@@ -4,6 +4,9 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* Yada Connect — IDDSI level swatches + sync status tokens.
+   These are registered as Tailwind colors via @theme inline further below. */
+
 /*
  * Design system definition.
  *
