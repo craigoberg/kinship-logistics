@@ -173,6 +173,20 @@
   --sidebar-accent-foreground: oklch(0.984 0.003 247.858);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.551 0.027 264.364);
+
+  /* IDDSI palette tuned for dark backgrounds */
+  --iddsi-0: oklch(0.35 0.08 240); --iddsi-0-fg: oklch(0.95 0.04 240);
+  --iddsi-1: oklch(0.38 0.10 220); --iddsi-1-fg: oklch(0.95 0.05 220);
+  --iddsi-2: oklch(0.40 0.12 200); --iddsi-2-fg: oklch(0.95 0.06 200);
+  --iddsi-3: oklch(0.40 0.13 165); --iddsi-3-fg: oklch(0.95 0.07 165);
+  --iddsi-4: oklch(0.45 0.14 110); --iddsi-4-fg: oklch(0.98 0.06 110);
+  --iddsi-5: oklch(0.50 0.15 85);  --iddsi-5-fg: oklch(0.98 0.06 85);
+  --iddsi-6: oklch(0.55 0.17 55);  --iddsi-6-fg: oklch(0.99 0.04 55);
+  --iddsi-7: oklch(0.60 0.20 30);  --iddsi-7-fg: oklch(0.99 0.02 30);
+
+  --success: oklch(0.65 0.16 155); --success-foreground: oklch(0.98 0.04 155);
+  --warning: oklch(0.78 0.16 80);  --warning-foreground: oklch(0.20 0.10 60);
+  --info:    oklch(0.65 0.15 240); --info-foreground: oklch(0.99 0.005 240);
 }
 
 @layer base {
