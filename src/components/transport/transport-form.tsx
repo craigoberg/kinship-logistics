@@ -67,7 +67,7 @@ export function TransportForm({ participants, onLogged }: Props) {
   };
 
   return (
-    <Card asChild>
+    <Card className="p-0">
       <form onSubmit={submit} className="space-y-5 p-5">
         <div className="grid gap-2">
           <Label htmlFor="participant">Participant</Label>
