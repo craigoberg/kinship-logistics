@@ -9,8 +9,26 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
+import { Route as TransportRouteImport } from './routes/transport'
+import { Route as SyncRouteImport } from './routes/sync'
+import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as IndexRouteImport } from './routes/index'
 
+const TransportRoute = TransportRouteImport.update({
+  id: '/transport',
+  path: '/transport',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SyncRoute = SyncRouteImport.update({
+  id: '/sync',
+  path: '/sync',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ParticipantsRoute = ParticipantsRouteImport.update({
+  id: '/participants',
+  path: '/participants',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -19,28 +37,61 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/sync': typeof SyncRoute
+  '/transport': typeof TransportRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/sync': typeof SyncRoute
+  '/transport': typeof TransportRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/participants': typeof ParticipantsRoute
+  '/sync': typeof SyncRoute
+  '/transport': typeof TransportRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/'
+  fullPaths: '/' | '/participants' | '/sync' | '/transport'
   fileRoutesByTo: FileRoutesByTo
-  to: '/'
-  id: '__root__' | '/'
+  to: '/' | '/participants' | '/sync' | '/transport'
+  id: '__root__' | '/' | '/participants' | '/sync' | '/transport'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  ParticipantsRoute: typeof ParticipantsRoute
+  SyncRoute: typeof SyncRoute
+  TransportRoute: typeof TransportRoute
 }
 
 declare module '@tanstack/react-router' {
   interface FileRoutesByPath {
+    '/transport': {
+      id: '/transport'
+      path: '/transport'
+      fullPath: '/transport'
+      preLoaderRoute: typeof TransportRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/sync': {
+      id: '/sync'
+      path: '/sync'
+      fullPath: '/sync'
+      preLoaderRoute: typeof SyncRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/participants': {
+      id: '/participants'
+      path: '/participants'
+      fullPath: '/participants'
+      preLoaderRoute: typeof ParticipantsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -53,6 +104,9 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  ParticipantsRoute: ParticipantsRoute,
+  SyncRoute: SyncRoute,
+  TransportRoute: TransportRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

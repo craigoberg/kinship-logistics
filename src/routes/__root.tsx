@@ -77,14 +77,14 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     meta: [
       { charSet: "utf-8" },
       { name: "viewport", content: "width=device-width, initial-scale=1" },
-      { title: "Lovable App" },
-      { name: "description", content: "Lovable Generated Project" },
-      { name: "author", content: "Lovable" },
-      { property: "og:title", content: "Lovable App" },
-      { property: "og:description", content: "Lovable Generated Project" },
+      { title: "Yada Connect — Community Care Coordination" },
+      { name: "description", content: "Mobile-first PWA for community care coordinators: participants, IDDSI, transport logs, offline sync." },
+      { name: "author", content: "Yada Connect" },
+      { name: "theme-color", content: "#1f4fbf" },
+      { property: "og:title", content: "Yada Connect" },
+      { property: "og:description", content: "Service coordination platform for community care organizations." },
       { property: "og:type", content: "website" },
       { name: "twitter:card", content: "summary" },
-      { name: "twitter:site", content: "@Lovable" },
     ],
     links: [
       {
