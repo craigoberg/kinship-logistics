@@ -19,6 +19,7 @@ function fmtMoney(n: number): string {
 export function RosterTab({ event }: Props) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
 
   const filtered = useMemo(() => {
