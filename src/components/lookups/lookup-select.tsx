@@ -8,10 +8,12 @@ import {
 import { useLookupParameters } from "@/hooks/use-supabase-data";
 
 interface Props {
-  /** `system_lookup_parameters.category` to query — e.g. `SERVICE_TYPE`. */
+  /** `system_lookup_parameters.category` to query — e.g. `service_types`. */
   category: string;
+  /** Current selection — the lookup `code`. */
   value: string;
-  onChange: (label: string, code: string) => void;
+  /** Receives the selected `code` and its `display_name`. */
+  onChange: (code: string, displayName: string) => void;
   placeholder?: string;
   disabled?: boolean;
   /** When true, the select stays disabled while the query is loading. */
@@ -20,11 +22,11 @@ interface Props {
 
 /**
  * Generic schema-driven dropdown. Hydrates options from
- * `system_lookup_parameters` filtered by `category`.
+ * `system_lookup_parameters` filtered by `category`. Uses `code` as the
+ * stored internal value and `display_name` as the visible label.
  *
- * Never inline an `<SelectItem>` array next to one of these and never wrap
- * with a hardcoded `Record<>` fallback — when the lookup is empty the
- * coordinator team has to fix the data, not the code.
+ * Offline-safe: the underlying hook seeds from a localStorage cache and
+ * shows a neutral "unavailable" trigger instead of crashing.
  */
 export function LookupSelect({
   category,
@@ -34,40 +36,42 @@ export function LookupSelect({
   disabled,
   blockUntilLoaded = true,
 }: Props) {
-  const { data = [], isLoading, error } = useLookupParameters(category);
+  const { data = [], isLoading, error, isFetched } = useLookupParameters(category);
 
-  const onValueChange = (label: string) => {
-    const hit = data.find((p) => p.label === label);
-    onChange(label, hit?.code ?? label);
+  const onValueChange = (code: string) => {
+    const hit = data.find((p) => p.code === code);
+    onChange(code, hit?.displayName ?? code);
   };
+
+  const noOptions = data.length === 0 && isFetched;
 
   return (
     <Select
       value={value || undefined}
       onValueChange={onValueChange}
-      disabled={disabled || (blockUntilLoaded && isLoading)}
+      disabled={disabled || (blockUntilLoaded && isLoading && data.length === 0)}
     >
       <SelectTrigger>
         <SelectValue
           placeholder={
-            isLoading
+            isLoading && data.length === 0
               ? "Loading…"
-              : error
-                ? "Lookup unavailable"
+              : error && data.length === 0
+                ? "Lookup unavailable (offline)"
                 : (placeholder ?? "Select…")
           }
         />
       </SelectTrigger>
       <SelectContent>
-        {data.length === 0 && !isLoading ? (
+        {noOptions ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             No options configured for{" "}
             <span className="font-mono">{category}</span>.
           </div>
         ) : (
           data.map((opt) => (
-            <SelectItem key={opt.id} value={opt.label}>
-              {opt.label}
+            <SelectItem key={opt.id} value={opt.code}>
+              {opt.displayName}
             </SelectItem>
           ))
         )}
