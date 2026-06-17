@@ -119,11 +119,51 @@ export function useLookupParameters(category: string | null | undefined) {
 export function useInsertAttendanceLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (input: NewAttendanceLog) => insertAttendanceLog(input),
+    mutationFn: async (input: NewAttendanceLog) => {
+      const log = await insertAttendanceLog(input);
+      if (NON_CHARGEABLE_STATUSES.includes(input.actualStatus)) {
+        await cancelChargesForDate(input.participantId, input.rosterDate);
+      }
+      return log;
+    },
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["attendance_logs", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+    },
+  });
+}
+
+export function useInsertAttendanceLogsBulk() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (inputs: NewAttendanceLog[]) => {
+      const logs = await insertAttendanceLogsBulk(inputs);
+      const sweepable = inputs.filter((i) =>
+        NON_CHARGEABLE_STATUSES.includes(i.actualStatus),
+      );
+      await Promise.all(
+        sweepable.map((i) => cancelChargesForDate(i.participantId, i.rosterDate)),
+      );
+      return logs;
+    },
+    onSuccess: (_, vars) => {
+      const ids = new Set(vars.map((v) => v.participantId));
+      ids.forEach((id) => {
+        qc.invalidateQueries({ queryKey: ["attendance_logs", id] });
+        qc.invalidateQueries({ queryKey: ["participant_financial_ledger", id] });
+      });
+      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
+    },
+    onError: (err: Error) => {
+      console.error("[useInsertAttendanceLogsBulk] insert failed", err);
+      toast.error("Could not log suspension range", {
+        description: err.message ?? "Unknown error",
+      });
     },
   });
 }
@@ -167,15 +207,63 @@ export function useInsertAttendanceSchedule() {
   });
 }
 
+export function useUpdateAttendanceSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: AttendanceSchedulePatch }) =>
+      updateAttendanceSchedule(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update schedule", { description: err.message });
+    },
+  });
+}
+
+export function useArchiveAttendanceSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => archiveAttendanceSchedule(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not archive schedule", { description: err.message });
+    },
+  });
+}
 
 export function useUpdateAttendanceLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: AttendanceLogPatch }) =>
-      updateAttendanceLog(id, patch),
+    mutationFn: async ({
+      id,
+      patch,
+      participantId,
+      rosterDate,
+    }: {
+      id: string;
+      patch: AttendanceLogPatch;
+      participantId?: string;
+      rosterDate?: string;
+    }) => {
+      const updated = await updateAttendanceLog(id, patch);
+      if (
+        patch.actualStatus &&
+        NON_CHARGEABLE_STATUSES.includes(patch.actualStatus) &&
+        participantId &&
+        rosterDate
+      ) {
+        await cancelChargesForDate(participantId, rosterDate);
+      }
+      return updated;
+    },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
     },
   });
 }
