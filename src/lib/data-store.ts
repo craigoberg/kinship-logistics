@@ -1343,6 +1343,8 @@ export interface EventRosterBooking {
   amountPaid: number;
   isFullyPaid: boolean;
   notes: string | null;
+  /** Per-booking custom price override; null means fall back to event ticket_price. */
+  customPrice: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1355,6 +1357,7 @@ interface BookingRow {
   amount_paid: number | string;
   is_fully_paid: boolean;
   notes: string | null;
+  custom_price: number | string | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1372,6 +1375,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     amountPaid: Number(r.amount_paid ?? 0),
     isFullyPaid: r.is_fully_paid,
     notes: r.notes ?? null,
+    customPrice: r.custom_price == null ? null : Number(r.custom_price),
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -1572,6 +1576,7 @@ export async function updateEventBooking(
       ? Number(input.amendedPrice)
       : null;
   if (!issueRefund && amended != null && amended >= 0) {
+    updatePayload.custom_price = amended;
     if (amended < currentPaid) {
       // Case B — cap amount_paid, flip fully paid, queue refund delta ledger
       priceAdjustmentDelta = Number((currentPaid - amended).toFixed(2));

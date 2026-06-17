@@ -49,6 +49,7 @@ function toBooking(r: EventBookingWithEvent): EventRosterBooking {
     amountPaid: r.amountPaid,
     isFullyPaid: r.isFullyPaid,
     notes: r.notes,
+    customPrice: r.customPrice,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
@@ -107,7 +108,8 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, r.eventTicketPrice - r.amountPaid);
+                  const baselineCost = r.customPrice ?? r.eventTicketPrice;
+                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, baselineCost - r.amountPaid);
                   const owes = r.bookingStatus !== "Cancelled" && balance > 0 && !r.isFullyPaid;
                   return (
                     <tr key={r.id} className="border-t border-border align-top">
@@ -120,7 +122,12 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                         {r.notes ? `“${r.notes}”` : "—"}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                        ${fmtMoney(r.eventTicketPrice)}
+                        ${fmtMoney(baselineCost)}
+                        {r.customPrice != null && r.customPrice !== r.eventTicketPrice && (
+                          <span className="ml-1 text-[9px] font-normal uppercase tracking-wide text-info">
+                            custom
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">
                         ${fmtMoney(r.amountPaid)}

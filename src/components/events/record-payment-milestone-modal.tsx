@@ -32,19 +32,21 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
   const [dirty, setDirty] = useState(false);
   const mutation = useRecordEventPaymentMilestone();
 
+  const baselineCost = (booking?.customPrice ?? event.ticketPrice) || 0;
+
   useEffect(() => {
     if (open && booking) {
-      const balance = Math.max(0, event.ticketPrice - booking.amountPaid);
+      const balance = Math.max(0, baselineCost - booking.amountPaid);
       setAmount(balance.toFixed(2));
       setPaymentDate(today());
       setDirty(false);
     }
-  }, [open, booking, event.ticketPrice]);
+  }, [open, booking, baselineCost]);
 
   if (!booking) return null;
 
   const amountNum = Number(amount);
-  const balance = Math.max(0, event.ticketPrice - booking.amountPaid);
+  const balance = Math.max(0, baselineCost - booking.amountPaid);
   const valid =
     Number.isFinite(amountNum) &&
     amountNum > 0 &&
@@ -59,7 +61,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
         eventId: event.id,
         eventTitle: event.title,
         participantId: booking.participantId,
-        ticketPrice: event.ticketPrice,
+        ticketPrice: baselineCost,
         currentAmountPaid: booking.amountPaid,
         paymentAmount: amountNum,
         paymentDate,
@@ -82,7 +84,10 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
             <strong>{booking.participantName}</strong> · {event.title}
             <br />
             Paid so far <span className="tabular-nums">${booking.amountPaid.toFixed(2)}</span> of{" "}
-            <span className="tabular-nums">${event.ticketPrice.toFixed(2)}</span>{" "}
+            <span className="tabular-nums">${baselineCost.toFixed(2)}</span>
+            {booking.customPrice != null && booking.customPrice !== event.ticketPrice && (
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-info">(custom)</span>
+            )}{" "}
             (balance <span className="tabular-nums">${balance.toFixed(2)}</span>).
           </DialogDescription>
         </DialogHeader>

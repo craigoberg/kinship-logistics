@@ -101,7 +101,8 @@ export function RosterTab({ event }: Props) {
               </thead>
               <tbody>
                 {filtered.map((b) => {
-                  const balance = b.bookingStatus === "Cancelled" ? 0 : event.ticketPrice - b.amountPaid;
+                  const baselineCost = b.customPrice ?? event.ticketPrice;
+                  const balance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - b.amountPaid;
                   const owes = b.bookingStatus !== "Cancelled" && balance > 0 && !b.isFullyPaid;
                   const isOpen = expanded.has(b.id);
                   return (
