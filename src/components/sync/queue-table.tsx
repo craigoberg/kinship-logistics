@@ -21,6 +21,9 @@ function extractParticipantId(item: SyncQueueItem): string | undefined {
 }
 
 export function QueueTable({ items }: { items: SyncQueueItem[] }) {
+  const { data: participants = [] } = useParticipants();
+  const byId = new Map(participants.map((p) => [p.id, p]));
+
   if (items.length === 0) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -31,13 +34,21 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
 
   return (
     <ul className="space-y-2">
-      {items.map((item) => (
+      {items.map((item) => {
+        const pid = extractParticipantId(item);
+        const participant = pid ? byId.get(pid) : undefined;
+        const name =
+          (participant?.firstName || participant?.lastName)
+            ? `${participant?.firstName ?? ""} ${participant?.lastName ?? ""}`.trim()
+            : "Unknown participant";
+        return (
         <li key={item.id}>
           <Card className="space-y-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={item.status} />
                 <span className="text-sm font-semibold">{TYPE_LABEL[item.type]}</span>
+                <span className="text-xs text-muted-foreground">· {name}</span>
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {new Date(item.createdAt).toLocaleString()}
                 </span>
