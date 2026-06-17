@@ -95,8 +95,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
               <div className="min-w-0">
                 <DialogTitle className="truncate">{participant.fullName || "Participant"}</DialogTitle>
                 <DialogDescription>
-                  NDIS {participant.ndisNumber} · Updated{" "}
-                  {new Date(participant.updatedAt).toLocaleDateString()}
+                  NDIS {participant.ndisNumber} · Updated {formatDate(participant.updatedAt)}
                 </DialogDescription>
               </div>
               {isPending && (
@@ -343,7 +342,7 @@ function HistoryTab({
                 return (
                   <tr key={l.id} className="border-t border-border align-top">
                     <td className="px-4 py-2 tabular-nums text-muted-foreground whitespace-nowrap">
-                      {ts.toLocaleString()}
+                      {formatDateTime(ts)}
                     </td>
                     <td className="px-4 py-2">
                       <div className="font-medium">{name}{dose && <span className="text-muted-foreground"> · {dose}</span>}</div>

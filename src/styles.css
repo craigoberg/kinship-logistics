@@ -102,23 +102,24 @@
   --accent: 210 40% 98%;
   --accent-foreground: 215 19% 34%;
 
-  --destructive: 0 72% 50%;
-  --destructive-foreground: 0 85% 97%;
+  /* Vibrant high-contrast status colors — always paired with white text */
+  --destructive: 0 84% 56%;          /* #EF4444 bright red */
+  --destructive-foreground: 0 0% 100%;
 
-  --success: 160 75% 48%;
-  --success-foreground: 240 20% 4%;
+  --success: 142 71% 45%;            /* #22C55E bright green */
+  --success-foreground: 0 0% 100%;
 
-  --warning: 42 95% 55%;
-  --warning-foreground: 240 20% 4%;
+  --warning: 32 95% 50%;             /* vibrant amber/orange */
+  --warning-foreground: 0 0% 100%;
 
-  --info: 200 98% 39%;
-  --info-foreground: 204 100% 97%;
+  --info: 200 98% 45%;
+  --info-foreground: 0 0% 100%;
 
   --overpayment: 50 100% 55%;
-  --overpayment-foreground: 240 20% 4%;
+  --overpayment-foreground: 0 0% 100%;
 
-  --unpaid: 200 90% 55%;
-  --unpaid-foreground: 240 20% 4%;
+  --unpaid: 0 84% 56%;
+  --unpaid-foreground: 0 0% 100%;
 
   --border: 212 26% 83%;
   --input: 212 26% 83%;
@@ -172,18 +173,18 @@
   --muted-foreground: 210 40% 98%;
   --accent: 228 84% 4%;
   --accent-foreground: 215 20% 65%;
-  --destructive: 0 84% 60%;
-  --destructive-foreground: 0 85% 97%;
-  --success: 160 75% 48%;
-  --success-foreground: 240 20% 4%;
-  --warning: 42 95% 55%;
-  --warning-foreground: 240 20% 4%;
-  --info: 198 93% 59%;
-  --info-foreground: 204 80% 15%;
+  --destructive: 0 84% 60%;          /* bright red */
+  --destructive-foreground: 0 0% 100%;
+  --success: 142 76% 45%;            /* bright green */
+  --success-foreground: 0 0% 100%;
+  --warning: 32 95% 53%;             /* amber/orange */
+  --warning-foreground: 0 0% 100%;
+  --info: 200 95% 55%;
+  --info-foreground: 0 0% 100%;
   --overpayment: 50 100% 55%;
-  --overpayment-foreground: 240 20% 4%;
-  --unpaid: 200 90% 55%;
-  --unpaid-foreground: 240 20% 4%;
+  --overpayment-foreground: 0 0% 100%;
+  --unpaid: 0 84% 60%;
+  --unpaid-foreground: 0 0% 100%;
   --border: 215 19% 34%;
   --input: 215 19% 34%;
   --ring: 198 93% 59%;
