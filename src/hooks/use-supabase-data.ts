@@ -597,8 +597,12 @@ export function useRecordEventPaymentMilestone() {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.participantId, vars.eventId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      qc.invalidateQueries({ queryKey: ["event_manifest"] });
+      qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
     onError: (err: Error) => {
       toast.error("Could not record payment milestone", {
@@ -606,6 +610,18 @@ export function useRecordEventPaymentMilestone() {
         className: "border-red-500 bg-red-600 text-white font-medium",
       });
     },
+  });
+}
+
+export function useEventPaymentLedger(
+  participantId: string | null | undefined,
+  eventId: string | null | undefined,
+) {
+  return useQuery({
+    queryKey: ["event_payment_ledger", participantId, eventId],
+    queryFn: () => listEventPaymentLedger(participantId as string, eventId as string),
+    enabled: !!participantId && !!eventId,
+    staleTime: 15_000,
   });
 }
 
@@ -618,6 +634,7 @@ export function useUpdateEventBooking() {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", booking.participantId] });
       qc.invalidateQueries({ queryKey: ["event_manifest"] });
       qc.invalidateQueries({ queryKey: ["events"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
     onError: (err: Error) => {
       toast.error("Database rejected booking update", {
