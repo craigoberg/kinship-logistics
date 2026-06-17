@@ -1,6 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { formatDate, formatDateTime } from "@/lib/utils";
-import { Save, Plus, Search, AlertTriangle, CalendarClock, ShieldCheck } from "lucide-react";
+import {
+  Save,
+  Plus,
+  Search,
+  AlertTriangle,
+  CalendarClock,
+  ShieldCheck,
+  Pencil,
+  Archive,
+  ArchiveRestore,
+} from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,14 +23,21 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { IddsiMatrix } from "./iddsi-matrix";
 import { iddsiLevel } from "@/lib/iddsi";
-import { type Participant, type ParticipantPatch } from "@/lib/data-store";
+import {
+  type MedicationSchedule,
+  type Participant,
+  type ParticipantPatch,
+} from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import {
   useUpdateParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
+  useArchiveMedicationSchedule,
+  useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
