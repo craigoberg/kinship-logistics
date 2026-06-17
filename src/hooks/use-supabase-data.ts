@@ -314,6 +314,33 @@ export function useInsertSchedule() {
   });
 }
 
+export function useUpdateMedicationSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: MedicationSchedulePatch }) =>
+      updateMedicationSchedule(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["medication_schedules"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update medication schedule", { description: err.message });
+    },
+  });
+}
+
+export function useArchiveMedicationSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (id: string) => archiveMedicationSchedule(id),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["medication_schedules"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not archive medication", { description: err.message });
+    },
+  });
+}
+
 
 export function useStaffRegistry() {
   return useQuery({
