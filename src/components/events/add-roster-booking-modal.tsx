@@ -73,6 +73,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bookingStatus: "Confirmed",
         amountPaid: paidNumber,
         ticketPrice: event.ticketPrice,
+        notes: notes.trim() || null,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
