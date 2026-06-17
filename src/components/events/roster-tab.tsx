@@ -105,8 +105,8 @@ export function RosterTab({ event }: Props) {
                   const owes = balance > 0 && !b.isFullyPaid;
                   const isOpen = expanded.has(b.id);
                   return (
-                    <>
-                      <tr key={b.id} className="border-t border-border align-top">
+                    <Fragment key={b.id}>
+                      <tr className="border-t border-border align-top">
                         <td className="px-2 py-2 align-middle">
                           <Button
                             size="icon"
