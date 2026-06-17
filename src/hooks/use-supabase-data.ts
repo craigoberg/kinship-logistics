@@ -429,11 +429,13 @@ export function useInsertLedgerEntry() {
 import {
   listEvents,
   insertEvent,
+  updateEvent,
   listEventBookings,
   insertEventBooking,
   listEventLedger,
   insertEventLedger,
   type NewEvent,
+  type UpdateEventInput,
   type NewEventBooking,
   type NewEventLedger,
 } from "@/lib/data-store";
