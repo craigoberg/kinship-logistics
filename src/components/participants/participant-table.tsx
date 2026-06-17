@@ -14,6 +14,8 @@ interface Props {
 
 export function ParticipantTable({ participants, onSelect }: Props) {
   const [q, setQ] = useState("");
+  const pending = usePendingScheduleMap();
+
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
