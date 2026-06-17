@@ -526,10 +526,11 @@ export async function listAttendanceSchedules(
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
     .select("*")
-    .eq("participant_id", participantId)
-    .order("day_of_week", { ascending: true });
+    .eq("participant_id", participantId);
   if (error) throw error;
-  return (data ?? []).map(rowToAttendanceSchedule);
+  const rows = (data ?? []).map(rowToAttendanceSchedule);
+  rows.sort((a, b) => dayChronoIndex(a.dayOfWeek) - dayChronoIndex(b.dayOfWeek));
+  return rows;
 }
 
 export interface NewAttendanceSchedule {
@@ -677,6 +678,8 @@ export interface LookupParameter {
   code: string;
   /** Human-readable label sourced from `display_name` in Supabase. */
   displayName: string;
+  /** Optional explicit chronological/priority ordering from `sort_order`. */
+  sortOrder: number | null;
 }
 
 interface LookupRow {
@@ -684,23 +687,49 @@ interface LookupRow {
   category: string;
   code: string;
   display_name: string | null;
+  sort_order: number | null;
+}
+
+const DAY_ORDER: Record<string, number> = {
+  monday: 1, tuesday: 2, wednesday: 3, thursday: 4,
+  friday: 5, saturday: 6, sunday: 7,
+};
+
+export function dayChronoIndex(value: string | null | undefined): number {
+  if (!value) return 99;
+  return DAY_ORDER[value.trim().toLowerCase()] ?? 99;
 }
 
 export async function listLookupParameters(
   category: string,
 ): Promise<LookupParameter[]> {
-  const { data, error } = await supabase
+  const base = supabase
     .from("system_lookup_parameters")
-    .select("id, category, code, display_name")
-    .eq("category", category)
-    .order("display_name", { ascending: true });
+    .select("id, category, code, display_name, sort_order")
+    .eq("category", category);
+
+  const { data, error } =
+    category === "operating_days"
+      ? await base
+          .order("sort_order", { ascending: true, nullsFirst: false })
+          .order("display_name", { ascending: true })
+      : await base.order("display_name", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r: LookupRow) => ({
+  const rows = (data ?? []).map((r: LookupRow) => ({
     id: r.id,
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
+    sortOrder: r.sort_order ?? null,
   }));
+  if (category === "operating_days") {
+    rows.sort((a, b) => {
+      const ai = a.sortOrder ?? dayChronoIndex(a.code || a.displayName);
+      const bi = b.sortOrder ?? dayChronoIndex(b.code || b.displayName);
+      return ai - bi;
+    });
+  }
+  return rows;
 }
 
 export async function insertLookupParameter(input: {
@@ -715,7 +744,7 @@ export async function insertLookupParameter(input: {
       code: input.code,
       display_name: input.displayName,
     })
-    .select("id, category, code, display_name")
+    .select("id, category, code, display_name, sort_order")
     .single();
   if (error) throw error;
   const r = data as LookupRow;
@@ -724,6 +753,7 @@ export async function insertLookupParameter(input: {
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
+    sortOrder: r.sort_order ?? null,
   };
 }
 
