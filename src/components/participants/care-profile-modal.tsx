@@ -15,8 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { IddsiMatrix } from "./iddsi-matrix";
 import { iddsiLevel } from "@/lib/iddsi";
-import { updateParticipant, type Participant } from "@/lib/data-store";
+import { type Participant } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
+import { useUpdateParticipant } from "@/hooks/use-supabase-data";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { toast } from "sonner";
 
 interface Props {
   participant: Participant | null;
@@ -29,6 +32,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
+  const online = useOnlineStatus();
+  const updateMutation = useUpdateParticipant();
 
   useEffect(() => {
     if (participant) {
@@ -43,15 +48,26 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const liquid = iddsiLevel("liquids", iddsi.liquids);
   const food = iddsiLevel("foods", iddsi.foods);
 
-  const save = () => {
-    const updated = updateParticipant(participant.id, { iddsi, notes });
-    if (updated) {
-      enqueue("iddsi_change", {
-        participantId: participant.id,
-        liquids: iddsi.liquids,
-        foods: iddsi.foods,
-      });
+  const save = async () => {
+    const patch = { iddsi, notes };
+    if (!online) {
+      enqueue("iddsi_change", { id: participant.id, patch });
+      toast.info("Queued offline", { description: "Profile changes will sync when back online." });
+      setDirty(false);
+      onOpenChange(false);
+      return;
+    }
+    try {
+      const updated = await updateMutation.mutateAsync({ id: participant.id, patch });
+      toast.success("Profile updated", { description: `${participant.fullName} saved.` });
       onSaved?.(updated);
+      setDirty(false);
+      onOpenChange(false);
+    } catch (err) {
+      enqueue("iddsi_change", { id: participant.id, patch });
+      toast.warning("Saved offline", {
+        description: `Will retry automatically. (${(err as Error).message})`,
+      });
       setDirty(false);
       onOpenChange(false);
     }
@@ -165,8 +181,9 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={save} disabled={!dirty} className="gap-1.5">
-            <Save className="h-4 w-4" /> Save changes
+          <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
+            <Save className="h-4 w-4" />
+            {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
           </Button>
         </DialogFooter>
       </DialogContent>

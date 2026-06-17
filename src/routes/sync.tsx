@@ -5,6 +5,7 @@ import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 
 export const Route = createFileRoute("/sync")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Sync Queue — Yada Connect" },

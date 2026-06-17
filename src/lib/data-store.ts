@@ -1,6 +1,8 @@
-// Local-first data store. All reads/writes go through this module so a future
-// Supabase adapter can slot in behind the same API surface.
-import { SAMPLE_PARTICIPANTS, SAMPLE_TRANSPORT_LOGS, SAMPLE_SYNC_ITEMS } from "./sample-data";
+// Live data layer backed by the external Supabase instance.
+// Read/write helpers map between snake_case columns and the camelCase shape
+// used by the UI. All functions are async; React components consume them via
+// TanStack Query hooks in src/hooks.
+import { supabase } from "@/integrations/supabase/client";
 
 export interface Participant {
   id: string;
@@ -26,6 +28,7 @@ export interface TransportLog {
   status: TransportStatus;
   timestamp: string;
   notes: string;
+  syncedAt?: string | null;
 }
 
 export type SyncItemType = "participant_update" | "transport_log" | "iddsi_change";
@@ -41,74 +44,141 @@ export interface SyncQueueItem {
   error?: string;
 }
 
-const KEYS = {
-  participants: "yada.participants.v1",
-  transport: "yada.transportLogs.v1",
-  seeded: "yada.seeded.v1",
-} as const;
+// ---------- row mappers ----------
 
-function isBrowser() {
-  return typeof window !== "undefined" && typeof localStorage !== "undefined";
+interface ParticipantRow {
+  id: string;
+  full_name: string;
+  ndis_id: string;
+  dob: string;
+  iddssi_level_liquids: number | null;
+  iddssi_level_solids: number | null;
+  mobility: Participant["mobility"];
+  allergies: string[] | null;
+  flags: string[] | null;
+  primary_contact: Participant["primaryContact"] | null;
+  notes: string | null;
 }
 
-function read<T>(key: string, fallback: T): T {
-  if (!isBrowser()) return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
+function rowToParticipant(r: ParticipantRow): Participant {
+  return {
+    id: r.id,
+    fullName: r.full_name,
+    ndisId: r.ndis_id,
+    dob: r.dob,
+    iddsi: {
+      liquids: r.iddssi_level_liquids ?? 0,
+      foods: r.iddssi_level_solids ?? 7,
+    },
+    mobility: r.mobility,
+    allergies: r.allergies ?? [],
+    flags: r.flags ?? [],
+    primaryContact: r.primary_contact ?? { name: "", relation: "", phone: "" },
+    notes: r.notes ?? "",
+  };
+}
+
+interface TransportRow {
+  id: string;
+  participant_id: string;
+  pickup_odometer: number;
+  dropoff_odometer: number;
+  passenger_present: boolean;
+  status: TransportStatus;
+  timestamp: string;
+  notes: string | null;
+  synced_at: string | null;
+}
+
+function rowToTransport(r: TransportRow): TransportLog {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    pickupOdometer: r.pickup_odometer,
+    dropoffOdometer: r.dropoff_odometer,
+    passengerPresent: r.passenger_present,
+    status: r.status,
+    timestamp: r.timestamp,
+    notes: r.notes ?? "",
+    syncedAt: r.synced_at,
+  };
+}
+
+// ---------- participants ----------
+
+export async function listParticipants(): Promise<Participant[]> {
+  const { data, error } = await supabase
+    .from("participants")
+    .select("*")
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(rowToParticipant);
+}
+
+export async function updateParticipant(
+  id: string,
+  patch: Partial<Participant>,
+): Promise<Participant> {
+  const row: Partial<ParticipantRow> = {};
+  if (patch.fullName !== undefined) row.full_name = patch.fullName;
+  if (patch.ndisId !== undefined) row.ndis_id = patch.ndisId;
+  if (patch.dob !== undefined) row.dob = patch.dob;
+  if (patch.iddsi !== undefined) {
+    row.iddssi_level_liquids = patch.iddsi.liquids;
+    row.iddssi_level_solids = patch.iddsi.foods;
   }
+  if (patch.mobility !== undefined) row.mobility = patch.mobility;
+  if (patch.allergies !== undefined) row.allergies = patch.allergies;
+  if (patch.flags !== undefined) row.flags = patch.flags;
+  if (patch.primaryContact !== undefined) row.primary_contact = patch.primaryContact;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+
+  const { data, error } = await supabase
+    .from("participants")
+    .update(row)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToParticipant(data as ParticipantRow);
 }
 
-function write<T>(key: string, value: T) {
-  if (!isBrowser()) return;
-  try {
-    localStorage.setItem(key, JSON.stringify(value));
-  } catch {
-    /* quota / private mode — silently ignore for now */
-  }
+// ---------- transport ----------
+
+export async function listTransportLogs(): Promise<TransportLog[]> {
+  const { data, error } = await supabase
+    .from("offline_sync_logs")
+    .select("*")
+    .order("timestamp", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map(rowToTransport);
 }
 
-function ensureSeeded() {
-  if (!isBrowser()) return;
-  if (localStorage.getItem(KEYS.seeded)) return;
-  write(KEYS.participants, SAMPLE_PARTICIPANTS);
-  write(KEYS.transport, SAMPLE_TRANSPORT_LOGS);
-  // Sync queue seed handled inside sync-queue module.
-  localStorage.setItem(KEYS.seeded, "1");
+export interface NewTransportLog {
+  participantId: string;
+  pickupOdometer: number;
+  dropoffOdometer: number;
+  passengerPresent: boolean;
+  status: TransportStatus;
+  timestamp: string;
+  notes: string;
 }
 
-export function listParticipants(): Participant[] {
-  ensureSeeded();
-  return read<Participant[]>(KEYS.participants, SAMPLE_PARTICIPANTS);
+export async function insertTransportLog(log: NewTransportLog): Promise<TransportLog> {
+  const { data, error } = await supabase
+    .from("offline_sync_logs")
+    .insert({
+      participant_id: log.participantId,
+      pickup_odometer: log.pickupOdometer,
+      dropoff_odometer: log.dropoffOdometer,
+      passenger_present: log.passengerPresent,
+      status: log.status,
+      timestamp: log.timestamp,
+      notes: log.notes,
+      synced_at: new Date().toISOString(),
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToTransport(data as TransportRow);
 }
-
-export function getParticipant(id: string): Participant | undefined {
-  return listParticipants().find((p) => p.id === id);
-}
-
-export function updateParticipant(id: string, patch: Partial<Participant>): Participant | undefined {
-  const all = listParticipants();
-  const idx = all.findIndex((p) => p.id === id);
-  if (idx === -1) return undefined;
-  const next = { ...all[idx], ...patch };
-  all[idx] = next;
-  write(KEYS.participants, all);
-  return next;
-}
-
-export function listTransportLogs(): TransportLog[] {
-  ensureSeeded();
-  return read<TransportLog[]>(KEYS.transport, SAMPLE_TRANSPORT_LOGS);
-}
-
-export function addTransportLog(log: Omit<TransportLog, "id">): TransportLog {
-  const all = listTransportLogs();
-  const created: TransportLog = { ...log, id: `t-${Date.now().toString(36)}` };
-  write(KEYS.transport, [created, ...all]);
-  return created;
-}
-
-// Re-export sample sync items for the initial queue seed.
-export { SAMPLE_SYNC_ITEMS };

@@ -1,10 +1,10 @@
-import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { TransportForm } from "@/components/transport/transport-form";
 import { TransportList } from "@/components/transport/transport-list";
-import { listParticipants, listTransportLogs } from "@/lib/data-store";
+import { useParticipants, useTransportLogs } from "@/hooks/use-supabase-data";
 
 export const Route = createFileRoute("/transport")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Transport Logs — Yada Connect" },
@@ -15,8 +15,8 @@ export const Route = createFileRoute("/transport")({
 });
 
 function TransportPage() {
-  const participants = listParticipants();
-  const [logs, setLogs] = useState(() => listTransportLogs());
+  const { data: participants = [] } = useParticipants();
+  const { data: logs = [] } = useTransportLogs();
 
   const today = new Date().toDateString();
   const todays = logs.filter((l) => new Date(l.timestamp).toDateString() === today);
@@ -28,7 +28,7 @@ function TransportPage() {
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Log a run</h2>
           <p className="text-sm text-muted-foreground">Optimised for one-handed entry from the driver's seat.</p>
         </header>
-        <TransportForm participants={participants} onLogged={() => setLogs(listTransportLogs())} />
+        <TransportForm participants={participants} />
       </section>
 
       <section className="space-y-3">

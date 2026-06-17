@@ -1,11 +1,10 @@
-// Store-and-forward sync queue. Persists to localStorage and exposes a small
-// event API so UI can re-render on changes. The flush() method is a stub today
-// and will dispatch to Supabase once external bindings are wired.
-import type { SyncQueueItem, SyncItemType, SyncStatus } from "./data-store";
-import { SAMPLE_SYNC_ITEMS } from "./data-store";
+// Store-and-forward sync queue. Persists pending payloads to localStorage when
+// the device is offline (or when a direct write fails), and replays them
+// against Supabase via flush().
+import type { SyncQueueItem, SyncItemType, SyncStatus, NewTransportLog } from "./data-store";
+import { insertTransportLog, updateParticipant } from "./data-store";
 
 const KEY = "yada.syncQueue.v1";
-const SEED_FLAG = "yada.syncQueue.seeded.v1";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -17,11 +16,6 @@ function isBrowser() {
 function read(): SyncQueueItem[] {
   if (!isBrowser()) return [];
   try {
-    if (!localStorage.getItem(SEED_FLAG)) {
-      localStorage.setItem(KEY, JSON.stringify(SAMPLE_SYNC_ITEMS));
-      localStorage.setItem(SEED_FLAG, "1");
-      return SAMPLE_SYNC_ITEMS;
-    }
     const raw = localStorage.getItem(KEY);
     return raw ? (JSON.parse(raw) as SyncQueueItem[]) : [];
   } catch {
@@ -48,7 +42,7 @@ export function enqueue(
   payload: Record<string, unknown>,
 ): SyncQueueItem {
   const item: SyncQueueItem = {
-    id: `s-${Date.now().toString(36)}`,
+    id: `s-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`,
     type,
     createdAt: new Date().toISOString(),
     status: "pending",
@@ -59,16 +53,12 @@ export function enqueue(
   return item;
 }
 
-export function setStatus(id: string, status: SyncStatus, error?: string) {
-  const next = read().map((i) =>
-    i.id === id ? { ...i, status, error, attempts: i.attempts + (status === "retrying" ? 1 : 0) } : i,
-  );
-  write(next);
+function patch(id: string, fields: Partial<SyncQueueItem>) {
+  write(read().map((i) => (i.id === id ? { ...i, ...fields } : i)));
 }
 
-export function retry(id: string) {
-  // Placeholder until Supabase binding lands: simulate an in-flight retry.
-  setStatus(id, "retrying");
+export function setStatus(id: string, status: SyncStatus, error?: string) {
+  patch(id, { status, error });
 }
 
 export function discard(id: string) {
@@ -77,10 +67,51 @@ export function discard(id: string) {
 
 export function subscribe(fn: Listener): () => void {
   listeners.add(fn);
-  return () => listeners.delete(fn);
+  return () => {
+    listeners.delete(fn);
+  };
 }
 
-// Future: walk the queue and POST to Supabase. Left as a no-op for now.
-export async function flush(): Promise<void> {
-  return;
+async function processItem(item: SyncQueueItem): Promise<void> {
+  if (item.type === "transport_log") {
+    await insertTransportLog(item.payload as unknown as NewTransportLog);
+    return;
+  }
+  if (item.type === "participant_update" || item.type === "iddsi_change") {
+    const p = item.payload as { id: string; patch: Record<string, unknown> };
+    await updateParticipant(p.id, p.patch as never);
+    return;
+  }
+}
+
+/** Walk the queue and push each pending item to Supabase. */
+export async function flush(): Promise<{ ok: number; failed: number }> {
+  const items = read().filter((i) => i.status !== "synced");
+  let ok = 0;
+  let failed = 0;
+  for (const item of items) {
+    patch(item.id, { status: "retrying", attempts: item.attempts + 1 });
+    try {
+      await processItem(item);
+      // Drop synced items from the queue so the dashboard stays focused on work.
+      write(read().filter((i) => i.id !== item.id));
+      ok += 1;
+    } catch (e) {
+      patch(item.id, { status: "failed", error: (e as Error).message });
+      failed += 1;
+    }
+  }
+  return { ok, failed };
+}
+
+export async function retry(id: string): Promise<void> {
+  const item = read().find((i) => i.id === id);
+  if (!item) return;
+  patch(id, { status: "retrying", attempts: item.attempts + 1 });
+  try {
+    await processItem(item);
+    write(read().filter((i) => i.id !== id));
+  } catch (e) {
+    patch(id, { status: "failed", error: (e as Error).message });
+  }
 }
