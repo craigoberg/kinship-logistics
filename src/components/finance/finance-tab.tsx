@@ -166,6 +166,9 @@ export function FinanceTab({ participantId, participantName }: Props) {
         </div>
       )}
 
+      <ParticipantRegisteredEvents participantId={participantId} />
+
+
       <LogLedgerEntryModal
         open={addOpen}
         onOpenChange={setAddOpen}
