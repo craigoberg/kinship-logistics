@@ -61,7 +61,9 @@ export interface MedicationLogPayload {
   witness_2_identity: string;
   timestamp: string;
   metadata: {
-    medication_notes: string;
+    medication_name: string;
+    dosage: string;
+    notes: string;
     witness_1_pin_hash: string;
     witness_2_pin_hash: string;
     network_state: "online" | "offline";

@@ -62,6 +62,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
 
   const [participantId, setParticipantId] = useState<string>("");
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
+  const [medicationName, setMedicationName] = useState("");
+  const [dosage, setDosage] = useState("");
   const [notes, setNotes] = useState("");
   const [witness1Id, setWitness1Id] = useState("");
   const [witness1Pin, setWitness1Pin] = useState("");
@@ -75,6 +77,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     if (open) {
       setParticipantId(participant?.id ?? "");
       setParticipantPickerOpen(false);
+      setMedicationName("");
+      setDosage("");
       setNotes("");
       setWitness1Id("");
       setWitness1Pin("");
@@ -93,6 +97,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
 
   const dirty =
     participantId.length > 0 ||
+    medicationName.length > 0 ||
+    dosage.length > 0 ||
     notes.length > 0 ||
     witness1Id.length > 0 ||
     witness1Pin.length > 0 ||
@@ -105,7 +111,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     !submitting &&
     dirty &&
     participantId.length > 0 &&
-    notes.trim().length > 0 &&
+    medicationName.trim().length > 0 &&
+    dosage.trim().length > 0 &&
     witnessesDistinct &&
     PIN_RE.test(witness1Pin) &&
     PIN_RE.test(witness2Pin);
@@ -158,7 +165,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         witness_2_identity: w2!.fullName,
         timestamp: new Date().toISOString(),
         metadata: {
-          medication_notes: notes.trim(),
+          medication_name: medicationName.trim(),
+          dosage: dosage.trim(),
+          notes: notes.trim(),
           witness_1_pin_hash: w1Hash,
           witness_2_pin_hash: w2Hash,
           network_state: online ? "online" : "offline",
@@ -267,12 +276,28 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
             </Popover>
           </Field>
 
-          <Field label="Medication, dosage & administration notes">
+          <Field label="Medication name">
+            <Input
+              value={medicationName}
+              onChange={(e) => setMedicationName(e.target.value)}
+              placeholder="e.g. Paracetamol"
+            />
+          </Field>
+
+          <Field label="Dosage">
+            <Input
+              value={dosage}
+              onChange={(e) => setDosage(e.target.value)}
+              placeholder="e.g. 500mg — 1 tablet"
+            />
+          </Field>
+
+          <Field label="Administration notes">
             <Textarea
-              rows={4}
+              rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Paracetamol 500mg PO — 1 tablet at 14:00 with water. Participant tolerated well."
+              placeholder="Route, time, observations, participant tolerance…"
             />
           </Field>
 
