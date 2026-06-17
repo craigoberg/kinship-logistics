@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { Search, UserPlus, Users } from "lucide-react";
+import { CircleDollarSign, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useEventBookings } from "@/hooks/use-supabase-data";
-import type { EventManifest } from "@/lib/data-store";
+import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
+import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 
 interface Props {
   event: EventManifest;
