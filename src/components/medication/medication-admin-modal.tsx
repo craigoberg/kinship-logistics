@@ -77,6 +77,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     if (open) {
       setParticipantId(participant?.id ?? "");
       setParticipantPickerOpen(false);
+      setMedicationName("");
+      setDosage("");
       setNotes("");
       setWitness1Id("");
       setWitness1Pin("");
@@ -95,6 +97,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
 
   const dirty =
     participantId.length > 0 ||
+    medicationName.length > 0 ||
+    dosage.length > 0 ||
     notes.length > 0 ||
     witness1Id.length > 0 ||
     witness1Pin.length > 0 ||
@@ -107,7 +111,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     !submitting &&
     dirty &&
     participantId.length > 0 &&
-    notes.trim().length > 0 &&
+    medicationName.trim().length > 0 &&
+    dosage.trim().length > 0 &&
     witnessesDistinct &&
     PIN_RE.test(witness1Pin) &&
     PIN_RE.test(witness2Pin);
@@ -160,7 +165,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         witness_2_identity: w2!.fullName,
         timestamp: new Date().toISOString(),
         metadata: {
-          medication_notes: notes.trim(),
+          medication_name: medicationName.trim(),
+          dosage: dosage.trim(),
+          notes: notes.trim(),
           witness_1_pin_hash: w1Hash,
           witness_2_pin_hash: w2Hash,
           network_state: online ? "online" : "offline",
