@@ -19,6 +19,8 @@ import process from "node:process";
 export function getServerConfig() {
   return {
     nodeEnv: process.env.NODE_ENV,
+    supabaseUrl: process.env.SUPABASE_URL,
+    supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY,
     // Add server-only values here, e.g.:
     //   databaseUrl: process.env.DATABASE_URL,
     //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
