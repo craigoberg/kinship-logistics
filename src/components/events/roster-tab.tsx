@@ -204,7 +204,7 @@ export function RosterTab({ event }: Props) {
                           </td>
                         </tr>
                       )}
-                    </>
+                    </Fragment>
                   );
                 })}
               </tbody>
