@@ -1353,7 +1353,6 @@ interface BookingRow {
   booking_status: string;
   amount_paid: number | string;
   is_fully_paid: boolean;
-  notes: string | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
