@@ -526,10 +526,11 @@ export async function listAttendanceSchedules(
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
     .select("*")
-    .eq("participant_id", participantId)
-    .order("day_of_week", { ascending: true });
+    .eq("participant_id", participantId);
   if (error) throw error;
-  return (data ?? []).map(rowToAttendanceSchedule);
+  const rows = (data ?? []).map(rowToAttendanceSchedule);
+  rows.sort((a, b) => dayChronoIndex(a.dayOfWeek) - dayChronoIndex(b.dayOfWeek));
+  return rows;
 }
 
 export interface NewAttendanceSchedule {
