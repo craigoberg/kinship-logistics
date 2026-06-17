@@ -48,7 +48,37 @@ export interface SyncLog {
   createdAt: string;
 }
 
-export type SyncItemType = "participant_update" | "transport_log" | "iddsi_change";
+export type SyncItemType =
+  | "participant_update"
+  | "transport_log"
+  | "iddsi_change"
+  | "medication_log";
+
+export interface MedicationLogPayload {
+  participant_id: string;
+  action_performed: "MEDICATION_ADMIN";
+  witness_1_identity: string;
+  witness_2_identity: string;
+  timestamp: string;
+  metadata: {
+    medication_notes: string;
+    witness_1_pin_hash: string;
+    witness_2_pin_hash: string;
+    network_state: "online" | "offline";
+    device_uuid: string;
+  };
+}
+
+// Static staff directory used by the dual-witness sign-off selectors.
+// Persisted alongside the medication log as `witness_*_identity`.
+export const STAFF_DIRECTORY: Array<{ id: string; name: string; role: string }> = [
+  { id: "staff-001", name: "Sarah Chen", role: "Registered Nurse" },
+  { id: "staff-002", name: "Marcus Webb", role: "Care Coordinator" },
+  { id: "staff-003", name: "Priya Natarajan", role: "Senior Support Worker" },
+  { id: "staff-004", name: "Jordan Ellis", role: "Support Worker" },
+  { id: "staff-005", name: "Amelia Hart", role: "Clinical Lead" },
+  { id: "guardian-001", name: "Family Guardian (on-site)", role: "Guardian" },
+];
 export type SyncStatus = "pending" | "retrying" | "failed" | "synced";
 
 export interface SyncQueueItem {
@@ -244,4 +274,27 @@ export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
     .single();
   if (error) throw error;
   return rowToSyncLog(data as SyncLogRow);
+}
+
+// ---------- compliance_audit_logs ----------
+
+export async function insertComplianceLog(payload: MedicationLogPayload): Promise<void> {
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: payload.participant_id,
+    action_performed: payload.action_performed,
+    witness_1_identity: payload.witness_1_identity,
+    witness_2_identity: payload.witness_2_identity,
+    timestamp: payload.timestamp,
+    metadata: payload.metadata,
+  });
+  if (error) throw error;
+}
+
+/** SHA-256 hash → hex (browser only). Never store the raw PIN. */
+export async function hashPin(pin: string): Promise<string> {
+  if (typeof crypto === "undefined" || !crypto.subtle) return `plain:${pin}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
 }

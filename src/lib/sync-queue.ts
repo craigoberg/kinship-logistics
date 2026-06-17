@@ -9,8 +9,9 @@ import type {
   SyncStatus,
   NewSyncLog,
   ParticipantPatch,
+  MedicationLogPayload,
 } from "./data-store";
-import { insertSyncLog, updateParticipant } from "./data-store";
+import { insertSyncLog, updateParticipant, insertComplianceLog } from "./data-store";
 
 const KEY = "yada.syncQueue.v1";
 
@@ -82,9 +83,16 @@ export function subscribe(fn: Listener): () => void {
 
 async function processItem(item: SyncQueueItem): Promise<void> {
   if (item.type === "transport_log") {
-    // Queued offline — payload is already in the JSONB shape we want to store.
     const log = item.payload as unknown as NewSyncLog;
     await insertSyncLog(log);
+    return;
+  }
+  if (item.type === "medication_log") {
+    const payload = item.payload as unknown as MedicationLogPayload;
+    await insertComplianceLog({
+      ...payload,
+      metadata: { ...payload.metadata, network_state: "online" },
+    });
     return;
   }
   if (item.type === "participant_update" || item.type === "iddsi_change") {

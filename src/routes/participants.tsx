@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { UserPlus } from "lucide-react";
+import { ShieldCheck, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
+import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { useParticipants } from "@/hooks/use-supabase-data";
 import type { Participant } from "@/lib/data-store";
 
@@ -24,6 +25,7 @@ function ParticipantsPage() {
   const [selected, setSelected] = useState<Participant | null>(null);
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [medOpen, setMedOpen] = useState(false);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -34,10 +36,16 @@ function ParticipantsPage() {
             {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
-          <UserPlus className="h-4 w-4" />
-          Add new participant
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setMedOpen(true)} className="gap-1.5">
+            <ShieldCheck className="h-4 w-4" />
+            Record medication admin
+          </Button>
+          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+            <UserPlus className="h-4 w-4" />
+            Add new participant
+          </Button>
+        </div>
       </header>
 
       {error && (
@@ -61,6 +69,7 @@ function ParticipantsPage() {
       />
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />
+      <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
     </div>
   );
 }

@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight } from "lucide-react";
+import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
+import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import type { TransportPayload } from "@/lib/data-store";
 
 export const Route = createFileRoute("/")({
@@ -22,6 +24,7 @@ function Dashboard() {
   const { data: participants = [] } = useParticipants();
   const { data: logs = [] } = useSyncLogs();
   const queue = useSyncQueue();
+  const [medOpen, setMedOpen] = useState(false);
 
   const today = new Date().toDateString();
   const todaysTransport = logs
@@ -35,14 +38,20 @@ function Dashboard() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
-        </p>
-        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
-        <p className="text-sm text-muted-foreground">
-          Here's where things stand across Yada Connect right now.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
+          <p className="text-sm text-muted-foreground">
+            Here's where things stand across Yada Connect right now.
+          </p>
+        </div>
+        <Button onClick={() => setMedOpen(true)} className="gap-1.5">
+          <ShieldCheck className="h-4 w-4" />
+          Record medication admin
+        </Button>
       </header>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
@@ -132,6 +141,8 @@ function Dashboard() {
           </ul>
         </Card>
       )}
+
+      <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} />
     </div>
   );
 }
