@@ -38,14 +38,20 @@ function Dashboard() {
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">
-      <header className="flex flex-col gap-1">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-          {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
-        </p>
-        <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
-        <p className="text-sm text-muted-foreground">
-          Here's where things stand across Yada Connect right now.
-        </p>
+      <header className="flex flex-wrap items-start justify-between gap-3">
+        <div className="flex flex-col gap-1">
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
+            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+          </p>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
+          <p className="text-sm text-muted-foreground">
+            Here's where things stand across Yada Connect right now.
+          </p>
+        </div>
+        <Button onClick={() => setMedOpen(true)} className="gap-1.5">
+          <ShieldCheck className="h-4 w-4" />
+          Record medication admin
+        </Button>
       </header>
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
