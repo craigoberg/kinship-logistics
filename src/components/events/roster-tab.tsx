@@ -129,24 +129,38 @@ export function RosterTab({ event }: Props) {
                         <PaidBadge fullyPaid={b.isFullyPaid} />
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {owes ? (
+                        <div className="flex items-center justify-end gap-1">
+                          {owes && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => setMilestoneBooking(b)}
+                                  className="h-7 w-7 text-success hover:text-success"
+                                  aria-label="Record payment milestone"
+                                >
+                                  <CircleDollarSign className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Record Payment Milestone</TooltipContent>
+                            </Tooltip>
+                          )}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                onClick={() => setMilestoneBooking(b)}
-                                className="h-7 w-7 text-success hover:text-success"
-                                aria-label="Record payment milestone"
+                                onClick={() => setEditBooking(b)}
+                                className="h-7 w-7 text-info hover:text-info"
+                                aria-label="Edit booking"
                               >
-                                <CircleDollarSign className="h-4 w-4" />
+                                <Pencil className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Record Payment Milestone</TooltipContent>
+                            <TooltipContent>Edit Booking</TooltipContent>
                           </Tooltip>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
