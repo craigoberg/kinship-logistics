@@ -1520,18 +1520,28 @@ export interface BookingRefundInput {
   eventId: string;
   eventTitle: string;
   participantId: string;
+  reason?: string | null;
 }
 
 export interface UpdateBookingInput {
   bookingId: string;
   bookingStatus: string;
   notes: string | null;
+  /** Amended booking cost ($). When provided, triggers delta logic vs current amount_paid. */
+  amendedPrice?: number | null;
+  /** Snapshot of current amount_paid (for delta calc). */
+  currentAmountPaid?: number;
+  /** Event context for price-adjustment ledger marker. */
+  eventTitle?: string;
+  eventId?: string;
+  participantId?: string;
   refund?: BookingRefundInput | null;
 }
 
 export interface UpdateBookingResult {
   booking: EventRosterBooking;
   refundLedger: LedgerEntry | null;
+  priceAdjustmentLedger: LedgerEntry | null;
 }
 
 export async function updateEventBooking(
@@ -1552,6 +1562,25 @@ export async function updateEventBooking(
   if (issueRefund) {
     updatePayload.amount_paid = 0;
     updatePayload.is_fully_paid = false;
+  }
+
+  // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
+  let priceAdjustmentDelta = 0;
+  const currentPaid = Number(input.currentAmountPaid ?? 0);
+  const amended =
+    input.amendedPrice != null && Number.isFinite(input.amendedPrice)
+      ? Number(input.amendedPrice)
+      : null;
+  if (!issueRefund && amended != null && amended >= 0) {
+    if (amended < currentPaid) {
+      // Case B — cap amount_paid, flip fully paid, queue refund delta ledger
+      priceAdjustmentDelta = Number((currentPaid - amended).toFixed(2));
+      updatePayload.amount_paid = amended;
+      updatePayload.is_fully_paid = true;
+    } else {
+      // Case A / C — recalc fully-paid flag against new threshold, no ledger entry
+      updatePayload.is_fully_paid = amended > 0 && currentPaid >= amended;
+    }
   }
 
   const { data, error } = await supabase
@@ -1584,7 +1613,27 @@ export async function updateEventBooking(
     }
   }
 
-  return { booking, refundLedger };
+  let priceAdjustmentLedger: LedgerEntry | null = null;
+  if (priceAdjustmentDelta > 0 && input.participantId && input.eventId) {
+    const today = new Date().toISOString().slice(0, 10);
+    const reason = (trimmed.length > 0 ? trimmed : "Booking cost amended");
+    const evTitle = input.eventTitle ?? "Event";
+    try {
+      priceAdjustmentLedger = await insertLedgerEntry({
+        participantId: input.participantId,
+        transactionDate: today,
+        financialCode: "EVENT_REFUND",
+        description: `Price Adjustment Credit · ${reason} - ${evTitle} [event:${input.eventId}]`,
+        amount: -priceAdjustmentDelta,
+        isReconciled: true,
+      });
+    } catch (ledgerErr) {
+      console.error("[updateEventBooking] price-adjustment ledger insert failed", ledgerErr);
+      throw ledgerErr;
+    }
+  }
+
+  return { booking, refundLedger, priceAdjustmentLedger };
 }
 
 // ---------- per-participant per-event payment history ----------
