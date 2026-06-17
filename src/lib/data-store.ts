@@ -298,3 +298,33 @@ export async function hashPin(pin: string): Promise<string> {
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("");
 }
+
+// ---------- staff_registry ----------
+
+export interface StaffMember {
+  id: string;
+  fullName: string;
+  role: string | null;
+  pinHash: string | null;
+}
+
+interface StaffRow {
+  id: string;
+  full_name: string;
+  role: string | null;
+  pin_hash: string | null;
+}
+
+export async function listStaffRegistry(): Promise<StaffMember[]> {
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id, full_name, role, pin_hash")
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r: StaffRow) => ({
+    id: r.id,
+    fullName: r.full_name,
+    role: r.role,
+    pinHash: r.pin_hash,
+  }));
+}

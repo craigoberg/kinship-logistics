@@ -2,6 +2,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   listParticipants,
   listSyncLogs,
+  listStaffRegistry,
   updateParticipant,
   insertParticipant,
   insertSyncLog,
@@ -10,6 +11,14 @@ import {
   type NewParticipant,
   type NewSyncLog,
 } from "@/lib/data-store";
+
+export function useStaffRegistry() {
+  return useQuery({
+    queryKey: ["staff_registry"],
+    queryFn: listStaffRegistry,
+    staleTime: 60_000,
+  });
+}
 
 export function useParticipants() {
   return useQuery({
