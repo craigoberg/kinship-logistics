@@ -1391,7 +1391,6 @@ export interface NewEventBooking {
   bookingStatus?: string;
   amountPaid?: number;
   ticketPrice: number;
-  notes?: string | null;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
@@ -1399,10 +1398,9 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
-    booking_status: input.bookingStatus ?? "Confirmed",
+    booking_status: input.bookingStatus?.trim() || "Confirmed",
     amount_paid: amount,
     is_fully_paid: amount >= input.ticketPrice && input.ticketPrice > 0,
-    notes: input.notes ?? null,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
