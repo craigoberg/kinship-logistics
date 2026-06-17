@@ -89,7 +89,13 @@ export function ManageEventModal({ event, open, onOpenChange }: Props) {
         </div>
 
         <div className="max-h-[65vh] overflow-y-auto px-6 py-5">
-          {tab === "roster" ? <RosterTab event={event} /> : <EventFinanceTab event={event} />}
+          {tab === "roster" ? (
+            <RosterTab event={event} />
+          ) : tab === "finance" ? (
+            <EventFinanceTab event={event} />
+          ) : (
+            <EventDetailsTab event={event} />
+          )}
         </div>
       </DialogContent>
     </Dialog>
