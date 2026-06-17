@@ -1170,8 +1170,8 @@ export interface EventManifest {
 interface EventManifestRow {
   id: string;
   title: string;
-  event_type_code: string;
-  venue: string;
+  event_type: string;
+  venue_name: string;
   start_date: string;
   end_date: string | null;
   ticket_price: number | string;
@@ -1185,8 +1185,8 @@ function rowToEvent(r: EventManifestRow): EventManifest {
   return {
     id: r.id,
     title: r.title,
-    eventTypeCode: r.event_type_code,
-    venue: r.venue,
+    eventTypeCode: r.event_type,
+    venue: r.venue_name,
     startDate: r.start_date,
     endDate: r.end_date,
     ticketPrice: Number(r.ticket_price ?? 0),
@@ -1196,6 +1196,7 @@ function rowToEvent(r: EventManifestRow): EventManifest {
     updatedAt: r.updated_at,
   };
 }
+
 
 export async function listEvents(): Promise<EventManifest[]> {
   const { data, error } = await supabase
@@ -1232,36 +1233,23 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
   const endIso = toIsoDate(input.endDate ?? null);
 
-  // Base payload — send BOTH `event_type` (legacy NOT NULL column) and
-  // `event_type_code` (newer canonical column). The auto-drop loop below
-  // will strip whichever one PostgREST reports as missing from the schema
-  // cache, so this works against either schema variant.
-  const payload: Record<string, unknown> = {
+  // Verified live schema on event_manifest:
+  // title · event_type · venue_name · start_date · end_date · ticket_price · description
+  const payload = {
     title: input.title,
     event_type: input.eventTypeCode,
-    event_type_code: input.eventTypeCode,
-    venue: input.venue,
-    location: input.venue,
+    venue_name: input.venue,
     start_date: startIso,
     end_date: endIso,
     ticket_price: input.ticketPrice,
-    description: input.description,
+    description: input.description ?? null,
   };
 
-  const attemptInsert = async (p: Record<string, unknown>) =>
-    supabase.from("event_manifest").insert(p).select("*").single();
-
-  let { data, error } = await attemptInsert(payload);
-
-  // Auto-recover from missing-column errors by dropping the offender and retrying.
-  while (error && error.code === "PGRST204" && /Could not find the '([^']+)' column/.test(error.message)) {
-    const match = /Could not find the '([^']+)' column/.exec(error.message);
-    const missing = match?.[1];
-    if (!missing || !(missing in payload)) break;
-    console.warn(`[insertEvent] schema missing column "${missing}" — dropping and retrying`);
-    delete payload[missing];
-    ({ data, error } = await attemptInsert(payload));
-  }
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .insert(payload)
+    .select("*")
+    .single();
 
   if (error) {
     console.error("[insertEvent] failed", { error, payload });
@@ -1273,9 +1261,10 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     ].filter(Boolean);
     throw new Error(parts.join(" · "));
   }
-  
+
   return rowToEvent(data as EventManifestRow);
 }
+
 
 // ---------- event_roster_bookings ----------
 
