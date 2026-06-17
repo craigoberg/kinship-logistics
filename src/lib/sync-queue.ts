@@ -9,8 +9,9 @@ import type {
   SyncStatus,
   NewSyncLog,
   ParticipantPatch,
+  MedicationLogPayload,
 } from "./data-store";
-import { insertSyncLog, updateParticipant } from "./data-store";
+import { insertSyncLog, updateParticipant, insertComplianceLog } from "./data-store";
 
 const KEY = "yada.syncQueue.v1";
 
