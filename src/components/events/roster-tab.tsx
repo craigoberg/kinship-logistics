@@ -1,0 +1,132 @@
+import { useMemo, useState } from "react";
+import { Search, UserPlus, Users } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { useEventBookings } from "@/hooks/use-supabase-data";
+import type { EventManifest } from "@/lib/data-store";
+import { AddRosterBookingModal } from "./add-roster-booking-modal";
+
+interface Props {
+  event: EventManifest;
+}
+
+function fmtMoney(n: number): string {
+  return n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+export function RosterTab({ event }: Props) {
+  const [query, setQuery] = useState("");
+  const [addOpen, setAddOpen] = useState(false);
+  const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+
+  const filtered = useMemo(() => {
+    const n = query.trim().toLowerCase();
+    if (!n) return bookings;
+    return bookings.filter((b) =>
+      [b.participantName, b.bookingStatus, b.amountPaid.toFixed(2), b.isFullyPaid ? "paid" : "partial unpaid"]
+        .join(" ")
+        .toLowerCase()
+        .includes(n),
+    );
+  }, [bookings, query]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold">Participant booking roster</h3>
+          <p className="text-xs text-muted-foreground">
+            {isLoading ? "Loading…" : `${bookings.length} participants on roster.`}
+          </p>
+        </div>
+        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+          <UserPlus className="h-4 w-4" />
+          Add Participant to Roster
+        </Button>
+      </div>
+
+      <div className="relative w-full sm:max-w-sm">
+        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+        <Input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Search name, status, balance…"
+          className="h-9 pl-9"
+        />
+      </div>
+
+      {error && (
+        <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
+          {(error as Error).message}
+        </div>
+      )}
+
+      {isLoading ? (
+        <div className="py-10 text-center text-sm text-muted-foreground">Loading roster…</div>
+      ) : filtered.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
+          <Users className="mx-auto mb-2 h-5 w-5" />
+          {query ? `No bookings match "${query}".` : "No participants on this roster yet."}
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border">
+          <table className="w-full text-sm">
+            <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
+              <tr>
+                <th className="px-4 py-2 font-medium">Participant</th>
+                <th className="px-4 py-2 font-medium">Booking status</th>
+                <th className="px-4 py-2 text-right font-medium">Amount paid</th>
+                <th className="px-4 py-2 text-right font-medium">Balance</th>
+                <th className="px-4 py-2 text-right font-medium">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filtered.map((b) => {
+                const balance = event.ticketPrice - b.amountPaid;
+                return (
+                  <tr key={b.id} className="border-t border-border align-top">
+                    <td className="px-4 py-2 font-medium">{b.participantName}</td>
+                    <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
+                    <td className="px-4 py-2 text-right font-semibold tabular-nums">
+                      ${fmtMoney(b.amountPaid)}
+                    </td>
+                    <td
+                      className={
+                        "px-4 py-2 text-right font-semibold tabular-nums " +
+                        (balance <= 0 ? "text-success" : "text-warning")
+                      }
+                    >
+                      ${fmtMoney(Math.max(0, balance))}
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <PaidBadge fullyPaid={b.isFullyPaid} />
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+
+      <AddRosterBookingModal
+        open={addOpen}
+        onOpenChange={setAddOpen}
+        event={event}
+        existingBookings={bookings}
+      />
+    </div>
+  );
+}
+
+function PaidBadge({ fullyPaid }: { fullyPaid: boolean }) {
+  return fullyPaid ? (
+    <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+      Paid
+    </span>
+  ) : (
+    <span className="rounded-full bg-warning px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+      Partial / Unpaid
+    </span>
+  );
+}

@@ -422,3 +422,117 @@ export function useInsertLedgerEntry() {
   });
 }
 
+
+// ============================================================================
+// EVENT MANAGEMENT HOOKS
+// ============================================================================
+import {
+  listEvents,
+  insertEvent,
+  listEventBookings,
+  insertEventBooking,
+  listEventLedger,
+  insertEventLedger,
+  type NewEvent,
+  type NewEventBooking,
+  type NewEventLedger,
+} from "@/lib/data-store";
+import { enqueue } from "@/lib/sync-queue";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+
+export function useEvents() {
+  return useQuery({
+    queryKey: ["event_manifest"],
+    queryFn: listEvents,
+    staleTime: 30_000,
+  });
+}
+
+export function useEventBookings(eventId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["event_roster_bookings", eventId],
+    queryFn: () => listEventBookings(eventId as string),
+    enabled: !!eventId,
+    staleTime: 15_000,
+  });
+}
+
+export function useEventLedger(eventId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["event_financial_ledger", eventId],
+    queryFn: () => listEventLedger(eventId as string),
+    enabled: !!eventId,
+    staleTime: 15_000,
+  });
+}
+
+/** Offline-safe envelope shoved into `offline_sync_logs` with action_type EVENT_SYNC. */
+function packEventSync(kind: "event" | "booking" | "ledger", payload: unknown) {
+  enqueue("transport_log", {
+    action_type: "EVENT_SYNC",
+    kind,
+    payload,
+    timestamp: new Date().toISOString(),
+  } as Record<string, unknown>);
+}
+
+export function useInsertEvent() {
+  const qc = useQueryClient();
+  const online = useOnlineStatus();
+  return useMutation({
+    mutationFn: async (input: NewEvent) => {
+      if (!online) {
+        packEventSync("event", input);
+        throw new Error("Offline — event queued to offline_sync_logs (EVENT_SYNC).");
+      }
+      return insertEvent(input);
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["event_manifest"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not save event", { description: err.message });
+    },
+  });
+}
+
+export function useInsertEventBooking() {
+  const qc = useQueryClient();
+  const online = useOnlineStatus();
+  return useMutation({
+    mutationFn: async (input: NewEventBooking) => {
+      if (!online) {
+        packEventSync("booking", input);
+        throw new Error("Offline — booking queued to offline_sync_logs (EVENT_SYNC).");
+      }
+      return insertEventBooking(input);
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not add participant to roster", { description: err.message });
+    },
+  });
+}
+
+export function useInsertEventLedger() {
+  const qc = useQueryClient();
+  const online = useOnlineStatus();
+  return useMutation({
+    mutationFn: async (input: NewEventLedger) => {
+      if (!online) {
+        packEventSync("ledger", input);
+        throw new Error("Offline — expense queued to offline_sync_logs (EVENT_SYNC).");
+      }
+      return insertEventLedger(input);
+    },
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not log event expense", { description: err.message });
+    },
+  });
+}

@@ -781,7 +781,9 @@ export const LOOKUP_CATEGORIES = {
   transportOption: "transport_types",
   financialCode: "financial_codes",
   operatingDay: "operating_days",
+  eventType: "event_types",
 } as const;
+
 
 /**
  * Surface every category in the Admin Configuration workspace so coordinators
@@ -813,7 +815,13 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     label: "Financial codes",
     description: "Billable item codes used in the ledger module.",
   },
+  {
+    category: LOOKUP_CATEGORIES.eventType,
+    label: "Event types",
+    description: "Categories powering the Event Management dashboard (Fundraiser, Workshop, …).",
+  },
 ];
+
 
 
 
@@ -1138,3 +1146,244 @@ export async function cancelChargesForDate(
   return targets.length;
 }
 
+
+// ============================================================================
+// EVENT MANAGEMENT DASHBOARD & ROSTER SYSTEM
+// Tables: event_manifest, event_roster_bookings, event_financial_ledger
+// SQL: docs/sql/2026-06-17_event_management.sql
+// ============================================================================
+
+export interface EventManifest {
+  id: string;
+  title: string;
+  eventTypeCode: string;
+  venue: string;
+  startDate: string;
+  endDate: string | null;
+  ticketPrice: number;
+  description: string | null;
+  active: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface EventManifestRow {
+  id: string;
+  title: string;
+  event_type_code: string;
+  venue: string;
+  start_date: string;
+  end_date: string | null;
+  ticket_price: number | string;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToEvent(r: EventManifestRow): EventManifest {
+  return {
+    id: r.id,
+    title: r.title,
+    eventTypeCode: r.event_type_code,
+    venue: r.venue,
+    startDate: r.start_date,
+    endDate: r.end_date,
+    ticketPrice: Number(r.ticket_price ?? 0),
+    description: r.description,
+    active: r.active,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function listEvents(): Promise<EventManifest[]> {
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("*")
+    .order("start_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
+}
+
+export interface NewEvent {
+  title: string;
+  eventTypeCode: string;
+  venue: string;
+  startDate: string;
+  endDate?: string | null;
+  ticketPrice: number;
+  description?: string | null;
+}
+
+export async function insertEvent(input: NewEvent): Promise<EventManifest> {
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .insert({
+      title: input.title,
+      event_type_code: input.eventTypeCode,
+      venue: input.venue,
+      start_date: input.startDate,
+      end_date: input.endDate ?? null,
+      ticket_price: input.ticketPrice,
+      description: input.description ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) {
+    console.error("[insertEvent] failed", error);
+    throw error;
+  }
+  return rowToEvent(data as EventManifestRow);
+}
+
+// ---------- event_roster_bookings ----------
+
+export interface EventRosterBooking {
+  id: string;
+  eventId: string;
+  participantId: string;
+  participantName: string;
+  bookingStatus: string;
+  amountPaid: number;
+  isFullyPaid: boolean;
+  notes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface BookingRow {
+  id: string;
+  event_id: string;
+  participant_id: string;
+  booking_status: string;
+  amount_paid: number | string;
+  is_fully_paid: boolean;
+  notes: string | null;
+  created_at: string;
+  updated_at: string;
+  participants?: { first_name: string; last_name: string } | null;
+}
+
+function rowToBooking(r: BookingRow): EventRosterBooking {
+  const fn = r.participants?.first_name ?? "";
+  const ln = r.participants?.last_name ?? "";
+  return {
+    id: r.id,
+    eventId: r.event_id,
+    participantId: r.participant_id,
+    participantName: `${fn} ${ln}`.trim() || "(unknown)",
+    bookingStatus: r.booking_status,
+    amountPaid: Number(r.amount_paid ?? 0),
+    isFullyPaid: r.is_fully_paid,
+    notes: r.notes,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select("*, participants!inner(first_name, last_name)")
+    .eq("event_id", eventId)
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToBooking(r as BookingRow));
+}
+
+export interface NewEventBooking {
+  eventId: string;
+  participantId: string;
+  bookingStatus?: string;
+  amountPaid?: number;
+  ticketPrice: number;
+  notes?: string | null;
+}
+
+export async function insertEventBooking(input: NewEventBooking): Promise<void> {
+  const amount = input.amountPaid ?? 0;
+  const { error } = await supabase.from("event_roster_bookings").insert({
+    event_id: input.eventId,
+    participant_id: input.participantId,
+    booking_status: input.bookingStatus ?? "Confirmed",
+    amount_paid: amount,
+    is_fully_paid: amount >= input.ticketPrice && input.ticketPrice > 0,
+    notes: input.notes ?? null,
+  });
+  if (error) {
+    console.error("[insertEventBooking] failed", error);
+    throw error;
+  }
+}
+
+// ---------- event_financial_ledger ----------
+
+export interface EventLedgerEntry {
+  id: string;
+  eventId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  financialCode: string;
+  vendorName: string | null;
+  createdAt: string;
+}
+
+interface EventLedgerRow {
+  id: string;
+  event_id: string;
+  transaction_date: string;
+  description: string;
+  amount: number | string;
+  financial_code: string;
+  vendor_name: string | null;
+  created_at: string;
+}
+
+function rowToEventLedger(r: EventLedgerRow): EventLedgerEntry {
+  return {
+    id: r.id,
+    eventId: r.event_id,
+    transactionDate: r.transaction_date,
+    description: r.description,
+    amount: Number(r.amount ?? 0),
+    financialCode: r.financial_code,
+    vendorName: r.vendor_name,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listEventLedger(eventId: string): Promise<EventLedgerEntry[]> {
+  const { data, error } = await supabase
+    .from("event_financial_ledger")
+    .select("*")
+    .eq("event_id", eventId)
+    .order("transaction_date", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToEventLedger(r as EventLedgerRow));
+}
+
+export interface NewEventLedger {
+  eventId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  financialCode: string;
+  vendorName?: string | null;
+}
+
+export async function insertEventLedger(input: NewEventLedger): Promise<void> {
+  const { error } = await supabase.from("event_financial_ledger").insert({
+    event_id: input.eventId,
+    transaction_date: input.transactionDate,
+    description: input.description,
+    amount: input.amount,
+    financial_code: input.financialCode,
+    vendor_name: input.vendorName ?? null,
+  });
+  if (error) {
+    console.error("[insertEventLedger] failed", error);
+    throw error;
+  }
+}
