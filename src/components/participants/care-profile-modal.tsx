@@ -25,6 +25,7 @@ import {
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { ScheduledMedicationModal } from "@/components/medication/scheduled-medication-modal";
+import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { toast } from "sonner";
 
 interface Props {
@@ -109,10 +110,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           </DialogHeader>
 
           <Tabs defaultValue="profile" className="mt-2">
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-4">
               <TabsTrigger value="profile">Care Profile</TabsTrigger>
               <TabsTrigger value="scheduling">Medication Scheduling</TabsTrigger>
-              <TabsTrigger value="history">Care & Medication History</TabsTrigger>
+              <TabsTrigger value="history">Care &amp; Medication History</TabsTrigger>
+              <TabsTrigger value="attendance">Schedules &amp; Attendance</TabsTrigger>
             </TabsList>
 
             {/* TAB 1 — Care Profile */}
@@ -177,6 +179,14 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 participantId={participant.id}
                 query={historyQuery}
                 onQueryChange={setHistoryQuery}
+              />
+            </TabsContent>
+
+            {/* TAB 4 — Schedules & Attendance */}
+            <TabsContent value="attendance" className="pt-4">
+              <AttendanceTab
+                participantId={participant.id}
+                participantName={participant.fullName}
               />
             </TabsContent>
           </Tabs>
