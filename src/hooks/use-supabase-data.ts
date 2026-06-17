@@ -64,6 +64,21 @@ function writeLookupCache(category: string, value: unknown) {
   }
 }
 
+/** Purge every localStorage entry keyed with the lookup cache prefix. */
+export function clearLookupCache() {
+  if (typeof window === "undefined") return;
+  try {
+    for (let i = window.localStorage.length - 1; i >= 0; i--) {
+      const key = window.localStorage.key(i);
+      if (key && key.startsWith(LOOKUP_CACHE_PREFIX)) {
+        window.localStorage.removeItem(key);
+      }
+    }
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export function useLookupParameters(category: string | null | undefined) {
   return useQuery({
     queryKey: ["system_lookup_parameters", category],
