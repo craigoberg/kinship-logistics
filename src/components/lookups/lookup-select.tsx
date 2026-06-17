@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLookupParameters, clearLookupCacheCategory } from "@/hooks/use-supabase-data";
+
 
 interface Props {
   /** `system_lookup_parameters.category` to query — e.g. `service_types`. */
@@ -40,7 +41,8 @@ export function LookupSelect({
   blockUntilLoaded = true,
 }: Props) {
   const queryClient = useQueryClient();
-  const { data = [], isLoading, error, isFetched, refetch } = useLookupParameters(category);
+  const { data = [], isLoading, isFetching, error, isFetched, refetch } = useLookupParameters(category);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const onValueChange = (code: string) => {
     const hit = data.find((p) => p.code === code);
@@ -49,11 +51,19 @@ export function LookupSelect({
 
   const noOptions = data.length === 0 && isFetched;
 
-  const handleRefresh = useCallback(() => {
-    clearLookupCacheCategory(category);
-    queryClient.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
-    refetch();
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      clearLookupCacheCategory(category);
+      await queryClient.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [category, queryClient, refetch]);
+
+  const busy = isRefreshing || isLoading || isFetching;
+
 
   const triggerPlaceholder =
     isLoading && data.length === 0
@@ -90,13 +100,18 @@ export function LookupSelect({
       <button
         type="button"
         onClick={handleRefresh}
-        title="Retry / Refresh Parameters"
-        className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md border border-border/60 bg-card/50 text-foreground transition-colors hover:bg-primary/20 hover:text-primary focus:outline-none focus:ring-2 focus:ring-ring"
+        disabled={busy}
+        title={busy ? "Syncing parameters…" : "Retry / Refresh Parameters"}
+        className="inline-flex h-9 shrink-0 items-center justify-center gap-1.5 rounded-md border border-border/60 bg-card/50 px-2 text-foreground transition-colors hover:bg-primary/20 hover:text-primary focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-wait disabled:opacity-80"
         aria-label="Retry / Refresh Parameters"
+        aria-busy={busy}
       >
         <RefreshCw
-          className={`h-4 w-4 ${isLoading ? "animate-spin" : ""}`}
+          className={`h-4 w-4 ${busy ? "animate-spin text-primary" : ""}`}
         />
+        {isRefreshing ? (
+          <span className="text-xs font-medium text-primary">Syncing…</span>
+        ) : null}
       </button>
     </div>
   );

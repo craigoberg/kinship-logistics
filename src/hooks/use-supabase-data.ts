@@ -111,6 +111,8 @@ export function useInsertAttendanceLog() {
     mutationFn: (input: NewAttendanceLog) => insertAttendanceLog(input),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["attendance_logs", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }
@@ -139,6 +141,8 @@ export function useInsertAttendanceSchedule() {
     mutationFn: (input: NewAttendanceSchedule) => insertAttendanceSchedule(input),
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
     },
   });
 }
@@ -150,9 +154,11 @@ export function useUpdateAttendanceLog() {
       updateAttendanceLog(id, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }
+
 
 export function useParticipantSchedules(participantId: string | null | undefined) {
   return useQuery({
@@ -274,6 +280,9 @@ export function useInsertLedgerEntry() {
       qc.invalidateQueries({
         queryKey: ["participant_financial_ledger", vars.participantId],
       });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }
+
