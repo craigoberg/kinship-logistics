@@ -89,8 +89,16 @@ export function subscribe(fn: Listener): () => void {
 
 async function processItem(item: SyncQueueItem): Promise<void> {
   if (item.type === "transport_log") {
-    const log = item.payload as unknown as NewSyncLog;
-    await insertSyncLog(log);
+    // Normalize: queued envelopes may use snake_case (action_type) or
+    // be raw JSON shapes (e.g. EVENT_SYNC). Guarantee NOT NULL columns.
+    const raw = (item.payload ?? {}) as Record<string, unknown>;
+    const actionType =
+      (raw.actionType as string | undefined) ??
+      (raw.action_type as string | undefined) ??
+      "OFFLINE_SYNC";
+    const payload =
+      (raw.payload as Record<string, unknown> | undefined) ?? raw;
+    await insertSyncLog({ actionType, payload });
     return;
   }
   if (item.type === "medication_log") {
