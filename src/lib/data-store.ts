@@ -1342,6 +1342,7 @@ export interface EventRosterBooking {
   bookingStatus: string;
   amountPaid: number;
   isFullyPaid: boolean;
+  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1353,6 +1354,7 @@ interface BookingRow {
   booking_status: string;
   amount_paid: number | string;
   is_fully_paid: boolean;
+  notes: string | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1369,7 +1371,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     bookingStatus: r.booking_status,
     amountPaid: Number(r.amount_paid ?? 0),
     isFullyPaid: r.is_fully_paid,
-    
+    notes: r.notes ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -1385,27 +1387,131 @@ export async function listEventBookings(eventId: string): Promise<EventRosterBoo
   return (data ?? []).map((r) => rowToBooking(r as BookingRow));
 }
 
+export interface EventBookingWithEvent extends EventRosterBooking {
+  eventTitle: string;
+  eventStartDate: string;
+  eventEndDate: string;
+  eventTicketPrice: number;
+  eventStatus: string;
+}
+
+export async function listEventBookingsForParticipant(
+  participantId: string,
+): Promise<EventBookingWithEvent[]> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select(
+      "*, participants!inner(first_name, last_name), event_manifest!inner(title, start_date, end_date, ticket_price, status)",
+    )
+    .eq("participant_id", participantId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => {
+    const raw = r as BookingRow & {
+      event_manifest?: {
+        title: string;
+        start_date: string;
+        end_date: string;
+        ticket_price: number | string;
+        status: string | null;
+      };
+    };
+    const base = rowToBooking(raw);
+    const ev = raw.event_manifest;
+    return {
+      ...base,
+      eventTitle: ev?.title ?? "(deleted event)",
+      eventStartDate: ev?.start_date ?? "",
+      eventEndDate: ev?.end_date ?? "",
+      eventTicketPrice: Number(ev?.ticket_price ?? 0),
+      eventStatus: ev?.status ?? "—",
+    };
+  });
+}
+
 export interface NewEventBooking {
   eventId: string;
   participantId: string;
   bookingStatus?: string;
   amountPaid?: number;
   ticketPrice: number;
+  notes?: string | null;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
   const amount = input.amountPaid ?? 0;
+  const trimmedNotes = (input.notes ?? "").trim();
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
     booking_status: input.bookingStatus?.trim() || "Confirmed",
     amount_paid: amount,
     is_fully_paid: amount >= input.ticketPrice && input.ticketPrice > 0,
+    notes: trimmedNotes.length > 0 ? trimmedNotes : null,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
     throw error;
   }
+}
+
+/**
+ * Record an incremental payment milestone against an existing roster booking.
+ * - Recomputes cumulative amount_paid + is_fully_paid on event_roster_bookings.
+ * - Writes a positive income line into participant_financial_ledger with
+ *   the event title + id embedded in the description (the live ledger schema
+ *   does not carry a dedicated event_id FK column).
+ */
+export interface PaymentMilestoneInput {
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  ticketPrice: number;
+  currentAmountPaid: number;
+  paymentAmount: number;
+  paymentDate: string; // YYYY-MM-DD
+}
+
+export interface PaymentMilestoneResult {
+  booking: EventRosterBooking;
+  ledger: LedgerEntry;
+}
+
+export async function recordEventPaymentMilestone(
+  input: PaymentMilestoneInput,
+): Promise<PaymentMilestoneResult> {
+  if (!Number.isFinite(input.paymentAmount) || input.paymentAmount <= 0) {
+    throw new Error("Payment amount must be greater than zero.");
+  }
+  const newTotal = Number((input.currentAmountPaid + input.paymentAmount).toFixed(2));
+  const fullyPaid = input.ticketPrice > 0 && newTotal >= input.ticketPrice;
+
+  const { data: bookingData, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .update({ amount_paid: newTotal, is_fully_paid: fullyPaid })
+    .eq("id", input.bookingId)
+    .select("*, participants!inner(first_name, last_name)")
+    .single();
+  if (bookingErr) {
+    console.error("[recordEventPaymentMilestone] booking update failed", bookingErr);
+    throw bookingErr;
+  }
+
+  const booking = rowToBooking(bookingData as BookingRow);
+
+  const ledger = await insertLedgerEntry({
+    participantId: input.participantId,
+    transactionDate: input.paymentDate,
+    financialCode: "EVENT_PMT",
+    description: `Event Payment Milestone — ${input.eventTitle} [event:${input.eventId}]`,
+    amount: input.paymentAmount,
+    isReconciled: true,
+  });
+
+  return { booking, ledger };
+}
+
 }
 
 // ---------- event_financial_ledger ----------
