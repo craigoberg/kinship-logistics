@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Save, AlertTriangle } from "lucide-react";
+import { Save, AlertTriangle, TrendingDown } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,6 +29,7 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   booking: EventRosterBooking | null;
   eventTitle?: string;
+  eventTicketPrice?: number;
 }
 
 const STATUS_OPTIONS = ["Confirmed", "Waitlisted", "Cancelled"] as const;
@@ -44,13 +45,20 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle }: Props) {
+export function EditRosterBookingModal({
+  open,
+  onOpenChange,
+  booking,
+  eventTitle,
+  eventTicketPrice = 0,
+}: Props) {
   const [bookingStatus, setBookingStatus] = useState<string>("Confirmed");
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const [issueRefund, setIssueRefund] = useState(true);
   const [refundAmount, setRefundAmount] = useState<string>("0");
   const [refundDate, setRefundDate] = useState<string>(todayISO());
+  const [amendedPrice, setAmendedPrice] = useState<string>("0");
   const mutation = useUpdateEventBooking();
 
   const collected = booking?.amountPaid ?? 0;
@@ -63,17 +71,26 @@ export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle
       setIssueRefund(collected > 0);
       setRefundAmount(collected > 0 ? collected.toFixed(2) : "0");
       setRefundDate(todayISO());
+      setAmendedPrice(Number(eventTicketPrice ?? 0).toFixed(2));
     }
-  }, [open, booking, collected]);
+  }, [open, booking, collected, eventTicketPrice]);
 
   const showRefundPanel = bookingStatus === "Cancelled" && collected > 0;
   const parsedRefund = useMemo(() => {
     const n = Number(refundAmount);
     return Number.isFinite(n) ? n : 0;
   }, [refundAmount]);
+  const parsedAmended = useMemo(() => {
+    const n = Number(amendedPrice);
+    return Number.isFinite(n) && n >= 0 ? n : 0;
+  }, [amendedPrice]);
 
   const refundInvalid =
     showRefundPanel && issueRefund && (parsedRefund <= 0 || parsedRefund > collected);
+  const priceChanged = Math.abs(parsedAmended - Number(eventTicketPrice ?? 0)) > 0.001;
+  const remainingBalance = Math.max(0, parsedAmended - collected);
+  const overpaymentDelta = Math.max(0, collected - parsedAmended);
+  const isCaseB = !showRefundPanel && priceChanged && parsedAmended < collected;
 
   if (!booking) return null;
 
@@ -88,6 +105,11 @@ export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle
         bookingId: booking.id,
         bookingStatus,
         notes: notes.trim() ? notes.trim() : null,
+        amendedPrice: priceChanged ? parsedAmended : null,
+        currentAmountPaid: collected,
+        eventId: booking.eventId,
+        eventTitle: eventTitle ?? "Event",
+        participantId: booking.participantId,
         refund: willRefund
           ? {
               amount: parsedRefund,
@@ -101,7 +123,9 @@ export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle
       toast.success("Booking updated", {
         description: result.refundLedger
           ? `${booking.participantName} → Cancelled · Refund $${fmtMoney(parsedRefund)} posted`
-          : `${booking.participantName} → ${bookingStatus}`,
+          : result.priceAdjustmentLedger
+            ? `${booking.participantName} → Price amended · Credit $${fmtMoney(overpaymentDelta)} posted`
+            : `${booking.participantName} → ${bookingStatus}`,
       });
       onOpenChange(false);
     } catch {
@@ -115,7 +139,7 @@ export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle
         <DialogHeader>
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
-            Update <strong>{booking.participantName}</strong>'s booking status and billing notes.
+            Update <strong>{booking.participantName}</strong>'s booking status, cost and billing notes.
           </DialogDescription>
         </DialogHeader>
 
@@ -142,6 +166,62 @@ export function EditRosterBookingModal({ open, onOpenChange, booking, eventTitle
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* ----- Amend Booking Cost ----- */}
+          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Amend Booking Cost ($)
+              </Label>
+              <span className="text-[10px] text-muted-foreground">
+                Event default: ${fmtMoney(Number(eventTicketPrice ?? 0))}
+              </span>
+            </div>
+            <Input
+              type="number"
+              step="0.01"
+              min="0"
+              value={amendedPrice}
+              onChange={(e) => {
+                setAmendedPrice(e.target.value);
+                setDirty(true);
+              }}
+              className="bg-background tabular-nums"
+            />
+            <div className="grid grid-cols-2 gap-2 text-[11px]">
+              <div className="rounded bg-background/60 px-2 py-1">
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  Collected
+                </div>
+                <div className="font-bold tabular-nums">${fmtMoney(collected)}</div>
+              </div>
+              <div
+                className={
+                  "rounded px-2 py-1 " +
+                  (isCaseB
+                    ? "bg-success/20 text-success-foreground"
+                    : "bg-background/60")
+                }
+              >
+                <div className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                  {isCaseB ? "Overpayment credit" : "Balance owing"}
+                </div>
+                <div className="font-bold tabular-nums">
+                  ${fmtMoney(isCaseB ? overpaymentDelta : remainingBalance)}
+                </div>
+              </div>
+            </div>
+            {isCaseB && (
+              <div className="flex items-start gap-1.5 rounded bg-success/10 px-2 py-1.5 text-[11px] text-success-foreground">
+                <TrendingDown className="mt-0.5 h-3.5 w-3.5" />
+                <span>
+                  Price below collected total — <code>amount_paid</code> will cap to{" "}
+                  <strong>${fmtMoney(parsedAmended)}</strong> and a negative{" "}
+                  <strong>${fmtMoney(overpaymentDelta)}</strong> credit will post to the ledger.
+                </span>
+              </div>
+            )}
           </div>
 
           {showRefundPanel && (
