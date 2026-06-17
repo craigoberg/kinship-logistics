@@ -1,6 +1,17 @@
-import { CalendarRange, Ticket } from "lucide-react";
+import { useState } from "react";
+import { CalendarRange, CircleDollarSign, Pencil, Ticket } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { useEventBookingsForParticipant } from "@/hooks/use-supabase-data";
 import { formatDate } from "@/lib/utils";
+import type { EventBookingWithEvent, EventManifest, EventRosterBooking } from "@/lib/data-store";
+import { RecordPaymentMilestoneModal } from "@/components/events/record-payment-milestone-modal";
+import { EditRosterBookingModal } from "@/components/events/edit-roster-booking-modal";
 
 interface Props {
   participantId: string;
@@ -10,8 +21,43 @@ function fmtMoney(n: number): string {
   return n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
+/** Build a minimal EventManifest from a joined booking row so the shared
+ * RecordPaymentMilestoneModal can be reused without a second event fetch. */
+function synthEvent(r: EventBookingWithEvent): EventManifest {
+  return {
+    id: r.eventId,
+    title: r.eventTitle,
+    eventTypeCode: "",
+    venue: "",
+    startDate: r.eventStartDate,
+    endDate: r.eventEndDate || null,
+    ticketPrice: r.eventTicketPrice,
+    description: null,
+    active: true,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
+function toBooking(r: EventBookingWithEvent): EventRosterBooking {
+  return {
+    id: r.id,
+    eventId: r.eventId,
+    participantId: r.participantId,
+    participantName: r.participantName,
+    bookingStatus: r.bookingStatus,
+    amountPaid: r.amountPaid,
+    isFullyPaid: r.isFullyPaid,
+    notes: r.notes,
+    createdAt: r.createdAt,
+    updatedAt: r.updatedAt,
+  };
+}
+
 export function ParticipantRegisteredEvents({ participantId }: Props) {
   const { data: rows = [], isLoading, error } = useEventBookingsForParticipant(participantId);
+  const [milestoneRow, setMilestoneRow] = useState<EventBookingWithEvent | null>(null);
+  const [editRow, setEditRow] = useState<EventBookingWithEvent | null>(null);
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card/40 p-4">
@@ -45,47 +91,98 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-3 py-2 font-medium">Event</th>
-                <th className="px-3 py-2 font-medium">Start date</th>
-                <th className="px-3 py-2 font-medium">Booking status</th>
-                <th className="px-3 py-2 font-medium">Notes</th>
-                <th className="px-3 py-2 text-right font-medium">Fee</th>
-                <th className="px-3 py-2 text-right font-medium">Paid</th>
-                <th className="px-3 py-2 text-right font-medium">Balance</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => {
-                const balance = Math.max(0, r.eventTicketPrice - r.amountPaid);
-                return (
-                  <tr key={r.id} className="border-t border-border align-top">
-                    <td className="px-3 py-2 font-medium">{r.eventTitle}</td>
-                    <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
-                      {r.eventStartDate ? formatDate(r.eventStartDate) : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-muted-foreground">{r.bookingStatus}</td>
-                    <td className="px-3 py-2 text-xs italic text-muted-foreground">
-                      {r.notes ? `“${r.notes}”` : "—"}
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                      ${fmtMoney(r.eventTicketPrice)}
-                    </td>
-                    <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                      ${fmtMoney(r.amountPaid)}
-                    </td>
-                    <td className="px-3 py-2 text-right">
-                      <BalanceBadge fullyPaid={r.isFullyPaid} balance={balance} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <TooltipProvider delayDuration={200}>
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-3 py-2 font-medium">Event</th>
+                  <th className="px-3 py-2 font-medium">Start date</th>
+                  <th className="px-3 py-2 font-medium">Booking status</th>
+                  <th className="px-3 py-2 font-medium">Notes</th>
+                  <th className="px-3 py-2 text-right font-medium">Fee</th>
+                  <th className="px-3 py-2 text-right font-medium">Paid</th>
+                  <th className="px-3 py-2 text-right font-medium">Balance</th>
+                  <th className="px-3 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((r) => {
+                  const balance = Math.max(0, r.eventTicketPrice - r.amountPaid);
+                  const owes = balance > 0 && !r.isFullyPaid;
+                  return (
+                    <tr key={r.id} className="border-t border-border align-top">
+                      <td className="px-3 py-2 font-medium">{r.eventTitle}</td>
+                      <td className="whitespace-nowrap px-3 py-2 tabular-nums text-muted-foreground">
+                        {r.eventStartDate ? formatDate(r.eventStartDate) : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-muted-foreground">{r.bookingStatus}</td>
+                      <td className="px-3 py-2 text-xs italic text-muted-foreground">
+                        {r.notes ? `“${r.notes}”` : "—"}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                        ${fmtMoney(r.eventTicketPrice)}
+                      </td>
+                      <td className="px-3 py-2 text-right font-semibold tabular-nums">
+                        ${fmtMoney(r.amountPaid)}
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <BalanceBadge fullyPaid={r.isFullyPaid} balance={balance} />
+                      </td>
+                      <td className="px-3 py-2 text-right">
+                        <div className="flex items-center justify-end gap-1">
+                          {owes && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => setMilestoneRow(r)}
+                                  className="h-7 w-7 text-success hover:text-success"
+                                  aria-label="Record payment"
+                                >
+                                  <CircleDollarSign className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Record Payment</TooltipContent>
+                            </Tooltip>
+                          )}
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setEditRow(r)}
+                                className="h-7 w-7 text-info hover:text-info"
+                                aria-label="Edit booking"
+                              >
+                                <Pencil className="h-3.5 w-3.5" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Edit Booking</TooltipContent>
+                          </Tooltip>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TooltipProvider>
         </div>
       )}
+
+      <RecordPaymentMilestoneModal
+        open={milestoneRow !== null}
+        onOpenChange={(o) => !o && setMilestoneRow(null)}
+        event={milestoneRow ? synthEvent(milestoneRow) : ({} as EventManifest)}
+        booking={milestoneRow ? toBooking(milestoneRow) : null}
+      />
+
+      <EditRosterBookingModal
+        open={editRow !== null}
+        onOpenChange={(o) => !o && setEditRow(null)}
+        booking={editRow ? toBooking(editRow) : null}
+      />
     </section>
   );
 }

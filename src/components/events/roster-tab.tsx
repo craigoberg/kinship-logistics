@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
+import { Fragment, useMemo, useState } from "react";
+import { ChevronDown, ChevronRight, CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -8,6 +8,7 @@ import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
+import { BookingPaymentHistory } from "./booking-payment-history";
 
 interface Props {
   event: EventManifest;
@@ -22,7 +23,17 @@ export function RosterTab({ event }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
@@ -79,6 +90,7 @@ export function RosterTab({ event }: Props) {
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
+                  <th className="w-8 px-2 py-2"></th>
                   <th className="px-4 py-2 font-medium">Participant</th>
                   <th className="px-4 py-2 font-medium">Booking status</th>
                   <th className="px-4 py-2 text-right font-medium">Amount paid</th>
@@ -91,78 +103,108 @@ export function RosterTab({ event }: Props) {
                 {filtered.map((b) => {
                   const balance = event.ticketPrice - b.amountPaid;
                   const owes = balance > 0 && !b.isFullyPaid;
+                  const isOpen = expanded.has(b.id);
                   return (
-                    <tr key={b.id} className="border-t border-border align-top">
-                      <td className="px-4 py-2">
-                        <div className="font-medium">
-                          {b.participantName}
-                          {b.notes && (
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <span className="ml-1.5 cursor-help text-[10px] uppercase tracking-wide text-info">
-                                  ⓘ
-                                </span>
-                              </TooltipTrigger>
-                              <TooltipContent className="max-w-xs">{b.notes}</TooltipContent>
-                            </Tooltip>
-                          )}
-                        </div>
-                        {b.notes && (
-                          <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
-                            “{b.notes}”
+                    <Fragment key={b.id}>
+                      <tr className="border-t border-border align-top">
+                        <td className="px-2 py-2 align-middle">
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            onClick={() => toggleExpanded(b.id)}
+                            className="h-6 w-6 text-muted-foreground"
+                            aria-label={isOpen ? "Collapse payment history" : "Expand payment history"}
+                            aria-expanded={isOpen}
+                          >
+                            {isOpen ? (
+                              <ChevronDown className="h-4 w-4" />
+                            ) : (
+                              <ChevronRight className="h-4 w-4" />
+                            )}
+                          </Button>
+                        </td>
+                        <td className="px-4 py-2">
+                          <div className="font-medium">
+                            {b.participantName}
+                            {b.notes && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <span className="ml-1.5 cursor-help text-[10px] uppercase tracking-wide text-info">
+                                    ⓘ
+                                  </span>
+                                </TooltipTrigger>
+                                <TooltipContent className="max-w-xs">{b.notes}</TooltipContent>
+                              </Tooltip>
+                            )}
                           </div>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
-                      <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                        ${fmtMoney(b.amountPaid)}
-                      </td>
-                      <td
-                        className={
-                          "px-4 py-2 text-right font-semibold tabular-nums " +
-                          (balance <= 0 ? "text-success" : "text-warning")
-                        }
-                      >
-                        ${fmtMoney(Math.max(0, balance))}
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <PaidBadge fullyPaid={b.isFullyPaid} />
-                      </td>
-                      <td className="px-4 py-2 text-right">
-                        <div className="flex items-center justify-end gap-1">
-                          {owes && (
+                          {b.notes && (
+                            <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
+                              “{b.notes}”
+                            </div>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
+                        <td className="px-4 py-2 text-right font-semibold tabular-nums">
+                          ${fmtMoney(b.amountPaid)}
+                        </td>
+                        <td
+                          className={
+                            "px-4 py-2 text-right font-semibold tabular-nums " +
+                            (balance <= 0 ? "text-success" : "text-warning")
+                          }
+                        >
+                          ${fmtMoney(Math.max(0, balance))}
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <PaidBadge fullyPaid={b.isFullyPaid} />
+                        </td>
+                        <td className="px-4 py-2 text-right">
+                          <div className="flex items-center justify-end gap-1">
+                            {owes && (
+                              <Tooltip>
+                                <TooltipTrigger asChild>
+                                  <Button
+                                    size="icon"
+                                    variant="ghost"
+                                    onClick={() => setMilestoneBooking(b)}
+                                    className="h-7 w-7 text-success hover:text-success"
+                                    aria-label="Record payment milestone"
+                                  >
+                                    <CircleDollarSign className="h-4 w-4" />
+                                  </Button>
+                                </TooltipTrigger>
+                                <TooltipContent>Record Payment Milestone</TooltipContent>
+                              </Tooltip>
+                            )}
                             <Tooltip>
                               <TooltipTrigger asChild>
                                 <Button
                                   size="icon"
                                   variant="ghost"
-                                  onClick={() => setMilestoneBooking(b)}
-                                  className="h-7 w-7 text-success hover:text-success"
-                                  aria-label="Record payment milestone"
+                                  onClick={() => setEditBooking(b)}
+                                  className="h-7 w-7 text-info hover:text-info"
+                                  aria-label="Edit booking"
                                 >
-                                  <CircleDollarSign className="h-4 w-4" />
+                                  <Pencil className="h-3.5 w-3.5" />
                                 </Button>
                               </TooltipTrigger>
-                              <TooltipContent>Record Payment Milestone</TooltipContent>
+                              <TooltipContent>Edit Booking</TooltipContent>
                             </Tooltip>
-                          )}
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <Button
-                                size="icon"
-                                variant="ghost"
-                                onClick={() => setEditBooking(b)}
-                                className="h-7 w-7 text-info hover:text-info"
-                                aria-label="Edit booking"
-                              >
-                                <Pencil className="h-3.5 w-3.5" />
-                              </Button>
-                            </TooltipTrigger>
-                            <TooltipContent>Edit Booking</TooltipContent>
-                          </Tooltip>
-                        </div>
-                      </td>
-                    </tr>
+                          </div>
+                        </td>
+                      </tr>
+                      {isOpen && (
+                        <tr className="border-t border-border/40 bg-muted/10">
+                          <td></td>
+                          <td colSpan={6} className="p-0">
+                            <BookingPaymentHistory
+                              participantId={b.participantId}
+                              eventId={event.id}
+                            />
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
