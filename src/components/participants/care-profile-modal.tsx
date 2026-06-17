@@ -191,6 +191,14 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 participantName={participant.fullName}
               />
             </TabsContent>
+
+            {/* TAB 5 — Finance & Ledger */}
+            <TabsContent value="finance" className="pt-4">
+              <FinanceTab
+                participantId={participant.id}
+                participantName={participant.fullName}
+              />
+            </TabsContent>
           </Tabs>
         </DialogContent>
       </Dialog>
