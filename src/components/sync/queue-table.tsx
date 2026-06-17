@@ -12,6 +12,7 @@ const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
   transport_log: "Transport log",
   iddsi_change: "IDDSI change",
   medication_log: "Medication admin",
+  attendance_log: "Attendance log",
 };
 
 function extractParticipantId(item: SyncQueueItem): string | undefined {
