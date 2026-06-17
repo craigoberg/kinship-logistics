@@ -3,9 +3,11 @@ import {
   listParticipants,
   listSyncLogs,
   updateParticipant,
+  insertParticipant,
   insertSyncLog,
   type Participant,
   type ParticipantPatch,
+  type NewParticipant,
   type NewSyncLog,
 } from "@/lib/data-store";
 
