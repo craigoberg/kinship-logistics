@@ -47,10 +47,14 @@ export function ParticipantTable({ participants, onSelect }: Props) {
             <button onClick={() => onSelect(p)} className="w-full text-left">
               <Card className="flex items-center justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{p.fullName}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-semibold">{p.fullName}</span>
+                    {pending.has(p.id) && <PendingBadge />}
+                  </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisNumber}</div>
                   <IddsiChips p={p} className="mt-2" />
                 </div>
+
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </Card>
             </button>
