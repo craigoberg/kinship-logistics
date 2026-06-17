@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { Search, ChevronRight } from "lucide-react";
+import { Search, ChevronRight, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { iddsiLevel } from "@/lib/iddsi";
+import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import type { Participant } from "@/lib/data-store";
+
 
 interface Props {
   participants: Participant[];
