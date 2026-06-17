@@ -1232,11 +1232,16 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
   const endIso = toIsoDate(input.endDate ?? null);
 
-  // Base payload — all known columns on event_manifest (including description).
+  // Base payload — send BOTH `event_type` (legacy NOT NULL column) and
+  // `event_type_code` (newer canonical column). The auto-drop loop below
+  // will strip whichever one PostgREST reports as missing from the schema
+  // cache, so this works against either schema variant.
   const payload: Record<string, unknown> = {
     title: input.title,
+    event_type: input.eventTypeCode,
     event_type_code: input.eventTypeCode,
     venue: input.venue,
+    location: input.venue,
     start_date: startIso,
     end_date: endIso,
     ticket_price: input.ticketPrice,
