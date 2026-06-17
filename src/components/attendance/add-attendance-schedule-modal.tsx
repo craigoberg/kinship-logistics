@@ -10,7 +10,6 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -19,7 +18,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { WEEK_DAYS, type WeekDay } from "@/lib/data-store";
+import { LookupSelect } from "@/components/lookups/lookup-select";
+import {
+  LOOKUP_CATEGORIES,
+  WEEK_DAYS,
+  type WeekDay,
+} from "@/lib/data-store";
 import { useInsertAttendanceSchedule } from "@/hooks/use-supabase-data";
 
 interface Props {
@@ -113,13 +117,14 @@ export function AddAttendanceScheduleModal({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Service type
             </Label>
-            <Input
+            <LookupSelect
+              category={LOOKUP_CATEGORIES.serviceType}
               value={serviceType}
-              onChange={(e) => {
-                setServiceType(e.target.value);
+              onChange={(label) => {
+                setServiceType(label);
                 setDirty(true);
               }}
-              placeholder="e.g. Center Day Care"
+              placeholder="Select service type"
             />
           </div>
 
@@ -127,13 +132,14 @@ export function AddAttendanceScheduleModal({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Transport rule
             </Label>
-            <Input
+            <LookupSelect
+              category={LOOKUP_CATEGORIES.transportRule}
               value={transportRule}
-              onChange={(e) => {
-                setTransportRule(e.target.value);
+              onChange={(label) => {
+                setTransportRule(label);
                 setDirty(true);
               }}
-              placeholder="e.g. Bus Pickup / Family Drop-off"
+              placeholder="Select transport rule"
             />
           </div>
         </div>

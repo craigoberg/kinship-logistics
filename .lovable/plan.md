@@ -189,3 +189,38 @@ every screen, table, badge, toast, form field, and chart label.
   `offline_sync_logs`.
 - All attendance editor forms keep `Save changes` disabled until the form is
   both dirty (changed from server state) and not mid-mutation.
+
+## 6. Schema-driven lookups & roster exceptions (mandatory)
+
+### Dropdown sourcing
+
+- Every operational selection list — service types, transport options,
+  financial codes, etc. — MUST hydrate from `system_lookup_parameters`
+  filtered by `category`. Use `LookupSelect` from
+  `@/components/lookups/lookup-select`, or `useLookupParameters(category)`
+  directly when you need raw data.
+- Canonical category strings live in `LOOKUP_CATEGORIES` in
+  `src/lib/data-store.ts`. Add new categories there before reading them.
+- Forbidden patterns: literal `string[]` arrays of options inside React
+  components, hardcoded `<SelectItem>` lists for operational choices,
+  inline `Record<>` fallbacks shadowing a lookup query, and
+  `STAFF_DIRECTORY`-style static directories for anything other than dev
+  fixtures.
+- Allowed exceptions: pure enums whose values are hardcoded in code
+  *and* the database (e.g. `AttendanceStatus`, `WeekDay`, sync states),
+  IDDSI levels, and dev-only mocks behind a feature flag.
+
+### Roster exceptions (sick / cancelled days)
+
+- Temporary "not coming this week / called in sick" changes MUST NOT delete
+  or mutate rows in `participant_attendance_schedules`. The recurrence rule
+  is the master.
+- Instead, insert a single-day row into `attendance_roster_logs` with
+  `roster_date = <that date>` and `actual_status` in `{Sick, Cancelled}`.
+  Use `MarkAttendanceExceptionModal` or `useInsertAttendanceLog`.
+- The Daily Roster engine `resolveDailyRoster(schedules, logs, date)` in
+  `src/lib/data-store.ts` expands the recurring schedule for a given date
+  and overlays any exception log for that exact `roster_date`. The
+  participant automatically reverts to the baseline next week — no cleanup
+  job required.
+- Never write a "skip next occurrence" flag onto the schedule row.
