@@ -1439,6 +1439,7 @@ export interface NewEventBooking {
   bookingStatus?: string;
   amountPaid?: number;
   ticketPrice: number;
+  eventTitle?: string;
   notes?: string | null;
 }
 
@@ -1456,6 +1457,16 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
   if (error) {
     console.error("[insertEventBooking] failed", error);
     throw error;
+  }
+  if (amount > 0) {
+    await insertLedgerEntry({
+      participantId: input.participantId,
+      transactionDate: new Date().toISOString().slice(0, 10),
+      financialCode: "EVENT_PMT",
+      description: `Event Payment Milestone — ${input.eventTitle ?? "Event"} [event:${input.eventId}]`,
+      amount,
+      isReconciled: true,
+    });
   }
 }
 
