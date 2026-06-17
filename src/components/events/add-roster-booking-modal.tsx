@@ -34,6 +34,7 @@ interface Props {
 export function AddRosterBookingModal({ open, onOpenChange, event, existingBookings }: Props) {
   const [participantId, setParticipantId] = useState("");
   const [amountPaid, setAmountPaid] = useState("0.00");
+  const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -42,6 +43,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
     if (open) {
       setParticipantId("");
       setAmountPaid("0.00");
+      setNotes("");
       setDirty(false);
     }
   }, [open]);
