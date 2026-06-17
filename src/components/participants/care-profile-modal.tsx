@@ -15,8 +15,11 @@ import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { IddsiMatrix } from "./iddsi-matrix";
 import { iddsiLevel } from "@/lib/iddsi";
-import { updateParticipant, type Participant } from "@/lib/data-store";
+import { type Participant } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
+import { useUpdateParticipant } from "@/hooks/use-supabase-data";
+import { useOnlineStatus } from "@/hooks/use-online-status";
+import { toast } from "sonner";
 
 interface Props {
   participant: Participant | null;
