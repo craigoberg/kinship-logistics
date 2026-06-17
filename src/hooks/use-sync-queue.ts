@@ -18,10 +18,17 @@ export function useSyncQueue(): SyncQueueItem[] {
     if (!online) return;
     const pending = listQueue().some((i) => i.status !== "synced");
     if (!pending) return;
-    void flush().then(() => {
-      qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
-    });
+    // Decoupled background drain: a failing offline_sync_logs insert must
+    // never bubble into the React tree and cancel a primary mutation.
+    (async () => {
+      try {
+        await flush();
+        qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
+        qc.invalidateQueries({ queryKey: ["participants"] });
+      } catch (err) {
+        console.warn("[sync-queue] background flush failed (decoupled)", err);
+      }
+    })();
   }, [online, qc]);
 
   return items;
