@@ -487,9 +487,15 @@ export function useInsertEvent() {
       }
       return insertEvent(input);
     },
-    onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["event_manifest"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
+    onSuccess: async () => {
+      // Hard cache bust — drop everything and force a fresh DB pull.
+      qc.removeQueries({ queryKey: ["event_manifest"] });
+      qc.removeQueries({ queryKey: ["events"] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["event_manifest"] }),
+        qc.invalidateQueries({ queryKey: ["events"] }),
+        qc.refetchQueries({ queryKey: ["events"] }),
+      ]);
     },
     onError: (err: Error) => {
       toast.error("Database rejected event", {
