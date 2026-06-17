@@ -66,12 +66,15 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const submit = async () => {
     if (!canSubmit) return;
     try {
+      // end_date is NOT NULL in event_manifest — mirror start_date when blank
+      // (covers single-day events where the operator leaves the end-date field empty).
+      const resolvedEndDate = endDate && endDate.length === 10 ? endDate : startDate;
       await mutation.mutateAsync({
         title: title.trim(),
         eventTypeCode, // canonical lookup code, e.g. EVT-SINGLE / EVT-MULTI
         venue: venue.trim(),
         startDate, // already YYYY-MM-DD from <input type="date">
-        endDate: endDate || null,
+        endDate: resolvedEndDate,
         ticketPrice: priceNumber,
         description: description.trim() || null,
       });
