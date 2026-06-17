@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { CalendarRange, CircleDollarSign, Pencil, Ticket } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +39,7 @@ function synthEvent(r: EventBookingWithEvent): EventManifest {
   };
 }
 
-function toBooking(r: EventBookingWithEvent, netLedgerSum = r.amountPaid): EventRosterBooking {
+function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooking {
   const baselineCost = r.customPrice ?? r.eventTicketPrice;
   const trueBalance = r.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
   return {
@@ -63,14 +63,16 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
   const [milestoneRow, setMilestoneRow] = useState<EventBookingWithEvent | null>(null);
   const [editRow, setEditRow] = useState<EventBookingWithEvent | null>(null);
 
-  const ledgerTotalsByEvent = participantLedger.reduce((totals, entry) => {
-    const match = entry.description.match(/\[event:([^\]]+)\]/i);
-    const eventId = match?.[1];
-    if (!eventId) return totals;
-    const next = (totals.get(eventId) ?? 0) + entry.amount;
-    totals.set(eventId, Number(next.toFixed(2)));
-    return totals;
-  }, new Map<string, number>());
+  const ledgerTotalsByEvent = useMemo(() => {
+    return participantLedger.reduce((totals, entry) => {
+      const match = entry.description.match(/\[event:([^\]]+)\]/i);
+      const eventId = match?.[1];
+      if (!eventId) return totals;
+      const next = (totals.get(eventId) ?? 0) + entry.amount;
+      totals.set(eventId, Number(next.toFixed(2)));
+      return totals;
+    }, new Map<string, number>());
+  }, [participantLedger]);
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card/40 p-4">
