@@ -231,6 +231,7 @@ export function RosterTab({ event }: Props) {
         open={editBooking !== null}
         onOpenChange={(o) => !o && setEditBooking(null)}
         booking={editBooking}
+        eventTitle={event.title}
       />
     </div>
   );
