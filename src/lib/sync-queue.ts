@@ -10,8 +10,14 @@ import type {
   NewSyncLog,
   ParticipantPatch,
   MedicationLogPayload,
+  AttendanceSyncPayload,
 } from "./data-store";
-import { insertSyncLog, updateParticipant, insertComplianceLog } from "./data-store";
+import {
+  insertSyncLog,
+  updateParticipant,
+  insertComplianceLog,
+  updateAttendanceLog,
+} from "./data-store";
 
 const KEY = "yada.syncQueue.v1";
 
@@ -92,6 +98,21 @@ async function processItem(item: SyncQueueItem): Promise<void> {
     await insertComplianceLog({
       ...payload,
       metadata: { ...payload.metadata, network_state: "online" },
+    });
+    return;
+  }
+  if (item.type === "attendance_log") {
+    const payload = item.payload as unknown as AttendanceSyncPayload;
+    // Mirror the medication flow: replay the user-facing update against the
+    // live row, then forward the JSONB envelope to offline_sync_logs so
+    // there is a durable audit entry with action_type ATTENDANCE_LOG.
+    await updateAttendanceLog(payload.attendance_log_id, {
+      actualStatus: payload.patch.actual_status,
+      driverNotes: payload.patch.driver_notes ?? undefined,
+    });
+    await insertSyncLog({
+      actionType: "ATTENDANCE_LOG",
+      payload: { ...payload, network_state: "online" },
     });
     return;
   }
