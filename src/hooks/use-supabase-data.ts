@@ -576,3 +576,32 @@ export function useInsertEventLedger() {
     },
   });
 }
+
+export function useEventBookingsForParticipant(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["event_roster_bookings", "by-participant", participantId],
+    queryFn: () => listEventBookingsForParticipant(participantId as string),
+    enabled: !!participantId,
+    staleTime: 15_000,
+  });
+}
+
+export function useRecordEventPaymentMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: PaymentMilestoneInput) => recordEventPaymentMilestone(input),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not record payment milestone", {
+        description: err.message,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
+    },
+  });
+}
