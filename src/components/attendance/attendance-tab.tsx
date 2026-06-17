@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Pencil, CalendarDays, ClipboardList, Search } from "lucide-react";
+import { Plus, Pencil, CalendarDays, CalendarX, ClipboardList, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -7,9 +7,10 @@ import {
   useAttendanceSchedules,
 } from "@/hooks/use-supabase-data";
 import { formatDate } from "@/lib/utils";
-import type { AttendanceLog } from "@/lib/data-store";
+import type { AttendanceLog, AttendanceSchedule } from "@/lib/data-store";
 import { AddAttendanceScheduleModal } from "./add-attendance-schedule-modal";
 import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
+import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
 
 interface Props {
@@ -21,6 +22,8 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [editLog, setEditLog] = useState<AttendanceLog | null>(null);
   const [editOpen, setEditOpen] = useState(false);
+  const [exceptionSchedule, setExceptionSchedule] = useState<AttendanceSchedule | null>(null);
+  const [exceptionOpen, setExceptionOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   const schedulesQ = useAttendanceSchedules(participantId);
@@ -81,7 +84,8 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                   <th className="px-4 py-2 font-medium">Day</th>
                   <th className="px-4 py-2 font-medium">Service type</th>
                   <th className="px-4 py-2 font-medium">Transport rule</th>
-                  <th className="px-4 py-2 text-right font-medium">Status</th>
+                  <th className="px-4 py-2 font-medium">Status</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -92,7 +96,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                     <td className="px-4 py-2 text-muted-foreground">
                       {s.transportRule}
                     </td>
-                    <td className="px-4 py-2 text-right">
+                    <td className="px-4 py-2">
                       <span
                         className={
                           s.active
@@ -102,6 +106,20 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                       >
                         {s.active ? "Active" : "Inactive"}
                       </span>
+                    </td>
+                    <td className="px-4 py-2 text-right">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="gap-1"
+                        onClick={() => {
+                          setExceptionSchedule(s);
+                          setExceptionOpen(true);
+                        }}
+                      >
+                        <CalendarX className="h-3.5 w-3.5" />
+                        Mark exception
+                      </Button>
                     </td>
                   </tr>
                 ))}
@@ -210,6 +228,15 @@ export function AttendanceTab({ participantId, participantName }: Props) {
           if (!o) setEditLog(null);
         }}
         log={editLog}
+      />
+      <MarkAttendanceExceptionModal
+        open={exceptionOpen}
+        onOpenChange={(o) => {
+          setExceptionOpen(o);
+          if (!o) setExceptionSchedule(null);
+        }}
+        schedule={exceptionSchedule}
+        participantName={participantName}
       />
     </div>
   );
