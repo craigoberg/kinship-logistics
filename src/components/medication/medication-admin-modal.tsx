@@ -62,6 +62,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
 
   const [participantId, setParticipantId] = useState<string>("");
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
+  const [medicationName, setMedicationName] = useState("");
+  const [dosage, setDosage] = useState("");
   const [notes, setNotes] = useState("");
   const [witness1Id, setWitness1Id] = useState("");
   const [witness1Pin, setWitness1Pin] = useState("");
