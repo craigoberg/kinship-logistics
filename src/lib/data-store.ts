@@ -52,7 +52,8 @@ export type SyncItemType =
   | "participant_update"
   | "transport_log"
   | "iddsi_change"
-  | "medication_log";
+  | "medication_log"
+  | "attendance_log";
 
 export interface MedicationLogPayload {
   participant_id: string;
