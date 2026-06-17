@@ -1268,7 +1268,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     ].filter(Boolean);
     throw new Error(parts.join(" · "));
   }
-  void optionalKeys;
+  
   return rowToEvent(data as EventManifestRow);
 }
 
