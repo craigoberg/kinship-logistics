@@ -21,10 +21,8 @@ export function SyncIndicator({ className, compact = false }: Props) {
   return (
     <div
       className={cn(
-        "inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium",
-        online
-          ? "border-success/30 bg-success/10 text-success-foreground"
-          : "border-warning/40 bg-warning/15 text-warning-foreground",
+        "inline-flex items-center gap-2 rounded-full px-3 py-1.5 text-xs font-semibold text-white shadow-sm",
+        online ? "bg-success" : "bg-destructive",
         className,
       )}
       aria-live="polite"
@@ -32,7 +30,7 @@ export function SyncIndicator({ className, compact = false }: Props) {
       {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
       <span>{stateLabel}</span>
       {pending > 0 && (
-        <span className="inline-flex items-center gap-1 rounded-full bg-foreground/10 px-2 py-0.5 text-[10px] font-semibold">
+        <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
           <RefreshCw className="h-3 w-3" />
           {pending} {compact ? "" : "in queue"}
         </span>

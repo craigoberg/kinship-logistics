@@ -4,6 +4,7 @@ import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { retry, discard } from "@/lib/sync-queue";
 import { useParticipants } from "@/hooks/use-supabase-data";
+import { formatDateTime } from "@/lib/utils";
 import type { SyncQueueItem } from "@/lib/data-store";
 
 const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
@@ -51,7 +52,7 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
                 <span className="text-sm font-semibold">{TYPE_LABEL[item.type]}</span>
                 <span className="text-xs text-muted-foreground">· {name}</span>
                 <span className="text-xs text-muted-foreground tabular-nums">
-                  {new Date(item.createdAt).toLocaleString()}
+                  {formatDateTime(item.createdAt)}
                 </span>
                 {item.attempts > 0 && (
                   <span className="text-xs text-muted-foreground">· {item.attempts} attempts</span>
@@ -99,21 +100,21 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
 function StatusBadge({ status }: { status: SyncQueueItem["status"] }) {
   if (status === "pending")
     return (
-      <Badge variant="outline" className="gap-1 border-info/40 text-info-foreground">
+      <Badge className="gap-1 border-transparent bg-info text-white">
         <Clock className="h-3 w-3" /> Pending
       </Badge>
     );
   if (status === "retrying")
     return (
-      <Badge variant="outline" className="gap-1 border-warning/50 text-warning-foreground">
+      <Badge className="gap-1 border-transparent bg-warning text-white">
         <Loader2 className="h-3 w-3 animate-spin" /> Retrying
       </Badge>
     );
   if (status === "failed")
     return (
-      <Badge variant="destructive" className="gap-1">
+      <Badge className="gap-1 border-transparent bg-destructive text-white">
         <AlertCircle className="h-3 w-3" /> Failed
       </Badge>
     );
-  return <Badge className="bg-success text-success-foreground">Synced</Badge>;
+  return <Badge className="gap-1 border-transparent bg-success text-white">Synced</Badge>;
 }
