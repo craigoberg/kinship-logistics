@@ -33,7 +33,6 @@ interface Props {
 export function AddRosterBookingModal({ open, onOpenChange, event, existingBookings }: Props) {
   const [participantId, setParticipantId] = useState("");
   const [amountPaid, setAmountPaid] = useState("0.00");
-  const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -42,7 +41,6 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
     if (open) {
       setParticipantId("");
       setAmountPaid("0.00");
-      setNotes("");
       setDirty(false);
     }
   }, [open]);
@@ -69,14 +67,17 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
       await mutation.mutateAsync({
         eventId: event.id,
         participantId,
+        bookingStatus: "Confirmed",
         amountPaid: paidNumber,
         ticketPrice: event.ticketPrice,
-        notes: notes.trim() || null,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
-    } catch {
-      /* surfaced via hook onError */
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Database error: ${msg}`, {
+        className: "bg-destructive text-destructive-foreground border-destructive",
+      });
     }
   };
 
