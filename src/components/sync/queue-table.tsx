@@ -89,7 +89,8 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
             )}
           </Card>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }
