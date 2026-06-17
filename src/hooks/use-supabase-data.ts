@@ -7,6 +7,10 @@ import {
   listAllActiveSchedules,
   listComplianceLogsForParticipant,
   listTodaysComplianceLogs,
+  listAttendanceSchedules,
+  listAttendanceLogs,
+  insertAttendanceSchedule,
+  updateAttendanceLog,
   insertSchedule,
   updateParticipant,
   insertParticipant,
@@ -16,7 +20,48 @@ import {
   type NewParticipant,
   type NewSyncLog,
   type NewSchedule,
+  type NewAttendanceSchedule,
+  type AttendanceLogPatch,
 } from "@/lib/data-store";
+
+export function useAttendanceSchedules(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["attendance_schedules", participantId],
+    queryFn: () => listAttendanceSchedules(participantId as string),
+    enabled: !!participantId,
+    staleTime: 30_000,
+  });
+}
+
+export function useAttendanceLogs(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["attendance_logs", participantId],
+    queryFn: () => listAttendanceLogs(participantId as string),
+    enabled: !!participantId,
+    staleTime: 15_000,
+  });
+}
+
+export function useInsertAttendanceSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewAttendanceSchedule) => insertAttendanceSchedule(input),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["attendance_schedules", vars.participantId] });
+    },
+  });
+}
+
+export function useUpdateAttendanceLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: AttendanceLogPatch }) =>
+      updateAttendanceLog(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+    },
+  });
+}
 
 export function useParticipantSchedules(participantId: string | null | undefined) {
   return useQuery({
