@@ -36,10 +36,16 @@ function ParticipantsPage() {
             {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
-          <UserPlus className="h-4 w-4" />
-          Add new participant
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Button variant="outline" onClick={() => setMedOpen(true)} className="gap-1.5">
+            <ShieldCheck className="h-4 w-4" />
+            Record medication admin
+          </Button>
+          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+            <UserPlus className="h-4 w-4" />
+            Add new participant
+          </Button>
+        </div>
       </header>
 
       {error && (
