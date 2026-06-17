@@ -25,6 +25,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [exceptionSchedule, setExceptionSchedule] = useState<AttendanceSchedule | null>(null);
   const [exceptionOpen, setExceptionOpen] = useState(false);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   const schedulesQ = useAttendanceSchedules(participantId);
