@@ -80,7 +80,13 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 onClick={() => onSelect(p)}
                 className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
               >
-                <td className="px-4 py-3 font-medium">{p.fullName}</td>
+                <td className="px-4 py-3 font-medium">
+                  <div className="flex items-center gap-2">
+                    <span>{p.fullName}</span>
+                    {pending.has(p.id) && <PendingBadge />}
+                  </div>
+                </td>
+
                 <td className="px-4 py-3 tabular-nums text-muted-foreground">{p.ndisNumber}</td>
                 <td className="px-4 py-3">
                   <IddsiChips p={p} />
