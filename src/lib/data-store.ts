@@ -1216,23 +1216,47 @@ export interface NewEvent {
   description?: string | null;
 }
 
+function toIsoDate(value: string | null | undefined): string | null {
+  if (!value) return null;
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  if (m) return m[1];
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return null;
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 export async function insertEvent(input: NewEvent): Promise<EventManifest> {
+  const startIso = toIsoDate(input.startDate);
+  if (!startIso) {
+    throw new Error(`Invalid start_date: "${input.startDate}" (expected YYYY-MM-DD)`);
+  }
+  const endIso = toIsoDate(input.endDate ?? null);
+
+  const payload = {
+    title: input.title,
+    event_type_code: input.eventTypeCode,
+    venue: input.venue,
+    start_date: startIso,
+    end_date: endIso,
+    ticket_price: input.ticketPrice,
+    description: input.description ?? null,
+  };
+
   const { data, error } = await supabase
     .from("event_manifest")
-    .insert({
-      title: input.title,
-      event_type_code: input.eventTypeCode,
-      venue: input.venue,
-      start_date: input.startDate,
-      end_date: input.endDate ?? null,
-      ticket_price: input.ticketPrice,
-      description: input.description ?? null,
-    })
+    .insert(payload)
     .select("*")
     .single();
+
   if (error) {
-    console.error("[insertEvent] failed", error);
-    throw error;
+    console.error("[insertEvent] failed", { error, payload });
+    const parts = [
+      error.message,
+      error.details ? `details: ${error.details}` : null,
+      error.hint ? `hint: ${error.hint}` : null,
+      error.code ? `code: ${error.code}` : null,
+    ].filter(Boolean);
+    throw new Error(parts.join(" · "));
   }
   return rowToEvent(data as EventManifestRow);
 }

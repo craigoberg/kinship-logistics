@@ -68,17 +68,23 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
     try {
       await mutation.mutateAsync({
         title: title.trim(),
-        eventTypeCode,
+        eventTypeCode, // canonical lookup code, e.g. EVT-SINGLE / EVT-MULTI
         venue: venue.trim(),
-        startDate,
+        startDate, // already YYYY-MM-DD from <input type="date">
         endDate: endDate || null,
         ticketPrice: priceNumber,
         description: description.trim() || null,
       });
       toast.success("Event created", { description: title.trim() });
       onOpenChange(false);
-    } catch {
-      /* surfaced via hook onError */
+    } catch (err) {
+      // Keep the modal OPEN so the operator can correct the payload.
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error("Event NOT saved — fix and retry", {
+        description: msg,
+        duration: 12000,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
     }
   };
 
