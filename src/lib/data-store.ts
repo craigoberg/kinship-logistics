@@ -1665,6 +1665,22 @@ export async function listEventPaymentLedger(
   return (data ?? []).map((r) => rowToLedgerEntry(r as LedgerRow));
 }
 
+export async function listEventPaymentLedgerForEvent(
+  eventId: string,
+): Promise<LedgerEntry[]> {
+  const marker = `%[event:${eventId}]%`;
+  const { data, error } = await supabase
+    .from("participant_financial_ledger")
+    .select(
+      "id, participant_id, transaction_date, financial_code, description, amount, is_reconciled, created_at",
+    )
+    .ilike("description", marker)
+    .order("transaction_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToLedgerEntry(r as LedgerRow));
+}
+
 
 
 
