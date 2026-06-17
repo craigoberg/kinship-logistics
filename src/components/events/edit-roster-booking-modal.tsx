@@ -71,7 +71,7 @@ export function EditRosterBookingModal({
       setIssueRefund(collected > 0);
       setRefundAmount(collected > 0 ? collected.toFixed(2) : "0");
       setRefundDate(todayISO());
-      setAmendedPrice(Number(eventTicketPrice ?? 0).toFixed(2));
+      setAmendedPrice(Number(booking.customPrice ?? eventTicketPrice ?? 0).toFixed(2));
     }
   }, [open, booking, collected, eventTicketPrice]);
 
