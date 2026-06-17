@@ -79,6 +79,16 @@ export function clearLookupCache() {
   }
 }
 
+/** Purge a single category's localStorage entry. */
+export function clearLookupCacheCategory(category: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.removeItem(LOOKUP_CACHE_PREFIX + category);
+  } catch {
+    /* non-fatal */
+  }
+}
+
 export function useLookupParameters(category: string | null | undefined) {
   return useQuery({
     queryKey: ["system_lookup_parameters", category],

@@ -1,5 +1,6 @@
 import { useCallback } from "react";
 import { RefreshCw } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   Select,
   SelectContent,
@@ -7,7 +8,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useLookupParameters, clearLookupCache } from "@/hooks/use-supabase-data";
+import { useLookupParameters, clearLookupCacheCategory } from "@/hooks/use-supabase-data";
 
 interface Props {
   /** `system_lookup_parameters.category` to query — e.g. `service_types`. */
@@ -38,6 +39,7 @@ export function LookupSelect({
   disabled,
   blockUntilLoaded = true,
 }: Props) {
+  const queryClient = useQueryClient();
   const { data = [], isLoading, error, isFetched, refetch } = useLookupParameters(category);
 
   const onValueChange = (code: string) => {
@@ -48,9 +50,10 @@ export function LookupSelect({
   const noOptions = data.length === 0 && isFetched;
 
   const handleRefresh = useCallback(() => {
-    clearLookupCache();
+    clearLookupCacheCategory(category);
+    queryClient.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
     refetch();
-  }, [refetch]);
+  }, [category, queryClient, refetch]);
 
   const triggerPlaceholder =
     isLoading && data.length === 0
