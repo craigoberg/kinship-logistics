@@ -187,6 +187,9 @@
   --overpayment-foreground: 0 0% 100%;
   --unpaid: 0 84% 60%;
   --unpaid-foreground: 0 0% 100%;
+  /* Club Ledger teal accent for active tabs (#00BCD4) */
+  --tab-active: 187 100% 42%;
+  --tab-active-foreground: 0 0% 100%;
   --border: 215 19% 34%;
   --input: 215 19% 34%;
   --ring: 198 93% 59%;
