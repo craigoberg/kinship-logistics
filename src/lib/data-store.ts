@@ -1232,21 +1232,39 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
   const endIso = toIsoDate(input.endDate ?? null);
 
-  const payload = {
+  // Base payload — only columns guaranteed to exist on event_manifest.
+  const payload: Record<string, unknown> = {
     title: input.title,
     event_type_code: input.eventTypeCode,
     venue: input.venue,
     start_date: startIso,
     end_date: endIso,
     ticket_price: input.ticketPrice,
-    description: input.description ?? null,
   };
 
-  const { data, error } = await supabase
-    .from("event_manifest")
-    .insert(payload)
-    .select("*")
-    .single();
+  // `description` / `end_date` may not exist in older schema caches. Try the
+  // full payload first; if PostgREST reports an unknown column (PGRST204),
+  // strip that column and retry so the event still saves.
+  const optionalKeys: Array<keyof NewEvent & string> = [];
+  if (input.description != null && input.description !== "") {
+    payload.description = input.description;
+    optionalKeys.push("description");
+  }
+
+  const attemptInsert = async (p: Record<string, unknown>) =>
+    supabase.from("event_manifest").insert(p).select("*").single();
+
+  let { data, error } = await attemptInsert(payload);
+
+  // Auto-recover from missing-column errors by dropping the offender and retrying.
+  while (error && error.code === "PGRST204" && /Could not find the '([^']+)' column/.test(error.message)) {
+    const match = /Could not find the '([^']+)' column/.exec(error.message);
+    const missing = match?.[1];
+    if (!missing || !(missing in payload)) break;
+    console.warn(`[insertEvent] schema missing column "${missing}" — dropping and retrying`);
+    delete payload[missing];
+    ({ data, error } = await attemptInsert(payload));
+  }
 
   if (error) {
     console.error("[insertEvent] failed", { error, payload });
@@ -1258,6 +1276,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     ].filter(Boolean);
     throw new Error(parts.join(" · "));
   }
+  void optionalKeys;
   return rowToEvent(data as EventManifestRow);
 }
 
