@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { Plus, Search, BadgeDollarSign, Wallet, TrendingUp } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useEventBookings, useEventLedger } from "@/hooks/use-supabase-data";
+import { useEventLedger, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
 import { formatDate } from "@/lib/utils";
 import type { EventManifest } from "@/lib/data-store";
 import { LogEventExpenseModal } from "./log-event-expense-modal";
@@ -22,12 +22,12 @@ function fmtMoney(n: number): string {
 export function EventFinanceTab({ event }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
-  const { data: bookings = [] } = useEventBookings(event.id);
   const { data: ledger = [], isLoading, error } = useEventLedger(event.id);
+  const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
 
   const revenue = useMemo(
-    () => bookings.reduce((s, b) => s + b.amountPaid, 0),
-    [bookings],
+    () => paymentLedger.reduce((s, entry) => Number((s + entry.amount).toFixed(2)), 0),
+    [paymentLedger],
   );
   const expenses = useMemo(
     () =>

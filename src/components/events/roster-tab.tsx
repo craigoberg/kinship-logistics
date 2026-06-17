@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, CircleDollarSign, Pencil, Search, UserPlus, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useEventBookings } from "@/hooks/use-supabase-data";
+import { useEventBookings, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
@@ -25,6 +25,15 @@ export function RosterTab({ event }: Props) {
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+  const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
+
+  const ledgerTotalsByParticipant = useMemo(() => {
+    return paymentLedger.reduce((totals, entry) => {
+      const next = (totals.get(entry.participantId) ?? 0) + entry.amount;
+      totals.set(entry.participantId, Number(next.toFixed(2)));
+      return totals;
+    }, new Map<string, number>());
+  }, [paymentLedger]);
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -39,12 +48,32 @@ export function RosterTab({ event }: Props) {
     const n = query.trim().toLowerCase();
     if (!n) return bookings;
     return bookings.filter((b) =>
-      [b.participantName, b.bookingStatus, b.amountPaid.toFixed(2), b.isFullyPaid ? "paid" : "partial unpaid"]
+      [
+        b.participantName,
+        b.bookingStatus,
+        (ledgerTotalsByParticipant.get(b.participantId) ?? 0).toFixed(2),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(n),
     );
-  }, [bookings, query]);
+  }, [bookings, ledgerTotalsByParticipant, query]);
+
+  const milestoneBookingWithLedger = useMemo(() => {
+    if (!milestoneBooking) return null;
+    const netLedgerSum = ledgerTotalsByParticipant.get(milestoneBooking.participantId) ?? 0;
+    const baselineCost = milestoneBooking.customPrice ?? event.ticketPrice;
+    const trueBalance = milestoneBooking.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    return { ...milestoneBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
+  }, [event.ticketPrice, ledgerTotalsByParticipant, milestoneBooking]);
+
+  const editBookingWithLedger = useMemo(() => {
+    if (!editBooking) return null;
+    const netLedgerSum = ledgerTotalsByParticipant.get(editBooking.participantId) ?? 0;
+    const baselineCost = editBooking.customPrice ?? event.ticketPrice;
+    const trueBalance = editBooking.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    return { ...editBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
+  }, [editBooking, event.ticketPrice, ledgerTotalsByParticipant]);
 
   return (
     <div className="space-y-4">
@@ -102,8 +131,9 @@ export function RosterTab({ event }: Props) {
               <tbody>
                 {filtered.map((b) => {
                   const baselineCost = b.customPrice ?? event.ticketPrice;
-                  const balance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - b.amountPaid;
-                  const owes = b.bookingStatus !== "Cancelled" && balance > 0 && !b.isFullyPaid;
+                  const netLedgerSum = ledgerTotalsByParticipant.get(b.participantId) ?? 0;
+                  const trueBalance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+                  const owes = b.bookingStatus !== "Cancelled" && trueBalance > 0;
                   const isOpen = expanded.has(b.id);
                   return (
                     <Fragment key={b.id}>
@@ -146,18 +176,23 @@ export function RosterTab({ event }: Props) {
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
                         <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                          ${fmtMoney(b.amountPaid)}
+                          ${fmtMoney(netLedgerSum)}
                         </td>
                         <td
                           className={
                             "px-4 py-2 text-right font-semibold tabular-nums " +
-                            (balance <= 0 ? "text-success" : "text-warning")
+                            (trueBalance <= 0 ? "text-success" : "text-warning")
                           }
                         >
-                          ${fmtMoney(Math.max(0, balance))}
+                          ${fmtMoney(Math.max(0, trueBalance))}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <PaidBadge fullyPaid={b.isFullyPaid} bookingStatus={b.bookingStatus} />
+                          <PaidBadge
+                            baselineCost={baselineCost}
+                            netLedgerSum={netLedgerSum}
+                            trueBalance={trueBalance}
+                            bookingStatus={b.bookingStatus}
+                          />
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -225,13 +260,13 @@ export function RosterTab({ event }: Props) {
         open={milestoneBooking !== null}
         onOpenChange={(o) => !o && setMilestoneBooking(null)}
         event={event}
-        booking={milestoneBooking}
+        booking={milestoneBookingWithLedger}
       />
 
       <EditRosterBookingModal
         open={editBooking !== null}
         onOpenChange={(o) => !o && setEditBooking(null)}
-        booking={editBooking}
+        booking={editBookingWithLedger}
         eventTitle={event.title}
         eventTicketPrice={event.ticketPrice}
       />
@@ -239,7 +274,17 @@ export function RosterTab({ event }: Props) {
   );
 }
 
-function PaidBadge({ fullyPaid, bookingStatus }: { fullyPaid: boolean; bookingStatus: string }) {
+function PaidBadge({
+  baselineCost,
+  netLedgerSum,
+  trueBalance,
+  bookingStatus,
+}: {
+  baselineCost: number;
+  netLedgerSum: number;
+  trueBalance: number;
+  bookingStatus: string;
+}) {
   if (bookingStatus === "Cancelled") {
     return (
       <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -247,13 +292,26 @@ function PaidBadge({ fullyPaid, bookingStatus }: { fullyPaid: boolean; bookingSt
       </span>
     );
   }
-  return fullyPaid ? (
-    <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
-      Paid
-    </span>
-  ) : (
+  const balanceCents = Math.round(trueBalance * 100);
+  const baselineCents = Math.round(baselineCost * 100);
+  const paidCents = Math.round(netLedgerSum * 100);
+  if (balanceCents <= 0) {
+    return (
+      <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+        Paid
+      </span>
+    );
+  }
+  if (balanceCents === baselineCents || paidCents <= 0) {
+    return (
+      <span className="rounded-full bg-destructive px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+        Unpaid
+      </span>
+    );
+  }
+  return (
     <span className="rounded-full bg-warning px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
-      Partial / Unpaid
+      Partial
     </span>
   );
 }
