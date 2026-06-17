@@ -607,3 +607,23 @@ export function useRecordEventPaymentMilestone() {
     },
   });
 }
+
+export function useUpdateEventBooking() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateBookingInput) => updateEventBooking(input),
+    onSuccess: (booking) => {
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings", booking.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", booking.participantId] });
+      qc.invalidateQueries({ queryKey: ["event_manifest"] });
+      qc.invalidateQueries({ queryKey: ["events"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Database rejected booking update", {
+        description: err.message,
+        duration: 12000,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
+    },
+  });
+}
