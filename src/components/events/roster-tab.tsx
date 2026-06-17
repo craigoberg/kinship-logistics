@@ -177,18 +177,23 @@ export function RosterTab({ event }: Props) {
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
                         <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                          ${fmtMoney(b.amountPaid)}
+                          ${fmtMoney(netLedgerSum)}
                         </td>
                         <td
                           className={
                             "px-4 py-2 text-right font-semibold tabular-nums " +
-                            (balance <= 0 ? "text-success" : "text-warning")
+                            (trueBalance <= 0 ? "text-success" : "text-warning")
                           }
                         >
-                          ${fmtMoney(Math.max(0, balance))}
+                          ${fmtMoney(Math.max(0, trueBalance))}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <PaidBadge fullyPaid={b.isFullyPaid} bookingStatus={b.bookingStatus} />
+                          <PaidBadge
+                            baselineCost={baselineCost}
+                            netLedgerSum={netLedgerSum}
+                            trueBalance={trueBalance}
+                            bookingStatus={b.bookingStatus}
+                          />
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex items-center justify-end gap-1">
