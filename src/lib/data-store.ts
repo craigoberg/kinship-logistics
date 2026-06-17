@@ -1342,7 +1342,6 @@ export interface EventRosterBooking {
   bookingStatus: string;
   amountPaid: number;
   isFullyPaid: boolean;
-  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
