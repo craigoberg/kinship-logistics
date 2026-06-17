@@ -280,6 +280,9 @@ export function useInsertLedgerEntry() {
       qc.invalidateQueries({
         queryKey: ["participant_financial_ledger", vars.participantId],
       });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }
+
