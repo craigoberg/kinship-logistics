@@ -138,19 +138,6 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Notes (optional)
-            </Label>
-            <Textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => {
-                setNotes(e.target.value);
-                setDirty(true);
-              }}
-            />
-          </div>
         </div>
 
         <DialogFooter>
