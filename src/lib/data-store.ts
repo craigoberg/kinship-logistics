@@ -781,7 +781,9 @@ export const LOOKUP_CATEGORIES = {
   transportOption: "transport_types",
   financialCode: "financial_codes",
   operatingDay: "operating_days",
+  eventType: "event_types",
 } as const;
+
 
 /**
  * Surface every category in the Admin Configuration workspace so coordinators
