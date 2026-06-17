@@ -64,6 +64,8 @@
   --color-overpayment-foreground: hsl(var(--overpayment-foreground));
   --color-unpaid: hsl(var(--unpaid));
   --color-unpaid-foreground: hsl(var(--unpaid-foreground));
+  --color-tab-active: hsl(var(--tab-active));
+  --color-tab-active-foreground: hsl(var(--tab-active-foreground));
 
   /* IDDSI scale (kept as oklch) */
   --color-iddsi-0: var(--iddsi-0); --color-iddsi-0-fg: var(--iddsi-0-fg);
