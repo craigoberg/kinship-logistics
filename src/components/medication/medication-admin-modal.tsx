@@ -276,12 +276,28 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
             </Popover>
           </Field>
 
-          <Field label="Medication, dosage & administration notes">
+          <Field label="Medication name">
+            <Input
+              value={medicationName}
+              onChange={(e) => setMedicationName(e.target.value)}
+              placeholder="e.g. Paracetamol"
+            />
+          </Field>
+
+          <Field label="Dosage">
+            <Input
+              value={dosage}
+              onChange={(e) => setDosage(e.target.value)}
+              placeholder="e.g. 500mg — 1 tablet"
+            />
+          </Field>
+
+          <Field label="Administration notes">
             <Textarea
-              rows={4}
+              rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="e.g. Paracetamol 500mg PO — 1 tablet at 14:00 with water. Participant tolerated well."
+              placeholder="Route, time, observations, participant tolerance…"
             />
           </Field>
 
