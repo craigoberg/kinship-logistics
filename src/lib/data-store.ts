@@ -1232,7 +1232,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
   const endIso = toIsoDate(input.endDate ?? null);
 
-  // Base payload — only columns guaranteed to exist on event_manifest.
+  // Base payload — all known columns on event_manifest (including description).
   const payload: Record<string, unknown> = {
     title: input.title,
     event_type_code: input.eventTypeCode,
@@ -1240,16 +1240,8 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     start_date: startIso,
     end_date: endIso,
     ticket_price: input.ticketPrice,
+    description: input.description,
   };
-
-  // `description` / `end_date` may not exist in older schema caches. Try the
-  // full payload first; if PostgREST reports an unknown column (PGRST204),
-  // strip that column and retry so the event still saves.
-  const optionalKeys: Array<keyof NewEvent & string> = [];
-  if (input.description != null && input.description !== "") {
-    payload.description = input.description;
-    optionalKeys.push("description");
-  }
 
   const attemptInsert = async (p: Record<string, unknown>) =>
     supabase.from("event_manifest").insert(p).select("*").single();
