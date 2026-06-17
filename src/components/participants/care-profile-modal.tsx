@@ -191,7 +191,12 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 participantId={participant.id}
                 participantName={participant.fullName}
                 onAdd={() => setScheduleOpen(true)}
+                onEdit={(s) => {
+                  setEditMedSchedule(s);
+                  setEditMedOpen(true);
+                }}
               />
+
             </TabsContent>
 
             {/* TAB 3 — History */}
