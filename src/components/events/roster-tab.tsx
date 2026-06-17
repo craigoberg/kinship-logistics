@@ -132,8 +132,9 @@ export function RosterTab({ event }: Props) {
               <tbody>
                 {filtered.map((b) => {
                   const baselineCost = b.customPrice ?? event.ticketPrice;
-                  const balance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - b.amountPaid;
-                  const owes = b.bookingStatus !== "Cancelled" && balance > 0 && !b.isFullyPaid;
+                  const netLedgerSum = ledgerTotalsByParticipant.get(b.participantId) ?? 0;
+                  const trueBalance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+                  const owes = b.bookingStatus !== "Cancelled" && trueBalance > 0;
                   const isOpen = expanded.has(b.id);
                   return (
                     <Fragment key={b.id}>
