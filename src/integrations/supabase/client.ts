@@ -6,6 +6,8 @@ const rawUrl = import.meta.env.VITE_SUPABASE_URL as string;
 const SUPABASE_URL = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
 const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
+export const supabaseUrl = SUPABASE_URL;
+
 // Environment audit — confirm the client is pointed at the active Supabase project.
 if (typeof window !== "undefined") {
   // eslint-disable-next-line no-console

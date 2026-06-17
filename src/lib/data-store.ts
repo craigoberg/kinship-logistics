@@ -9,7 +9,7 @@
 // offline_sync_logs:
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
-import { supabase } from "@/integrations/supabase/client";
+import { supabase, supabaseUrl } from "@/integrations/supabase/client";
 
 export interface Participant {
   id: string;
@@ -1245,11 +1245,17 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     description: input.description ?? null,
   };
 
-  const { data, error } = await supabase
+  console.warn("[insertEvent] active Supabase URL:", supabaseUrl);
+
+  const response = await supabase
     .from("event_manifest")
-    .insert(payload)
+    .insert([payload])
     .select("*")
     .single();
+
+  console.warn("RAW SUPABASE API OUTPUT:", response);
+
+  const { data, error } = response;
 
   if (error) {
     console.error("[insertEvent] failed", { error, payload });
