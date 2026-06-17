@@ -98,9 +98,9 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
               Participant
             </Label>
             <Select
-              value={participantId || undefined}
+              value={participantId === "" ? undefined : participantId}
               onValueChange={(v) => {
-                setParticipantId(v);
+                setParticipantId(v ?? "");
                 setDirty(true);
               }}
             >
