@@ -246,6 +246,12 @@ export function AttendanceTab({ participantId, participantName }: Props) {
         schedule={exceptionSchedule}
         participantName={participantName}
       />
+      <LogPlannedAbsenceModal
+        open={absenceOpen}
+        onOpenChange={setAbsenceOpen}
+        participantId={participantId}
+        participantName={participantName}
+      />
     </div>
   );
 }
