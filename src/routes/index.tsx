@@ -1,10 +1,12 @@
+import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight } from "lucide-react";
+import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
+import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import type { TransportPayload } from "@/lib/data-store";
 
 export const Route = createFileRoute("/")({
