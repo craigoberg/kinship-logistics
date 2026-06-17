@@ -1,94 +1,140 @@
+# Yada Connect — Global System Engineering Playbook
 
-# Yada Connect — Foundation Plan
+This is the master execution playbook for every UI and interaction change in
+Yada Connect. It is **mandatory** — every new screen, table, form, and
+selector must comply with the operational overrides in section 2, regardless
+of what any reference codebase shows.
 
-A mobile-first PWA for community care service coordination. This plan establishes the workspace baseline: layout, navigation, four core modules with sample data, and offline-ready state primitives. Supabase wiring is deferred to a follow-up turn (per your "structure to accept" wording).
+## 1. Visual reference layer — Club Ledger `/events`
 
-## Design direction
+Source of truth for visual language: **[Club Ledger](/projects/ebe7f728-5a79-4888-a900-15cdca5bc0ec)**,
+primarily `src/pages/Events.tsx` and its supporting components
+(`AddBookingDialog`, `AddExpenseForm`, `EventMonthlyGrid`, `EmailReportDialog`,
+`MemberCombobox`, `DashboardCalendar`, `EventPrintReport`).
 
-- Clean, clinical, high-contrast. Calm neutral surfaces with a single trust-blue accent and semantic colors for status (success/warn/danger).
-- Typography: Inter (body) + a slightly heavier display weight for headings. No purple gradients, no generic SaaS feel.
-- Generous tap targets (≥44px), visible focus rings, WCAG AA contrast via semantic tokens in `src/styles.css`.
-- Lucide React for all icons.
+Mirror the following from that codebase:
 
-## Navigation & layout
+- **Component framework:** shadcn/ui primitives — `Button`, `Input`, `Label`,
+  `Select`, `Dialog`, `AlertDialog`, `Checkbox`, `Switch`, `Textarea`,
+  `Progress`, `Tooltip`, `ScrollArea`, `Tabs`, `Table`, `Badge`. Icons from
+  `lucide-react` only. Toasts via `sonner`.
+- **Page header pattern:** page title left, primary action button anchored top
+  right of the section (e.g. Club Ledger's "Add event" button mirrors our
+  "Add participant" / "New log" placement — see §2).
+- **Filter bar pattern:** a single horizontal row directly under the header
+  containing a global `<Input>` search with a leading `Search` icon, plus
+  inline `Select`/chip filters (status, category). Match Club Ledger's
+  `search` + `statusFilters` + `categoryFilters` + `sortBy` layout.
+- **Status badges:** small rounded-full pills, semantic color tokens via
+  `hsl(var(--...))` (success / warning / unpaid / overpayment patterns).
+  Never hard-coded colors.
+- **Cards & tiles:** rounded, soft border, generous padding (`p-4`/`p-6`),
+  section headings in `text-sm font-medium` with muted subtitles. Tile P/L
+  numbers use semantic success/destructive tokens.
+- **Dialogs:** `Dialog` for create/edit, `AlertDialog` for destructive
+  confirmation. Footer aligned right with `Cancel` (ghost) + primary action.
+- **Spacing rhythm:** `space-y-4` between page sections, `gap-3`/`gap-4`
+  within toolbars, `gap-2` inside inline control clusters. Form fields use
+  `space-y-2` (Label above Input). Tables use `text-sm` with `py-2` cells.
+- **Buttons:** default shadcn variants. Primary actions use `default`,
+  secondary use `outline`, destructive use `destructive`, row-level icon
+  actions use `ghost` + `size="icon"`.
+- **Typography:** Inter body, slightly heavier display for page titles
+  (`text-xl md:text-2xl font-semibold tracking-tight`). No serif, no purple
+  gradients, no generic SaaS aesthetic.
+- **Empty / loading states:** muted text, single sentence, optional inline
+  action — matching Club Ledger's terse copy register.
 
-- `src/routes/__root.tsx` wraps the app in an `AppShell`:
-  - **Desktop (≥md):** persistent left sidebar (collapsible) with Dashboard, Participants, Transport Logs, Sync Queue + sync status indicator at bottom.
-  - **Mobile (<md):** fixed bottom navigation bar (4 tabs, same destinations), top app bar with title + sync indicator.
-- Active route highlighting via TanStack `useRouterState`.
-- Routes created: `/` (Dashboard), `/participants`, `/transport`, `/sync`.
+Use this as the **exact visual template** for every Yada Connect screen
+(Dashboard, Participants Directory, Care Profile Modal, Transport Logger,
+Sync Queue, Add Participant, future modules).
 
-## Modules
+## 2. Strict operational overrides — MANDATORY
 
-### 1. Dashboard (`/`)
-Overview cards: total participants, today's transport runs, pending sync items, IDDSI alerts. Recent activity list. Quick-action buttons (Log transport, Add participant).
+These behaviors are required across every Yada Connect view. Apply them even
+if the Club Ledger reference does not enforce them.
 
-### 2. Participants Directory (`/participants`)
-- Searchable, filterable table (name, NDIS ID, care indicators as colored badges: IDDSI level, mobility, allergies).
-- Row click → **Care Profile Modal**:
-  - Tabs: Overview, IDDSI Matrix, Contacts, Notes.
-  - **IDDSI Matrix editor:** two segmented selectors — Liquids (Level 0 Thin → 4 Extremely Thick) and Foods (Level 3 Liquidised → 7 Regular/Easy to chew). Visual color-coded chips per IDDSI spec, with selected level prominent. Save persists to local state (and queues for sync).
-- Mobile: list cards instead of table columns.
+### 2.1 Form submission gating (dirty-and-valid)
 
-### 3. Transport & Attendance Logger (`/transport`)
-- Large-tap form optimized for drivers in the field:
-  - Participant picker (searchable, recent-first).
-  - Pickup / Dropoff odometer (number pads).
-  - Passenger present toggle, arrival status (En route / Arrived / No-show) as big segmented buttons.
-  - Timestamp auto-captured, optional notes.
-- Submitted entries appear in a "Today's runs" list below; if offline, marked queued.
+- Every `Submit` / `Save` / `Update` button stays **disabled and visibly
+  greyed out** until the form state is **both valid and dirty** relative to
+  the initial payload.
+- Implementation: prefer `react-hook-form` with
+  `formState: { isDirty, isValid }` and `mode: "onChange"`, applied as
+  `disabled={!isDirty || !isValid || isSubmitting}`. For forms not using
+  RHF, deep-compare the current values against the captured initial payload
+  (`JSON.stringify(initial) === JSON.stringify(current)` → disabled).
+- Applies to: Care Profile Modal, Add Participant Modal, Transport Form,
+  and every future create/edit dialog.
 
-### 4. Sync Queue (`/sync`)
-- Technical status board listing queued items: type (participant_update / transport_log / iddsi_change), created timestamp, payload preview, status (pending / retrying / failed), manual **Retry** and **Discard** buttons.
-- Header shows online/offline state and counts.
+### 2.2 Table layout — Actions column rightmost
 
-## Offline-ready primitives
+- Every data table places its **Actions** column as the final (rightmost)
+  column. No exceptions.
+- Header cell labelled `Actions`, right-aligned (`text-right`). Body cell
+  uses `flex justify-end gap-1`.
 
-- `src/hooks/use-online-status.ts` — `navigator.onLine` + `online`/`offline` listeners.
-- `src/hooks/use-local-storage.ts` — typed, SSR-safe localStorage state hook.
-- `src/lib/sync-queue.ts` — store-and-forward queue API: `enqueue(item)`, `list()`, `retry(id)`, `discard(id)`, persisted to localStorage under `yada.syncQueue.v1`. Stubbed `flush()` that will later call Supabase.
-- `src/lib/data-store.ts` — local CRUD over participants/transport logs, persisted to localStorage, seeded with sample data on first load. Designed so a future Supabase adapter slots in behind the same interface.
+### 2.3 Row-level action icons (lucide-react)
 
-## Sample data
+Within the rightmost Actions column, use these intuitive icons consistently:
 
-- ~8 participants with realistic names, NDIS IDs (e.g. `430 123 456`), IDDSI levels, care flags.
-- ~5 transport log entries across today/yesterday.
-- ~3 queued sync items in mixed states for the Sync Queue view.
+- Undo → `Undo2`
+- Reverse → `Repeat2` (or `RotateCcw` for "revert to previous")
+- Rollback → `History`
+- Edit → `Pencil`
+- Delete → `Trash2`
+- Retry (sync) → `RefreshCw`
+- Discard (sync) → `X`
 
-## PWA scope
+Render as `Button` `variant="ghost"` `size="icon"` with a `Tooltip` label
+describing the action. Icons must always be visible (no hover-to-reveal).
 
-Per PWA guidance, this turn delivers the app structure and offline state primitives only — **no service worker or manifest** is added now (you didn't ask for installability or true offline caching). When you want "Add to Home Screen" or real offline shell caching, that's a separate, focused turn.
+### 2.4 Primary control positioning — top right
 
-## Tech notes
+- Every page or section's **global management trigger** (e.g. "Add
+  Participant", "New Log", "Add Run", "Create…") is anchored at the
+  **top right** of the viewport's section header, on the same row as the
+  page title.
+- Pattern:
 
-- Stack: TanStack Start (already scaffolded), React 19, Tailwind v4, shadcn/ui (Button, Card, Dialog, Input, Table, Tabs, Badge, Sidebar already present), Lucide React.
-- New design tokens added in `src/styles.css` for IDDSI level colors and status colors (semantic, dark-mode aware).
-- No backend calls yet; all data flows through `data-store.ts` + `sync-queue.ts` so swapping in Supabase later is a single adapter change.
+  ```tsx
+  <header className="flex flex-wrap items-start justify-between gap-3">
+    <div>
+      <h2 className="...">Section title</h2>
+      <p className="text-sm text-muted-foreground">Subtitle</p>
+    </div>
+    <Button className="gap-1.5"><Plus className="h-4 w-4" /> Add …</Button>
+  </header>
+  ```
 
-## Files to create
+### 2.5 Universal data filtering
 
-```
-src/components/app-shell.tsx
-src/components/app-sidebar.tsx
-src/components/bottom-nav.tsx
-src/components/sync-indicator.tsx
-src/components/participants/participant-table.tsx
-src/components/participants/care-profile-modal.tsx
-src/components/participants/iddsi-matrix.tsx
-src/components/transport/transport-form.tsx
-src/components/transport/transport-list.tsx
-src/components/sync/queue-table.tsx
-src/hooks/use-online-status.ts
-src/hooks/use-local-storage.ts
-src/lib/sync-queue.ts
-src/lib/data-store.ts
-src/lib/sample-data.ts
-src/lib/iddsi.ts                (level metadata + colors)
-src/routes/participants.tsx
-src/routes/transport.tsx
-src/routes/sync.tsx
-```
+- **Every dropdown selector** must include a built-in search/filter input.
+  Default to shadcn `Command` + `Popover` (Combobox pattern, like Club
+  Ledger's `MemberCombobox`). Plain `<Select>` is forbidden for any list
+  longer than ~8 items.
+- **Every data table view** must include a global search field above the
+  table that filters across **all visible fields simultaneously** (case-
+  insensitive substring match against a concatenated row string, or a
+  per-column matcher reduced with OR). Search input uses the `Search`
+  lucide icon and the same toolbar pattern across the app.
+- Filters compose with the global search (AND semantics).
 
-Files to modify: `src/routes/__root.tsx` (mount AppShell, head meta), `src/routes/index.tsx` (replace placeholder with Dashboard), `src/styles.css` (add tokens).
+## 3. Compliance checklist (apply before finishing any UI turn)
 
-Approve and I'll build it.
+For every changed screen, verify:
+
+- [ ] Visual language matches Club Ledger `/events` (shadcn primitives,
+      spacing, badges, dialog layout).
+- [ ] Primary "create / add / new" action is in the top right of its section
+      header.
+- [ ] Every form's submit button is disabled until `isDirty && isValid`.
+- [ ] Every table has Actions as the rightmost column with lucide icons
+      and tooltips.
+- [ ] Every dropdown of non-trivial length is a searchable Combobox.
+- [ ] Every table has a global search input that filters across all fields.
+- [ ] No hardcoded colors; only semantic tokens from `src/styles.css`.
+- [ ] Toasts via `sonner`; destructive confirms via `AlertDialog`.
+
+This playbook supersedes any earlier guidance in this file. Future turns
+must read and honor it before implementing UI changes.
