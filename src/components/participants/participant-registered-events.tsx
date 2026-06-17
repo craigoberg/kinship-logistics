@@ -7,7 +7,7 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from "@/components/ui/tooltip";
-import { useEventBookingsForParticipant } from "@/hooks/use-supabase-data";
+import { useEventBookingsForParticipant, useParticipantLedger } from "@/hooks/use-supabase-data";
 import { formatDate } from "@/lib/utils";
 import type { EventBookingWithEvent, EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { RecordPaymentMilestoneModal } from "@/components/events/record-payment-milestone-modal";
@@ -39,15 +39,17 @@ function synthEvent(r: EventBookingWithEvent): EventManifest {
   };
 }
 
-function toBooking(r: EventBookingWithEvent): EventRosterBooking {
+function toBooking(r: EventBookingWithEvent, netLedgerSum = r.amountPaid): EventRosterBooking {
+  const baselineCost = r.customPrice ?? r.eventTicketPrice;
+  const trueBalance = r.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
   return {
     id: r.id,
     eventId: r.eventId,
     participantId: r.participantId,
     participantName: r.participantName,
     bookingStatus: r.bookingStatus,
-    amountPaid: r.amountPaid,
-    isFullyPaid: r.isFullyPaid,
+    amountPaid: netLedgerSum,
+    isFullyPaid: trueBalance <= 0,
     notes: r.notes,
     customPrice: r.customPrice,
     createdAt: r.createdAt,
@@ -57,8 +59,18 @@ function toBooking(r: EventBookingWithEvent): EventRosterBooking {
 
 export function ParticipantRegisteredEvents({ participantId }: Props) {
   const { data: rows = [], isLoading, error } = useEventBookingsForParticipant(participantId);
+  const { data: participantLedger = [] } = useParticipantLedger(participantId);
   const [milestoneRow, setMilestoneRow] = useState<EventBookingWithEvent | null>(null);
   const [editRow, setEditRow] = useState<EventBookingWithEvent | null>(null);
+
+  const ledgerTotalsByEvent = participantLedger.reduce((totals, entry) => {
+    const match = entry.description.match(/\[event:([^\]]+)\]/i);
+    const eventId = match?.[1];
+    if (!eventId) return totals;
+    const next = (totals.get(eventId) ?? 0) + entry.amount;
+    totals.set(eventId, Number(next.toFixed(2)));
+    return totals;
+  }, new Map<string, number>());
 
   return (
     <section className="space-y-3 rounded-lg border border-border bg-card/40 p-4">
@@ -109,8 +121,9 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
               <tbody>
                 {rows.map((r) => {
                   const baselineCost = r.customPrice ?? r.eventTicketPrice;
-                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, baselineCost - r.amountPaid);
-                  const owes = r.bookingStatus !== "Cancelled" && balance > 0 && !r.isFullyPaid;
+                  const netLedgerSum = ledgerTotalsByEvent.get(r.eventId) ?? 0;
+                  const trueBalance = r.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+                  const owes = r.bookingStatus !== "Cancelled" && trueBalance > 0;
                   return (
                     <tr key={r.id} className="border-t border-border align-top">
                       <td className="px-3 py-2 font-medium">{r.eventTitle}</td>
@@ -130,10 +143,15 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                         )}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                        ${fmtMoney(r.amountPaid)}
+                        ${fmtMoney(netLedgerSum)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <BalanceBadge fullyPaid={r.isFullyPaid} balance={balance} bookingStatus={r.bookingStatus} />
+                        <BalanceBadge
+                          baselineCost={baselineCost}
+                          netLedgerSum={netLedgerSum}
+                          trueBalance={trueBalance}
+                          bookingStatus={r.bookingStatus}
+                        />
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -182,13 +200,13 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
         open={milestoneRow !== null}
         onOpenChange={(o) => !o && setMilestoneRow(null)}
         event={milestoneRow ? synthEvent(milestoneRow) : ({} as EventManifest)}
-        booking={milestoneRow ? toBooking(milestoneRow) : null}
+        booking={milestoneRow ? toBooking(milestoneRow, ledgerTotalsByEvent.get(milestoneRow.eventId) ?? 0) : null}
       />
 
       <EditRosterBookingModal
         open={editRow !== null}
         onOpenChange={(o) => !o && setEditRow(null)}
-        booking={editRow ? toBooking(editRow) : null}
+        booking={editRow ? toBooking(editRow, ledgerTotalsByEvent.get(editRow.eventId) ?? 0) : null}
         eventTitle={editRow?.eventTitle}
         eventTicketPrice={editRow?.eventTicketPrice ?? 0}
       />
