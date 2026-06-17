@@ -101,8 +101,8 @@ export function RosterTab({ event }: Props) {
               </thead>
               <tbody>
                 {filtered.map((b) => {
-                  const balance = event.ticketPrice - b.amountPaid;
-                  const owes = balance > 0 && !b.isFullyPaid;
+                  const balance = b.bookingStatus === "Cancelled" ? 0 : event.ticketPrice - b.amountPaid;
+                  const owes = b.bookingStatus !== "Cancelled" && balance > 0 && !b.isFullyPaid;
                   const isOpen = expanded.has(b.id);
                   return (
                     <Fragment key={b.id}>
@@ -156,7 +156,7 @@ export function RosterTab({ event }: Props) {
                           ${fmtMoney(Math.max(0, balance))}
                         </td>
                         <td className="px-4 py-2 text-right">
-                          <PaidBadge fullyPaid={b.isFullyPaid} />
+                          <PaidBadge fullyPaid={b.isFullyPaid} bookingStatus={b.bookingStatus} />
                         </td>
                         <td className="px-4 py-2 text-right">
                           <div className="flex items-center justify-end gap-1">
@@ -237,7 +237,14 @@ export function RosterTab({ event }: Props) {
   );
 }
 
-function PaidBadge({ fullyPaid }: { fullyPaid: boolean }) {
+function PaidBadge({ fullyPaid, bookingStatus }: { fullyPaid: boolean; bookingStatus: string }) {
+  if (bookingStatus === "Cancelled") {
+    return (
+      <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+        Cancelled / Balanced
+      </span>
+    );
+  }
   return fullyPaid ? (
     <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
       Paid
