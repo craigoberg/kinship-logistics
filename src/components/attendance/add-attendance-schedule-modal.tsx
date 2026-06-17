@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Plus, Save } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,14 +12,23 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { LookupSelect } from "@/components/lookups/lookup-select";
-import { LOOKUP_CATEGORIES, type WeekDay } from "@/lib/data-store";
-import { useInsertAttendanceSchedule } from "@/hooks/use-supabase-data";
+import {
+  LOOKUP_CATEGORIES,
+  type AttendanceSchedule,
+  type WeekDay,
+} from "@/lib/data-store";
+import {
+  useInsertAttendanceSchedule,
+  useUpdateAttendanceSchedule,
+} from "@/hooks/use-supabase-data";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   participantId: string;
   participantName: string;
+  /** When present, the modal switches to edit mode. */
+  editing?: AttendanceSchedule | null;
 }
 
 export function AddAttendanceScheduleModal({
@@ -27,24 +36,33 @@ export function AddAttendanceScheduleModal({
   onOpenChange,
   participantId,
   participantName,
+  editing,
 }: Props) {
+  const isEdit = !!editing;
   const [dayOfWeek, setDayOfWeek] = useState<string>("");
   const [dayLabel, setDayLabel] = useState<string>("");
   const [serviceType, setServiceType] = useState("");
   const [transportRule, setTransportRule] = useState("");
   const [dirty, setDirty] = useState(false);
-  const mutation = useInsertAttendanceSchedule();
+  const insert = useInsertAttendanceSchedule();
+  const update = useUpdateAttendanceSchedule();
+  const mutation = isEdit ? update : insert;
 
   useEffect(() => {
-    if (!open) {
+    if (open && editing) {
+      setDayOfWeek(editing.dayOfWeek);
+      setDayLabel(editing.dayOfWeek);
+      setServiceType(editing.serviceType);
+      setTransportRule(editing.transportRule);
+      setDirty(false);
+    } else if (!open) {
       setDayOfWeek("");
       setDayLabel("");
       setServiceType("");
       setTransportRule("");
       setDirty(false);
     }
-  }, [open]);
-
+  }, [open, editing]);
 
   const valid =
     dayOfWeek.length > 0 &&
@@ -56,15 +74,29 @@ export function AddAttendanceScheduleModal({
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      await mutation.mutateAsync({
-        participantId,
-        dayOfWeek: dayOfWeek as WeekDay,
-        serviceType: serviceType.trim(),
-        transportRule: transportRule.trim(),
-      });
-      toast.success("Operational schedule added", {
-        description: `${dayDisplay} · ${serviceType.trim()} for ${participantName}.`,
-      });
+      if (isEdit && editing) {
+        await update.mutateAsync({
+          id: editing.id,
+          patch: {
+            dayOfWeek: dayOfWeek as WeekDay,
+            serviceType: serviceType.trim(),
+            transportRule: transportRule.trim(),
+          },
+        });
+        toast.success("Operational schedule updated", {
+          description: `${dayDisplay} · ${serviceType.trim()} for ${participantName}.`,
+        });
+      } else {
+        await insert.mutateAsync({
+          participantId,
+          dayOfWeek: dayOfWeek as WeekDay,
+          serviceType: serviceType.trim(),
+          transportRule: transportRule.trim(),
+        });
+        toast.success("Operational schedule added", {
+          description: `${dayDisplay} · ${serviceType.trim()} for ${participantName}.`,
+        });
+      }
       onOpenChange(false);
     } catch (err) {
       toast.error("Could not save schedule", {
@@ -77,9 +109,13 @@ export function AddAttendanceScheduleModal({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md border-border bg-card">
         <DialogHeader>
-          <DialogTitle>Add operational schedule</DialogTitle>
+          <DialogTitle>
+            {isEdit ? "Edit operational schedule" : "Add operational schedule"}
+          </DialogTitle>
           <DialogDescription>
-            Define one recurring attendance rule for {participantName}.
+            {isEdit
+              ? `Update this recurring attendance rule for ${participantName}.`
+              : `Define one recurring attendance rule for ${participantName}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -99,7 +135,6 @@ export function AddAttendanceScheduleModal({
               placeholder="Select day"
             />
           </div>
-
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -137,8 +172,12 @@ export function AddAttendanceScheduleModal({
             Cancel
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
-            <Plus className="h-4 w-4" />
-            {mutation.isPending ? "Saving…" : "Save schedule"}
+            {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+            {mutation.isPending
+              ? "Saving…"
+              : isEdit
+                ? "Save changes"
+                : "Save schedule"}
           </Button>
         </DialogFooter>
       </DialogContent>

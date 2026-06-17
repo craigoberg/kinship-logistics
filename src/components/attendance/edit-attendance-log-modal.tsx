@@ -89,6 +89,8 @@ export function EditAttendanceLogModal({ open, onOpenChange, log }: Props) {
     try {
       await mutation.mutateAsync({
         id: log.id,
+        participantId: log.participantId,
+        rosterDate: log.rosterDate,
         patch: {
           ...(statusDirty ? { actualStatus: status } : {}),
           ...(notesDirty ? { driverNotes: notes.trim() || null } : {}),

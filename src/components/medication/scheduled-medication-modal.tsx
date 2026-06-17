@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { CalendarClock } from "lucide-react";
+import { CalendarClock, Save } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -18,59 +18,92 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useInsertSchedule } from "@/hooks/use-supabase-data";
+import {
+  useInsertSchedule,
+  useUpdateMedicationSchedule,
+} from "@/hooks/use-supabase-data";
 import { toast } from "sonner";
+import type { MedicationSchedule } from "@/lib/data-store";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   participantId: string;
   participantName: string;
+  editing?: MedicationSchedule | null;
 }
 
 const FREQUENCIES = ["Daily", "Twice daily", "Weekly", "PRN (as needed)", "Custom"];
 
-export function ScheduledMedicationModal({ open, onOpenChange, participantId, participantName }: Props) {
+export function ScheduledMedicationModal({
+  open,
+  onOpenChange,
+  participantId,
+  participantName,
+  editing,
+}: Props) {
+  const isEdit = !!editing;
   const [medicationName, setMedicationName] = useState("");
   const [dosage, setDosage] = useState("");
   const [expectedTime, setExpectedTime] = useState("");
   const [frequency, setFrequency] = useState("Daily");
+  const [dirty, setDirty] = useState(false);
   const insert = useInsertSchedule();
+  const update = useUpdateMedicationSchedule();
+  const pending = isEdit ? update.isPending : insert.isPending;
 
   useEffect(() => {
-    if (open) {
+    if (open && editing) {
+      setMedicationName(editing.medicationName);
+      setDosage(editing.dosage);
+      setExpectedTime(editing.expectedTime.slice(0, 5));
+      setFrequency(editing.frequency);
+      setDirty(false);
+    } else if (open) {
       setMedicationName("");
       setDosage("");
       setExpectedTime("");
       setFrequency("Daily");
+      setDirty(false);
     }
-  }, [open]);
+  }, [open, editing]);
 
-  const dirty =
-    medicationName.trim().length > 0 ||
-    dosage.trim().length > 0 ||
-    expectedTime.length > 0;
-
-  const canSubmit =
-    !insert.isPending &&
+  const valid =
     medicationName.trim().length > 0 &&
     dosage.trim().length > 0 &&
     /^\d{2}:\d{2}$/.test(expectedTime) &&
     frequency.length > 0;
 
+  const canSubmit = !pending && valid && (isEdit ? dirty : true);
+
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      await insert.mutateAsync({
-        participantId,
-        medicationName: medicationName.trim(),
-        dosage: dosage.trim(),
-        expectedTime,
-        frequency,
-      });
-      toast.success("Scheduled medication added", {
-        description: `${medicationName.trim()} for ${participantName} at ${expectedTime}.`,
-      });
+      if (isEdit && editing) {
+        await update.mutateAsync({
+          id: editing.id,
+          patch: {
+            medicationName: medicationName.trim(),
+            dosage: dosage.trim(),
+            expectedTime,
+            frequency,
+          },
+        });
+        toast.success("Medication schedule updated", {
+          description: `${medicationName.trim()} for ${participantName}.`,
+        });
+      } else {
+        await insert.mutateAsync({
+          participantId,
+          medicationName: medicationName.trim(),
+          dosage: dosage.trim(),
+          expectedTime,
+          frequency,
+        });
+        toast.success("Scheduled medication added", {
+          description: `${medicationName.trim()} for ${participantName} at ${expectedTime}.`,
+        });
+      }
       onOpenChange(false);
     } catch (err) {
       toast.error("Could not save schedule", {
@@ -79,17 +112,25 @@ export function ScheduledMedicationModal({ open, onOpenChange, participantId, pa
     }
   };
 
+  const track = <T extends string>(setter: (v: T) => void) => (v: T) => {
+    setter(v);
+    setDirty(true);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-md border-border bg-card">
         <DialogHeader>
           <div className="flex items-center gap-2">
             <CalendarClock className="h-5 w-5 text-primary" />
-            <DialogTitle>Add scheduled medication</DialogTitle>
+            <DialogTitle>
+              {isEdit ? "Edit scheduled medication" : "Add scheduled medication"}
+            </DialogTitle>
           </div>
           <DialogDescription>
-            Adds an expected routine for {participantName} to{" "}
-            <code className="rounded bg-muted px-1 text-[11px]">participant_medication_schedules</code>.
+            {isEdit
+              ? `Update routine for ${participantName}.`
+              : `Adds an expected routine for ${participantName}.`}
           </DialogDescription>
         </DialogHeader>
 
@@ -97,14 +138,14 @@ export function ScheduledMedicationModal({ open, onOpenChange, participantId, pa
           <Field label="Medication name">
             <Input
               value={medicationName}
-              onChange={(e) => setMedicationName(e.target.value)}
+              onChange={(e) => track(setMedicationName)(e.target.value)}
               placeholder="e.g. Paracetamol"
             />
           </Field>
           <Field label="Dosage">
             <Input
               value={dosage}
-              onChange={(e) => setDosage(e.target.value)}
+              onChange={(e) => track(setDosage)(e.target.value)}
               placeholder="e.g. 500mg — 1 tablet"
             />
           </Field>
@@ -113,11 +154,11 @@ export function ScheduledMedicationModal({ open, onOpenChange, participantId, pa
               <Input
                 type="time"
                 value={expectedTime}
-                onChange={(e) => setExpectedTime(e.target.value)}
+                onChange={(e) => track(setExpectedTime)(e.target.value)}
               />
             </Field>
             <Field label="Frequency">
-              <Select value={frequency} onValueChange={setFrequency}>
+              <Select value={frequency} onValueChange={track(setFrequency)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -133,8 +174,9 @@ export function ScheduledMedicationModal({ open, onOpenChange, participantId, pa
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
-          <Button onClick={submit} disabled={!dirty || !canSubmit}>
-            {insert.isPending ? "Saving…" : "Save schedule"}
+          <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+            {isEdit ? <Save className="h-4 w-4" /> : null}
+            {pending ? "Saving…" : isEdit ? "Save changes" : "Save schedule"}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -21,7 +21,9 @@ export function AttendanceStatusBadge({
         ? "bg-destructive"
         : status === "Cancelled" || status === "Sick"
           ? "bg-warning"
-          : "bg-info";
+          : status === "Suspended"
+            ? "bg-muted-foreground"
+            : "bg-info";
 
   return (
     <Badge
