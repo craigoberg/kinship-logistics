@@ -23,7 +23,17 @@ export function RosterTab({ event }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+
+  const toggleExpanded = (id: string) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
