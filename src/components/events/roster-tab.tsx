@@ -28,12 +28,11 @@ export function RosterTab({ event }: Props) {
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
 
   const ledgerTotalsByParticipant = useMemo(() => {
-    const totals = new Map<string, number>();
-    for (const entry of paymentLedger) {
+    return paymentLedger.reduce((totals, entry) => {
       const next = (totals.get(entry.participantId) ?? 0) + entry.amount;
       totals.set(entry.participantId, Number(next.toFixed(2)));
-    }
-    return totals;
+      return totals;
+    }, new Map<string, number>());
   }, [paymentLedger]);
 
   const toggleExpanded = (id: string) => {
