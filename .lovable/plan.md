@@ -166,3 +166,26 @@ every screen, table, badge, toast, form field, and chart label.
   in render output. Always route through the `@/lib/utils` formatters so the
   app stays regionally consistent.
 - All timestamp cells/labels use `tabular-nums` for alignment.
+
+## 5. Schedules & Attendance module
+
+- Every Participant profile (`CareProfileModal`) carries 4 tabs in this exact
+  order: `Care Profile` · `Medication Scheduling` · `Care & Medication
+  History` · `Schedules & Attendance`.
+- Tab 4 has two sections:
+  - **Section A — Baseline rules**: list of `participant_attendance_schedules`
+    rows with a Top-Right `+ Add Operational Schedule` button.
+  - **Section B — Historical truth**: searchable table over
+    `attendance_roster_logs` with columns Roster date · Expected service ·
+    Actual status · Driver notes · **Actions** (rightmost).
+- Attendance status badges use `AttendanceStatusBadge` only:
+  `Attended → bg-success`, `No-Show → bg-destructive`,
+  `Cancelled` / `Sick → bg-warning`, anything else `bg-info`. All pills are
+  solid + `text-white`.
+- Roster dates render via `formatDate` (`dd-Mmm-YY`).
+- Offline attendance edits MUST be enqueued through `enqueue("attendance_log",
+  payload)` using the `AttendanceSyncPayload` envelope; the sync worker
+  replays via `updateAttendanceLog` and writes an `ATTENDANCE_LOG` row into
+  `offline_sync_logs`.
+- All attendance editor forms keep `Save changes` disabled until the form is
+  both dirty (changed from server state) and not mid-mutation.

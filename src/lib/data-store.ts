@@ -52,7 +52,8 @@ export type SyncItemType =
   | "participant_update"
   | "transport_log"
   | "iddsi_change"
-  | "medication_log";
+  | "medication_log"
+  | "attendance_log";
 
 export interface MedicationLogPayload {
   participant_id: string;
@@ -473,3 +474,186 @@ export async function listTodaysComplianceLogs(): Promise<ComplianceLog[]> {
   return (data ?? []).map(rowToComplianceLog);
 }
 
+
+// ---------- participant_attendance_schedules ----------
+//
+// Baseline operational schedule rules. Each row defines one recurring
+// weekday/service pairing (e.g. Tuesday / Center Day Care / Bus Pickup).
+
+export type WeekDay =
+  | "Monday" | "Tuesday" | "Wednesday" | "Thursday"
+  | "Friday" | "Saturday" | "Sunday";
+
+export const WEEK_DAYS: WeekDay[] = [
+  "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday",
+];
+
+export interface AttendanceSchedule {
+  id: string;
+  participantId: string;
+  dayOfWeek: WeekDay;
+  serviceType: string;
+  transportRule: string;
+  active: boolean;
+  createdAt: string;
+}
+
+interface AttendanceScheduleRow {
+  id: string;
+  participant_id: string;
+  day_of_week: string;
+  service_type: string;
+  transport_rule: string;
+  active: boolean;
+  created_at: string;
+}
+
+function rowToAttendanceSchedule(r: AttendanceScheduleRow): AttendanceSchedule {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    dayOfWeek: r.day_of_week as WeekDay,
+    serviceType: r.service_type,
+    transportRule: r.transport_rule,
+    active: r.active,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listAttendanceSchedules(
+  participantId: string,
+): Promise<AttendanceSchedule[]> {
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("day_of_week", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(rowToAttendanceSchedule);
+}
+
+export interface NewAttendanceSchedule {
+  participantId: string;
+  dayOfWeek: WeekDay;
+  serviceType: string;
+  transportRule: string;
+}
+
+export async function insertAttendanceSchedule(
+  input: NewAttendanceSchedule,
+): Promise<AttendanceSchedule> {
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .insert({
+      participant_id: input.participantId,
+      day_of_week: input.dayOfWeek,
+      service_type: input.serviceType,
+      transport_rule: input.transportRule,
+      active: true,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+}
+
+// ---------- attendance_roster_logs ----------
+
+export type AttendanceStatus =
+  | "Pending" | "Attended" | "No-Show" | "Cancelled" | "Sick";
+
+export const ATTENDANCE_STATUSES: AttendanceStatus[] = [
+  "Pending", "Attended", "No-Show", "Cancelled", "Sick",
+];
+
+export interface AttendanceLog {
+  id: string;
+  participantId: string;
+  scheduleId: string | null;
+  rosterDate: string;
+  expectedService: string;
+  actualStatus: AttendanceStatus;
+  driverNotes: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AttendanceLogRow {
+  id: string;
+  participant_id: string;
+  schedule_id: string | null;
+  roster_date: string;
+  expected_service: string;
+  actual_status: string;
+  driver_notes: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+function rowToAttendanceLog(r: AttendanceLogRow): AttendanceLog {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    scheduleId: r.schedule_id,
+    rosterDate: r.roster_date,
+    expectedService: r.expected_service,
+    actualStatus: (r.actual_status as AttendanceStatus) ?? "Pending",
+    driverNotes: r.driver_notes,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
+  };
+}
+
+export async function listAttendanceLogs(
+  participantId: string,
+): Promise<AttendanceLog[]> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("roster_date", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []).map(rowToAttendanceLog);
+}
+
+export interface AttendanceLogPatch {
+  actualStatus?: AttendanceStatus;
+  driverNotes?: string | null;
+}
+
+export async function updateAttendanceLog(
+  id: string,
+  patch: AttendanceLogPatch,
+): Promise<AttendanceLog> {
+  const row: Partial<AttendanceLogRow> = {};
+  if (patch.actualStatus !== undefined) row.actual_status = patch.actualStatus;
+  if (patch.driverNotes !== undefined) row.driver_notes = patch.driverNotes;
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .update(row)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToAttendanceLog(data as AttendanceLogRow);
+}
+
+/**
+ * JSONB envelope sent to offline_sync_logs.payload with
+ * action_type = 'ATTENDANCE_LOG'. Mirrors the medication shape so downstream
+ * BI / replay consumers see one canonical structure.
+ */
+export interface AttendanceSyncPayload {
+  attendance_log_id: string;
+  participant_id: string;
+  roster_date: string;
+  expected_service: string;
+  patch: {
+    actual_status?: AttendanceStatus;
+    driver_notes?: string | null;
+  };
+  network_state: "online" | "offline";
+  device_uuid: string;
+  timestamp: string;
+}
