@@ -41,7 +41,8 @@ export function LookupSelect({
   blockUntilLoaded = true,
 }: Props) {
   const queryClient = useQueryClient();
-  const { data = [], isLoading, error, isFetched, refetch } = useLookupParameters(category);
+  const { data = [], isLoading, isFetching, error, isFetched, refetch } = useLookupParameters(category);
+  const [isRefreshing, setIsRefreshing] = useState(false);
 
   const onValueChange = (code: string) => {
     const hit = data.find((p) => p.code === code);
@@ -50,11 +51,19 @@ export function LookupSelect({
 
   const noOptions = data.length === 0 && isFetched;
 
-  const handleRefresh = useCallback(() => {
-    clearLookupCacheCategory(category);
-    queryClient.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
-    refetch();
+  const handleRefresh = useCallback(async () => {
+    setIsRefreshing(true);
+    try {
+      clearLookupCacheCategory(category);
+      await queryClient.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
+      await refetch();
+    } finally {
+      setIsRefreshing(false);
+    }
   }, [category, queryClient, refetch]);
+
+  const busy = isRefreshing || isLoading || isFetching;
+
 
   const triggerPlaceholder =
     isLoading && data.length === 0
