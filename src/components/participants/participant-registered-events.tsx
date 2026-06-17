@@ -49,6 +49,7 @@ function toBooking(r: EventBookingWithEvent): EventRosterBooking {
     amountPaid: r.amountPaid,
     isFullyPaid: r.isFullyPaid,
     notes: r.notes,
+    customPrice: r.customPrice,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
