@@ -11,9 +11,10 @@ import type { EventManifest } from "@/lib/data-store";
 
 interface Props {
   event: EventManifest;
+  onSuccess?: () => void;
 }
 
-export function EventDetailsTab({ event }: Props) {
+export function EventDetailsTab({ event, onSuccess }: Props) {
   const [title, setTitle] = useState(event.title);
   const [eventTypeCode, setEventTypeCode] = useState(event.eventTypeCode);
   const [venue, setVenue] = useState(event.venue);
@@ -74,6 +75,7 @@ export function EventDetailsTab({ event }: Props) {
         description: description.trim() || null,
       });
       toast.success("Event logistics updated", { description: title.trim() });
+      onSuccess?.();
     } catch {
       /* surfaced via mutation.onError */
     }
