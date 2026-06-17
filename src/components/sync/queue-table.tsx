@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { retry, discard } from "@/lib/sync-queue";
+import { useParticipants } from "@/hooks/use-supabase-data";
 import type { SyncQueueItem } from "@/lib/data-store";
 
 const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
@@ -11,7 +12,18 @@ const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
   iddsi_change: "IDDSI change",
 };
 
+function extractParticipantId(item: SyncQueueItem): string | undefined {
+  const p = item.payload as Record<string, unknown> | undefined;
+  if (!p) return undefined;
+  if (typeof p.participant_id === "string") return p.participant_id;
+  if (typeof p.id === "string") return p.id;
+  return undefined;
+}
+
 export function QueueTable({ items }: { items: SyncQueueItem[] }) {
+  const { data: participants = [] } = useParticipants();
+  const byId = new Map(participants.map((p) => [p.id, p]));
+
   if (items.length === 0) {
     return (
       <Card className="p-8 text-center text-sm text-muted-foreground">
@@ -22,13 +34,21 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
 
   return (
     <ul className="space-y-2">
-      {items.map((item) => (
+      {items.map((item) => {
+        const pid = extractParticipantId(item);
+        const participant = pid ? byId.get(pid) : undefined;
+        const name =
+          (participant?.firstName || participant?.lastName)
+            ? `${participant?.firstName ?? ""} ${participant?.lastName ?? ""}`.trim()
+            : "Unknown participant";
+        return (
         <li key={item.id}>
           <Card className="space-y-3 p-4">
             <div className="flex flex-wrap items-center justify-between gap-2">
               <div className="flex flex-wrap items-center gap-2">
                 <StatusBadge status={item.status} />
                 <span className="text-sm font-semibold">{TYPE_LABEL[item.type]}</span>
+                <span className="text-xs text-muted-foreground">· {name}</span>
                 <span className="text-xs text-muted-foreground tabular-nums">
                   {new Date(item.createdAt).toLocaleString()}
                 </span>
@@ -69,7 +89,8 @@ export function QueueTable({ items }: { items: SyncQueueItem[] }) {
             )}
           </Card>
         </li>
-      ))}
+        );
+      })}
     </ul>
   );
 }

@@ -153,6 +153,32 @@ export interface ParticipantPatch {
   dualWitnessPinHash?: string | null;
 }
 
+export interface NewParticipant {
+  firstName: string;
+  lastName: string;
+  ndisNumber: string;
+  iddsi: { liquids: number; foods: number };
+  dualWitnessPinHash?: string | null;
+}
+
+export async function insertParticipant(input: NewParticipant): Promise<Participant> {
+  const row = {
+    first_name: input.firstName,
+    last_name: input.lastName,
+    ndis_number: input.ndisNumber,
+    iddsi_level_liquids: input.iddsi.liquids,
+    iddsi_level_solids: input.iddsi.foods,
+    dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
+  };
+  const { data, error } = await supabase
+    .from("participants")
+    .insert(row)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToParticipant(data as ParticipantRow);
+}
+
 export async function updateParticipant(
   id: string,
   patch: ParticipantPatch,

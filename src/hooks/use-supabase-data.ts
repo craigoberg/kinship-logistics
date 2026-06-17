@@ -3,9 +3,11 @@ import {
   listParticipants,
   listSyncLogs,
   updateParticipant,
+  insertParticipant,
   insertSyncLog,
   type Participant,
   type ParticipantPatch,
+  type NewParticipant,
   type NewSyncLog,
 } from "@/lib/data-store";
 
@@ -30,6 +32,16 @@ export function useUpdateParticipant() {
   return useMutation({
     mutationFn: ({ id, patch }: { id: string; patch: ParticipantPatch }) =>
       updateParticipant(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["participants"] });
+    },
+  });
+}
+
+export function useInsertParticipant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewParticipant) => insertParticipant(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
     },
