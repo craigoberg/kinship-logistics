@@ -677,6 +677,8 @@ export interface LookupParameter {
   code: string;
   /** Human-readable label sourced from `display_name` in Supabase. */
   displayName: string;
+  /** Optional explicit chronological/priority ordering from `sort_order`. */
+  sortOrder: number | null;
 }
 
 interface LookupRow {
