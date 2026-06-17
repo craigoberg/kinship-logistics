@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Pencil, CalendarDays, CalendarX, ClipboardList, Search } from "lucide-react";
+import { Plus, Pencil, CalendarDays, CalendarX, CalendarOff, ClipboardList, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,6 +11,7 @@ import type { AttendanceLog, AttendanceSchedule } from "@/lib/data-store";
 import { AddAttendanceScheduleModal } from "./add-attendance-schedule-modal";
 import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
+import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
 
 interface Props {
