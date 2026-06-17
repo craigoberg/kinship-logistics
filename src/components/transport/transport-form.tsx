@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Check, X, Clock, Save } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,13 +14,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { addTransportLog, type Participant, type TransportStatus } from "@/lib/data-store";
+import { insertTransportLog, type Participant, type TransportStatus, type NewTransportLog } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { useQueryClient } from "@tanstack/react-query";
 
 interface Props {
   participants: Participant[];
-  onLogged?: () => void;
 }
 
 const STATUSES: { value: TransportStatus; label: string; icon: typeof Check }[] = [
@@ -28,26 +29,38 @@ const STATUSES: { value: TransportStatus; label: string; icon: typeof Check }[] 
   { value: "No-show",  label: "No-show",  icon: X },
 ];
 
-export function TransportForm({ participants, onLogged }: Props) {
+export function TransportForm({ participants }: Props) {
   const online = useOnlineStatus();
+  const qc = useQueryClient();
   const [participantId, setParticipantId] = useState("");
   const [pickup, setPickup] = useState("");
   const [dropoff, setDropoff] = useState("");
   const [present, setPresent] = useState(true);
   const [status, setStatus] = useState<TransportStatus>("Arrived");
   const [notes, setNotes] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   const km =
     pickup && dropoff && Number(dropoff) >= Number(pickup)
       ? Number(dropoff) - Number(pickup)
       : null;
 
-  const canSubmit = !!participantId && !!pickup && !!dropoff;
+  const canSubmit = !!participantId && !!pickup && !!dropoff && !submitting;
 
-  const submit = (e: React.FormEvent) => {
+  const reset = () => {
+    setPickup("");
+    setDropoff("");
+    setNotes("");
+    setStatus("Arrived");
+    setPresent(true);
+    setParticipantId("");
+  };
+
+  const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!canSubmit) return;
-    const log = addTransportLog({
+    setSubmitting(true);
+    const payload: NewTransportLog = {
       participantId,
       pickupOdometer: Number(pickup),
       dropoffOdometer: Number(dropoff),
@@ -55,15 +68,30 @@ export function TransportForm({ participants, onLogged }: Props) {
       status,
       timestamp: new Date().toISOString(),
       notes,
-    });
-    enqueue("transport_log", { id: log.id, participantId, status, km });
-    setPickup("");
-    setDropoff("");
-    setNotes("");
-    setStatus("Arrived");
-    setPresent(true);
-    setParticipantId("");
-    onLogged?.();
+    };
+
+    if (online) {
+      try {
+        await insertTransportLog(payload);
+        qc.invalidateQueries({ queryKey: ["transport_logs"] });
+        toast.success("Run saved", { description: "Synced to Yada Connect." });
+        reset();
+      } catch (err) {
+        // Network said online but write failed — queue for retry.
+        enqueue("transport_log", payload as unknown as Record<string, unknown>);
+        toast.warning("Saved offline", {
+          description: `Will retry automatically. (${(err as Error).message})`,
+        });
+        reset();
+      } finally {
+        setSubmitting(false);
+      }
+    } else {
+      enqueue("transport_log", payload as unknown as Record<string, unknown>);
+      toast.info("Queued offline", { description: "Will sync when back online." });
+      reset();
+      setSubmitting(false);
+    }
   };
 
   return (
@@ -186,7 +214,7 @@ export function TransportForm({ participants, onLogged }: Props) {
 
         <Button type="submit" disabled={!canSubmit} className="h-14 w-full gap-2 text-base">
           <Save className="h-5 w-5" />
-          {online ? "Save run" : "Save & queue offline"}
+          {submitting ? "Saving…" : online ? "Save run" : "Save & queue offline"}
         </Button>
       </form>
     </Card>
