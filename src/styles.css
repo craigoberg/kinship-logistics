@@ -122,6 +122,8 @@
 
   --unpaid: 0 84% 56%;
   --unpaid-foreground: 0 0% 100%;
+  --tab-active: 187 100% 42%;
+  --tab-active-foreground: 0 0% 100%;
 
   --border: 212 26% 83%;
   --input: 212 26% 83%;
