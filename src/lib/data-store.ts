@@ -566,10 +566,15 @@ export async function insertAttendanceSchedule(
 // ---------- attendance_roster_logs ----------
 
 export type AttendanceStatus =
-  | "Pending" | "Attended" | "No-Show" | "Cancelled" | "Sick";
+  | "Pending" | "Attended" | "No-Show" | "Cancelled" | "Sick" | "Suspended";
 
 export const ATTENDANCE_STATUSES: AttendanceStatus[] = [
-  "Pending", "Attended", "No-Show", "Cancelled", "Sick",
+  "Pending", "Attended", "No-Show", "Cancelled", "Sick", "Suspended",
+];
+
+/** Statuses that should auto-cancel any chargeable ledger entry for that day. */
+export const NON_CHARGEABLE_STATUSES: AttendanceStatus[] = [
+  "Sick", "Cancelled", "Suspended", "No-Show",
 ];
 
 export interface AttendanceLog {
