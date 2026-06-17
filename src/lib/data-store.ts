@@ -988,3 +988,153 @@ export async function insertLedgerEntry(
   if (error) throw error;
   return rowToLedgerEntry(data as LedgerRow);
 }
+
+// ---------- archive / edit helpers ----------
+
+export interface AttendanceSchedulePatch {
+  dayOfWeek?: WeekDay;
+  serviceType?: string;
+  transportRule?: string;
+  active?: boolean;
+}
+
+export async function updateAttendanceSchedule(
+  id: string,
+  patch: AttendanceSchedulePatch,
+): Promise<AttendanceSchedule> {
+  const row: Partial<AttendanceScheduleRow> = {};
+  if (patch.dayOfWeek !== undefined) row.day_of_week = patch.dayOfWeek;
+  if (patch.serviceType !== undefined) row.service_type = patch.serviceType;
+  if (patch.transportRule !== undefined) row.transport_required = patch.transportRule;
+  if (patch.active !== undefined) row.active = patch.active;
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .update(row)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+}
+
+export async function archiveAttendanceSchedule(id: string): Promise<void> {
+  await updateAttendanceSchedule(id, { active: false });
+}
+
+export interface MedicationSchedulePatch {
+  medicationName?: string;
+  dosage?: string;
+  expectedTime?: string;
+  frequency?: string;
+  active?: boolean;
+}
+
+export async function updateMedicationSchedule(
+  id: string,
+  patch: MedicationSchedulePatch,
+): Promise<MedicationSchedule> {
+  const row: Partial<ScheduleRow> = {};
+  if (patch.medicationName !== undefined) row.medication_name = patch.medicationName;
+  if (patch.dosage !== undefined) row.dosage = patch.dosage;
+  if (patch.expectedTime !== undefined)
+    row.expected_time =
+      patch.expectedTime.length === 5 ? `${patch.expectedTime}:00` : patch.expectedTime;
+  if (patch.frequency !== undefined) row.frequency = patch.frequency;
+  if (patch.active !== undefined) row.active = patch.active;
+  const { data, error } = await supabase
+    .from("participant_medication_schedules")
+    .update(row)
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToSchedule(data as ScheduleRow);
+}
+
+export async function archiveMedicationSchedule(id: string): Promise<void> {
+  await updateMedicationSchedule(id, { active: false });
+}
+
+// ---------- suspension / bulk roster exceptions ----------
+
+/** Enumerate every YYYY-MM-DD between two inclusive dates. */
+export function eachDateInRange(startIso: string, endIso: string): string[] {
+  const start = new Date(`${startIso}T00:00:00`);
+  const end = new Date(`${endIso}T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return [];
+  if (end < start) return [];
+  const out: string[] = [];
+  const cur = new Date(start);
+  while (cur <= end) {
+    out.push(isoDate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return out;
+}
+
+export async function insertAttendanceLogsBulk(
+  rows: NewAttendanceLog[],
+): Promise<AttendanceLog[]> {
+  if (rows.length === 0) return [];
+  const payload = rows.map((r) => ({
+    participant_id: r.participantId,
+    schedule_id: r.scheduleId ?? null,
+    roster_date: r.rosterDate,
+    expected_service: r.expectedService,
+    actual_status: r.actualStatus,
+    driver_notes: r.driverNotes ?? null,
+  }));
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .insert(payload)
+    .select("*");
+  if (error) {
+    console.error("[insertAttendanceLogsBulk] supabase error", { error, payload });
+    throw new Error(error.message || "Bulk insert failed");
+  }
+  return (data ?? []).map((r) => rowToAttendanceLog(r as AttendanceLogRow));
+}
+
+// ---------- ledger reconciliation on absence ----------
+//
+// When a participant is Sick / Cancelled / Suspended on a given day, any
+// auto-generated chargeable ledger entry for that exact date is flipped to
+// `is_reconciled = true` and its description prefixed with
+// "Cancelled - No Charge".
+
+const NO_CHARGE_PREFIX = "Cancelled - No Charge · ";
+
+export async function cancelChargesForDate(
+  participantId: string,
+  date: string,
+): Promise<number> {
+  const { data: existing, error: selErr } = await supabase
+    .from("participant_financial_ledger")
+    .select("id, description, amount, is_reconciled")
+    .eq("participant_id", participantId)
+    .eq("transaction_date", date)
+    .gt("amount", 0)
+    .eq("is_reconciled", false);
+  if (selErr) {
+    console.error("[cancelChargesForDate] select failed", selErr);
+    return 0;
+  }
+  const targets = (existing ?? []) as Array<{
+    id: string;
+    description: string | null;
+  }>;
+  if (targets.length === 0) return 0;
+  await Promise.all(
+    targets.map((row) =>
+      supabase
+        .from("participant_financial_ledger")
+        .update({
+          is_reconciled: true,
+          description: `${NO_CHARGE_PREFIX}${row.description ?? ""}`.trim(),
+        })
+        .eq("id", row.id),
+    ),
+  );
+  return targets.length;
+}
+
