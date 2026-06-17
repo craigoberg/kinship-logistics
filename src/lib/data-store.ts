@@ -1369,7 +1369,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     bookingStatus: r.booking_status,
     amountPaid: Number(r.amount_paid ?? 0),
     isFullyPaid: r.is_fully_paid,
-    notes: r.notes,
+    
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
