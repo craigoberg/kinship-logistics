@@ -3,10 +3,11 @@ import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight } from "lucide
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { listParticipants, listTransportLogs } from "@/lib/data-store";
+import { useParticipants, useTransportLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 
 export const Route = createFileRoute("/")({
+  ssr: false,
   head: () => ({
     meta: [
       { title: "Dashboard — Yada Connect" },
@@ -17,8 +18,8 @@ export const Route = createFileRoute("/")({
 });
 
 function Dashboard() {
-  const participants = listParticipants();
-  const logs = listTransportLogs();
+  const { data: participants = [] } = useParticipants();
+  const { data: logs = [] } = useTransportLogs();
   const queue = useSyncQueue();
 
   const today = new Date().toDateString();
