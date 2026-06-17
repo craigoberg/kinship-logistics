@@ -13,6 +13,8 @@ import {
   updateAttendanceLog,
   insertAttendanceLog,
   listLookupParameters,
+  listLedgerForParticipant,
+  insertLedgerEntry,
   insertSchedule,
   updateParticipant,
   insertParticipant,
@@ -25,6 +27,7 @@ import {
   type NewAttendanceSchedule,
   type NewAttendanceLog,
   type AttendanceLogPatch,
+  type NewLedgerEntry,
 } from "@/lib/data-store";
 
 /**
@@ -228,3 +231,24 @@ export function useInsertSyncLog() {
 }
 
 export type { Participant };
+
+export function useParticipantLedger(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["participant_financial_ledger", participantId],
+    queryFn: () => listLedgerForParticipant(participantId as string),
+    enabled: !!participantId,
+    staleTime: 15_000,
+  });
+}
+
+export function useInsertLedgerEntry() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewLedgerEntry) => insertLedgerEntry(input),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({
+        queryKey: ["participant_financial_ledger", vars.participantId],
+      });
+    },
+  });
+}
