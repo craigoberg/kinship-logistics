@@ -503,7 +503,7 @@ interface AttendanceScheduleRow {
   participant_id: string;
   day_of_week: string;
   service_type: string;
-  transport_rule: string;
+  transport_required: string;
   active: boolean;
   created_at: string;
 }
@@ -514,7 +514,7 @@ function rowToAttendanceSchedule(r: AttendanceScheduleRow): AttendanceSchedule {
     participantId: r.participant_id,
     dayOfWeek: r.day_of_week as WeekDay,
     serviceType: r.service_type,
-    transportRule: r.transport_rule,
+    transportRule: r.transport_required,
     active: r.active,
     createdAt: r.created_at,
   };
@@ -542,20 +542,25 @@ export interface NewAttendanceSchedule {
 export async function insertAttendanceSchedule(
   input: NewAttendanceSchedule,
 ): Promise<AttendanceSchedule> {
+  const payload = {
+    participant_id: input.participantId,
+    day_of_week: input.dayOfWeek,
+    service_type: input.serviceType,
+    transport_required: input.transportRule,
+    active: true,
+  };
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
-    .insert({
-      participant_id: input.participantId,
-      day_of_week: input.dayOfWeek,
-      service_type: input.serviceType,
-      transport_rule: input.transportRule,
-      active: true,
-    })
+    .insert(payload)
     .select("*")
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error("[insertAttendanceSchedule] supabase error", { error, payload });
+    throw new Error(error.message || "Unknown Supabase error");
+  }
   return rowToAttendanceSchedule(data as AttendanceScheduleRow);
 }
+
 
 // ---------- attendance_roster_logs ----------
 

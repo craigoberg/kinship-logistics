@@ -1,4 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+
 import {
   listParticipants,
   listSyncLogs,
@@ -144,8 +146,18 @@ export function useInsertAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
     },
+    onError: (err: Error) => {
+      console.error("[useInsertAttendanceSchedule] insert failed", err);
+      toast.error("Database rejected the schedule insert", {
+        description: err.message ?? "Unknown error",
+        duration: 10000,
+        className:
+          "border-2 border-destructive bg-destructive text-destructive-foreground",
+      });
+    },
   });
 }
+
 
 export function useUpdateAttendanceLog() {
   const qc = useQueryClient();
