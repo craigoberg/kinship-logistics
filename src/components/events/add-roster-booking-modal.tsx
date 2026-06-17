@@ -19,7 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Textarea } from "@/components/ui/textarea";
+
 import { useInsertEventBooking, useParticipants } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 
@@ -33,7 +33,6 @@ interface Props {
 export function AddRosterBookingModal({ open, onOpenChange, event, existingBookings }: Props) {
   const [participantId, setParticipantId] = useState("");
   const [amountPaid, setAmountPaid] = useState("0.00");
-  const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -42,7 +41,6 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
     if (open) {
       setParticipantId("");
       setAmountPaid("0.00");
-      setNotes("");
       setDirty(false);
     }
   }, [open]);
@@ -69,14 +67,17 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
       await mutation.mutateAsync({
         eventId: event.id,
         participantId,
+        bookingStatus: "Confirmed",
         amountPaid: paidNumber,
         ticketPrice: event.ticketPrice,
-        notes: notes.trim() || null,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
-    } catch {
-      /* surfaced via hook onError */
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      toast.error(`Database error: ${msg}`, {
+        className: "bg-destructive text-destructive-foreground border-destructive",
+      });
     }
   };
 
@@ -97,9 +98,9 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
               Participant
             </Label>
             <Select
-              value={participantId || undefined}
+              value={participantId === "" ? undefined : participantId}
               onValueChange={(v) => {
-                setParticipantId(v);
+                setParticipantId(v ?? "");
                 setDirty(true);
               }}
             >
@@ -137,19 +138,6 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
             </p>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Notes (optional)
-            </Label>
-            <Textarea
-              rows={2}
-              value={notes}
-              onChange={(e) => {
-                setNotes(e.target.value);
-                setDirty(true);
-              }}
-            />
-          </div>
         </div>
 
         <DialogFooter>

@@ -1342,7 +1342,6 @@ export interface EventRosterBooking {
   bookingStatus: string;
   amountPaid: number;
   isFullyPaid: boolean;
-  notes: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1354,7 +1353,6 @@ interface BookingRow {
   booking_status: string;
   amount_paid: number | string;
   is_fully_paid: boolean;
-  notes: string | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1371,7 +1369,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     bookingStatus: r.booking_status,
     amountPaid: Number(r.amount_paid ?? 0),
     isFullyPaid: r.is_fully_paid,
-    notes: r.notes,
+    
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -1393,7 +1391,6 @@ export interface NewEventBooking {
   bookingStatus?: string;
   amountPaid?: number;
   ticketPrice: number;
-  notes?: string | null;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
@@ -1401,10 +1398,9 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
-    booking_status: input.bookingStatus ?? "Confirmed",
+    booking_status: input.bookingStatus?.trim() || "Confirmed",
     amount_paid: amount,
     is_fully_paid: amount >= input.ticketPrice && input.ticketPrice > 0,
-    notes: input.notes ?? null,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
