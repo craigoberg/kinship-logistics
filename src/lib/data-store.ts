@@ -743,7 +743,7 @@ export async function insertLookupParameter(input: {
       code: input.code,
       display_name: input.displayName,
     })
-    .select("id, category, code, display_name")
+    .select("id, category, code, display_name, sort_order")
     .single();
   if (error) throw error;
   const r = data as LookupRow;
@@ -752,6 +752,7 @@ export async function insertLookupParameter(input: {
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
+    sortOrder: r.sort_order ?? null,
   };
 }
 
