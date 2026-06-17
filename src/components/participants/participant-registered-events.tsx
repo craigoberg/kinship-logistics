@@ -107,8 +107,8 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const balance = Math.max(0, r.eventTicketPrice - r.amountPaid);
-                  const owes = balance > 0 && !r.isFullyPaid;
+                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, r.eventTicketPrice - r.amountPaid);
+                  const owes = r.bookingStatus !== "Cancelled" && balance > 0 && !r.isFullyPaid;
                   return (
                     <tr key={r.id} className="border-t border-border align-top">
                       <td className="px-3 py-2 font-medium">{r.eventTitle}</td>
@@ -126,7 +126,7 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                         ${fmtMoney(r.amountPaid)}
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <BalanceBadge fullyPaid={r.isFullyPaid} balance={balance} />
+                        <BalanceBadge fullyPaid={r.isFullyPaid} balance={balance} bookingStatus={r.bookingStatus} />
                       </td>
                       <td className="px-3 py-2 text-right">
                         <div className="flex items-center justify-end gap-1">
@@ -188,7 +188,14 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
   );
 }
 
-function BalanceBadge({ fullyPaid, balance }: { fullyPaid: boolean; balance: number }) {
+function BalanceBadge({ fullyPaid, balance, bookingStatus }: { fullyPaid: boolean; balance: number; bookingStatus: string }) {
+  if (bookingStatus === "Cancelled") {
+    return (
+      <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
+        Cancelled / Balanced
+      </span>
+    );
+  }
   if (fullyPaid || balance <= 0) {
     return (
       <span className="rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
