@@ -25,6 +25,7 @@ function ParticipantsPage() {
   const [selected, setSelected] = useState<Participant | null>(null);
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
+  const [medOpen, setMedOpen] = useState(false);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
