@@ -24,6 +24,7 @@ function Dashboard() {
   const { data: participants = [] } = useParticipants();
   const { data: logs = [] } = useSyncLogs();
   const queue = useSyncQueue();
+  const [medOpen, setMedOpen] = useState(false);
 
   const today = new Date().toDateString();
   const todaysTransport = logs
