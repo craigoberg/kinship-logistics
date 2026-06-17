@@ -69,6 +69,7 @@ function ParticipantsPage() {
       />
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />
+      <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
     </div>
   );
 }
