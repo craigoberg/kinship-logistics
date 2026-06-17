@@ -554,7 +554,7 @@ export function useInsertEventBooking() {
     onSuccess: (_, vars) => {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.participantId, vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
@@ -606,7 +606,7 @@ export function useRecordEventPaymentMilestone() {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
       qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.participantId, vars.eventId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
@@ -637,7 +637,7 @@ export function useEventPaymentLedger(
 
 export function useEventPaymentLedgerForEvent(eventId: string | null | undefined) {
   return useQuery({
-    queryKey: ["event_payment_ledger", eventId],
+    queryKey: ["event_payment_ledger", "by-event", eventId],
     queryFn: () => listEventPaymentLedgerForEvent(eventId as string),
     enabled: !!eventId,
     staleTime: 15_000,
@@ -651,7 +651,7 @@ export function useUpdateEventBooking() {
     onSuccess: ({ booking }, vars) => {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", booking.eventId] });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", booking.participantId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", booking.eventId] });
+      qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", booking.eventId] });
       qc.invalidateQueries({ queryKey: ["event_payment_ledger", booking.participantId, booking.eventId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger", booking.participantId] });
       qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
