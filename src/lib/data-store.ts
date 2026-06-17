@@ -1512,7 +1512,6 @@ export async function recordEventPaymentMilestone(
   return { booking, ledger };
 }
 
-}
 
 // ---------- event_financial_ledger ----------
 
