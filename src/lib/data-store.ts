@@ -657,3 +657,146 @@ export interface AttendanceSyncPayload {
   device_uuid: string;
   timestamp: string;
 }
+
+// ---------- system_lookup_parameters ----------
+//
+// CRITICAL: every operational dropdown (service types, transport options,
+// financial codes, etc.) MUST hydrate from this table. Hardcoded string
+// arrays in components are forbidden — see `.lovable/plan.md` §6.
+//
+//   id, category, code, label, sort_order, active
+
+export interface LookupParameter {
+  id: string;
+  category: string;
+  code: string;
+  label: string;
+  sortOrder: number;
+  active: boolean;
+}
+
+interface LookupRow {
+  id: string;
+  category: string;
+  code: string;
+  label: string;
+  sort_order: number | null;
+  active: boolean | null;
+}
+
+export async function listLookupParameters(
+  category: string,
+): Promise<LookupParameter[]> {
+  const { data, error } = await supabase
+    .from("system_lookup_parameters")
+    .select("id, category, code, label, sort_order, active")
+    .eq("category", category)
+    .eq("active", true)
+    .order("sort_order", { ascending: true })
+    .order("label", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r: LookupRow) => ({
+    id: r.id,
+    category: r.category,
+    code: r.code,
+    label: r.label,
+    sortOrder: r.sort_order ?? 0,
+    active: r.active ?? true,
+  }));
+}
+
+/**
+ * Canonical lookup categories used across the app. Add new strings here
+ * before reading them so the grep surface is one file.
+ */
+export const LOOKUP_CATEGORIES = {
+  serviceType: "SERVICE_TYPE",
+  transportRule: "TRANSPORT_RULE",
+  transportOption: "TRANSPORT_OPTION",
+  financialCode: "FINANCIAL_CODE",
+} as const;
+
+// ---------- attendance_roster_logs writes ----------
+
+export interface NewAttendanceLog {
+  participantId: string;
+  scheduleId?: string | null;
+  rosterDate: string;            // YYYY-MM-DD
+  expectedService: string;
+  actualStatus: AttendanceStatus;
+  driverNotes?: string | null;
+}
+
+export async function insertAttendanceLog(
+  input: NewAttendanceLog,
+): Promise<AttendanceLog> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .insert({
+      participant_id: input.participantId,
+      schedule_id: input.scheduleId ?? null,
+      roster_date: input.rosterDate,
+      expected_service: input.expectedService,
+      actual_status: input.actualStatus,
+      driver_notes: input.driverNotes ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToAttendanceLog(data as AttendanceLogRow);
+}
+
+// ---------- daily roster engine ----------
+//
+// Expands recurring `participant_attendance_schedules` rows for a given date
+// and overlays any single-day exception entries from `attendance_roster_logs`.
+// Critical contract: temporary changes (sick, cancelled) NEVER mutate the
+// recurring schedule — they're written as date-scoped log rows here, so the
+// participant auto-reverts to their baseline next week.
+
+const WEEKDAY_INDEX: Record<WeekDay, number> = {
+  Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
+  Thursday: 4, Friday: 5, Saturday: 6,
+};
+
+export interface RosterEntry {
+  schedule: AttendanceSchedule;
+  date: string;                    // YYYY-MM-DD
+  expectedService: string;
+  /** Effective status: 'Pending' until an exception/actual log overrides. */
+  effectiveStatus: AttendanceStatus;
+  exceptionLog: AttendanceLog | null;
+}
+
+function isoDate(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+export function resolveDailyRoster(
+  schedules: AttendanceSchedule[],
+  logs: AttendanceLog[],
+  date: Date,
+): RosterEntry[] {
+  const dow = date.getDay();
+  const day = isoDate(date);
+  const todays = schedules.filter(
+    (s) => s.active && WEEKDAY_INDEX[s.dayOfWeek] === dow,
+  );
+  return todays.map((s) => {
+    const exception =
+      logs.find(
+        (l) =>
+          l.participantId === s.participantId &&
+          l.rosterDate === day &&
+          (l.scheduleId === s.id || l.scheduleId === null) &&
+          l.expectedService === s.serviceType,
+      ) ?? null;
+    return {
+      schedule: s,
+      date: day,
+      expectedService: s.serviceType,
+      effectiveStatus: exception?.actualStatus ?? "Pending",
+      exceptionLog: exception,
+    };
+  });
+}
