@@ -330,3 +330,146 @@ export async function listStaffRegistry(): Promise<StaffMember[]> {
     pinHash: r.pin_hash,
   }));
 }
+
+// ---------- participant_medication_schedules ----------
+
+export interface MedicationSchedule {
+  id: string;
+  participantId: string | null;
+  medicationName: string;
+  dosage: string;
+  expectedTime: string; // "HH:MM:SS"
+  frequency: string;
+  active: boolean;
+  createdAt: string;
+}
+
+interface ScheduleRow {
+  id: string;
+  participant_id: string | null;
+  medication_name: string;
+  dosage: string;
+  expected_time: string;
+  frequency: string;
+  active: boolean;
+  created_at: string;
+}
+
+function rowToSchedule(r: ScheduleRow): MedicationSchedule {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    medicationName: r.medication_name,
+    dosage: r.dosage,
+    expectedTime: r.expected_time,
+    frequency: r.frequency,
+    active: r.active,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listSchedulesForParticipant(
+  participantId: string,
+): Promise<MedicationSchedule[]> {
+  const { data, error } = await supabase
+    .from("participant_medication_schedules")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("expected_time", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map(rowToSchedule);
+}
+
+export async function listAllActiveSchedules(): Promise<MedicationSchedule[]> {
+  const { data, error } = await supabase
+    .from("participant_medication_schedules")
+    .select("*")
+    .eq("active", true);
+  if (error) throw error;
+  return (data ?? []).map(rowToSchedule);
+}
+
+export interface NewSchedule {
+  participantId: string;
+  medicationName: string;
+  dosage: string;
+  expectedTime: string; // "HH:MM"
+  frequency: string;
+}
+
+export async function insertSchedule(input: NewSchedule): Promise<MedicationSchedule> {
+  const { data, error } = await supabase
+    .from("participant_medication_schedules")
+    .insert({
+      participant_id: input.participantId,
+      medication_name: input.medicationName,
+      dosage: input.dosage,
+      expected_time: input.expectedTime.length === 5 ? `${input.expectedTime}:00` : input.expectedTime,
+      frequency: input.frequency,
+      active: true,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToSchedule(data as ScheduleRow);
+}
+
+// ---------- compliance_audit_logs reads ----------
+
+export interface ComplianceLog {
+  id: string;
+  participantId: string | null;
+  actionPerformed: string;
+  witness1: string | null;
+  witness2: string | null;
+  timestamp: string;
+  metadata: Record<string, unknown>;
+}
+
+interface ComplianceLogRow {
+  id: string;
+  participant_id: string | null;
+  action_performed: string;
+  witness_1_identity: string | null;
+  witness_2_identity: string | null;
+  timestamp: string;
+  metadata: Record<string, unknown> | null;
+}
+
+function rowToComplianceLog(r: ComplianceLogRow): ComplianceLog {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    actionPerformed: r.action_performed,
+    witness1: r.witness_1_identity,
+    witness2: r.witness_2_identity,
+    timestamp: r.timestamp,
+    metadata: r.metadata ?? {},
+  };
+}
+
+export async function listComplianceLogsForParticipant(
+  participantId: string,
+): Promise<ComplianceLog[]> {
+  const { data, error } = await supabase
+    .from("compliance_audit_logs")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("timestamp", { ascending: false })
+    .limit(200);
+  if (error) throw error;
+  return (data ?? []).map(rowToComplianceLog);
+}
+
+export async function listTodaysComplianceLogs(): Promise<ComplianceLog[]> {
+  const since = new Date();
+  since.setHours(0, 0, 0, 0);
+  const { data, error } = await supabase
+    .from("compliance_audit_logs")
+    .select("*")
+    .gte("timestamp", since.toISOString())
+    .limit(1000);
+  if (error) throw error;
+  return (data ?? []).map(rowToComplianceLog);
+}
+
