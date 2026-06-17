@@ -122,7 +122,12 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                         {r.notes ? `“${r.notes}”` : "—"}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">
-                        ${fmtMoney(r.eventTicketPrice)}
+                        ${fmtMoney(baselineCost)}
+                        {r.customPrice != null && r.customPrice !== r.eventTicketPrice && (
+                          <span className="ml-1 text-[9px] font-normal uppercase tracking-wide text-info">
+                            custom
+                          </span>
+                        )}
                       </td>
                       <td className="px-3 py-2 text-right font-semibold tabular-nums">
                         ${fmtMoney(r.amountPaid)}
