@@ -2,6 +2,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Check, X, Clock } from "lucide-react";
 import type { SyncLog, Participant, TransportPayload, TransportStatus } from "@/lib/data-store";
+import { formatDateTime } from "@/lib/utils";
 
 interface Props {
   logs: SyncLog[];
@@ -40,7 +41,7 @@ export function TransportList({ logs, participants }: Props) {
               <div className="min-w-0">
                 <div className="truncate font-medium">{p?.fullName ?? "Unknown participant"}</div>
                 <div className="mt-0.5 text-xs text-muted-foreground tabular-nums">
-                  {new Date(t.timestamp).toLocaleString()} · {km} km
+                  {formatDateTime(t.timestamp)} · {km} km
                 </div>
                 {t.notes && <div className="mt-1 text-xs italic text-muted-foreground">"{t.notes}"</div>}
               </div>

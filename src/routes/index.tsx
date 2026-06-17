@@ -8,6 +8,7 @@ import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import type { TransportPayload } from "@/lib/data-store";
+import { formatDate, formatTime } from "@/lib/utils";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -40,8 +41,8 @@ function Dashboard() {
     <div className="mx-auto max-w-6xl space-y-6">
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex flex-col gap-1">
-          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">
-            {new Date().toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" })}
+          <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground tabular-nums">
+            {formatDate(new Date())}
           </p>
           <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
           <p className="text-sm text-muted-foreground">
@@ -89,7 +90,7 @@ function Dashboard() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{p?.fullName ?? "—"}</div>
                       <div className="text-xs text-muted-foreground tabular-nums">
-                        {new Date(t.timestamp!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {km} km
+                        {formatTime(t.timestamp!)} · {km} km
                       </div>
                     </div>
                     <Badge variant={t.status === "Arrived" ? "default" : t.status === "No-show" ? "destructive" : "outline"}>

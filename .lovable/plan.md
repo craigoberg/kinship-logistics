@@ -138,3 +138,31 @@ For every changed screen, verify:
 
 This playbook supersedes any earlier guidance in this file. Future turns
 must read and honor it before implementing UI changes.
+
+## 4. Status indicator & date/time standards (mandatory)
+
+These rules supersede any earlier color or formatting guidance. They apply to
+every screen, table, badge, toast, form field, and chart label.
+
+### Status colors
+
+- Use vibrant, high-contrast semantic tokens only: `bg-success` (bright green
+  `#22C55E`), `bg-destructive` (bright red `#EF4444`), `bg-warning` (vibrant
+  amber/orange), `bg-info` (clear blue). All four pair with `text-white`.
+- Status badges/pills MUST use a solid semantic background + `text-white`.
+  Do NOT use tinted variants (`bg-success/10`, `text-success-foreground` with
+  light backgrounds, or outline-only badges) for Online/Offline, Success/
+  Failed/Pending/Retrying, or alert indicators.
+- The Online/Offline sync indicator is `bg-success` (online) / `bg-destructive`
+  (offline), always with `text-white`.
+
+### Date & time format
+
+- Dates: `dd-Mmm-YY` (e.g. `17-Jun-26`). Never `MM/DD/YYYY`, never localized
+  long form (`Wednesday, 17 June`). Use `formatDate` from `@/lib/utils`.
+- Times: 24-hour `HH:MM`, no seconds. Use `formatTime` from `@/lib/utils`.
+- Combined timestamps: `dd-Mmm-YY HH:MM` via `formatDateTime`.
+- Forbidden: `toLocaleString()`, `toLocaleDateString()`, `toLocaleTimeString()`
+  in render output. Always route through the `@/lib/utils` formatters so the
+  app stays regionally consistent.
+- All timestamp cells/labels use `tabular-nums` for alignment.
