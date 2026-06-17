@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CircleDollarSign, Search, UserPlus, Users } from "lucide-react";
+import { CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -7,6 +7,7 @@ import { useEventBookings } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
+import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 
 interface Props {
   event: EventManifest;
@@ -20,6 +21,7 @@ export function RosterTab({ event }: Props) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
+  const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
 
   const filtered = useMemo(() => {
@@ -127,24 +129,38 @@ export function RosterTab({ event }: Props) {
                         <PaidBadge fullyPaid={b.isFullyPaid} />
                       </td>
                       <td className="px-4 py-2 text-right">
-                        {owes ? (
+                        <div className="flex items-center justify-end gap-1">
+                          {owes && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => setMilestoneBooking(b)}
+                                  className="h-7 w-7 text-success hover:text-success"
+                                  aria-label="Record payment milestone"
+                                >
+                                  <CircleDollarSign className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Record Payment Milestone</TooltipContent>
+                            </Tooltip>
+                          )}
                           <Tooltip>
                             <TooltipTrigger asChild>
                               <Button
                                 size="icon"
                                 variant="ghost"
-                                onClick={() => setMilestoneBooking(b)}
-                                className="h-7 w-7 text-success hover:text-success"
-                                aria-label="Record payment milestone"
+                                onClick={() => setEditBooking(b)}
+                                className="h-7 w-7 text-info hover:text-info"
+                                aria-label="Edit booking"
                               >
-                                <CircleDollarSign className="h-4 w-4" />
+                                <Pencil className="h-3.5 w-3.5" />
                               </Button>
                             </TooltipTrigger>
-                            <TooltipContent>Record Payment Milestone</TooltipContent>
+                            <TooltipContent>Edit Booking</TooltipContent>
                           </Tooltip>
-                        ) : (
-                          <span className="text-xs text-muted-foreground">—</span>
-                        )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -167,6 +183,12 @@ export function RosterTab({ event }: Props) {
         onOpenChange={(o) => !o && setMilestoneBooking(null)}
         event={event}
         booking={milestoneBooking}
+      />
+
+      <EditRosterBookingModal
+        open={editBooking !== null}
+        onOpenChange={(o) => !o && setEditBooking(null)}
+        booking={editBooking}
       />
     </div>
   );

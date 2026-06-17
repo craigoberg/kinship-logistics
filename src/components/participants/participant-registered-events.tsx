@@ -51,6 +51,7 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                 <th className="px-3 py-2 font-medium">Event</th>
                 <th className="px-3 py-2 font-medium">Start date</th>
                 <th className="px-3 py-2 font-medium">Booking status</th>
+                <th className="px-3 py-2 font-medium">Notes</th>
                 <th className="px-3 py-2 text-right font-medium">Fee</th>
                 <th className="px-3 py-2 text-right font-medium">Paid</th>
                 <th className="px-3 py-2 text-right font-medium">Balance</th>
@@ -66,6 +67,9 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
                       {r.eventStartDate ? formatDate(r.eventStartDate) : "—"}
                     </td>
                     <td className="px-3 py-2 text-muted-foreground">{r.bookingStatus}</td>
+                    <td className="px-3 py-2 text-xs italic text-muted-foreground">
+                      {r.notes ? `“${r.notes}”` : "—"}
+                    </td>
                     <td className="px-3 py-2 text-right font-semibold tabular-nums">
                       ${fmtMoney(r.eventTicketPrice)}
                     </td>

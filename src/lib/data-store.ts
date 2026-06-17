@@ -1512,6 +1512,35 @@ export async function recordEventPaymentMilestone(
   return { booking, ledger };
 }
 
+// ---------- update booking (status + notes) ----------
+
+export interface UpdateBookingInput {
+  bookingId: string;
+  bookingStatus: string;
+  notes: string | null;
+}
+
+export async function updateEventBooking(
+  input: UpdateBookingInput,
+): Promise<EventRosterBooking> {
+  const trimmed = (input.notes ?? "").trim();
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .update({
+      booking_status: input.bookingStatus,
+      notes: trimmed.length > 0 ? trimmed : null,
+    })
+    .eq("id", input.bookingId)
+    .select("*, participants!inner(first_name, last_name)")
+    .single();
+  if (error) {
+    console.error("[updateEventBooking] failed", error);
+    throw error;
+  }
+  return rowToBooking(data as BookingRow);
+}
+
+
 
 // ---------- event_financial_ledger ----------
 
