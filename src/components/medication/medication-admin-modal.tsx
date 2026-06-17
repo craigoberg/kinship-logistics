@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, ChevronsUpDown, ShieldCheck, WifiOff } from "lucide-react";
+import { Check, ChevronsUpDown, ShieldCheck, WifiOff, AlertCircle } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -29,15 +29,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { useParticipants } from "@/hooks/use-supabase-data";
+import { useParticipants, useStaffRegistry } from "@/hooks/use-supabase-data";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import {
-  STAFF_DIRECTORY,
   hashPin,
   insertComplianceLog,
   getDeviceUuid,
   type MedicationLogPayload,
   type Participant,
+  type StaffMember,
 } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import { toast } from "sonner";
@@ -54,6 +54,11 @@ const PIN_RE = /^\d{4}$/;
 export function MedicationAdminModal({ open, onOpenChange, participant }: Props) {
   const online = useOnlineStatus();
   const { data: participants = [] } = useParticipants();
+  const {
+    data: staff = [],
+    isLoading: staffLoading,
+    error: staffError,
+  } = useStaffRegistry();
 
   const [participantId, setParticipantId] = useState<string>("");
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
@@ -62,6 +67,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
   const [witness1Pin, setWitness1Pin] = useState("");
   const [witness2Id, setWitness2Id] = useState("");
   const [witness2Pin, setWitness2Pin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   // Reset on (re)open
@@ -74,9 +80,16 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
       setWitness1Pin("");
       setWitness2Id("");
       setWitness2Pin("");
+      setPinError(null);
       setSubmitting(false);
     }
   }, [open, participant?.id]);
+
+  // Clear stale PIN errors as the user edits.
+  useEffect(() => {
+    if (pinError) setPinError(null);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [witness1Pin, witness2Pin, witness1Id, witness2Id]);
 
   const dirty =
     participantId.length > 0 ||
@@ -102,21 +115,47 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     [participants, participantId],
   );
 
-  const witnessName = (id: string) => {
-    const s = STAFF_DIRECTORY.find((x) => x.id === id);
-    return s ? `${s.name} (${s.role})` : id;
+  const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
+
+  /** Verify a 4-digit PIN against the staff member's stored pin_hash. */
+  const verifyPin = async (member: StaffMember | undefined, pin: string): Promise<boolean> => {
+    if (!member) return false;
+    if (!member.pinHash) return false;
+    const candidate = await hashPin(pin);
+    // Accept either a raw SHA-256 match or a plaintext fallback for legacy rows.
+    return candidate === member.pinHash || pin === member.pinHash;
   };
 
   const submit = async () => {
     if (!canSubmit) return;
     setSubmitting(true);
+    setPinError(null);
     try {
+      const w1 = staffById.get(witness1Id);
+      const w2 = staffById.get(witness2Id);
+
+      const [w1ok, w2ok] = await Promise.all([
+        verifyPin(w1, witness1Pin),
+        verifyPin(w2, witness2Pin),
+      ]);
+
+      if (!w1ok || !w2ok) {
+        setPinError(
+          !w1ok && !w2ok
+            ? "Both witness PINs are incorrect."
+            : !w1ok
+              ? `Witness 1 PIN does not match ${w1?.fullName ?? "selected staff"}.`
+              : `Witness 2 PIN does not match ${w2?.fullName ?? "selected staff"}.`,
+        );
+        return;
+      }
+
       const [w1Hash, w2Hash] = await Promise.all([hashPin(witness1Pin), hashPin(witness2Pin)]);
       const payload: MedicationLogPayload = {
         participant_id: participantId,
         action_performed: "MEDICATION_ADMIN",
-        witness_1_identity: witnessName(witness1Id),
-        witness_2_identity: witnessName(witness2Id),
+        witness_1_identity: w1!.fullName,
+        witness_2_identity: w2!.fullName,
         timestamp: new Date().toISOString(),
         metadata: {
           medication_notes: notes.trim(),
@@ -143,7 +182,6 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         });
         onOpenChange(false);
       } catch (err) {
-        // Live insert failed — route to queue so it isn't lost.
         enqueue("medication_log", payload as unknown as Record<string, unknown>);
         toast.warning("Saved offline", {
           description: `Will retry automatically. (${(err as Error).message})`,
@@ -238,9 +276,18 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
             />
           </Field>
 
+          {staffError && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Couldn't load staff_registry: {(staffError as Error).message}</span>
+            </div>
+          )}
+
           <div className="grid gap-4 sm:grid-cols-2">
             <WitnessBlock
               title="Witness 1 sign-off"
+              staff={staff}
+              staffLoading={staffLoading}
               staffValue={witness1Id}
               onStaffChange={setWitness1Id}
               pinValue={witness1Pin}
@@ -249,6 +296,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
             />
             <WitnessBlock
               title="Witness 2 sign-off"
+              staff={staff}
+              staffLoading={staffLoading}
               staffValue={witness2Id}
               onStaffChange={setWitness2Id}
               pinValue={witness2Pin}
@@ -262,6 +311,13 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
               Witness 1 and Witness 2 must be different staff members.
             </p>
           )}
+
+          {pinError && (
+            <div className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 p-2 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>{pinError}</span>
+            </div>
+          )}
         </div>
 
         <DialogFooter>
@@ -270,7 +326,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <ShieldCheck className="h-4 w-4" />
-            {submitting ? "Submitting…" : "Verify and submit log"}
+            {submitting ? "Verifying…" : "Verify and submit log"}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -280,6 +336,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
 
 function WitnessBlock({
   title,
+  staff,
+  staffLoading,
   staffValue,
   onStaffChange,
   pinValue,
@@ -287,27 +345,41 @@ function WitnessBlock({
   excludeId,
 }: {
   title: string;
+  staff: StaffMember[];
+  staffLoading: boolean;
   staffValue: string;
   onStaffChange: (v: string) => void;
   pinValue: string;
   onPinChange: (v: string) => void;
   excludeId: string;
 }) {
+  const options = staff.filter((s) => s.id !== excludeId);
   return (
     <div className="space-y-2 rounded-lg border border-border bg-background/50 p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {title}
       </div>
-      <Select value={staffValue} onValueChange={onStaffChange}>
+      <Select value={staffValue} onValueChange={onStaffChange} disabled={staffLoading}>
         <SelectTrigger>
-          <SelectValue placeholder="Select staff / guardian" />
+          <SelectValue
+            placeholder={staffLoading ? "Loading staff…" : "Select staff member"}
+          />
         </SelectTrigger>
         <SelectContent>
-          {STAFF_DIRECTORY.filter((s) => s.id !== excludeId).map((s) => (
-            <SelectItem key={s.id} value={s.id}>
-              {s.name} <span className="text-muted-foreground">— {s.role}</span>
-            </SelectItem>
-          ))}
+          {options.length === 0 ? (
+            <div className="px-2 py-1.5 text-xs text-muted-foreground">
+              No staff available.
+            </div>
+          ) : (
+            options.map((s) => (
+              <SelectItem key={s.id} value={s.id}>
+                {s.fullName}
+                {s.role && (
+                  <span className="text-muted-foreground"> — {s.role}</span>
+                )}
+              </SelectItem>
+            ))
+          )}
         </SelectContent>
       </Select>
       <Input
@@ -321,7 +393,7 @@ function WitnessBlock({
         className="tracking-[0.5em] text-center font-mono"
       />
       <p className="text-[11px] text-muted-foreground">
-        4-digit security PIN — hashed on this device before storage.
+        4-digit security PIN — verified against staff_registry.pin_hash.
       </p>
     </div>
   );
