@@ -1576,6 +1576,7 @@ export async function updateEventBooking(
       ? Number(input.amendedPrice)
       : null;
   if (!issueRefund && amended != null && amended >= 0) {
+    updatePayload.custom_price = amended;
     if (amended < currentPaid) {
       // Case B — cap amount_paid, flip fully paid, queue refund delta ledger
       priceAdjustmentDelta = Number((currentPaid - amended).toFixed(2));
