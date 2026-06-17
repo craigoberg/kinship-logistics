@@ -1,7 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { TransportForm } from "@/components/transport/transport-form";
 import { TransportList } from "@/components/transport/transport-list";
-import { useParticipants, useTransportLogs } from "@/hooks/use-supabase-data";
+import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
+import type { TransportPayload } from "@/lib/data-store";
 
 export const Route = createFileRoute("/transport")({
   ssr: false,
@@ -16,10 +17,14 @@ export const Route = createFileRoute("/transport")({
 
 function TransportPage() {
   const { data: participants = [] } = useParticipants();
-  const { data: logs = [] } = useTransportLogs();
+  const { data: logs = [] } = useSyncLogs();
 
   const today = new Date().toDateString();
-  const todays = logs.filter((l) => new Date(l.timestamp).toDateString() === today);
+  const todays = logs.filter((l) => {
+    if (l.actionType !== "transport_log") return false;
+    const t = l.payload as Partial<TransportPayload>;
+    return typeof t.timestamp === "string" && new Date(t.timestamp).toDateString() === today;
+  });
 
   return (
     <div className="mx-auto grid max-w-6xl gap-6 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)]">

@@ -1,5 +1,13 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import { listParticipants, listTransportLogs, updateParticipant, insertTransportLog, type Participant, type NewTransportLog } from "@/lib/data-store";
+import {
+  listParticipants,
+  listSyncLogs,
+  updateParticipant,
+  insertSyncLog,
+  type Participant,
+  type ParticipantPatch,
+  type NewSyncLog,
+} from "@/lib/data-store";
 
 export function useParticipants() {
   return useQuery({
@@ -9,10 +17,10 @@ export function useParticipants() {
   });
 }
 
-export function useTransportLogs() {
+export function useSyncLogs() {
   return useQuery({
-    queryKey: ["transport_logs"],
-    queryFn: listTransportLogs,
+    queryKey: ["offline_sync_logs"],
+    queryFn: listSyncLogs,
     staleTime: 10_000,
   });
 }
@@ -20,7 +28,7 @@ export function useTransportLogs() {
 export function useUpdateParticipant() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ id, patch }: { id: string; patch: Partial<Participant> }) =>
+    mutationFn: ({ id, patch }: { id: string; patch: ParticipantPatch }) =>
       updateParticipant(id, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
@@ -28,12 +36,14 @@ export function useUpdateParticipant() {
   });
 }
 
-export function useInsertTransportLog() {
+export function useInsertSyncLog() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: (log: NewTransportLog) => insertTransportLog(log),
+    mutationFn: (log: NewSyncLog) => insertSyncLog(log),
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ["transport_logs"] });
+      qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
     },
   });
 }
+
+export type { Participant };

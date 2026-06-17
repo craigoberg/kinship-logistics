@@ -1,8 +1,16 @@
 // Store-and-forward sync queue. Persists pending payloads to localStorage when
 // the device is offline (or when a direct write fails), and replays them
-// against Supabase via flush().
-import type { SyncQueueItem, SyncItemType, SyncStatus, NewTransportLog } from "./data-store";
-import { insertTransportLog, updateParticipant } from "./data-store";
+// against Supabase via flush(). All replays funnel through insertSyncLog so
+// the JSONB payload column owns the variable shape (transport logs, IDDSI
+// changes, participant edits).
+import type {
+  SyncQueueItem,
+  SyncItemType,
+  SyncStatus,
+  NewSyncLog,
+  ParticipantPatch,
+} from "./data-store";
+import { insertSyncLog, updateParticipant } from "./data-store";
 
 const KEY = "yada.syncQueue.v1";
 
@@ -74,12 +82,14 @@ export function subscribe(fn: Listener): () => void {
 
 async function processItem(item: SyncQueueItem): Promise<void> {
   if (item.type === "transport_log") {
-    await insertTransportLog(item.payload as unknown as NewTransportLog);
+    // Queued offline — payload is already in the JSONB shape we want to store.
+    const log = item.payload as unknown as NewSyncLog;
+    await insertSyncLog(log);
     return;
   }
   if (item.type === "participant_update" || item.type === "iddsi_change") {
-    const p = item.payload as { id: string; patch: Record<string, unknown> };
-    await updateParticipant(p.id, p.patch as never);
+    const p = item.payload as { id: string; patch: ParticipantPatch };
+    await updateParticipant(p.id, p.patch);
     return;
   }
 }
@@ -93,7 +103,6 @@ export async function flush(): Promise<{ ok: number; failed: number }> {
     patch(item.id, { status: "retrying", attempts: item.attempts + 1 });
     try {
       await processItem(item);
-      // Drop synced items from the queue so the dashboard stays focused on work.
       write(read().filter((i) => i.id !== item.id));
       ok += 1;
     } catch (e) {

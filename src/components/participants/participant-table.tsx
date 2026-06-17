@@ -1,7 +1,6 @@
 import { useMemo, useState } from "react";
-import { Search, AlertTriangle, ChevronRight } from "lucide-react";
+import { Search, ChevronRight } from "lucide-react";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { iddsiLevel } from "@/lib/iddsi";
 import type { Participant } from "@/lib/data-store";
@@ -20,8 +19,7 @@ export function ParticipantTable({ participants, onSelect }: Props) {
     return participants.filter(
       (p) =>
         p.fullName.toLowerCase().includes(needle) ||
-        p.ndisId.includes(needle) ||
-        p.mobility.toLowerCase().includes(needle),
+        p.ndisNumber.toLowerCase().includes(needle),
     );
   }, [participants, q]);
 
@@ -32,7 +30,7 @@ export function ParticipantTable({ participants, onSelect }: Props) {
         <Input
           value={q}
           onChange={(e) => setQ(e.target.value)}
-          placeholder="Search by name, NDIS ID, mobility…"
+          placeholder="Search by name or NDIS number…"
           className="h-11 pl-9"
           aria-label="Search participants"
         />
@@ -42,20 +40,12 @@ export function ParticipantTable({ participants, onSelect }: Props) {
       <ul className="space-y-2 md:hidden">
         {filtered.map((p) => (
           <li key={p.id}>
-            <button
-              onClick={() => onSelect(p)}
-              className="w-full text-left"
-            >
+            <button onClick={() => onSelect(p)} className="w-full text-left">
               <Card className="flex items-center justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate font-semibold">{p.fullName}</span>
-                    {p.flags.includes("Choking risk") && (
-                      <AlertTriangle className="h-4 w-4 shrink-0 text-destructive" aria-label="Choking risk" />
-                    )}
-                  </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisId} · {p.mobility}</div>
-                  <CareChips p={p} className="mt-2" />
+                  <div className="truncate font-semibold">{p.fullName}</div>
+                  <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisNumber}</div>
+                  <IddsiChips p={p} className="mt-2" />
                 </div>
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </Card>
@@ -70,9 +60,8 @@ export function ParticipantTable({ participants, onSelect }: Props) {
           <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-4 py-3 font-medium">Participant</th>
-              <th className="px-4 py-3 font-medium">NDIS ID</th>
-              <th className="px-4 py-3 font-medium">Mobility</th>
-              <th className="px-4 py-3 font-medium">Care indicators</th>
+              <th className="px-4 py-3 font-medium">NDIS number</th>
+              <th className="px-4 py-3 font-medium">IDDSI</th>
               <th className="px-4 py-3 font-medium sr-only">Actions</th>
             </tr>
           </thead>
@@ -83,18 +72,10 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 onClick={() => onSelect(p)}
                 className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
               >
-                <td className="px-4 py-3 font-medium">
-                  <div className="flex items-center gap-2">
-                    {p.fullName}
-                    {p.flags.includes("Choking risk") && (
-                      <AlertTriangle className="h-4 w-4 text-destructive" aria-label="Choking risk" />
-                    )}
-                  </div>
-                </td>
-                <td className="px-4 py-3 tabular-nums text-muted-foreground">{p.ndisId}</td>
-                <td className="px-4 py-3 text-muted-foreground">{p.mobility}</td>
+                <td className="px-4 py-3 font-medium">{p.fullName}</td>
+                <td className="px-4 py-3 tabular-nums text-muted-foreground">{p.ndisNumber}</td>
                 <td className="px-4 py-3">
-                  <CareChips p={p} />
+                  <IddsiChips p={p} />
                 </td>
                 <td className="px-4 py-3 text-right">
                   <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground" />
@@ -114,7 +95,7 @@ export function ParticipantTable({ participants, onSelect }: Props) {
   );
 }
 
-function CareChips({ p, className }: { p: Participant; className?: string }) {
+function IddsiChips({ p, className }: { p: Participant; className?: string }) {
   const liq = iddsiLevel("liquids", p.iddsi.liquids);
   const food = iddsiLevel("foods", p.iddsi.foods);
   return (
@@ -129,12 +110,6 @@ function CareChips({ p, className }: { p: Participant; className?: string }) {
           Food L{food.level}
         </span>
       )}
-      {p.allergies.slice(0, 2).map((a) => (
-        <Badge key={a} variant="destructive" className="px-1.5 py-0 text-[10px]">{a}</Badge>
-      ))}
-      {p.flags.filter((f) => f !== "Choking risk").map((f) => (
-        <Badge key={f} variant="outline" className="px-1.5 py-0 text-[10px]">{f}</Badge>
-      ))}
     </div>
   );
 }

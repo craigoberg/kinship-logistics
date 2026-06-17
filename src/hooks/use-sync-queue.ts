@@ -14,13 +14,12 @@ export function useSyncQueue(): SyncQueueItem[] {
     return subscribe(() => setItems(listQueue()));
   }, []);
 
-  // Auto-flush when we come back online.
   useEffect(() => {
     if (!online) return;
     const pending = listQueue().some((i) => i.status !== "synced");
     if (!pending) return;
     void flush().then(() => {
-      qc.invalidateQueries({ queryKey: ["transport_logs"] });
+      qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
     });
   }, [online, qc]);
