@@ -183,6 +183,7 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
         onOpenChange={(o) => !o && setEditRow(null)}
         booking={editRow ? toBooking(editRow) : null}
         eventTitle={editRow?.eventTitle}
+        eventTicketPrice={editRow?.eventTicketPrice ?? 0}
       />
     </section>
   );

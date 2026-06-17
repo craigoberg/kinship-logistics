@@ -232,6 +232,7 @@ export function RosterTab({ event }: Props) {
         onOpenChange={(o) => !o && setEditBooking(null)}
         booking={editBooking}
         eventTitle={event.title}
+        eventTicketPrice={event.ticketPrice}
       />
     </div>
   );
