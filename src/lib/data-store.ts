@@ -1512,24 +1512,51 @@ export async function recordEventPaymentMilestone(
   return { booking, ledger };
 }
 
-// ---------- update booking (status + notes) ----------
+// ---------- update booking (status + notes, optional cancellation refund) ----------
+
+export interface BookingRefundInput {
+  amount: number; // positive value of refund issued
+  date: string; // YYYY-MM-DD
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+}
 
 export interface UpdateBookingInput {
   bookingId: string;
   bookingStatus: string;
   notes: string | null;
+  refund?: BookingRefundInput | null;
+}
+
+export interface UpdateBookingResult {
+  booking: EventRosterBooking;
+  refundLedger: LedgerEntry | null;
 }
 
 export async function updateEventBooking(
   input: UpdateBookingInput,
-): Promise<EventRosterBooking> {
+): Promise<UpdateBookingResult> {
   const trimmed = (input.notes ?? "").trim();
+  const isCancelled = input.bookingStatus === "Cancelled";
+  const issueRefund =
+    isCancelled &&
+    !!input.refund &&
+    Number.isFinite(input.refund.amount) &&
+    input.refund.amount > 0;
+
+  const updatePayload: Record<string, unknown> = {
+    booking_status: input.bookingStatus,
+    notes: trimmed.length > 0 ? trimmed : null,
+  };
+  if (issueRefund) {
+    updatePayload.amount_paid = 0;
+    updatePayload.is_fully_paid = false;
+  }
+
   const { data, error } = await supabase
     .from("event_roster_bookings")
-    .update({
-      booking_status: input.bookingStatus,
-      notes: trimmed.length > 0 ? trimmed : null,
-    })
+    .update(updatePayload)
     .eq("id", input.bookingId)
     .select("*, participants!inner(first_name, last_name)")
     .single();
@@ -1537,7 +1564,27 @@ export async function updateEventBooking(
     console.error("[updateEventBooking] failed", error);
     throw error;
   }
-  return rowToBooking(data as BookingRow);
+  const booking = rowToBooking(data as BookingRow);
+
+  let refundLedger: LedgerEntry | null = null;
+  if (issueRefund && input.refund) {
+    const refundAmt = Number(input.refund.amount.toFixed(2));
+    try {
+      refundLedger = await insertLedgerEntry({
+        participantId: input.refund.participantId,
+        transactionDate: input.refund.date,
+        financialCode: "EVENT_REFUND",
+        description: `Refund · Event Cancelled - ${input.refund.eventTitle} [event:${input.refund.eventId}]`,
+        amount: -refundAmt,
+        isReconciled: true,
+      });
+    } catch (ledgerErr) {
+      console.error("[updateEventBooking] refund ledger insert failed", ledgerErr);
+      throw ledgerErr;
+    }
+  }
+
+  return { booking, refundLedger };
 }
 
 // ---------- per-participant per-event payment history ----------
