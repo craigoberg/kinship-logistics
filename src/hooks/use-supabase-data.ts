@@ -489,9 +489,14 @@ export function useInsertEvent() {
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["event_manifest"] });
+      qc.invalidateQueries({ queryKey: ["events"] });
     },
     onError: (err: Error) => {
-      toast.error("Could not save event", { description: err.message });
+      toast.error("Database rejected event", {
+        description: err.message,
+        duration: 12000,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
     },
   });
 }
