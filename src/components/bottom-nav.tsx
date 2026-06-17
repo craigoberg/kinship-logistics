@@ -1,14 +1,16 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Truck, RefreshCw, Settings } from "lucide-react";
+import { LayoutDashboard, Users, Truck, RefreshCw, Settings, CalendarRange } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/participants", label: "Participants", icon: Users, exact: false },
+  { to: "/events", label: "Events", icon: CalendarRange, exact: false },
   { to: "/transport", label: "Transport", icon: Truck, exact: false },
   { to: "/sync", label: "Sync Queue", icon: RefreshCw, exact: false },
   { to: "/admin", label: "Admin", icon: Settings, exact: false },
 ] as const;
+
 
 
 export function BottomNav() {
