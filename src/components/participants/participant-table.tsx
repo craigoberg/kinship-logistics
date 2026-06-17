@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
-import { Search, ChevronRight } from "lucide-react";
+import { Search, ChevronRight, AlertTriangle } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { iddsiLevel } from "@/lib/iddsi";
+import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import type { Participant } from "@/lib/data-store";
+
 
 interface Props {
   participants: Participant[];
@@ -12,6 +14,8 @@ interface Props {
 
 export function ParticipantTable({ participants, onSelect }: Props) {
   const [q, setQ] = useState("");
+  const pending = usePendingScheduleMap();
+
 
   const filtered = useMemo(() => {
     const needle = q.trim().toLowerCase();
@@ -43,10 +47,14 @@ export function ParticipantTable({ participants, onSelect }: Props) {
             <button onClick={() => onSelect(p)} className="w-full text-left">
               <Card className="flex items-center justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
                 <div className="min-w-0 flex-1">
-                  <div className="truncate font-semibold">{p.fullName}</div>
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-semibold">{p.fullName}</span>
+                    {pending.has(p.id) && <PendingBadge />}
+                  </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisNumber}</div>
                   <IddsiChips p={p} className="mt-2" />
                 </div>
+
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
               </Card>
             </button>
@@ -72,7 +80,13 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 onClick={() => onSelect(p)}
                 className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
               >
-                <td className="px-4 py-3 font-medium">{p.fullName}</td>
+                <td className="px-4 py-3 font-medium">
+                  <div className="flex items-center gap-2">
+                    <span>{p.fullName}</span>
+                    {pending.has(p.id) && <PendingBadge />}
+                  </div>
+                </td>
+
                 <td className="px-4 py-3 tabular-nums text-muted-foreground">{p.ndisNumber}</td>
                 <td className="px-4 py-3">
                   <IddsiChips p={p} />
@@ -113,3 +127,16 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
     </div>
   );
 }
+
+function PendingBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+      title="System Notice: Scheduled Care Pending"
+    >
+      <AlertTriangle className="h-3 w-3" />
+      Scheduled Care Pending
+    </span>
+  );
+}
+
