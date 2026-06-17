@@ -233,6 +233,16 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
         participantId={participant.id}
         participantName={participant.fullName}
       />
+      <ScheduledMedicationModal
+        open={editMedOpen}
+        onOpenChange={(o) => {
+          setEditMedOpen(o);
+          if (!o) setEditMedSchedule(null);
+        }}
+        participantId={participant.id}
+        participantName={participant.fullName}
+        editing={editMedSchedule}
+      />
     </>
   );
 }
@@ -243,27 +253,75 @@ function SchedulingTab({
   participantId,
   participantName,
   onAdd,
+  onEdit,
 }: {
   participantId: string;
   participantName: string;
   onAdd: () => void;
+  onEdit: (s: MedicationSchedule) => void;
 }) {
   const { data: schedules = [], isLoading, error } = useParticipantSchedules(participantId);
+  const archive = useArchiveMedicationSchedule();
+  const restore = useUpdateMedicationSchedule();
+  const [showArchived, setShowArchived] = useState(false);
+
   const active = schedules.filter((s) => s.active);
+  const visible = showArchived ? schedules : active;
+  const archivedCount = schedules.length - active.length;
+
+  const onArchive = async (s: MedicationSchedule) => {
+    try {
+      await archive.mutateAsync(s.id);
+      toast.success("Medication archived", { description: `${s.medicationName} marked inactive.` });
+    } catch {
+      /* handled in hook */
+    }
+  };
+
+  const onRestore = async (s: MedicationSchedule) => {
+    try {
+      await restore.mutateAsync({ id: s.id, patch: { active: true } });
+      toast.success("Medication restored", { description: `${s.medicationName} reactivated.` });
+    } catch {
+      /* handled */
+    }
+  };
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-3">
+      <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold">Expected routines</h3>
           <p className="text-xs text-muted-foreground">
-            {isLoading ? "Loading…" : `${active.length} active schedule${active.length === 1 ? "" : "s"} for ${participantName}.`}
+            {isLoading
+              ? "Loading…"
+              : `${active.length} active schedule${active.length === 1 ? "" : "s"} for ${participantName}.`}
           </p>
         </div>
-        <Button onClick={onAdd} className="gap-1.5">
-          <Plus className="h-4 w-4" />
-          Add Scheduled Medication
-        </Button>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2 rounded-md border border-border bg-card/60 px-3 py-1.5">
+            <Switch
+              id="show-archived-meds"
+              checked={showArchived}
+              onCheckedChange={setShowArchived}
+            />
+            <Label
+              htmlFor="show-archived-meds"
+              className="cursor-pointer text-xs font-semibold uppercase tracking-wide text-foreground"
+            >
+              Show archived requirements
+              {archivedCount > 0 && (
+                <span className="ml-1 rounded-full bg-warning px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  {archivedCount}
+                </span>
+              )}
+            </Label>
+          </div>
+          <Button onClick={onAdd} className="gap-1.5">
+            <Plus className="h-4 w-4" />
+            Add Scheduled Medication
+          </Button>
+        </div>
       </div>
 
       {error && (
@@ -272,10 +330,12 @@ function SchedulingTab({
         </div>
       )}
 
-      {active.length === 0 && !isLoading ? (
+      {visible.length === 0 && !isLoading ? (
         <div className="rounded-lg border border-dashed border-border py-10 text-center text-sm text-muted-foreground">
           <CalendarClock className="mx-auto mb-2 h-5 w-5" />
-          No scheduled medications yet.
+          {showArchived
+            ? "No scheduled medications on file."
+            : "No active medications. Toggle Show archived to view past configurations."}
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
@@ -286,15 +346,73 @@ function SchedulingTab({
                 <th className="px-4 py-2 font-medium">Dosage</th>
                 <th className="px-4 py-2 font-medium">Expected time</th>
                 <th className="px-4 py-2 font-medium">Frequency</th>
+                <th className="px-4 py-2 font-medium">Status</th>
+                <th className="px-4 py-2 text-right font-medium">Actions</th>
               </tr>
             </thead>
             <tbody>
-              {active.map((s) => (
-                <tr key={s.id} className="border-t border-border">
+              {visible.map((s) => (
+                <tr
+                  key={s.id}
+                  className={
+                    "border-t border-border " +
+                    (s.active ? "" : "bg-muted/30 text-muted-foreground")
+                  }
+                >
                   <td className="px-4 py-2 font-medium">{s.medicationName}</td>
                   <td className="px-4 py-2 text-muted-foreground">{s.dosage}</td>
                   <td className="px-4 py-2 tabular-nums">{s.expectedTime.slice(0, 5)}</td>
                   <td className="px-4 py-2 text-muted-foreground">{s.frequency}</td>
+                  <td className="px-4 py-2">
+                    <span
+                      className={
+                        s.active
+                          ? "rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+                          : "rounded-full bg-muted-foreground px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white"
+                      }
+                    >
+                      {s.active ? "Active" : "Archived"}
+                    </span>
+                  </td>
+                  <td className="px-4 py-2 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <Button
+                        size="sm"
+                        variant="ghost"
+                        className="gap-1"
+                        onClick={() => onEdit(s)}
+                        title="Edit this medication"
+                      >
+                        <Pencil className="h-3.5 w-3.5" />
+                        Edit
+                      </Button>
+                      {s.active ? (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="gap-1 text-destructive hover:text-destructive"
+                          onClick={() => onArchive(s)}
+                          disabled={archive.isPending}
+                          title="Archive (keeps history, sets active=false)"
+                        >
+                          <Archive className="h-3.5 w-3.5" />
+                          Archive
+                        </Button>
+                      ) : (
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="gap-1 text-primary hover:text-primary"
+                          onClick={() => onRestore(s)}
+                          disabled={restore.isPending}
+                          title="Restore (sets active=true)"
+                        >
+                          <ArchiveRestore className="h-3.5 w-3.5" />
+                          Restore
+                        </Button>
+                      )}
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -304,6 +422,7 @@ function SchedulingTab({
     </div>
   );
 }
+
 
 // ---------- History tab ----------
 
