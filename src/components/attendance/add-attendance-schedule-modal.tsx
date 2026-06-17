@@ -11,19 +11,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { LookupSelect } from "@/components/lookups/lookup-select";
-import {
-  LOOKUP_CATEGORIES,
-  WEEK_DAYS,
-  type WeekDay,
-} from "@/lib/data-store";
+import { LOOKUP_CATEGORIES, type WeekDay } from "@/lib/data-store";
 import { useInsertAttendanceSchedule } from "@/hooks/use-supabase-data";
 
 interface Props {
@@ -39,7 +28,8 @@ export function AddAttendanceScheduleModal({
   participantId,
   participantName,
 }: Props) {
-  const [dayOfWeek, setDayOfWeek] = useState<WeekDay>("Monday");
+  const [dayOfWeek, setDayOfWeek] = useState<string>("");
+  const [dayLabel, setDayLabel] = useState<string>("");
   const [serviceType, setServiceType] = useState("");
   const [transportRule, setTransportRule] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -47,12 +37,14 @@ export function AddAttendanceScheduleModal({
 
   useEffect(() => {
     if (!open) {
-      setDayOfWeek("Monday");
+      setDayOfWeek("");
+      setDayLabel("");
       setServiceType("");
       setTransportRule("");
       setDirty(false);
     }
   }, [open]);
+
 
   const valid =
     serviceType.trim().length > 0 && transportRule.trim().length > 0;
