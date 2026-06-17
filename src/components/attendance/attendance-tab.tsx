@@ -140,14 +140,20 @@ export function AttendanceTab({ participantId, participantName }: Props) {
               Actual attendance vs. expected service.
             </p>
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search dates, status, notes…"
-              className="h-9 pl-9"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search dates, status, notes…"
+                className="h-9 pl-9"
+              />
+            </div>
+            <Button onClick={() => setAbsenceOpen(true)} className="gap-1.5">
+              <CalendarOff className="h-4 w-4" />
+              Log Planned Absence / Sick Leave
+            </Button>
           </div>
         </div>
 
