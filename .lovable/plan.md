@@ -210,6 +210,33 @@ every screen, table, badge, toast, form field, and chart label.
   *and* the database (e.g. `AttendanceStatus`, `WeekDay`, sync states),
   IDDSI levels, and dev-only mocks behind a feature flag.
 
+### Canonical sorting law (global — applies to every module)
+
+This rule is **global and inherited automatically** by every current and
+future module — including Event Roster lists, Transport Run Sheets,
+Finance ledgers, and any new dropdown or table that touches lookups or
+weekly operating days. No module may opt out.
+
+- **Lookup queries**: every read through `LookupSelect` /
+  `useLookupParameters` / `listLookupParameters` MUST append
+  `.order('sort_order', { ascending: true })` by default, with
+  `display_name` as the tiebreaker. Administrators control display order
+  via the `sort_order` integer column in `system_lookup_parameters`.
+- **Calendar / weekly day fields** (Monday → Sunday): MUST sort
+  chronologically by the database integer weights
+  `1=Monday, 2=Tuesday, 3=Wednesday, 4=Thursday, 5=Friday, 6=Saturday,
+  7=Sunday`. Never alphabetical, never insertion order. Use
+  `dayChronoIndex()` from `src/lib/data-store.ts` as the canonical
+  client-side fallback whenever `sort_order` is null or absent.
+- Applies to: dropdowns (`<LookupSelect category="operating_days" />`),
+  data tables ("Operational Schedules", roster grids, run sheets), and
+  any aggregate view that groups by day-of-week.
+- Forbidden: `.order('display_name')` alone for `operating_days`,
+  `Array.prototype.sort()` with default lexicographic comparison on day
+  strings, and hand-rolled day arrays in component files.
+
+
+
 ### Roster exceptions (sick / cancelled days)
 
 - Temporary "not coming this week / called in sick" changes MUST NOT delete
