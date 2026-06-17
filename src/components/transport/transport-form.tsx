@@ -14,7 +14,15 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { insertTransportLog, type Participant, type TransportStatus, type NewTransportLog } from "@/lib/data-store";
+import {
+  insertSyncLog,
+  getDeviceUuid,
+  getStaffId,
+  type Participant,
+  type TransportStatus,
+  type TransportPayload,
+  type NewSyncLog,
+} from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useQueryClient } from "@tanstack/react-query";
@@ -28,6 +36,8 @@ const STATUSES: { value: TransportStatus; label: string; icon: typeof Check }[] 
   { value: "Arrived",  label: "Arrived",  icon: Check },
   { value: "No-show",  label: "No-show",  icon: X },
 ];
+
+export const TRANSPORT_ACTION = "transport_log";
 
 export function TransportForm({ participants }: Props) {
   const online = useOnlineStatus();
@@ -60,25 +70,32 @@ export function TransportForm({ participants }: Props) {
     e.preventDefault();
     if (!canSubmit) return;
     setSubmitting(true);
-    const payload: NewTransportLog = {
-      participantId,
-      pickupOdometer: Number(pickup),
-      dropoffOdometer: Number(dropoff),
-      passengerPresent: present,
+
+    const transportPayload: TransportPayload = {
+      participant_id: participantId,
+      pickup_odometer: Number(pickup),
+      dropoff_odometer: Number(dropoff),
+      passenger_present: present,
       status,
-      timestamp: new Date().toISOString(),
       notes,
+      timestamp: new Date().toISOString(),
+    };
+
+    const newLog: NewSyncLog = {
+      actionType: TRANSPORT_ACTION,
+      driverOrStaffId: getStaffId(),
+      deviceUuid: getDeviceUuid(),
+      payload: transportPayload as unknown as Record<string, unknown>,
     };
 
     if (online) {
       try {
-        await insertTransportLog(payload);
-        qc.invalidateQueries({ queryKey: ["transport_logs"] });
+        await insertSyncLog(newLog);
+        qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
         toast.success("Run saved", { description: "Synced to Yada Connect." });
         reset();
       } catch (err) {
-        // Network said online but write failed — queue for retry.
-        enqueue("transport_log", payload as unknown as Record<string, unknown>);
+        enqueue("transport_log", newLog as unknown as Record<string, unknown>);
         toast.warning("Saved offline", {
           description: `Will retry automatically. (${(err as Error).message})`,
         });
@@ -87,7 +104,7 @@ export function TransportForm({ participants }: Props) {
         setSubmitting(false);
       }
     } else {
-      enqueue("transport_log", payload as unknown as Record<string, unknown>);
+      enqueue("transport_log", newLog as unknown as Record<string, unknown>);
       toast.info("Queued offline", { description: "Will sync when back online." });
       reset();
       setSubmitting(false);
@@ -106,7 +123,7 @@ export function TransportForm({ participants }: Props) {
             <SelectContent>
               {participants.map((p) => (
                 <SelectItem key={p.id} value={p.id}>
-                  {p.fullName} <span className="text-muted-foreground">· {p.ndisId}</span>
+                  {p.fullName} <span className="text-muted-foreground">· {p.ndisNumber}</span>
                 </SelectItem>
               ))}
             </SelectContent>

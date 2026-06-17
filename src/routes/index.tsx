@@ -3,8 +3,9 @@ import { Users, Truck, RefreshCw, AlertTriangle, Plus, ArrowRight } from "lucide
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { useParticipants, useTransportLogs } from "@/hooks/use-supabase-data";
+import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
+import type { TransportPayload } from "@/lib/data-store";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -19,13 +20,17 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const { data: participants = [] } = useParticipants();
-  const { data: logs = [] } = useTransportLogs();
+  const { data: logs = [] } = useSyncLogs();
   const queue = useSyncQueue();
 
   const today = new Date().toDateString();
-  const todays = logs.filter((l) => new Date(l.timestamp).toDateString() === today);
+  const todaysTransport = logs
+    .filter((l) => l.actionType === "transport_log")
+    .map((l) => ({ l, t: l.payload as Partial<TransportPayload> }))
+    .filter(({ t }) => typeof t.timestamp === "string" && new Date(t.timestamp).toDateString() === today);
+
   const iddsiAlerts = participants.filter(
-    (p) => p.iddsi.liquids >= 3 || p.iddsi.foods <= 4 || p.flags.includes("Choking risk"),
+    (p) => p.iddsi.liquids >= 3 || p.iddsi.foods <= 4,
   );
 
   return (
@@ -42,8 +47,8 @@ function Dashboard() {
 
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4">
         <StatCard icon={Users}   label="Participants"  value={participants.length} to="/participants" />
-        <StatCard icon={Truck}   label="Runs today"    value={todays.length}       to="/transport" />
-        <StatCard icon={RefreshCw} label="In sync queue" value={queue.length}      to="/sync" />
+        <StatCard icon={Truck}   label="Runs today"    value={todaysTransport.length} to="/transport" />
+        <StatCard icon={RefreshCw} label="In sync queue" value={queue.length}        to="/sync" />
         <StatCard
           icon={AlertTriangle}
           label="IDDSI alerts"
@@ -61,25 +66,25 @@ function Dashboard() {
               <Link to="/transport">View all <ArrowRight className="h-3.5 w-3.5" /></Link>
             </Button>
           </div>
-          {todays.length === 0 ? (
+          {todaysTransport.length === 0 ? (
             <p className="rounded-md border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
               No runs logged yet today.
             </p>
           ) : (
             <ul className="divide-y divide-border">
-              {todays.slice(0, 5).map((log) => {
-                const p = participants.find((x) => x.id === log.participantId);
-                const km = log.dropoffOdometer - log.pickupOdometer;
+              {todaysTransport.slice(0, 5).map(({ l, t }) => {
+                const p = participants.find((x) => x.id === t.participant_id);
+                const km = (t.dropoff_odometer ?? 0) - (t.pickup_odometer ?? 0);
                 return (
-                  <li key={log.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
+                  <li key={l.id} className="flex items-center justify-between gap-3 py-3 first:pt-0 last:pb-0">
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{p?.fullName ?? "—"}</div>
                       <div className="text-xs text-muted-foreground tabular-nums">
-                        {new Date(log.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {km} km
+                        {new Date(t.timestamp!).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })} · {km} km
                       </div>
                     </div>
-                    <Badge variant={log.status === "Arrived" ? "default" : log.status === "No-show" ? "destructive" : "outline"}>
-                      {log.status}
+                    <Badge variant={t.status === "Arrived" ? "default" : t.status === "No-show" ? "destructive" : "outline"}>
+                      {t.status}
                     </Badge>
                   </li>
                 );
@@ -117,7 +122,6 @@ function Dashboard() {
                   <div className="truncate text-sm font-medium">{p.fullName}</div>
                   <div className="text-xs text-muted-foreground">
                     Liq L{p.iddsi.liquids} · Food L{p.iddsi.foods}
-                    {p.flags.length > 0 && <> · {p.flags.join(", ")}</>}
                   </div>
                 </div>
                 <Button asChild size="sm" variant="ghost">

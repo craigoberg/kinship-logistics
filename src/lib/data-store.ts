@@ -1,34 +1,51 @@
 // Live data layer backed by the external Supabase instance.
-// Read/write helpers map between snake_case columns and the camelCase shape
-// used by the UI. All functions are async; React components consume them via
-// TanStack Query hooks in src/hooks.
+// Strict mapping to the deployed Oceania (Sydney) schema — do not add columns
+// that aren't listed in the table definitions below.
+//
+// participants:
+//   id, first_name, last_name, ndis_number, iddsi_level_liquids,
+//   iddsi_level_solids, dual_witness_pin_hash, created_at, updated_at
+//
+// offline_sync_logs:
+//   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
+//   synced_at, created_at
 import { supabase } from "@/integrations/supabase/client";
 
 export interface Participant {
   id: string;
-  fullName: string;
-  ndisId: string;
-  dob: string;
+  firstName: string;
+  lastName: string;
+  fullName: string; // derived: `${firstName} ${lastName}`.trim()
+  ndisNumber: string;
   iddsi: { liquids: number; foods: number };
-  mobility: "Independent" | "Walking stick" | "Walking frame" | "Wheelchair";
-  allergies: string[];
-  flags: string[];
-  primaryContact: { name: string; relation: string; phone: string };
-  notes: string;
+  dualWitnessPinHash: string | null;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export type TransportStatus = "En route" | "Arrived" | "No-show";
 
-export interface TransportLog {
-  id: string;
-  participantId: string;
-  pickupOdometer: number;
-  dropoffOdometer: number;
-  passengerPresent: boolean;
+// JSONB payload shape persisted in offline_sync_logs.payload for transport
+// actions. Keep keys snake_case so they match what downstream consumers
+// (reports, BI) will see in the JSONB column.
+export interface TransportPayload {
+  participant_id: string;
+  pickup_odometer: number;
+  dropoff_odometer: number;
+  passenger_present: boolean;
   status: TransportStatus;
-  timestamp: string;
   notes: string;
-  syncedAt?: string | null;
+  timestamp: string;
+}
+
+export interface SyncLog {
+  id: string;
+  driverOrStaffId: string | null;
+  deviceUuid: string;
+  actionType: string;
+  payload: Record<string, unknown>;
+  syncedAt: string | null;
+  createdAt: string;
 }
 
 export type SyncItemType = "participant_update" | "transport_log" | "iddsi_change";
@@ -44,63 +61,76 @@ export interface SyncQueueItem {
   error?: string;
 }
 
+// ---------- device / staff identity ----------
+
+const DEVICE_KEY = "yada.deviceUuid.v1";
+const STAFF_KEY = "yada.staffId.v1";
+
+export function getDeviceUuid(): string {
+  if (typeof localStorage === "undefined") return "00000000-0000-0000-0000-000000000000";
+  let id = localStorage.getItem(DEVICE_KEY);
+  if (!id) {
+    id = crypto.randomUUID();
+    localStorage.setItem(DEVICE_KEY, id);
+  }
+  return id;
+}
+
+export function getStaffId(): string | null {
+  if (typeof localStorage === "undefined") return null;
+  return localStorage.getItem(STAFF_KEY);
+}
+
 // ---------- row mappers ----------
 
 interface ParticipantRow {
   id: string;
-  full_name: string;
-  ndis_id: string;
-  dob: string;
-  iddssi_level_liquids: number | null;
-  iddssi_level_solids: number | null;
-  mobility: Participant["mobility"];
-  allergies: string[] | null;
-  flags: string[] | null;
-  primary_contact: Participant["primaryContact"] | null;
-  notes: string | null;
+  first_name: string;
+  last_name: string;
+  ndis_number: string;
+  iddsi_level_liquids: number | null;
+  iddsi_level_solids: number | null;
+  dual_witness_pin_hash: string | null;
+  created_at: string;
+  updated_at: string;
 }
 
 function rowToParticipant(r: ParticipantRow): Participant {
   return {
     id: r.id,
-    fullName: r.full_name,
-    ndisId: r.ndis_id,
-    dob: r.dob,
+    firstName: r.first_name ?? "",
+    lastName: r.last_name ?? "",
+    fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+    ndisNumber: r.ndis_number,
     iddsi: {
-      liquids: r.iddssi_level_liquids ?? 0,
-      foods: r.iddssi_level_solids ?? 7,
+      liquids: r.iddsi_level_liquids ?? 0,
+      foods: r.iddsi_level_solids ?? 7,
     },
-    mobility: r.mobility,
-    allergies: r.allergies ?? [],
-    flags: r.flags ?? [],
-    primaryContact: r.primary_contact ?? { name: "", relation: "", phone: "" },
-    notes: r.notes ?? "",
+    dualWitnessPinHash: r.dual_witness_pin_hash,
+    createdAt: r.created_at,
+    updatedAt: r.updated_at,
   };
 }
 
-interface TransportRow {
+interface SyncLogRow {
   id: string;
-  participant_id: string;
-  pickup_odometer: number;
-  dropoff_odometer: number;
-  passenger_present: boolean;
-  status: TransportStatus;
-  timestamp: string;
-  notes: string | null;
+  driver_or_staff_id: string | null;
+  device_uuid: string;
+  action_type: string;
+  payload: Record<string, unknown> | null;
   synced_at: string | null;
+  created_at: string;
 }
 
-function rowToTransport(r: TransportRow): TransportLog {
+function rowToSyncLog(r: SyncLogRow): SyncLog {
   return {
     id: r.id,
-    participantId: r.participant_id,
-    pickupOdometer: r.pickup_odometer,
-    dropoffOdometer: r.dropoff_odometer,
-    passengerPresent: r.passenger_present,
-    status: r.status,
-    timestamp: r.timestamp,
-    notes: r.notes ?? "",
+    driverOrStaffId: r.driver_or_staff_id,
+    deviceUuid: r.device_uuid,
+    actionType: r.action_type,
+    payload: r.payload ?? {},
     syncedAt: r.synced_at,
+    createdAt: r.created_at,
   };
 }
 
@@ -110,28 +140,32 @@ export async function listParticipants(): Promise<Participant[]> {
   const { data, error } = await supabase
     .from("participants")
     .select("*")
-    .order("full_name", { ascending: true });
+    .order("last_name", { ascending: true });
   if (error) throw error;
   return (data ?? []).map(rowToParticipant);
 }
 
+export interface ParticipantPatch {
+  firstName?: string;
+  lastName?: string;
+  ndisNumber?: string;
+  iddsi?: { liquids: number; foods: number };
+  dualWitnessPinHash?: string | null;
+}
+
 export async function updateParticipant(
   id: string,
-  patch: Partial<Participant>,
+  patch: ParticipantPatch,
 ): Promise<Participant> {
   const row: Partial<ParticipantRow> = {};
-  if (patch.fullName !== undefined) row.full_name = patch.fullName;
-  if (patch.ndisId !== undefined) row.ndis_id = patch.ndisId;
-  if (patch.dob !== undefined) row.dob = patch.dob;
+  if (patch.firstName !== undefined) row.first_name = patch.firstName;
+  if (patch.lastName !== undefined) row.last_name = patch.lastName;
+  if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
   if (patch.iddsi !== undefined) {
-    row.iddssi_level_liquids = patch.iddsi.liquids;
-    row.iddssi_level_solids = patch.iddsi.foods;
+    row.iddsi_level_liquids = patch.iddsi.liquids;
+    row.iddsi_level_solids = patch.iddsi.foods;
   }
-  if (patch.mobility !== undefined) row.mobility = patch.mobility;
-  if (patch.allergies !== undefined) row.allergies = patch.allergies;
-  if (patch.flags !== undefined) row.flags = patch.flags;
-  if (patch.primaryContact !== undefined) row.primary_contact = patch.primaryContact;
-  if (patch.notes !== undefined) row.notes = patch.notes;
+  if (patch.dualWitnessPinHash !== undefined) row.dual_witness_pin_hash = patch.dualWitnessPinHash;
 
   const { data, error } = await supabase
     .from("participants")
@@ -143,42 +177,38 @@ export async function updateParticipant(
   return rowToParticipant(data as ParticipantRow);
 }
 
-// ---------- transport ----------
+// ---------- offline_sync_logs ----------
 
-export async function listTransportLogs(): Promise<TransportLog[]> {
+export async function listSyncLogs(): Promise<SyncLog[]> {
   const { data, error } = await supabase
     .from("offline_sync_logs")
     .select("*")
-    .order("timestamp", { ascending: false });
+    .order("created_at", { ascending: false })
+    .limit(200);
   if (error) throw error;
-  return (data ?? []).map(rowToTransport);
+  return (data ?? []).map(rowToSyncLog);
 }
 
-export interface NewTransportLog {
-  participantId: string;
-  pickupOdometer: number;
-  dropoffOdometer: number;
-  passengerPresent: boolean;
-  status: TransportStatus;
-  timestamp: string;
-  notes: string;
+export interface NewSyncLog {
+  actionType: string;
+  payload: Record<string, unknown>;
+  driverOrStaffId?: string | null;
+  deviceUuid?: string;
+  synced?: boolean;
 }
 
-export async function insertTransportLog(log: NewTransportLog): Promise<TransportLog> {
+export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
   const { data, error } = await supabase
     .from("offline_sync_logs")
     .insert({
-      participant_id: log.participantId,
-      pickup_odometer: log.pickupOdometer,
-      dropoff_odometer: log.dropoffOdometer,
-      passenger_present: log.passengerPresent,
-      status: log.status,
-      timestamp: log.timestamp,
-      notes: log.notes,
-      synced_at: new Date().toISOString(),
+      driver_or_staff_id: log.driverOrStaffId ?? getStaffId(),
+      device_uuid: log.deviceUuid ?? getDeviceUuid(),
+      action_type: log.actionType,
+      payload: log.payload,
+      synced_at: log.synced === false ? null : new Date().toISOString(),
     })
     .select("*")
     .single();
   if (error) throw error;
-  return rowToTransport(data as TransportRow);
+  return rowToSyncLog(data as SyncLogRow);
 }
