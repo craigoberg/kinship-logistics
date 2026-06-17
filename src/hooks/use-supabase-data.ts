@@ -437,6 +437,7 @@ import {
   recordEventPaymentMilestone,
   listEventLedger,
   listEventPaymentLedger,
+  listEventPaymentLedgerForEvent,
   insertEventLedger,
   type NewEvent,
   type UpdateEventInput,
@@ -621,6 +622,15 @@ export function useEventPaymentLedger(
     queryKey: ["event_payment_ledger", participantId, eventId],
     queryFn: () => listEventPaymentLedger(participantId as string, eventId as string),
     enabled: !!participantId && !!eventId,
+    staleTime: 15_000,
+  });
+}
+
+export function useEventPaymentLedgerForEvent(eventId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["event_payment_ledger", eventId],
+    queryFn: () => listEventPaymentLedgerForEvent(eventId as string),
+    enabled: !!eventId,
     staleTime: 15_000,
   });
 }
