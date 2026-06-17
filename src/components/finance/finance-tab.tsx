@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { useParticipantLedger } from "@/hooks/use-supabase-data";
 import { formatDate } from "@/lib/utils";
 import { LogLedgerEntryModal } from "./log-ledger-entry-modal";
+import { ParticipantRegisteredEvents } from "@/components/participants/participant-registered-events";
 
 interface Props {
   participantId: string;
@@ -164,6 +165,9 @@ export function FinanceTab({ participantId, participantName }: Props) {
           </table>
         </div>
       )}
+
+      <ParticipantRegisteredEvents participantId={participantId} />
+
 
       <LogLedgerEntryModal
         open={addOpen}

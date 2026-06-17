@@ -19,6 +19,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { Textarea } from "@/components/ui/textarea";
 
 import { useInsertEventBooking, useParticipants } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
@@ -33,6 +34,7 @@ interface Props {
 export function AddRosterBookingModal({ open, onOpenChange, event, existingBookings }: Props) {
   const [participantId, setParticipantId] = useState("");
   const [amountPaid, setAmountPaid] = useState("0.00");
+  const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -41,6 +43,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
     if (open) {
       setParticipantId("");
       setAmountPaid("0.00");
+      setNotes("");
       setDirty(false);
     }
   }, [open]);
@@ -70,6 +73,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bookingStatus: "Confirmed",
         amountPaid: paidNumber,
         ticketPrice: event.ticketPrice,
+        notes: notes.trim() || null,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
@@ -137,7 +141,20 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
               Marked <strong>Paid</strong> when amount ≥ ticket price.
             </p>
           </div>
-
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Notes / Billing arrangements
+            </Label>
+            <Textarea
+              rows={2}
+              value={notes}
+              placeholder="e.g. paying via plan manager; split with sibling…"
+              onChange={(e) => {
+                setNotes(e.target.value);
+                setDirty(true);
+              }}
+            />
+          </div>
         </div>
 
         <DialogFooter>

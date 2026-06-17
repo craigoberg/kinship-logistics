@@ -1,10 +1,12 @@
 import { useMemo, useState } from "react";
-import { Search, UserPlus, Users } from "lucide-react";
+import { CircleDollarSign, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { useEventBookings } from "@/hooks/use-supabase-data";
-import type { EventManifest } from "@/lib/data-store";
+import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
+import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 
 interface Props {
   event: EventManifest;
@@ -17,6 +19,7 @@ function fmtMoney(n: number): string {
 export function RosterTab({ event }: Props) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
 
   const filtered = useMemo(() => {
@@ -70,42 +73,85 @@ export function RosterTab({ event }: Props) {
         </div>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">Participant</th>
-                <th className="px-4 py-2 font-medium">Booking status</th>
-                <th className="px-4 py-2 text-right font-medium">Amount paid</th>
-                <th className="px-4 py-2 text-right font-medium">Balance</th>
-                <th className="px-4 py-2 text-right font-medium">Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((b) => {
-                const balance = event.ticketPrice - b.amountPaid;
-                return (
-                  <tr key={b.id} className="border-t border-border align-top">
-                    <td className="px-4 py-2 font-medium">{b.participantName}</td>
-                    <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
-                    <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                      ${fmtMoney(b.amountPaid)}
-                    </td>
-                    <td
-                      className={
-                        "px-4 py-2 text-right font-semibold tabular-nums " +
-                        (balance <= 0 ? "text-success" : "text-warning")
-                      }
-                    >
-                      ${fmtMoney(Math.max(0, balance))}
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <PaidBadge fullyPaid={b.isFullyPaid} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <TooltipProvider delayDuration={200}>
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Participant</th>
+                  <th className="px-4 py-2 font-medium">Booking status</th>
+                  <th className="px-4 py-2 text-right font-medium">Amount paid</th>
+                  <th className="px-4 py-2 text-right font-medium">Balance</th>
+                  <th className="px-4 py-2 text-right font-medium">Status</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((b) => {
+                  const balance = event.ticketPrice - b.amountPaid;
+                  const owes = balance > 0 && !b.isFullyPaid;
+                  return (
+                    <tr key={b.id} className="border-t border-border align-top">
+                      <td className="px-4 py-2">
+                        <div className="font-medium">
+                          {b.participantName}
+                          {b.notes && (
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <span className="ml-1.5 cursor-help text-[10px] uppercase tracking-wide text-info">
+                                  ⓘ
+                                </span>
+                              </TooltipTrigger>
+                              <TooltipContent className="max-w-xs">{b.notes}</TooltipContent>
+                            </Tooltip>
+                          )}
+                        </div>
+                        {b.notes && (
+                          <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
+                            “{b.notes}”
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
+                      <td className="px-4 py-2 text-right font-semibold tabular-nums">
+                        ${fmtMoney(b.amountPaid)}
+                      </td>
+                      <td
+                        className={
+                          "px-4 py-2 text-right font-semibold tabular-nums " +
+                          (balance <= 0 ? "text-success" : "text-warning")
+                        }
+                      >
+                        ${fmtMoney(Math.max(0, balance))}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <PaidBadge fullyPaid={b.isFullyPaid} />
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        {owes ? (
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                onClick={() => setMilestoneBooking(b)}
+                                className="h-7 w-7 text-success hover:text-success"
+                                aria-label="Record payment milestone"
+                              >
+                                <CircleDollarSign className="h-4 w-4" />
+                              </Button>
+                            </TooltipTrigger>
+                            <TooltipContent>Record Payment Milestone</TooltipContent>
+                          </Tooltip>
+                        ) : (
+                          <span className="text-xs text-muted-foreground">—</span>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </TooltipProvider>
         </div>
       )}
 
@@ -114,6 +160,13 @@ export function RosterTab({ event }: Props) {
         onOpenChange={setAddOpen}
         event={event}
         existingBookings={bookings}
+      />
+
+      <RecordPaymentMilestoneModal
+        open={milestoneBooking !== null}
+        onOpenChange={(o) => !o && setMilestoneBooking(null)}
+        event={event}
+        booking={milestoneBooking}
       />
     </div>
   );
