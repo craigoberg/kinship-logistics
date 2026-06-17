@@ -141,6 +141,8 @@ function Dashboard() {
           </ul>
         </Card>
       )}
+
+      <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} />
     </div>
   );
 }
