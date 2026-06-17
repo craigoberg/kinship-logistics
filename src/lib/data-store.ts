@@ -670,7 +670,8 @@ export interface LookupParameter {
   id: string;
   category: string;
   code: string;
-  label: string;
+  /** Human-readable label sourced from `display_name` in Supabase. */
+  displayName: string;
   sortOrder: number;
   active: boolean;
 }
@@ -679,7 +680,7 @@ interface LookupRow {
   id: string;
   category: string;
   code: string;
-  label: string;
+  display_name: string | null;
   sort_order: number | null;
   active: boolean | null;
 }
@@ -689,17 +690,17 @@ export async function listLookupParameters(
 ): Promise<LookupParameter[]> {
   const { data, error } = await supabase
     .from("system_lookup_parameters")
-    .select("id, category, code, label, sort_order, active")
+    .select("id, category, code, display_name, sort_order, active")
     .eq("category", category)
     .eq("active", true)
     .order("sort_order", { ascending: true })
-    .order("label", { ascending: true });
+    .order("display_name", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r: LookupRow) => ({
     id: r.id,
     category: r.category,
     code: r.code,
-    label: r.label,
+    displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? 0,
     active: r.active ?? true,
   }));
@@ -707,13 +708,14 @@ export async function listLookupParameters(
 
 /**
  * Canonical lookup categories used across the app. Add new strings here
- * before reading them so the grep surface is one file.
+ * before reading them so the grep surface is one file. Values match the
+ * `category` column in `system_lookup_parameters`.
  */
 export const LOOKUP_CATEGORIES = {
-  serviceType: "SERVICE_TYPE",
-  transportRule: "TRANSPORT_RULE",
-  transportOption: "TRANSPORT_OPTION",
-  financialCode: "FINANCIAL_CODE",
+  serviceType: "service_types",
+  transportRule: "transport_types",
+  transportOption: "transport_types",
+  financialCode: "financial_codes",
 } as const;
 
 // ---------- attendance_roster_logs writes ----------
