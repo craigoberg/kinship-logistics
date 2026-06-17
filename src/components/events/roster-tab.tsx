@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -8,6 +8,7 @@ import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
+import { BookingPaymentHistory } from "./booking-payment-history";
 
 interface Props {
   event: EventManifest;
