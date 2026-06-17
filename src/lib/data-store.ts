@@ -48,7 +48,37 @@ export interface SyncLog {
   createdAt: string;
 }
 
-export type SyncItemType = "participant_update" | "transport_log" | "iddsi_change";
+export type SyncItemType =
+  | "participant_update"
+  | "transport_log"
+  | "iddsi_change"
+  | "medication_log";
+
+export interface MedicationLogPayload {
+  participant_id: string;
+  action_performed: "MEDICATION_ADMIN";
+  witness_1_identity: string;
+  witness_2_identity: string;
+  timestamp: string;
+  metadata: {
+    medication_notes: string;
+    witness_1_pin_hash: string;
+    witness_2_pin_hash: string;
+    network_state: "online" | "offline";
+    device_uuid: string;
+  };
+}
+
+// Static staff directory used by the dual-witness sign-off selectors.
+// Persisted alongside the medication log as `witness_*_identity`.
+export const STAFF_DIRECTORY: Array<{ id: string; name: string; role: string }> = [
+  { id: "staff-001", name: "Sarah Chen", role: "Registered Nurse" },
+  { id: "staff-002", name: "Marcus Webb", role: "Care Coordinator" },
+  { id: "staff-003", name: "Priya Natarajan", role: "Senior Support Worker" },
+  { id: "staff-004", name: "Jordan Ellis", role: "Support Worker" },
+  { id: "staff-005", name: "Amelia Hart", role: "Clinical Lead" },
+  { id: "guardian-001", name: "Family Guardian (on-site)", role: "Guardian" },
+];
 export type SyncStatus = "pending" | "retrying" | "failed" | "synced";
 
 export interface SyncQueueItem {
