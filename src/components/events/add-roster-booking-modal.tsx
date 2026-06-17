@@ -73,6 +73,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bookingStatus: "Confirmed",
         amountPaid: paidNumber,
         ticketPrice: event.ticketPrice,
+        eventTitle: event.title,
         notes: notes.trim() || null,
       });
       toast.success("Participant added to roster");
@@ -138,7 +139,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
               className="tabular-nums"
             />
             <p className="text-[11px] text-muted-foreground">
-              Marked <strong>Paid</strong> when amount ≥ ticket price.
+              Initial funds are written to the payment ledger for this event.
             </p>
           </div>
           <div className="space-y-2">
