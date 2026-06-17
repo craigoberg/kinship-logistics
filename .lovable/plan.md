@@ -224,3 +224,23 @@ every screen, table, badge, toast, form field, and chart label.
   participant automatically reverts to the baseline next week — no cleanup
   job required.
 - Never write a "skip next occurrence" flag onto the schedule row.
+
+## 7. Tab Component Template (mandatory)
+
+All multi-step workflows and complex workspace views — including the
+Participant Master Profile, Event management, Transport, Finance, and any
+future module with more than two tabs — MUST use the shared
+`@/components/ui/tabs` primitives without overriding their structural
+classes.
+
+Rules:
+- The container scrolls horizontally (`overflow-x-auto`) and never wraps.
+- Tabs size to their content (`w-max`, `whitespace-nowrap`) — never apply
+  `grid grid-cols-*` or fixed widths to `TabsList`.
+- Inactive triggers: transparent background, high-contrast `text-foreground`.
+- Active triggers: solid teal `bg-tab-active` with `text-tab-active-foreground`
+  (defined in `src/styles.css` as `#00BCD4` / white).
+- Separation: gap-1.5 between triggers, `rounded-md` per trigger,
+  `rounded-lg` border around the list.
+
+Do not hand-roll alternative tab bars; extend this template instead.
