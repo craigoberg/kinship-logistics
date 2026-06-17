@@ -1231,7 +1231,9 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   if (!startIso) {
     throw new Error(`Invalid start_date: "${input.startDate}" (expected YYYY-MM-DD)`);
   }
-  const endIso = toIsoDate(input.endDate ?? null);
+  // end_date is NOT NULL in event_manifest — mirror start_date when the
+  // caller leaves it blank (single-day events).
+  const endIso = toIsoDate(input.endDate ?? null) ?? startIso;
 
   // Verified live schema on event_manifest:
   // title · event_type · venue_name · start_date · end_date · ticket_price · description
