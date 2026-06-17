@@ -214,7 +214,17 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
   );
 }
 
-function BalanceBadge({ fullyPaid, balance, bookingStatus }: { fullyPaid: boolean; balance: number; bookingStatus: string }) {
+function BalanceBadge({
+  baselineCost,
+  netLedgerSum,
+  trueBalance,
+  bookingStatus,
+}: {
+  baselineCost: number;
+  netLedgerSum: number;
+  trueBalance: number;
+  bookingStatus: string;
+}) {
   if (bookingStatus === "Cancelled") {
     return (
       <span className="rounded-full bg-slate-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -222,16 +232,26 @@ function BalanceBadge({ fullyPaid, balance, bookingStatus }: { fullyPaid: boolea
       </span>
     );
   }
-  if (fullyPaid || balance <= 0) {
+  const balanceCents = Math.round(trueBalance * 100);
+  const baselineCents = Math.round(baselineCost * 100);
+  const paidCents = Math.round(netLedgerSum * 100);
+  if (balanceCents <= 0) {
     return (
       <span className="rounded-full bg-success px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
         Paid
       </span>
     );
   }
+  if (balanceCents === baselineCents || paidCents <= 0) {
+    return (
+      <span className="rounded-full bg-destructive px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white">
+        Unpaid
+      </span>
+    );
+  }
   return (
     <span className="rounded-full bg-warning px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-white tabular-nums">
-      ${balance.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 })} due
+      Partial
     </span>
   );
 }
