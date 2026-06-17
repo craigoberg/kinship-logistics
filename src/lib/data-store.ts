@@ -1538,6 +1538,8 @@ export async function updateEventBooking(
     throw error;
   }
   return rowToBooking(data as BookingRow);
+}
+
 
 
 // ---------- event_financial_ledger ----------
