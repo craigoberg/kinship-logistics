@@ -38,6 +38,16 @@ export function useUpdateParticipant() {
   });
 }
 
+export function useInsertParticipant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewParticipant) => insertParticipant(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["participants"] });
+    },
+  });
+}
+
 export function useInsertSyncLog() {
   const qc = useQueryClient();
   return useMutation({
