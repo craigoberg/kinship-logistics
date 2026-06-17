@@ -1,4 +1,4 @@
-import { useCallback } from "react";
+import { useCallback, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import { useQueryClient } from "@tanstack/react-query";
 import {
@@ -9,6 +9,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { useLookupParameters, clearLookupCacheCategory } from "@/hooks/use-supabase-data";
+
 
 interface Props {
   /** `system_lookup_parameters.category` to query — e.g. `service_types`. */
