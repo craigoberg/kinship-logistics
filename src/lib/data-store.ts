@@ -1274,6 +1274,57 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
 }
 
 
+export interface UpdateEventInput {
+  id: string;
+  title: string;
+  eventTypeCode: string;
+  venue: string;
+  startDate: string;
+  endDate?: string | null;
+  ticketPrice: number;
+  description?: string | null;
+}
+
+export async function updateEvent(input: UpdateEventInput): Promise<EventManifest> {
+  const startIso = toIsoDate(input.startDate);
+  if (!startIso) {
+    throw new Error(`Invalid start_date: "${input.startDate}" (expected YYYY-MM-DD)`);
+  }
+  // Strict date-coercion rule: empty end_date mirrors start_date.
+  const endIso = toIsoDate(input.endDate ?? null) ?? startIso;
+
+  const payload = {
+    title: input.title,
+    event_type: input.eventTypeCode,
+    venue_name: input.venue,
+    start_date: startIso,
+    end_date: endIso,
+    ticket_price: input.ticketPrice,
+    description: input.description ?? null,
+  };
+
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .update(payload)
+    .eq("id", input.id)
+    .select("*")
+    .single();
+
+  if (error) {
+    console.error("[updateEvent] failed", { error, payload });
+    const parts = [
+      error.message,
+      error.details ? `details: ${error.details}` : null,
+      error.hint ? `hint: ${error.hint}` : null,
+      error.code ? `code: ${error.code}` : null,
+    ].filter(Boolean);
+    throw new Error(parts.join(" · "));
+  }
+
+  return rowToEvent(data as EventManifestRow);
+}
+
+
 // ---------- event_roster_bookings ----------
 
 export interface EventRosterBooking {
