@@ -108,7 +108,8 @@ export function ParticipantRegisteredEvents({ participantId }: Props) {
               </thead>
               <tbody>
                 {rows.map((r) => {
-                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, r.eventTicketPrice - r.amountPaid);
+                  const baselineCost = r.customPrice ?? r.eventTicketPrice;
+                  const balance = r.bookingStatus === "Cancelled" ? 0 : Math.max(0, baselineCost - r.amountPaid);
                   const owes = r.bookingStatus !== "Cancelled" && balance > 0 && !r.isFullyPaid;
                   return (
                     <tr key={r.id} className="border-t border-border align-top">
