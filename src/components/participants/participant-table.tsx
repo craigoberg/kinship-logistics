@@ -127,3 +127,16 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
     </div>
   );
 }
+
+function PendingBadge() {
+  return (
+    <span
+      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
+      title="System Notice: Scheduled Care Pending"
+    >
+      <AlertTriangle className="h-3 w-3" />
+      Scheduled Care Pending
+    </span>
+  );
+}
+
