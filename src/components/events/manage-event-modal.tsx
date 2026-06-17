@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Users, Wallet } from "lucide-react";
+import { Users, Wallet, Settings2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,7 @@ import { useLookupParameters } from "@/hooks/use-supabase-data";
 import type { EventManifest } from "@/lib/data-store";
 import { RosterTab } from "./roster-tab";
 import { EventFinanceTab } from "./event-finance-tab";
+import { EventDetailsTab } from "./event-details-tab";
 
 interface Props {
   event: EventManifest | null;
@@ -20,11 +21,12 @@ interface Props {
   onOpenChange: (open: boolean) => void;
 }
 
-type TabKey = "roster" | "finance";
+type TabKey = "roster" | "finance" | "details";
 
 const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = [
   { key: "roster", label: "Roster Management", icon: Users },
   { key: "finance", label: "Event Finance & P&L", icon: Wallet },
+  { key: "details", label: "Event Details & Config", icon: Settings2 },
 ];
 
 export function ManageEventModal({ event, open, onOpenChange }: Props) {
