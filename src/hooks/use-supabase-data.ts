@@ -11,6 +11,8 @@ import {
   listAttendanceLogs,
   insertAttendanceSchedule,
   updateAttendanceLog,
+  insertAttendanceLog,
+  listLookupParameters,
   insertSchedule,
   updateParticipant,
   insertParticipant,
@@ -21,8 +23,33 @@ import {
   type NewSyncLog,
   type NewSchedule,
   type NewAttendanceSchedule,
+  type NewAttendanceLog,
   type AttendanceLogPatch,
 } from "@/lib/data-store";
+
+/**
+ * Schema-driven dropdown source. Every operational selection list
+ * (service types, transport options, financial codes, …) MUST come through
+ * here — see `.lovable/plan.md` §6.
+ */
+export function useLookupParameters(category: string | null | undefined) {
+  return useQuery({
+    queryKey: ["system_lookup_parameters", category],
+    queryFn: () => listLookupParameters(category as string),
+    enabled: !!category,
+    staleTime: 5 * 60_000,
+  });
+}
+
+export function useInsertAttendanceLog() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: NewAttendanceLog) => insertAttendanceLog(input),
+    onSuccess: (_, vars) => {
+      qc.invalidateQueries({ queryKey: ["attendance_logs", vars.participantId] });
+    },
+  });
+}
 
 export function useAttendanceSchedules(participantId: string | null | undefined) {
   return useQuery({
