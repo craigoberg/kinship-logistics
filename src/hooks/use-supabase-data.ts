@@ -509,6 +509,30 @@ export function useInsertEvent() {
   });
 }
 
+export function useUpdateEvent() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateEventInput) => updateEvent(input),
+    onSuccess: async () => {
+      qc.removeQueries({ queryKey: ["event_manifest"] });
+      qc.removeQueries({ queryKey: ["events"] });
+      await Promise.all([
+        qc.invalidateQueries({ queryKey: ["event_manifest"] }),
+        qc.invalidateQueries({ queryKey: ["events"] }),
+        qc.refetchQueries({ queryKey: ["events"] }),
+        qc.refetchQueries({ queryKey: ["event_manifest"] }),
+      ]);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update event", {
+        description: err.message,
+        duration: 12000,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
+    },
+  });
+}
+
 export function useInsertEventBooking() {
   const qc = useQueryClient();
   const online = useOnlineStatus();
