@@ -664,7 +664,7 @@ export interface AttendanceSyncPayload {
 // financial codes, etc.) MUST hydrate from this table. Hardcoded string
 // arrays in components are forbidden — see `.lovable/plan.md` §6.
 //
-//   id, category, code, label, sort_order, active
+//   id, category, code, display_name
 
 export interface LookupParameter {
   id: string;
@@ -672,8 +672,6 @@ export interface LookupParameter {
   code: string;
   /** Human-readable label sourced from `display_name` in Supabase. */
   displayName: string;
-  sortOrder: number;
-  active: boolean;
 }
 
 interface LookupRow {
@@ -681,8 +679,6 @@ interface LookupRow {
   category: string;
   code: string;
   display_name: string | null;
-  sort_order: number | null;
-  active: boolean | null;
 }
 
 export async function listLookupParameters(
@@ -690,10 +686,8 @@ export async function listLookupParameters(
 ): Promise<LookupParameter[]> {
   const { data, error } = await supabase
     .from("system_lookup_parameters")
-    .select("id, category, code, display_name, sort_order, active")
+    .select("id, category, code, display_name")
     .eq("category", category)
-    .eq("active", true)
-    .order("sort_order", { ascending: true })
     .order("display_name", { ascending: true });
   if (error) throw error;
   return (data ?? []).map((r: LookupRow) => ({
@@ -701,8 +695,6 @@ export async function listLookupParameters(
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
-    sortOrder: r.sort_order ?? 0,
-    active: r.active ?? true,
   }));
 }
 
