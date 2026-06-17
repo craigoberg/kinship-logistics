@@ -47,20 +47,23 @@ export function AddAttendanceScheduleModal({
 
 
   const valid =
-    serviceType.trim().length > 0 && transportRule.trim().length > 0;
+    dayOfWeek.length > 0 &&
+    serviceType.trim().length > 0 &&
+    transportRule.trim().length > 0;
   const canSubmit = dirty && valid && !mutation.isPending;
+  const dayDisplay = dayLabel || dayOfWeek;
 
   const submit = async () => {
     if (!canSubmit) return;
     try {
       await mutation.mutateAsync({
         participantId,
-        dayOfWeek,
+        dayOfWeek: dayOfWeek as WeekDay,
         serviceType: serviceType.trim(),
         transportRule: transportRule.trim(),
       });
       toast.success("Operational schedule added", {
-        description: `${dayOfWeek} · ${serviceType.trim()} for ${participantName}.`,
+        description: `${dayDisplay} · ${serviceType.trim()} for ${participantName}.`,
       });
       onOpenChange(false);
     } catch (err) {
@@ -85,25 +88,18 @@ export function AddAttendanceScheduleModal({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Day of week
             </Label>
-            <Select
+            <LookupSelect
+              category={LOOKUP_CATEGORIES.operatingDay}
               value={dayOfWeek}
-              onValueChange={(v) => {
-                setDayOfWeek(v as WeekDay);
+              onChange={(code, displayName) => {
+                setDayOfWeek(code);
+                setDayLabel(displayName);
                 setDirty(true);
               }}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select day" />
-              </SelectTrigger>
-              <SelectContent>
-                {WEEK_DAYS.map((d) => (
-                  <SelectItem key={d} value={d}>
-                    {d}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+              placeholder="Select day"
+            />
           </div>
+
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
