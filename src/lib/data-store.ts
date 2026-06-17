@@ -275,3 +275,26 @@ export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
   if (error) throw error;
   return rowToSyncLog(data as SyncLogRow);
 }
+
+// ---------- compliance_audit_logs ----------
+
+export async function insertComplianceLog(payload: MedicationLogPayload): Promise<void> {
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: payload.participant_id,
+    action_performed: payload.action_performed,
+    witness_1_identity: payload.witness_1_identity,
+    witness_2_identity: payload.witness_2_identity,
+    timestamp: payload.timestamp,
+    metadata: payload.metadata,
+  });
+  if (error) throw error;
+}
+
+/** SHA-256 hash → hex (browser only). Never store the raw PIN. */
+export async function hashPin(pin: string): Promise<string> {
+  if (typeof crypto === "undefined" || !crypto.subtle) return `plain:${pin}`;
+  const buf = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pin));
+  return Array.from(new Uint8Array(buf))
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("");
+}
