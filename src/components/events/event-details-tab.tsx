@@ -75,6 +75,7 @@ export function EventDetailsTab({ event, onSuccess }: Props) {
         description: description.trim() || null,
       });
       toast.success("Event logistics updated", { description: title.trim() });
+      onSuccess?.();
     } catch {
       /* surfaced via mutation.onError */
     }

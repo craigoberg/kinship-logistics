@@ -94,7 +94,13 @@ export function ManageEventModal({ event, open, onOpenChange }: Props) {
           ) : tab === "finance" ? (
             <EventFinanceTab event={event} />
           ) : (
-            <EventDetailsTab event={event} />
+            <EventDetailsTab
+              event={event}
+              onSuccess={() => {
+                setTab("roster");
+                onOpenChange(false);
+              }}
+            />
           )}
         </div>
       </DialogContent>
