@@ -31,15 +31,51 @@ import {
  * Schema-driven dropdown source. Every operational selection list
  * (service types, transport options, financial codes, …) MUST come through
  * here — see `.lovable/plan.md` §6.
+ *
+ * Offline-safe: results are mirrored to localStorage so the dropdown can
+ * still render its last-known options when the device drops connection.
  */
+const LOOKUP_CACHE_PREFIX = "yc:lookup:";
+
+function readLookupCache(category: string) {
+  if (typeof window === "undefined") return undefined;
+  try {
+    const raw = window.localStorage.getItem(LOOKUP_CACHE_PREFIX + category);
+    if (!raw) return undefined;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function writeLookupCache(category: string, value: unknown) {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(
+      LOOKUP_CACHE_PREFIX + category,
+      JSON.stringify(value),
+    );
+  } catch {
+    /* quota or private-mode — non-fatal */
+  }
+}
+
 export function useLookupParameters(category: string | null | undefined) {
   return useQuery({
     queryKey: ["system_lookup_parameters", category],
-    queryFn: () => listLookupParameters(category as string),
+    queryFn: async () => {
+      const rows = await listLookupParameters(category as string);
+      writeLookupCache(category as string, rows);
+      return rows;
+    },
     enabled: !!category,
     staleTime: 5 * 60_000,
+    placeholderData: category ? readLookupCache(category) : undefined,
+    retry: 1,
   });
 }
+
 
 export function useInsertAttendanceLog() {
   const qc = useQueryClient();

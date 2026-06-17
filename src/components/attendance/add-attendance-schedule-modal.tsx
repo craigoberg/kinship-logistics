@@ -120,8 +120,8 @@ export function AddAttendanceScheduleModal({
             <LookupSelect
               category={LOOKUP_CATEGORIES.serviceType}
               value={serviceType}
-              onChange={(label) => {
-                setServiceType(label);
+              onChange={(code) => {
+                setServiceType(code);
                 setDirty(true);
               }}
               placeholder="Select service type"
@@ -130,16 +130,16 @@ export function AddAttendanceScheduleModal({
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Transport rule
+              Transport required
             </Label>
             <LookupSelect
               category={LOOKUP_CATEGORIES.transportRule}
               value={transportRule}
-              onChange={(label) => {
-                setTransportRule(label);
+              onChange={(code) => {
+                setTransportRule(code);
                 setDirty(true);
               }}
-              placeholder="Select transport rule"
+              placeholder="Select transport option"
             />
           </div>
         </div>

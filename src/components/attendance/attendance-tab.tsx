@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { Plus, Pencil, CalendarDays, CalendarX, ClipboardList, Search } from "lucide-react";
+import { Plus, Pencil, CalendarDays, CalendarX, CalendarOff, ClipboardList, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -11,6 +11,7 @@ import type { AttendanceLog, AttendanceSchedule } from "@/lib/data-store";
 import { AddAttendanceScheduleModal } from "./add-attendance-schedule-modal";
 import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
+import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
 
 interface Props {
@@ -24,6 +25,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [exceptionSchedule, setExceptionSchedule] = useState<AttendanceSchedule | null>(null);
   const [exceptionOpen, setExceptionOpen] = useState(false);
+  const [absenceOpen, setAbsenceOpen] = useState(false);
   const [query, setQuery] = useState("");
 
   const schedulesQ = useAttendanceSchedules(participantId);
@@ -138,14 +140,20 @@ export function AttendanceTab({ participantId, participantName }: Props) {
               Actual attendance vs. expected service.
             </p>
           </div>
-          <div className="relative w-full sm:w-72">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Search dates, status, notes…"
-              className="h-9 pl-9"
-            />
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative w-full sm:w-72">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Search dates, status, notes…"
+                className="h-9 pl-9"
+              />
+            </div>
+            <Button onClick={() => setAbsenceOpen(true)} className="gap-1.5">
+              <CalendarOff className="h-4 w-4" />
+              Log Planned Absence / Sick Leave
+            </Button>
           </div>
         </div>
 
@@ -236,6 +244,12 @@ export function AttendanceTab({ participantId, participantName }: Props) {
           if (!o) setExceptionSchedule(null);
         }}
         schedule={exceptionSchedule}
+        participantName={participantName}
+      />
+      <LogPlannedAbsenceModal
+        open={absenceOpen}
+        onOpenChange={setAbsenceOpen}
+        participantId={participantId}
         participantName={participantName}
       />
     </div>
