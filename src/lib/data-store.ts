@@ -264,13 +264,20 @@ export interface NewSyncLog {
 }
 
 export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
+  // Hard guard: action_type is NOT NULL on offline_sync_logs. Refuse a
+  // malformed envelope here instead of letting Postgres return 400 and
+  // poison whichever transaction triggered the background log.
+  const actionType = (log.actionType ?? "").trim();
+  if (!actionType) {
+    throw new Error("insertSyncLog: actionType is required (offline_sync_logs.action_type NOT NULL).");
+  }
   const { data, error } = await supabase
     .from("offline_sync_logs")
     .insert({
       driver_or_staff_id: log.driverOrStaffId || getStaffId() || DEFAULT_STAFF_UUID,
       device_uuid: log.deviceUuid || getDeviceUuid() || DEFAULT_DEVICE_UUID,
-      action_type: log.actionType,
-      payload: log.payload,
+      action_type: actionType,
+      payload: log.payload ?? {},
       synced_at: log.synced === false ? null : new Date().toISOString(),
     })
     .select("*")
