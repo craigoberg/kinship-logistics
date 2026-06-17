@@ -802,3 +802,90 @@ export function resolveDailyRoster(
     };
   });
 }
+
+// ---------- participant_financial_ledger ----------
+//
+// Running NDIS / fee statement per participant. Positive amounts are
+// charges raised against the participant; negative amounts are payments,
+// credits, or reconciliations against earlier charges.
+//
+//   id, participant_id, transaction_date, financial_code, description,
+//   amount (numeric), is_reconciled (bool), created_at
+
+export interface LedgerEntry {
+  id: string;
+  participantId: string;
+  transactionDate: string;      // YYYY-MM-DD
+  financialCode: string;
+  description: string;
+  amount: number;
+  isReconciled: boolean;
+  createdAt: string;
+}
+
+interface LedgerRow {
+  id: string;
+  participant_id: string;
+  transaction_date: string;
+  financial_code: string;
+  description: string | null;
+  amount: number | string;
+  is_reconciled: boolean | null;
+  created_at: string;
+}
+
+function rowToLedgerEntry(r: LedgerRow): LedgerEntry {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    transactionDate: r.transaction_date,
+    financialCode: r.financial_code,
+    description: r.description ?? "",
+    amount: typeof r.amount === "string" ? Number(r.amount) : r.amount,
+    isReconciled: r.is_reconciled ?? false,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listLedgerForParticipant(
+  participantId: string,
+): Promise<LedgerEntry[]> {
+  const { data, error } = await supabase
+    .from("participant_financial_ledger")
+    .select(
+      "id, participant_id, transaction_date, financial_code, description, amount, is_reconciled, created_at",
+    )
+    .eq("participant_id", participantId)
+    .order("transaction_date", { ascending: false })
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToLedgerEntry(r as LedgerRow));
+}
+
+export interface NewLedgerEntry {
+  participantId: string;
+  transactionDate: string;
+  financialCode: string;
+  description: string;
+  amount: number;
+  isReconciled?: boolean;
+}
+
+export async function insertLedgerEntry(
+  input: NewLedgerEntry,
+): Promise<LedgerEntry> {
+  const { data, error } = await supabase
+    .from("participant_financial_ledger")
+    .insert({
+      participant_id: input.participantId,
+      transaction_date: input.transactionDate,
+      financial_code: input.financialCode,
+      description: input.description,
+      amount: input.amount,
+      is_reconciled: input.isReconciled ?? false,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToLedgerEntry(data as LedgerRow);
+}
