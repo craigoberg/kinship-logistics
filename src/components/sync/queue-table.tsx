@@ -3,6 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Card } from "@/components/ui/card";
 import { retry, discard } from "@/lib/sync-queue";
+import { useParticipants } from "@/hooks/use-supabase-data";
 import type { SyncQueueItem } from "@/lib/data-store";
 
 const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
@@ -10,6 +11,14 @@ const TYPE_LABEL: Record<SyncQueueItem["type"], string> = {
   transport_log: "Transport log",
   iddsi_change: "IDDSI change",
 };
+
+function extractParticipantId(item: SyncQueueItem): string | undefined {
+  const p = item.payload as Record<string, unknown> | undefined;
+  if (!p) return undefined;
+  if (typeof p.participant_id === "string") return p.participant_id;
+  if (typeof p.id === "string") return p.id;
+  return undefined;
+}
 
 export function QueueTable({ items }: { items: SyncQueueItem[] }) {
   if (items.length === 0) {
