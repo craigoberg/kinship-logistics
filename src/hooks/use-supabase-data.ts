@@ -629,12 +629,17 @@ export function useUpdateEventBooking() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: UpdateBookingInput) => updateEventBooking(input),
-    onSuccess: (booking) => {
+    onSuccess: ({ booking }, vars) => {
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", booking.eventId] });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", booking.participantId] });
+      qc.invalidateQueries({ queryKey: ["event_payment_ledger", booking.participantId, booking.eventId] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", booking.participantId] });
+      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      qc.invalidateQueries({ queryKey: ["event_financial_ledger", booking.eventId] });
       qc.invalidateQueries({ queryKey: ["event_manifest"] });
       qc.invalidateQueries({ queryKey: ["events"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
+      void vars;
     },
     onError: (err: Error) => {
       toast.error("Database rejected booking update", {
