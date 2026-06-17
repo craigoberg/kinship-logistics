@@ -433,6 +433,7 @@ import {
   listEventBookings,
   listEventBookingsForParticipant,
   insertEventBooking,
+  updateEventBooking,
   recordEventPaymentMilestone,
   listEventLedger,
   insertEventLedger,
@@ -441,6 +442,7 @@ import {
   type NewEventBooking,
   type NewEventLedger,
   type PaymentMilestoneInput,
+  type UpdateBookingInput,
 } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
