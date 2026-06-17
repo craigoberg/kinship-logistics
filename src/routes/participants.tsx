@@ -1,10 +1,11 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
-import { UserPlus } from "lucide-react";
+import { ShieldCheck, UserPlus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
+import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { useParticipants } from "@/hooks/use-supabase-data";
 import type { Participant } from "@/lib/data-store";
 
