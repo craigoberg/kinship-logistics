@@ -1540,6 +1540,31 @@ export async function updateEventBooking(
   return rowToBooking(data as BookingRow);
 }
 
+// ---------- per-participant per-event payment history ----------
+//
+// participant_financial_ledger has no event_id FK in the live schema;
+// recordEventPaymentMilestone tags each milestone with the marker
+// "[event:<eventId>]" inside the description. We filter on that marker.
+
+export async function listEventPaymentLedger(
+  participantId: string,
+  eventId: string,
+): Promise<LedgerEntry[]> {
+  const marker = `%[event:${eventId}]%`;
+  const { data, error } = await supabase
+    .from("participant_financial_ledger")
+    .select(
+      "id, participant_id, transaction_date, financial_code, description, amount, is_reconciled, created_at",
+    )
+    .eq("participant_id", participantId)
+    .ilike("description", marker)
+    .order("transaction_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToLedgerEntry(r as LedgerRow));
+}
+
+
 
 
 // ---------- event_financial_ledger ----------
