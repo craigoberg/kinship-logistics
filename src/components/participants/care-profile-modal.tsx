@@ -60,6 +60,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
+  const [editMedSchedule, setEditMedSchedule] = useState<MedicationSchedule | null>(null);
+  const [editMedOpen, setEditMedOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
   const online = useOnlineStatus();
   const updateMutation = useUpdateParticipant();
