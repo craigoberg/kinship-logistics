@@ -66,19 +66,26 @@ export interface SyncQueueItem {
 const DEVICE_KEY = "yada.deviceUuid.v1";
 const STAFF_KEY = "yada.staffId.v1";
 
+export const DEFAULT_STAFF_UUID = "00000000-0000-0000-0000-000000000000";
+export const DEFAULT_DEVICE_UUID = "browser-client";
+
 export function getDeviceUuid(): string {
-  if (typeof localStorage === "undefined") return "00000000-0000-0000-0000-000000000000";
+  if (typeof localStorage === "undefined") return DEFAULT_DEVICE_UUID;
   let id = localStorage.getItem(DEVICE_KEY);
   if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_KEY, id);
+    try {
+      id = crypto.randomUUID();
+      localStorage.setItem(DEVICE_KEY, id);
+    } catch {
+      return DEFAULT_DEVICE_UUID;
+    }
   }
-  return id;
+  return id || DEFAULT_DEVICE_UUID;
 }
 
-export function getStaffId(): string | null {
-  if (typeof localStorage === "undefined") return null;
-  return localStorage.getItem(STAFF_KEY);
+export function getStaffId(): string {
+  if (typeof localStorage === "undefined") return DEFAULT_STAFF_UUID;
+  return localStorage.getItem(STAFF_KEY) || DEFAULT_STAFF_UUID;
 }
 
 // ---------- row mappers ----------
@@ -227,8 +234,8 @@ export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
   const { data, error } = await supabase
     .from("offline_sync_logs")
     .insert({
-      driver_or_staff_id: log.driverOrStaffId ?? getStaffId(),
-      device_uuid: log.deviceUuid ?? getDeviceUuid(),
+      driver_or_staff_id: log.driverOrStaffId || getStaffId() || DEFAULT_STAFF_UUID,
+      device_uuid: log.deviceUuid || getDeviceUuid() || DEFAULT_DEVICE_UUID,
       action_type: log.actionType,
       payload: log.payload,
       synced_at: log.synced === false ? null : new Date().toISOString(),
