@@ -26,6 +26,7 @@ import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { ScheduledMedicationModal } from "@/components/medication/scheduled-medication-modal";
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
+import { FinanceTab } from "@/components/finance/finance-tab";
 import { toast } from "sonner";
 
 interface Props {
