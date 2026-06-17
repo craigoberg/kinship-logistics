@@ -698,6 +698,38 @@ export async function listLookupParameters(
   }));
 }
 
+export async function insertLookupParameter(input: {
+  category: string;
+  code: string;
+  displayName: string;
+}): Promise<LookupParameter> {
+  const { data, error } = await supabase
+    .from("system_lookup_parameters")
+    .insert({
+      category: input.category,
+      code: input.code,
+      display_name: input.displayName,
+    })
+    .select("id, category, code, display_name")
+    .single();
+  if (error) throw error;
+  const r = data as LookupRow;
+  return {
+    id: r.id,
+    category: r.category,
+    code: r.code,
+    displayName: r.display_name ?? r.code,
+  };
+}
+
+export async function deleteLookupParameter(id: string): Promise<void> {
+  const { error } = await supabase
+    .from("system_lookup_parameters")
+    .delete()
+    .eq("id", id);
+  if (error) throw error;
+}
+
 /**
  * Canonical lookup categories used across the app. Add new strings here
  * before reading them so the grep surface is one file. Values match the
@@ -708,7 +740,42 @@ export const LOOKUP_CATEGORIES = {
   transportRule: "transport_types",
   transportOption: "transport_types",
   financialCode: "financial_codes",
+  operatingDay: "operating_days",
 } as const;
+
+/**
+ * Surface every category in the Admin Configuration workspace so coordinators
+ * can toggle entries (e.g. Saturday / Sunday under `operating_days`) globally.
+ */
+export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
+  category: string;
+  label: string;
+  description: string;
+}> = [
+  {
+    category: LOOKUP_CATEGORIES.operatingDay,
+    label: "Operating days",
+    description:
+      "Calendar days the centre operates. Add Saturday/Sunday to open weekend rosters.",
+  },
+  {
+    category: LOOKUP_CATEGORIES.serviceType,
+    label: "Service types",
+    description: "Programmes offered (Centre Day Care, Community Access, …).",
+  },
+  {
+    category: LOOKUP_CATEGORIES.transportRule,
+    label: "Transport types",
+    description: "Transport options drivers can attach to a schedule.",
+  },
+  {
+    category: LOOKUP_CATEGORIES.financialCode,
+    label: "Financial codes",
+    description: "Billable item codes used in the ledger module.",
+  },
+];
+
+
 
 // ---------- attendance_roster_logs writes ----------
 

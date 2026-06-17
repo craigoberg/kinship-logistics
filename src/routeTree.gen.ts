@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransportRouteImport } from './routes/transport'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as ParticipantsRouteImport } from './routes/participants'
+import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 
 const TransportRoute = TransportRouteImport.update({
@@ -29,6 +30,11 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
   path: '/participants',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminRoute = AdminRouteImport.update({
+  id: '/admin',
+  path: '/admin',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const IndexRoute = IndexRouteImport.update({
   id: '/',
   path: '/',
@@ -37,12 +43,14 @@ const IndexRoute = IndexRouteImport.update({
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/participants': typeof ParticipantsRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/participants': typeof ParticipantsRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
@@ -50,20 +58,22 @@ export interface FileRoutesByTo {
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
+  '/admin': typeof AdminRoute
   '/participants': typeof ParticipantsRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/participants' | '/sync' | '/transport'
+  fullPaths: '/' | '/admin' | '/participants' | '/sync' | '/transport'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/participants' | '/sync' | '/transport'
-  id: '__root__' | '/' | '/participants' | '/sync' | '/transport'
+  to: '/' | '/admin' | '/participants' | '/sync' | '/transport'
+  id: '__root__' | '/' | '/admin' | '/participants' | '/sync' | '/transport'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
+  AdminRoute: typeof AdminRoute
   ParticipantsRoute: typeof ParticipantsRoute
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
@@ -92,6 +102,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParticipantsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/admin': {
+      id: '/admin'
+      path: '/admin'
+      fullPath: '/admin'
+      preLoaderRoute: typeof AdminRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/': {
       id: '/'
       path: '/'
@@ -104,6 +121,7 @@ declare module '@tanstack/react-router' {
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
+  AdminRoute: AdminRoute,
   ParticipantsRoute: ParticipantsRoute,
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,
