@@ -111,11 +111,12 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           </DialogHeader>
 
           <Tabs defaultValue="profile" className="mt-2">
-            <TabsList className="grid w-full grid-cols-4">
+            <TabsList className="grid w-full grid-cols-5">
               <TabsTrigger value="profile">Care Profile</TabsTrigger>
               <TabsTrigger value="scheduling">Medication Scheduling</TabsTrigger>
               <TabsTrigger value="history">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance">Schedules &amp; Attendance</TabsTrigger>
+              <TabsTrigger value="finance">Finance &amp; Ledger</TabsTrigger>
             </TabsList>
 
             {/* TAB 1 — Care Profile */}
