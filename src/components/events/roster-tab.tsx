@@ -3,7 +3,7 @@ import { ChevronDown, ChevronRight, CircleDollarSign, Pencil, Search, UserPlus, 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useEventBookings } from "@/hooks/use-supabase-data";
+import { useEventBookings, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
@@ -25,6 +25,16 @@ export function RosterTab({ event }: Props) {
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+  const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
+
+  const ledgerTotalsByParticipant = useMemo(() => {
+    const totals = new Map<string, number>();
+    for (const entry of paymentLedger) {
+      const next = (totals.get(entry.participantId) ?? 0) + entry.amount;
+      totals.set(entry.participantId, Number(next.toFixed(2)));
+    }
+    return totals;
+  }, [paymentLedger]);
 
   const toggleExpanded = (id: string) => {
     setExpanded((prev) => {
@@ -39,12 +49,32 @@ export function RosterTab({ event }: Props) {
     const n = query.trim().toLowerCase();
     if (!n) return bookings;
     return bookings.filter((b) =>
-      [b.participantName, b.bookingStatus, b.amountPaid.toFixed(2), b.isFullyPaid ? "paid" : "partial unpaid"]
+      [
+        b.participantName,
+        b.bookingStatus,
+        (ledgerTotalsByParticipant.get(b.participantId) ?? 0).toFixed(2),
+      ]
         .join(" ")
         .toLowerCase()
         .includes(n),
     );
-  }, [bookings, query]);
+  }, [bookings, ledgerTotalsByParticipant, query]);
+
+  const milestoneBookingWithLedger = useMemo(() => {
+    if (!milestoneBooking) return null;
+    const netLedgerSum = ledgerTotalsByParticipant.get(milestoneBooking.participantId) ?? 0;
+    const baselineCost = milestoneBooking.customPrice ?? event.ticketPrice;
+    const trueBalance = milestoneBooking.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    return { ...milestoneBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
+  }, [event.ticketPrice, ledgerTotalsByParticipant, milestoneBooking]);
+
+  const editBookingWithLedger = useMemo(() => {
+    if (!editBooking) return null;
+    const netLedgerSum = ledgerTotalsByParticipant.get(editBooking.participantId) ?? 0;
+    const baselineCost = editBooking.customPrice ?? event.ticketPrice;
+    const trueBalance = editBooking.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    return { ...editBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
+  }, [editBooking, event.ticketPrice, ledgerTotalsByParticipant]);
 
   return (
     <div className="space-y-4">
