@@ -815,7 +815,13 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     label: "Financial codes",
     description: "Billable item codes used in the ledger module.",
   },
+  {
+    category: LOOKUP_CATEGORIES.eventType,
+    label: "Event types",
+    description: "Categories powering the Event Management dashboard (Fundraiser, Workshop, …).",
+  },
 ];
+
 
 
 
