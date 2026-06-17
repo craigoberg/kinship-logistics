@@ -261,13 +261,13 @@ export function RosterTab({ event }: Props) {
         open={milestoneBooking !== null}
         onOpenChange={(o) => !o && setMilestoneBooking(null)}
         event={event}
-        booking={milestoneBooking}
+        booking={milestoneBookingWithLedger}
       />
 
       <EditRosterBookingModal
         open={editBooking !== null}
         onOpenChange={(o) => !o && setEditBooking(null)}
-        booking={editBooking}
+        booking={editBookingWithLedger}
         eventTitle={event.title}
         eventTicketPrice={event.ticketPrice}
       />
@@ -275,7 +275,17 @@ export function RosterTab({ event }: Props) {
   );
 }
 
-function PaidBadge({ fullyPaid, bookingStatus }: { fullyPaid: boolean; bookingStatus: string }) {
+function PaidBadge({
+  baselineCost,
+  netLedgerSum,
+  trueBalance,
+  bookingStatus,
+}: {
+  baselineCost: number;
+  netLedgerSum: number;
+  trueBalance: number;
+  bookingStatus: string;
+}) {
   if (bookingStatus === "Cancelled") {
     return (
       <span className="rounded-full bg-slate-100 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-slate-700 dark:bg-slate-800 dark:text-slate-300">
@@ -283,13 +293,26 @@ function PaidBadge({ fullyPaid, bookingStatus }: { fullyPaid: boolean; bookingSt
       </span>
     );
   }
-  return fullyPaid ? (
-    <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
-      Paid
-    </span>
-  ) : (
+  const balanceCents = Math.round(trueBalance * 100);
+  const baselineCents = Math.round(baselineCost * 100);
+  const paidCents = Math.round(netLedgerSum * 100);
+  if (balanceCents <= 0) {
+    return (
+      <span className="rounded-full bg-success px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+        Paid
+      </span>
+    );
+  }
+  if (balanceCents === baselineCents || paidCents <= 0) {
+    return (
+      <span className="rounded-full bg-destructive px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
+        Unpaid
+      </span>
+    );
+  }
+  return (
     <span className="rounded-full bg-warning px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white">
-      Partial / Unpaid
+      Partial
     </span>
   );
 }
