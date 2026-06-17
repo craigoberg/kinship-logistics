@@ -184,6 +184,12 @@ export function RosterTab({ event }: Props) {
         event={event}
         booking={milestoneBooking}
       />
+
+      <EditRosterBookingModal
+        open={editBooking !== null}
+        onOpenChange={(o) => !o && setEditBooking(null)}
+        booking={editBooking}
+      />
     </div>
   );
 }
