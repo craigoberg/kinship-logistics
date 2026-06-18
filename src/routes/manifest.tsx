@@ -22,6 +22,7 @@ import {
   usePatchTripLeg,
   useCompleteTrip,
   useEvents,
+  useLastEndOdometer,
 } from "@/hooks/use-supabase-data";
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
@@ -61,6 +62,7 @@ function ManifestPage() {
 
 function InitializeTripScreen() {
   const { data: events = [] } = useEvents();
+  const { data: lastEndOdo = null } = useLastEndOdometer();
   const startTrip = useStartTrip();
   const today = new Date().toISOString().slice(0, 10);
   const todaysEvents = useMemo(
@@ -69,14 +71,33 @@ function InitializeTripScreen() {
   );
   const [eventId, setEventId] = useState("");
   const [odo, setOdo] = useState("");
+  const [reason, setReason] = useState("");
 
-  const canSubmit = !!eventId && !!odo && !startTrip.isPending;
+  const odoNum = odo === "" ? null : Number(odo);
+  const VARIANCE_KM = 100;
+  const outOfBounds =
+    odoNum != null &&
+    lastEndOdo != null &&
+    (odoNum < lastEndOdo || odoNum > lastEndOdo + VARIANCE_KM);
+
+  const reasonOk = !outOfBounds || reason.trim().length >= 3;
+  const canSubmit = !!eventId && odoNum != null && odoNum > 0 && reasonOk && !startTrip.isPending;
+
+  const onOdoChange = (raw: string) => {
+    // Strip any non-digit characters (incl. spaces) — positive integers only.
+    const cleaned = raw.replace(/\D+/g, "");
+    setOdo(cleaned);
+  };
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit) return;
+    if (!canSubmit || odoNum == null) return;
     startTrip.mutate(
-      { eventId, startOdometerKm: Number(odo) },
+      {
+        eventId,
+        startOdometerKm: odoNum,
+        varianceReason: outOfBounds ? reason.trim() : null,
+      },
       {
         onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
       },
@@ -110,14 +131,49 @@ function InitializeTripScreen() {
             <Label htmlFor="odo">Starting Odometer reading (KM)</Label>
             <Input
               id="odo"
-              type="number"
+              type="text"
               inputMode="numeric"
-              className="h-14 text-lg tabular-nums"
+              autoComplete="off"
+              pattern="[0-9]*"
+              className={cn(
+                "h-14 text-lg tabular-nums",
+                outOfBounds && "border-amber-500 focus-visible:ring-amber-500",
+              )}
               value={odo}
-              onChange={(e) => setOdo(e.target.value)}
-              placeholder="48 210"
+              onChange={(e) => onOdoChange(e.target.value)}
+              placeholder="48210"
             />
+            {lastEndOdo != null && !outOfBounds && odoNum != null && (
+              <p className="text-[11px] text-muted-foreground">
+                Last recorded closing odometer: <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
+              </p>
+            )}
           </div>
+
+          {outOfBounds && lastEndOdo != null && (
+            <div className="space-y-2 rounded-lg border border-amber-500 bg-amber-500/10 p-3 animate-in slide-in-from-top-2">
+              <div className="flex items-start gap-2 text-amber-700 dark:text-amber-300">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <p className="text-sm font-semibold">
+                  ⚠️ Reading varies significantly from the last recorded closing odometer of {lastEndOdo} KM. Please confirm for a typo.
+                </p>
+              </div>
+              <div className="grid gap-1">
+                <Label htmlFor="reason" className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                  Reason for Odometer Variance (Required)
+                </Label>
+                <Input
+                  id="reason"
+                  type="text"
+                  value={reason}
+                  onChange={(e) => setReason(e.target.value)}
+                  className="h-11 bg-background"
+                  placeholder="e.g. vehicle swap, after-hours private use logged separately…"
+                />
+              </div>
+            </div>
+          )}
+
           <button
             type="submit"
             disabled={!canSubmit}
