@@ -2296,7 +2296,7 @@ function rowToTrip(r: TripRow): TransportTrip {
     driverStaffId: r.driver_staff_id,
     eventId: r.event_id,
     tripDate: r.trip_date,
-    startOdometerKm: Number(r.start_odometer_km),
+    startOdometerKm: Number(r.start_odometer),
     endOdometerKm: r.end_odometer_km == null ? null : Number(r.end_odometer_km),
     status: r.status,
     startedAt: r.started_at,
