@@ -379,6 +379,8 @@ export function useGiveDose() {
       insertDualWitnessAdministrationLog(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] });
+      qc.invalidateQueries({ queryKey: ["compliance_audit_logs", "today"] });
+      qc.invalidateQueries({ queryKey: ["medication_schedules"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
