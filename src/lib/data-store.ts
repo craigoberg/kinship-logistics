@@ -609,6 +609,69 @@ export async function upsertPrimaryCarer(
   return rowToCarer(data as CarerRow);
 }
 
+/**
+ * Atomically promote a single carer row to primary contact for a participant.
+ * Demotes every other row for the same participant first so the partial unique
+ * index `(participant_id) WHERE is_primary_contact` is respected. Also ensures
+ * the target carer row is linked to this participant.
+ */
+export async function setPrimaryCarer(carerId: string, participantId: string): Promise<Carer> {
+  const { error: demoteErr } = await supabase
+    .from("carers_registry")
+    .update({ is_primary_contact: false })
+    .eq("participant_id", participantId)
+    .neq("id", carerId);
+  if (demoteErr) throw demoteErr;
+
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .update({ is_primary_contact: true, participant_id: participantId })
+    .eq("id", carerId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+/** Demote a carer to secondary (no other side-effects). */
+export async function demoteCarer(carerId: string): Promise<Carer> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .update({ is_primary_contact: false })
+    .eq("id", carerId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+/** Attach an existing carer record to a participant (secondary by default). */
+export async function linkCarerToParticipant(carerId: string, participantId: string): Promise<Carer> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .update({ participant_id: participantId })
+    .eq("id", carerId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+/** Unlink a carer from its participant and demote in the same write. */
+export async function unlinkCarer(carerId: string): Promise<Carer> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .update({ participant_id: null, is_primary_contact: false })
+    .eq("id", carerId)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+
+
+
 
 // ---------- participant_medication_schedules ----------
 

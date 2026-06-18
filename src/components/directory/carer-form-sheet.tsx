@@ -39,9 +39,19 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   carer: Carer | null;
+  /** Pre-fill linked participant when creating a brand-new carer. */
+  defaultParticipantId?: string | null;
+  /** Hide the participant picker entirely (use when launched from inside a participant profile). */
+  lockParticipant?: boolean;
 }
 
-export function CarerFormSheet({ open, onOpenChange, carer }: Props) {
+export function CarerFormSheet({
+  open,
+  onOpenChange,
+  carer,
+  defaultParticipantId = null,
+  lockParticipant = false,
+}: Props) {
   const isEdit = !!carer;
   const { data: participants = [] } = useParticipants();
 
@@ -68,8 +78,9 @@ export function CarerFormSheet({ open, onOpenChange, carer }: Props) {
     setStreetAddress(carer?.streetAddress ?? "");
     setIsPrimary(carer?.isPrimaryContact ?? false);
     setNotes(carer?.notes ?? "");
-    setParticipantId(carer?.participantId ?? null);
-  }, [open, carer]);
+    setParticipantId(carer?.participantId ?? defaultParticipantId ?? null);
+  }, [open, carer, defaultParticipantId]);
+
 
   const selectedParticipant = useMemo(
     () => participants.find((p) => p.id === participantId) ?? null,
@@ -125,60 +136,63 @@ export function CarerFormSheet({ open, onOpenChange, carer }: Props) {
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
-          <Field label="Linked participant">
-            <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant="outline"
-                  role="combobox"
-                  className="w-full justify-between font-normal"
-                >
-                  {selectedParticipant ? selectedParticipant.fullName : "Select participant…"}
-                  <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
-                <Command>
-                  <CommandInput placeholder="Search participants…" />
-                  <CommandList>
-                    <CommandEmpty>No participant found.</CommandEmpty>
-                    <CommandGroup>
-                      <CommandItem
-                        value="__none__"
-                        onSelect={() => {
-                          setParticipantId(null);
-                          setPickerOpen(false);
-                        }}
-                      >
-                        <Check className={cn("mr-2 h-4 w-4", !participantId ? "opacity-100" : "opacity-0")} />
-                        <span className="text-muted-foreground">No participant linked</span>
-                      </CommandItem>
-                      {participants.map((p) => (
+          {!lockParticipant && (
+            <Field label="Linked participant">
+              <Popover open={pickerOpen} onOpenChange={setPickerOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    role="combobox"
+                    className="w-full justify-between font-normal"
+                  >
+                    {selectedParticipant ? selectedParticipant.fullName : "Select participant…"}
+                    <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                  <Command>
+                    <CommandInput placeholder="Search participants…" />
+                    <CommandList>
+                      <CommandEmpty>No participant found.</CommandEmpty>
+                      <CommandGroup>
                         <CommandItem
-                          key={p.id}
-                          value={`${p.fullName} ${p.ndisNumber}`}
+                          value="__none__"
                           onSelect={() => {
-                            setParticipantId(p.id);
+                            setParticipantId(null);
                             setPickerOpen(false);
                           }}
                         >
-                          <Check
-                            className={cn(
-                              "mr-2 h-4 w-4",
-                              participantId === p.id ? "opacity-100" : "opacity-0",
-                            )}
-                          />
-                          <span>{p.fullName}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{p.ndisNumber}</span>
+                          <Check className={cn("mr-2 h-4 w-4", !participantId ? "opacity-100" : "opacity-0")} />
+                          <span className="text-muted-foreground">No participant linked</span>
                         </CommandItem>
-                      ))}
-                    </CommandGroup>
-                  </CommandList>
-                </Command>
-              </PopoverContent>
-            </Popover>
-          </Field>
+                        {participants.map((p) => (
+                          <CommandItem
+                            key={p.id}
+                            value={`${p.fullName} ${p.ndisNumber}`}
+                            onSelect={() => {
+                              setParticipantId(p.id);
+                              setPickerOpen(false);
+                            }}
+                          >
+                            <Check
+                              className={cn(
+                                "mr-2 h-4 w-4",
+                                participantId === p.id ? "opacity-100" : "opacity-0",
+                              )}
+                            />
+                            <span>{p.fullName}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{p.ndisNumber}</span>
+                          </CommandItem>
+                        ))}
+                      </CommandGroup>
+                    </CommandList>
+                  </Command>
+                </PopoverContent>
+              </Popover>
+            </Field>
+          )}
+
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" className="sm:col-span-2">
