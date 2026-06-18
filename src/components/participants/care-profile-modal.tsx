@@ -38,6 +38,8 @@ import {
   useParticipantComplianceLogs,
   useArchiveMedicationSchedule,
   useUpdateMedicationSchedule,
+  usePrimaryCarer,
+  useUpsertPrimaryCarer,
 } from "@/hooks/use-supabase-data";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
@@ -64,8 +66,16 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [editMedSchedule, setEditMedSchedule] = useState<MedicationSchedule | null>(null);
   const [editMedOpen, setEditMedOpen] = useState(false);
   const [historyQuery, setHistoryQuery] = useState("");
+  // Primary carer state
+  const [carerName, setCarerName] = useState("");
+  const [carerPhone, setCarerPhone] = useState("");
+  const [carerEmail, setCarerEmail] = useState("");
+  const [carerAddress, setCarerAddress] = useState("");
+  const [carerRelationship, setCarerRelationship] = useState("");
   const online = useOnlineStatus();
   const updateMutation = useUpdateParticipant();
+  const upsertCarer = useUpsertPrimaryCarer();
+  const { data: primaryCarer } = usePrimaryCarer(participant?.id ?? null);
   const pending = usePendingScheduleMap();
 
   useEffect(() => {
@@ -79,11 +89,26 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
     }
   }, [participant]);
 
+  useEffect(() => {
+    setCarerName(primaryCarer?.fullName ?? "");
+    setCarerPhone(primaryCarer?.phone ?? "");
+    setCarerEmail(primaryCarer?.email ?? "");
+    setCarerAddress(primaryCarer?.streetAddress ?? "");
+    setCarerRelationship(primaryCarer?.relationship ?? "");
+  }, [primaryCarer]);
+
   if (!participant) return null;
 
   const liquid = iddsiLevel("liquids", iddsi.liquids);
   const food = iddsiLevel("foods", iddsi.foods);
   const isPending = pending.has(participant.id);
+
+  const carerDirty =
+    (carerName.trim() || "") !== (primaryCarer?.fullName ?? "") ||
+    (carerPhone.trim() || "") !== (primaryCarer?.phone ?? "") ||
+    (carerEmail.trim() || "") !== (primaryCarer?.email ?? "") ||
+    (carerAddress.trim() || "") !== (primaryCarer?.streetAddress ?? "") ||
+    (carerRelationship.trim() || "") !== (primaryCarer?.relationship ?? "");
 
   const save = async () => {
     const patch: ParticipantPatch = {
@@ -102,6 +127,19 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
     }
     try {
       const updated = await updateMutation.mutateAsync({ id: participant.id, patch });
+      if (carerDirty && carerName.trim().length > 0) {
+        await upsertCarer.mutateAsync({
+          participantId: participant.id,
+          payload: {
+            fullName: carerName.trim(),
+            phone: carerPhone.trim() || null,
+            email: carerEmail.trim() || null,
+            streetAddress: carerAddress.trim() || null,
+            relationship: carerRelationship.trim() || null,
+            notes: null,
+          },
+        });
+      }
       toast.success("Profile updated", { description: `${updated.fullName} saved.` });
       onSaved?.(updated);
       setDirty(false);

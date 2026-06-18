@@ -487,6 +487,28 @@ export async function listCarersRegistry(): Promise<Carer[]> {
   return (data ?? []).map((r) => rowToCarer(r as CarerRow));
 }
 
+export async function listCarersForParticipant(participantId: string): Promise<Carer[]> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .select("*")
+    .eq("participant_id", participantId)
+    .order("is_primary_contact", { ascending: false })
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToCarer(r as CarerRow));
+}
+
+export async function getPrimaryCarer(participantId: string): Promise<Carer | null> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .select("*")
+    .eq("participant_id", participantId)
+    .eq("is_primary_contact", true)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToCarer(data as CarerRow) : null;
+}
+
 export interface CarerPayload {
   participantId: string | null;
   fullName: string;
@@ -526,6 +548,61 @@ export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
     .from("carers_registry")
     .update(carerPayloadToRow(p))
     .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+/**
+ * Upsert the primary emergency carer for a participant. Demotes any existing
+ * primary first so the partial unique index is respected, then updates the
+ * oldest carer row in place or inserts a new one when none exists yet.
+ */
+export async function upsertPrimaryCarer(
+  participantId: string,
+  payload: Omit<CarerPayload, "participantId" | "isPrimaryContact">,
+): Promise<Carer> {
+  const { error: demoteErr } = await supabase
+    .from("carers_registry")
+    .update({ is_primary_contact: false })
+    .eq("participant_id", participantId)
+    .eq("is_primary_contact", true);
+  if (demoteErr) throw demoteErr;
+
+  const { data: existingRows, error: lookupErr } = await supabase
+    .from("carers_registry")
+    .select("id")
+    .eq("participant_id", participantId)
+    .order("created_at", { ascending: true })
+    .limit(1);
+  if (lookupErr) throw lookupErr;
+
+  const row = {
+    participant_id: participantId,
+    full_name: payload.fullName,
+    relationship: payload.relationship,
+    phone: payload.phone,
+    email: payload.email,
+    street_address: payload.streetAddress,
+    is_primary_contact: true,
+    notes: payload.notes,
+  };
+
+  if (existingRows && existingRows.length > 0) {
+    const { data, error } = await supabase
+      .from("carers_registry")
+      .update(row)
+      .eq("id", existingRows[0].id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    return rowToCarer(data as CarerRow);
+  }
+
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .insert(row)
     .select("*")
     .single();
   if (error) throw error;
@@ -1539,6 +1616,12 @@ export interface EventRosterBooking {
   notes: string | null;
   /** Per-booking custom price override; null means fall back to event ticket_price. */
   customPrice: number | null;
+  /** Whether the participant is bringing a carer companion to this event. */
+  bringsCarer: boolean;
+  /** FK into carers_registry — populated only when brings_carer = true. */
+  carerId: string | null;
+  /** Whether the companion carer needs a physical bus seat. */
+  carerTransportRequired: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1552,6 +1635,9 @@ interface BookingRow {
   is_fully_paid: boolean;
   notes: string | null;
   custom_price: number | string | null;
+  brings_carer: boolean | null;
+  carer_id: string | null;
+  carer_transport_required: boolean | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1570,6 +1656,9 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     isFullyPaid: r.is_fully_paid,
     notes: r.notes ?? null,
     customPrice: r.custom_price == null ? null : Number(r.custom_price),
+    bringsCarer: r.brings_carer ?? false,
+    carerId: r.carer_id ?? null,
+    carerTransportRequired: r.carer_transport_required ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -1635,11 +1724,15 @@ export interface NewEventBooking {
   ticketPrice: number;
   eventTitle?: string;
   notes?: string | null;
+  bringsCarer?: boolean;
+  carerId?: string | null;
+  carerTransportRequired?: boolean;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
   const amount = input.amountPaid ?? 0;
   const trimmedNotes = (input.notes ?? "").trim();
+  const bringsCarer = !!input.bringsCarer;
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
@@ -1647,6 +1740,9 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     amount_paid: amount,
     is_fully_paid: amount >= input.ticketPrice && input.ticketPrice > 0,
     notes: trimmedNotes.length > 0 ? trimmedNotes : null,
+    brings_carer: bringsCarer,
+    carer_id: bringsCarer ? input.carerId ?? null : null,
+    carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
@@ -1745,6 +1841,10 @@ export interface UpdateBookingInput {
   eventId?: string;
   participantId?: string;
   refund?: BookingRefundInput | null;
+  /** Carer companion controls. Pass undefined to leave columns untouched. */
+  bringsCarer?: boolean;
+  carerId?: string | null;
+  carerTransportRequired?: boolean;
 }
 
 export interface UpdateBookingResult {
@@ -1771,6 +1871,18 @@ export async function updateEventBooking(
   if (issueRefund) {
     updatePayload.amount_paid = 0;
     updatePayload.is_fully_paid = false;
+  }
+
+  if (input.bringsCarer !== undefined) {
+    updatePayload.brings_carer = input.bringsCarer;
+    if (input.bringsCarer) {
+      if (input.carerId !== undefined) updatePayload.carer_id = input.carerId;
+      if (input.carerTransportRequired !== undefined)
+        updatePayload.carer_transport_required = input.carerTransportRequired;
+    } else {
+      updatePayload.carer_id = null;
+      updatePayload.carer_transport_required = false;
+    }
   }
 
   // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
