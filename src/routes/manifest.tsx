@@ -72,20 +72,48 @@ function InitializeTripScreen() {
   const [eventId, setEventId] = useState("");
   const [odo, setOdo] = useState("");
   const [reason, setReason] = useState("");
+  const [userTouchedOdo, setUserTouchedOdo] = useState(false);
+
+  // Auto-populate odometer with last recorded closing reading on load.
+  useEffect(() => {
+    if (!userTouchedOdo && lastEndOdo != null && odo === "") {
+      setOdo(String(lastEndOdo));
+    }
+  }, [lastEndOdo, userTouchedOdo, odo]);
+
+  // Auto-select event when only one is happening today.
+  useEffect(() => {
+    if (!eventId && todaysEvents.length === 1) setEventId(todaysEvents[0].id);
+  }, [eventId, todaysEvents]);
 
   const odoNum = odo === "" ? null : Number(odo);
   const VARIANCE_KM = 100;
-  const outOfBounds =
-    odoNum != null &&
-    lastEndOdo != null &&
-    (odoNum < lastEndOdo || odoNum > lastEndOdo + VARIANCE_KM);
 
-  const reasonOk = !outOfBounds || reason.trim().length >= 3;
-  const canSubmit = !!eventId && odoNum != null && odoNum > 0 && reasonOk && !startTrip.isPending;
+  type OdoState = "empty" | "backwards" | "normal" | "high_variance";
+  const odoState: OdoState =
+    odoNum == null
+      ? "empty"
+      : lastEndOdo == null
+        ? "normal"
+        : odoNum < lastEndOdo
+          ? "backwards"
+          : odoNum > lastEndOdo + VARIANCE_KM
+            ? "high_variance"
+            : "normal";
+
+  const variance = odoNum != null && lastEndOdo != null ? odoNum - lastEndOdo : 0;
+  const reasonOk = odoState !== "high_variance" || reason.trim().length >= 10;
+  const canSubmit =
+    !!eventId &&
+    odoNum != null &&
+    odoNum > 0 &&
+    odoState !== "backwards" &&
+    reasonOk &&
+    !startTrip.isPending;
 
   const onOdoChange = (raw: string) => {
-    // Strip any non-digit characters (incl. spaces) — positive integers only.
     const cleaned = raw.replace(/\D+/g, "");
+    setUserTouchedOdo(true);
     setOdo(cleaned);
   };
 
@@ -96,7 +124,7 @@ function InitializeTripScreen() {
       {
         eventId,
         startOdometerKm: odoNum,
-        varianceReason: outOfBounds ? reason.trim() : null,
+        varianceReason: odoState === "high_variance" ? reason.trim() : null,
       },
       {
         onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
@@ -137,39 +165,55 @@ function InitializeTripScreen() {
               pattern="[0-9]*"
               className={cn(
                 "h-14 text-lg tabular-nums",
-                outOfBounds && "border-amber-500 focus-visible:ring-amber-500",
+                odoState === "backwards" &&
+                  "border-2 border-red-600 focus-visible:ring-red-600",
+                odoState === "high_variance" &&
+                  "border-amber-500 focus-visible:ring-amber-500",
               )}
               value={odo}
               onChange={(e) => onOdoChange(e.target.value)}
               placeholder="48210"
             />
-            {lastEndOdo != null && !outOfBounds && odoNum != null && (
+            {lastEndOdo != null && odoState === "normal" && (
               <p className="text-[11px] text-muted-foreground">
-                Last recorded closing odometer: <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
+                Last recorded closing odometer:{" "}
+                <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
+                {odoNum === lastEndOdo && " · pre-filled"}
+              </p>
+            )}
+            {odoState === "backwards" && lastEndOdo != null && (
+              <p className="text-sm font-semibold text-red-600">
+                🚫 Odometer cannot go backwards from the last recorded closing value of {lastEndOdo} KM.
               </p>
             )}
           </div>
 
-          {outOfBounds && lastEndOdo != null && (
+          {odoState === "high_variance" && lastEndOdo != null && (
             <div className="space-y-2 rounded-lg border border-amber-500 bg-amber-500/10 p-3 animate-in slide-in-from-top-2">
               <div className="flex items-start gap-2 text-amber-700 dark:text-amber-300">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
                 <p className="text-sm font-semibold">
-                  ⚠️ Reading varies significantly from the last recorded closing odometer of {lastEndOdo} KM. Please confirm for a typo.
+                  ⚠️ Warning: This entry reflects a significant variance ({variance} KM) from our last logged run. Please verify for typos.
                 </p>
               </div>
               <div className="grid gap-1">
-                <Label htmlFor="reason" className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                  Reason for Odometer Variance (Required)
+                <Label
+                  htmlFor="reason"
+                  className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300"
+                >
+                  Reason for Odometer Variance / Long Trip Explanatory Notes (Required)
                 </Label>
-                <Input
+                <Textarea
                   id="reason"
-                  type="text"
+                  rows={3}
                   value={reason}
                   onChange={(e) => setReason(e.target.value)}
-                  className="h-11 bg-background"
-                  placeholder="e.g. vehicle swap, after-hours private use logged separately…"
+                  className="bg-background"
+                  placeholder="Minimum 10 characters — e.g. vehicle swap, after-hours private use logged separately…"
                 />
+                <p className="text-[11px] text-amber-700 dark:text-amber-300">
+                  {reason.trim().length}/10 characters minimum
+                </p>
               </div>
             </div>
           )}
@@ -177,7 +221,12 @@ function InitializeTripScreen() {
           <button
             type="submit"
             disabled={!canSubmit}
-            className="h-14 w-full rounded-xl bg-blue-600 font-bold text-white shadow transition hover:bg-blue-700 disabled:opacity-60"
+            className={cn(
+              "h-14 w-full rounded-xl font-bold text-white shadow transition",
+              canSubmit
+                ? "bg-blue-600 opacity-100 cursor-pointer hover:bg-blue-700"
+                : "bg-blue-600 opacity-60 cursor-not-allowed",
+            )}
           >
             {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
           </button>
