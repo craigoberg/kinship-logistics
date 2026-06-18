@@ -150,7 +150,6 @@ export function DirectoryWorkspace() {
                   <EmptyRow colSpan={6} label="No personnel found." />
                 ) : (
                   filteredStaff.map((s) => {
-                    const summary = staffCertSummary(s);
                     return (
                       <TableRow key={s.id}>
                         <TableCell className="font-medium">{s.fullName}</TableCell>
@@ -171,7 +170,7 @@ export function DirectoryWorkspace() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <CertSummaryChips summary={summary} />
+                          <CertBadges certs={s.certifications} />
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
