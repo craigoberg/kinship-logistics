@@ -72,24 +72,31 @@ function InitializeTripScreen() {
   );
   const [eventId, setEventId] = useState("");
   const [odo, setOdo] = useState("");
+  const hasHydratedOdoRef = useRef(false);
 
   useEffect(() => {
-    if (lastEndOdo != null) {
-      setOdo(Number(lastEndOdo).toString());
+    if (hasHydratedOdoRef.current) return;
+    if (lastEndOdo != null && odo === "") {
+      setOdo(String(lastEndOdo));
+      hasHydratedOdoRef.current = true;
     }
-  }, [lastEndOdo]);
+  }, [lastEndOdo, odo]);
 
   useEffect(() => {
-    if (!eventId && todaysEvents.length === 1) setEventId(todaysEvents[0].id);
-  }, [eventId, todaysEvents]);
+    if (eventId) return;
+    const pool = todaysEvents.length ? todaysEvents : events;
+    if (pool.length > 0) setEventId(pool[0].id);
+  }, [eventId, todaysEvents, events]);
 
-  const odoNum = odo === "" ? null : Number(odo);
+  const odoNum = odo === "" ? NaN : Number(odo);
+  const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
 
-  const isButtonDisabled = !eventId || !odo || parseFloat(odo) <= 0 || startTrip.isPending;
+  const isButtonDisabled = !eventId || !odoReasonable || startTrip.isPending;
+
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isButtonDisabled || odoNum == null) return;
+    if (isButtonDisabled || !Number.isFinite(odoNum)) return;
     startTrip.mutate(
       {
         eventId,
