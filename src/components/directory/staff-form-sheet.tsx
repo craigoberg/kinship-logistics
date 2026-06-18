@@ -186,7 +186,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             ) : (
               <div className="space-y-2">
                 {certs.map((c, i) => (
-                  <div key={i} className="grid gap-2 rounded-md border border-border bg-card/40 p-3 sm:grid-cols-[1fr_1fr_140px_auto]">
+                  <div key={i} className="grid gap-2 rounded-md border border-border bg-card/40 p-3 sm:grid-cols-[1fr_1fr_180px_auto]">
                     <Input
                       placeholder="Certificate name"
                       value={c.name}
@@ -197,17 +197,26 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                       value={c.number}
                       onChange={(e) => updateCert(i, { number: e.target.value })}
                     />
-                    <Input
-                      type="date"
-                      value={c.expiry ?? ""}
-                      onChange={(e) => updateCert(i, { expiry: e.target.value || null })}
-                    />
+                    <div className="grid gap-1">
+                      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Renewal / Expiry Date
+                      </Label>
+                      <Input
+                        type="date"
+                        value={c.expiry ?? ""}
+                        onChange={(e) => updateCert(i, { expiry: e.target.value || null })}
+                      />
+                      <p className="text-[11px] text-muted-foreground/70">
+                        Optional. Leave blank if this certification never expires.
+                      </p>
+                    </div>
                     <Button
                       type="button"
                       size="icon"
                       variant="ghost"
                       onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
                       aria-label="Remove certification"
+                      className="self-start"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
                     </Button>
