@@ -454,6 +454,53 @@ export function useUpsertPrimaryCarer() {
   });
 }
 
+function invalidateCarerCaches(qc: ReturnType<typeof useQueryClient>, participantId?: string) {
+  qc.invalidateQueries({ queryKey: ["carers_registry"] });
+  qc.invalidateQueries({ queryKey: ["carers_for_participant"] });
+  qc.invalidateQueries({ queryKey: ["primary_carer"] });
+  qc.invalidateQueries({ queryKey: ["participants"] });
+  if (participantId) {
+    qc.invalidateQueries({ queryKey: ["carers_for_participant", participantId] });
+    qc.invalidateQueries({ queryKey: ["primary_carer", participantId] });
+  }
+}
+
+export function useSetPrimaryCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carerId, participantId }: { carerId: string; participantId: string }) =>
+      setPrimaryCarer(carerId, participantId),
+    onSuccess: (_d, vars) => invalidateCarerCaches(qc, vars.participantId),
+  });
+}
+
+export function useDemoteCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carerId }: { carerId: string; participantId?: string }) => demoteCarer(carerId),
+    onSuccess: (_d, vars) => invalidateCarerCaches(qc, vars.participantId),
+  });
+}
+
+export function useLinkCarerToParticipant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carerId, participantId }: { carerId: string; participantId: string }) =>
+      linkCarerToParticipant(carerId, participantId),
+    onSuccess: (_d, vars) => invalidateCarerCaches(qc, vars.participantId),
+  });
+}
+
+export function useUnlinkCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ carerId }: { carerId: string; participantId?: string }) => unlinkCarer(carerId),
+    onSuccess: (_d, vars) => invalidateCarerCaches(qc, vars.participantId),
+  });
+}
+
+
+
 export function useParticipants() {
   return useQuery({
     queryKey: ["participants"],
