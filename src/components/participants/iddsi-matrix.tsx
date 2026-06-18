@@ -69,7 +69,7 @@ function Row({
       <div
         role="radiogroup"
         aria-label={`IDDSI ${title.toLowerCase()} level`}
-        className="grid grid-cols-5 gap-2"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
       >
         {levels.map((l) => {
           const active = l.level === selected;
