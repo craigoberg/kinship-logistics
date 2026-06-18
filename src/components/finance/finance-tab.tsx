@@ -20,6 +20,15 @@ function fmtMoney(n: number): string {
   return n < 0 ? `(${abs})` : abs;
 }
 
+function cleanDescription(raw: string | null | undefined): string {
+  if (!raw) return "";
+  return raw
+    .replace(/\[[a-z_]+:[0-9a-f-]{8,}\]/gi, "")
+    .replace(/\s{2,}/g, " ")
+    .replace(/\s+([—–-])\s*$/, "")
+    .trim();
+}
+
 export function FinanceTab({ participantId, participantName }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [query, setQuery] = useState("");
@@ -143,7 +152,7 @@ export function FinanceTab({ participantId, participantName }: Props) {
                     <td className="px-4 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
                       {e.financialCode}
                     </td>
-                    <td className="px-4 py-2">{e.description || "—"}</td>
+                    <td className="px-4 py-2">{cleanDescription(e.description) || "—"}</td>
                     <td
                       className={
                         "whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums " +

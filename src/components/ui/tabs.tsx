@@ -20,7 +20,7 @@ const TabsList = React.forwardRef<
   React.ElementRef<typeof TabsPrimitive.List>,
   React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>
 >(({ className, ...props }, ref) => (
-  <div className="-mx-1 overflow-x-auto px-1 [scrollbar-width:thin]">
+  <div className="-mx-1 shrink-0 overflow-x-auto px-1 [scrollbar-width:thin]">
     <TabsPrimitive.List
       ref={ref}
       className={cn(

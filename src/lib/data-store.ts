@@ -1751,7 +1751,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name), event_manifest!inner(title, start_date, end_date, ticket_price, status)",
+      "*, participants!inner(first_name, last_name), event_manifest!inner(title, start_date, end_date, ticket_price)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
@@ -1763,7 +1763,6 @@ export async function listEventBookingsForParticipant(
         start_date: string;
         end_date: string;
         ticket_price: number | string;
-        status: string | null;
       };
     };
     const base = rowToBooking(raw);
@@ -1774,7 +1773,7 @@ export async function listEventBookingsForParticipant(
       eventStartDate: ev?.start_date ?? "",
       eventEndDate: ev?.end_date ?? "",
       eventTicketPrice: Number(ev?.ticket_price ?? 0),
-      eventStatus: ev?.status ?? "—",
+      eventStatus: base.bookingStatus ?? "—",
     };
   });
 }
