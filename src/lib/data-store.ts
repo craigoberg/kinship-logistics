@@ -17,6 +17,7 @@ export interface Participant {
   lastName: string;
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
   ndisNumber: string;
+  streetAddress: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash: string | null;
   createdAt: string;
