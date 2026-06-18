@@ -126,6 +126,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 <DialogDescription>
                   NDIS {participant.ndisNumber} · Updated {formatDate(participant.updatedAt)}
                 </DialogDescription>
+                {participant.streetAddress && (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    📍 {participant.streetAddress}
+                  </p>
+                )}
               </div>
               {isPending && (
                 <div className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning">
