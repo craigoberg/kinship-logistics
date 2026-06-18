@@ -357,6 +357,56 @@ export function useStaffRegistry() {
   });
 }
 
+export function useInsertStaffMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: StaffPayload) => insertStaffMember(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["staff_registry"] });
+    },
+  });
+}
+
+export function useUpdateStaffMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: StaffPayload }) =>
+      updateStaffMember(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["staff_registry"] });
+    },
+  });
+}
+
+export function useCarersRegistry() {
+  return useQuery({
+    queryKey: ["carers_registry"],
+    queryFn: listCarersRegistry,
+    staleTime: 30_000,
+  });
+}
+
+export function useInsertCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (payload: CarerPayload) => insertCarer(payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["carers_registry"] });
+    },
+  });
+}
+
+export function useUpdateCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, payload }: { id: string; payload: CarerPayload }) =>
+      updateCarer(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["carers_registry"] });
+    },
+  });
+}
+
 export function useParticipants() {
   return useQuery({
     queryKey: ["participants"],
