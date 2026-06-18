@@ -1,3 +1,4 @@
+// Force rebuild version 2.0
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
@@ -71,73 +72,35 @@ function InitializeTripScreen() {
   );
   const [eventId, setEventId] = useState("");
   const [odo, setOdo] = useState("");
-  const [reason, setReason] = useState("");
-  const [userTouchedOdo, setUserTouchedOdo] = useState(false);
 
-  // Auto-populate odometer with last recorded closing reading on load.
-  // Hydrate React state at the same moment the value appears on screen so
-  // validation (and the submit button) react without a manual keystroke.
   useEffect(() => {
-    if (!userTouchedOdo && lastEndOdo != null && odo === "") {
-      const fetchedValue = Number(lastEndOdo);
-      setOdo(fetchedValue.toString());
+    if (lastEndOdo != null) {
+      setOdo(Number(lastEndOdo).toString());
     }
-  }, [lastEndOdo, userTouchedOdo, odo]);
+  }, [lastEndOdo]);
 
-  // Auto-select event when only one is happening today.
   useEffect(() => {
     if (!eventId && todaysEvents.length === 1) setEventId(todaysEvents[0].id);
   }, [eventId, todaysEvents]);
 
   const odoNum = odo === "" ? null : Number(odo);
-  const VARIANCE_KM = 100;
 
-  type OdoState = "empty" | "backwards" | "normal" | "high_variance";
-  const odoState: OdoState =
-    odoNum == null
-      ? "empty"
-      : lastEndOdo == null
-        ? "normal"
-        : odoNum < lastEndOdo
-          ? "backwards"
-          : odoNum > lastEndOdo + VARIANCE_KM
-            ? "high_variance"
-            : "normal";
-
-  const variance = odoNum != null && lastEndOdo != null ? odoNum - lastEndOdo : 0;
-  const reasonOk = odoState !== "high_variance" || reason.trim().length >= 10;
-  const canSubmit =
-    !!eventId &&
-    odoNum != null &&
-    odoNum > 0 &&
-    odoState !== "backwards" &&
-    reasonOk &&
-    !startTrip.isPending;
-  const isOdometerBackwards = odoState === "backwards";
-  const isVarianceHigh = odoState === "high_variance";
-
-  const onOdoChange = (raw: string) => {
-    const cleaned = raw.replace(/\D+/g, "");
-    setUserTouchedOdo(true);
-    setOdo(cleaned);
-  };
+  const isButtonDisabled = !eventId || !odo || parseFloat(odo) <= 0 || startTrip.isPending;
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!canSubmit || odoNum == null) return;
+    if (isButtonDisabled || odoNum == null) return;
     startTrip.mutate(
       {
         eventId,
         startOdometerKm: odoNum,
-        varianceReason: odoState === "high_variance" ? reason.trim() : null,
+        varianceReason: null,
       },
       {
         onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
       },
     );
   };
-
-  console.log("Current Validation State:", { eventId, odo, isOdometerBackwards });
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -166,79 +129,29 @@ function InitializeTripScreen() {
             <Label htmlFor="odo">Starting Odometer reading (KM)</Label>
             <Input
               id="odo"
-              type="text"
-              inputMode="numeric"
-              autoComplete="off"
-              pattern="[0-9]*"
-              className={cn(
-                "h-14 text-lg tabular-nums",
-                odoState === "backwards" &&
-                  "border-2 border-red-600 focus-visible:ring-red-600",
-                odoState === "high_variance" &&
-                  "border-amber-500 focus-visible:ring-amber-500",
-              )}
-              value={odo || ""}
-              onChange={(e) => onOdoChange(e.target.value)}
+              type="number"
+              value={odo}
+              onChange={(e) => setOdo(e.target.value)}
               placeholder="48210"
+              className="h-14 text-lg tabular-nums"
             />
-            {lastEndOdo != null && odoState === "normal" && (
+            {lastEndOdo != null && (
               <p className="text-[11px] text-muted-foreground">
                 Last recorded closing odometer:{" "}
                 <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
                 {odoNum === lastEndOdo && " · pre-filled"}
               </p>
             )}
-            {odoState === "backwards" && lastEndOdo != null && (
-              <p className="text-sm font-semibold text-red-600">
-                🚫 Odometer cannot go backwards from the last recorded closing value of {lastEndOdo} KM.
-              </p>
-            )}
           </div>
-
-          {odoState === "high_variance" && lastEndOdo != null && (
-            <div className="space-y-2 rounded-lg border border-amber-500 bg-amber-500/10 p-3 animate-in slide-in-from-top-2">
-              <div className="flex items-start gap-2 text-amber-700 dark:text-amber-300">
-                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-                <p className="text-sm font-semibold">
-                  ⚠️ Warning: This entry reflects a significant variance ({variance} KM) from our last logged run. Please verify for typos.
-                </p>
-              </div>
-              <div className="grid gap-1">
-                <Label
-                  htmlFor="reason"
-                  className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300"
-                >
-                  Reason for Odometer Variance / Long Trip Explanatory Notes (Required)
-                </Label>
-                <Textarea
-                  id="reason"
-                  rows={3}
-                  value={reason}
-                  onChange={(e) => setReason(e.target.value)}
-                  className="bg-background"
-                  placeholder="Minimum 10 characters — e.g. vehicle swap, after-hours private use logged separately…"
-                />
-                <p className="text-[11px] text-amber-700 dark:text-amber-300">
-                  {reason.trim().length}/10 characters minimum
-                </p>
-              </div>
-            </div>
-          )}
 
           <button
             type="submit"
-            disabled={
-              !eventId ||
-              !odo ||
-              isOdometerBackwards ||
-              (isVarianceHigh && reason.trim().length < 10) ||
-              startTrip.isPending
-            }
+            disabled={isButtonDisabled}
             className={cn(
               "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              canSubmit
-                ? "bg-blue-600 opacity-100 cursor-pointer hover:bg-blue-700"
-                : "bg-blue-600 opacity-60 cursor-not-allowed",
+              isButtonDisabled
+                ? "bg-blue-600 opacity-60 cursor-not-allowed"
+                : "bg-blue-600 opacity-100 cursor-pointer hover:bg-blue-700",
             )}
           >
             {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
