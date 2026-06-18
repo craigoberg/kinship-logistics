@@ -5,7 +5,7 @@ export const Route = createFileRoute("/staff")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Team & Support Directory — Yada Connect" },
+      { title: "Staff & Support Directory — Yada Connect" },
       {
         name: "description",
         content:
@@ -13,15 +13,15 @@ export const Route = createFileRoute("/staff")({
       },
     ],
   }),
-  component: DirectoryPage,
+  component: StaffPage,
 });
 
-function DirectoryPage() {
+function StaffPage() {
   return (
     <div className="mx-auto max-w-6xl space-y-4">
       <header>
         <h2 className="text-xl font-semibold tracking-tight md:text-2xl">
-          Team &amp; Support Directory
+          Staff &amp; Support Directory
         </h2>
         <p className="text-sm text-muted-foreground">
           Personnel rosters and the support network surrounding each participant.

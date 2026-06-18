@@ -11,9 +11,9 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransportRouteImport } from './routes/transport'
 import { Route as SyncRouteImport } from './routes/sync'
+import { Route as StaffRouteImport } from './routes/staff'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as EventsRouteImport } from './routes/events'
-import { Route as DirectoryRouteImport } from './routes/directory'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
 
@@ -27,6 +27,11 @@ const SyncRoute = SyncRouteImport.update({
   path: '/sync',
   getParentRoute: () => rootRouteImport,
 } as any)
+const StaffRoute = StaffRouteImport.update({
+  id: '/staff',
+  path: '/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ParticipantsRoute = ParticipantsRouteImport.update({
   id: '/participants',
   path: '/participants',
@@ -35,11 +40,6 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const DirectoryRoute = DirectoryRouteImport.update({
-  id: '/directory',
-  path: '/directory',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AdminRoute = AdminRouteImport.update({
@@ -56,18 +56,18 @@ const IndexRoute = IndexRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/directory': typeof DirectoryRoute
   '/events': typeof EventsRoute
   '/participants': typeof ParticipantsRoute
+  '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/directory': typeof DirectoryRoute
   '/events': typeof EventsRoute
   '/participants': typeof ParticipantsRoute
+  '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
 }
@@ -75,9 +75,9 @@ export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
-  '/directory': typeof DirectoryRoute
   '/events': typeof EventsRoute
   '/participants': typeof ParticipantsRoute
+  '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
 }
@@ -86,27 +86,27 @@ export interface FileRouteTypes {
   fullPaths:
     | '/'
     | '/admin'
-    | '/directory'
     | '/events'
     | '/participants'
+    | '/staff'
     | '/sync'
     | '/transport'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
     | '/admin'
-    | '/directory'
     | '/events'
     | '/participants'
+    | '/staff'
     | '/sync'
     | '/transport'
   id:
     | '__root__'
     | '/'
     | '/admin'
-    | '/directory'
     | '/events'
     | '/participants'
+    | '/staff'
     | '/sync'
     | '/transport'
   fileRoutesById: FileRoutesById
@@ -114,9 +114,9 @@ export interface FileRouteTypes {
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
-  DirectoryRoute: typeof DirectoryRoute
   EventsRoute: typeof EventsRoute
   ParticipantsRoute: typeof ParticipantsRoute
+  StaffRoute: typeof StaffRoute
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
 }
@@ -137,6 +137,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SyncRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/staff': {
+      id: '/staff'
+      path: '/staff'
+      fullPath: '/staff'
+      preLoaderRoute: typeof StaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/participants': {
       id: '/participants'
       path: '/participants'
@@ -149,13 +156,6 @@ declare module '@tanstack/react-router' {
       path: '/events'
       fullPath: '/events'
       preLoaderRoute: typeof EventsRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/directory': {
-      id: '/directory'
-      path: '/directory'
-      fullPath: '/directory'
-      preLoaderRoute: typeof DirectoryRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/admin': {
@@ -178,9 +178,9 @@ declare module '@tanstack/react-router' {
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
-  DirectoryRoute: DirectoryRoute,
   EventsRoute: EventsRoute,
   ParticipantsRoute: ParticipantsRoute,
+  StaffRoute: StaffRoute,
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,
 }
