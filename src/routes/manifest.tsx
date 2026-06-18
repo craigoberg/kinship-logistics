@@ -78,6 +78,7 @@ function InitializeTripScreen() {
   useEffect(() => {
     if (!userTouchedOdo && lastEndOdo != null && odo === "") {
       setOdo(String(lastEndOdo));
+      setUserTouchedOdo(true);
     }
   }, [lastEndOdo, userTouchedOdo, odo]);
 
@@ -110,6 +111,8 @@ function InitializeTripScreen() {
     odoState !== "backwards" &&
     reasonOk &&
     !startTrip.isPending;
+  const isOdometerBackwards = odoState === "backwards";
+  const isVarianceHigh = odoState === "high_variance";
 
   const onOdoChange = (raw: string) => {
     const cleaned = raw.replace(/\D+/g, "");
@@ -220,7 +223,13 @@ function InitializeTripScreen() {
 
           <button
             type="submit"
-            disabled={!canSubmit}
+            disabled={
+              !eventId ||
+              !odo ||
+              isOdometerBackwards ||
+              (isVarianceHigh && reason.trim().length < 10) ||
+              startTrip.isPending
+            }
             className={cn(
               "h-14 w-full rounded-xl font-bold text-white shadow transition",
               canSubmit
