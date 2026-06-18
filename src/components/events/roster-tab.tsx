@@ -177,15 +177,27 @@ export function RosterTab({ event }: Props) {
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
                         <td className="px-4 py-2 text-right font-semibold tabular-nums">
+                          ${fmtMoney(baselineCost)}
+                          {b.customPrice != null && b.customPrice !== event.ticketPrice && (
+                            <span className="ml-1 text-[10px] uppercase tracking-wide text-info">
+                              custom
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right font-semibold tabular-nums">
                           ${fmtMoney(netLedgerSum)}
                         </td>
                         <td
                           className={
                             "px-4 py-2 text-right font-semibold tabular-nums " +
-                            (trueBalance <= 0 ? "text-success" : "text-warning")
+                            (b.bookingStatus === "Cancelled"
+                              ? "text-muted-foreground"
+                              : trueBalance <= 0
+                                ? "text-success"
+                                : "text-warning")
                           }
                         >
-                          ${fmtMoney(Math.max(0, trueBalance))}
+                          ${fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <PaidBadge
