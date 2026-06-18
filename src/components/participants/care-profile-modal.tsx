@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import {
   Save,
@@ -76,6 +76,14 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const online = useOnlineStatus();
   const updateMutation = useUpdateParticipant();
   const pending = usePendingScheduleMap();
+  const medSectionRef = useRef<HTMLDivElement | null>(null);
+  const [medPulse, setMedPulse] = useState(false);
+
+  const scrollToMeds = () => {
+    medSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    setMedPulse(true);
+    window.setTimeout(() => setMedPulse(false), 2200);
+  };
 
   useEffect(() => {
     if (participant) {
@@ -144,10 +152,15 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 )}
               </div>
               {isPending && (
-                <div className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning">
+                <button
+                  type="button"
+                  onClick={scrollToMeds}
+                  title="Jump to medication scheduling"
+                  className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
+                >
                   <AlertTriangle className="h-3.5 w-3.5" />
                   Scheduled Care Pending
-                </div>
+                </button>
               )}
             </div>
           </DialogHeader>
