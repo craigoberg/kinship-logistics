@@ -129,6 +129,13 @@ export function ParticipantTable({ participants, onSelect }: Props) {
           No participants match "{q}".
         </div>
       )}
+
+      <GiveDoseModal
+        open={!!verifying}
+        onOpenChange={(o) => !o && setVerifying(null)}
+        schedule={verifying?.schedule ?? null}
+        participantName={verifying?.participantName ?? ""}
+      />
     </div>
   );
 }
@@ -152,15 +159,22 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
   );
 }
 
-function PendingBadge() {
+function PendingBadge({ onClick }: { onClick: () => void }) {
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
-      title="System Notice: Scheduled Care Pending"
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning transition-colors hover:bg-warning/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/60 cursor-pointer"
+      title="Open Medication Administration Verification"
+      aria-label="Open Medication Administration Verification"
     >
       <AlertTriangle className="h-3 w-3" />
       Scheduled Care Pending
-    </span>
+    </button>
   );
 }
+
 
