@@ -223,7 +223,13 @@ function InitializeTripScreen() {
 
           <button
             type="submit"
-            disabled={!canSubmit}
+            disabled={
+              !eventId ||
+              !odo ||
+              isOdometerBackwards ||
+              (isVarianceHigh && reason.trim().length < 10) ||
+              startTrip.isPending
+            }
             className={cn(
               "h-14 w-full rounded-xl font-bold text-white shadow transition",
               canSubmit
