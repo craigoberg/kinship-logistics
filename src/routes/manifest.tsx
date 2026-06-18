@@ -96,7 +96,7 @@ function InitializeTripScreen() {
 
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isButtonDisabled || odoNum == null) return;
+    if (isButtonDisabled || !Number.isFinite(odoNum)) return;
     startTrip.mutate(
       {
         eventId,
