@@ -175,59 +175,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 </Field>
               </div>
 
-              <div className="rounded-lg border-2 border-destructive/30 bg-destructive/5 p-3">
-                <div className="mb-2 flex items-center justify-between">
-                  <div>
-                    <div className="text-xs font-semibold uppercase tracking-wide text-destructive">
-                      Primary Carer &amp; Emergency Network
-                    </div>
-                    <div className="text-[11px] text-muted-foreground">
-                      Saved as the participant's primary emergency contact.
-                    </div>
-                  </div>
-                  {primaryCarer && (
-                    <span className="rounded-full bg-destructive px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-destructive-foreground">
-                      On file
-                    </span>
-                  )}
-                </div>
-                <div className="grid gap-3 sm:grid-cols-2">
-                  <Field label="Carer name" className="sm:col-span-2">
-                    <Input
-                      value={carerName}
-                      onChange={(e) => setCarerName(e.target.value)}
-                      placeholder="e.g. Maria Costa"
-                    />
-                  </Field>
-                  <Field label="Phone">
-                    <Input
-                      value={carerPhone}
-                      onChange={(e) => setCarerPhone(e.target.value)}
-                      placeholder="+61 …"
-                    />
-                  </Field>
-                  <Field label="Relationship">
-                    <Input
-                      value={carerRelationship}
-                      onChange={(e) => setCarerRelationship(e.target.value)}
-                      placeholder="Mother, Spouse, Support Coordinator…"
-                    />
-                  </Field>
-                  <Field label="Email" className="sm:col-span-2">
-                    <Input
-                      type="email"
-                      value={carerEmail}
-                      onChange={(e) => setCarerEmail(e.target.value)}
-                    />
-                  </Field>
-                  <Field label="Address" className="sm:col-span-2">
-                    <Input
-                      value={carerAddress}
-                      onChange={(e) => setCarerAddress(e.target.value)}
-                    />
-                  </Field>
-                </div>
-              </div>
+              <CarerNetworkPanel
+                participantId={participant.id}
+                participantName={participant.fullName}
+              />
+
 
 
               <div className="space-y-2">
