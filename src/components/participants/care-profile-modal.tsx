@@ -57,6 +57,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
+  const [streetAddress, setStreetAddress] = useState("");
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -72,6 +73,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       setFirstName(participant.firstName);
       setLastName(participant.lastName);
       setNdisNumber(participant.ndisNumber);
+      setStreetAddress(participant.streetAddress ?? "");
       setIddsi(participant.iddsi);
       setDirty(false);
     }
@@ -84,7 +86,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const isPending = pending.has(participant.id);
 
   const save = async () => {
-    const patch: ParticipantPatch = { firstName, lastName, ndisNumber, iddsi };
+    const patch: ParticipantPatch = {
+      firstName,
+      lastName,
+      ndisNumber,
+      streetAddress: streetAddress.trim() || null,
+      iddsi,
+    };
     if (!online) {
       enqueue("iddsi_change", { id: participant.id, patch: patch as unknown as Record<string, unknown> });
       toast.info("Queued offline", { description: "Profile changes will sync when back online." });
@@ -99,12 +107,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       setDirty(false);
       onOpenChange(false);
     } catch (err) {
-      enqueue("iddsi_change", { id: participant.id, patch: patch as unknown as Record<string, unknown> });
-      toast.warning("Saved offline", {
-        description: `Will retry automatically. (${(err as Error).message})`,
+      toast.error("Could not save profile", {
+        description: (err as Error).message,
+        className: "!bg-red-600 !text-white !border-red-700",
+        duration: 12_000,
       });
-      setDirty(false);
-      onOpenChange(false);
     }
   };
 
