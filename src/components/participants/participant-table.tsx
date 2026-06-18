@@ -55,7 +55,16 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-semibold">{p.fullName}</span>
-                    {pending.has(p.id) && <PendingBadge />}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisNumber}</div>
                   <IddsiChips p={p} className="mt-2" />
