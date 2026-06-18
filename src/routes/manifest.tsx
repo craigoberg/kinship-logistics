@@ -137,6 +137,8 @@ function InitializeTripScreen() {
     );
   };
 
+  console.log("Current Validation State:", { eventId, odo, isOdometerBackwards });
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <Card className="p-5">
