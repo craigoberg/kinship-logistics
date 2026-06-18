@@ -549,9 +549,9 @@ function HistoryTab({
   );
 }
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
   return (
-    <div className="grid gap-1.5">
+    <div className={`grid gap-1.5 ${className ?? ""}`}>
       <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{label}</Label>
       {children}
     </div>
