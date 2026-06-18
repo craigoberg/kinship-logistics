@@ -107,6 +107,14 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
             />
           </Field>
 
+          <Field label="Street address" className="sm:col-span-2">
+            <Input
+              value={streetAddress}
+              onChange={(e) => setStreetAddress(e.target.value)}
+              placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+            />
+          </Field>
+
           <Field label="IDDSI liquids (0–4)">
             <Select value={String(liquids)} onValueChange={(v) => setLiquids(Number(v))}>
               <SelectTrigger><SelectValue /></SelectTrigger>
