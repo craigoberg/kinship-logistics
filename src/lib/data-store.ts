@@ -1901,6 +1901,7 @@ export interface NewEventBooking {
   bringsCarer?: boolean;
   carerId?: string | null;
   carerTransportRequired?: boolean;
+  participantTransportRequired?: boolean;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
@@ -1917,6 +1918,7 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     brings_carer: bringsCarer,
     carer_id: bringsCarer ? input.carerId ?? null : null,
     carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
+    participant_transport_required: !!input.participantTransportRequired,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
