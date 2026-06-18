@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { iddsiLevel } from "@/lib/iddsi";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
-import type { Participant } from "@/lib/data-store";
+import { GiveDoseModal } from "@/components/medication/give-dose-modal";
+import type { MedicationSchedule, Participant } from "@/lib/data-store";
 
 
 interface Props {
@@ -14,7 +15,12 @@ interface Props {
 
 export function ParticipantTable({ participants, onSelect }: Props) {
   const [q, setQ] = useState("");
+  const [verifying, setVerifying] = useState<{
+    schedule: MedicationSchedule;
+    participantName: string;
+  } | null>(null);
   const pending = usePendingScheduleMap();
+
 
 
   const filtered = useMemo(() => {
@@ -49,7 +55,16 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-semibold">{p.fullName}</span>
-                    {pending.has(p.id) && <PendingBadge />}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
                   <div className="mt-0.5 text-xs text-muted-foreground">NDIS {p.ndisNumber}</div>
                   <IddsiChips p={p} className="mt-2" />
@@ -83,7 +98,16 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 <td className="px-4 py-3 font-medium">
                   <div className="flex items-center gap-2">
                     <span>{p.fullName}</span>
-                    {pending.has(p.id) && <PendingBadge />}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
                 </td>
 
@@ -105,6 +129,13 @@ export function ParticipantTable({ participants, onSelect }: Props) {
           No participants match "{q}".
         </div>
       )}
+
+      <GiveDoseModal
+        open={!!verifying}
+        onOpenChange={(o) => !o && setVerifying(null)}
+        schedule={verifying?.schedule ?? null}
+        participantName={verifying?.participantName ?? ""}
+      />
     </div>
   );
 }
@@ -128,15 +159,22 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
   );
 }
 
-function PendingBadge() {
+function PendingBadge({ onClick }: { onClick: () => void }) {
   return (
-    <span
-      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning"
-      title="System Notice: Scheduled Care Pending"
+    <button
+      type="button"
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+      className="inline-flex items-center gap-1 rounded-md border border-warning/50 bg-warning/10 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-warning transition-colors hover:bg-warning/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-warning/60 cursor-pointer"
+      title="Open Medication Administration Verification"
+      aria-label="Open Medication Administration Verification"
     >
       <AlertTriangle className="h-3 w-3" />
       Scheduled Care Pending
-    </span>
+    </button>
   );
 }
+
 

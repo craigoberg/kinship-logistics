@@ -1,12 +1,14 @@
 import { useMemo } from "react";
 import { useAllActiveSchedules, useTodaysComplianceLogs } from "@/hooks/use-supabase-data";
+import type { MedicationSchedule } from "@/lib/data-store";
 
 /**
- * Returns a Set of participant IDs that have a scheduled medication today
- * whose expected_time has already passed, with no matching compliance log
- * recorded since that expected time.
+ * Returns a Map of participant_id → the earliest-due pending medication
+ * schedule for today (one whose expected_time has already passed with no
+ * matching compliance log since). Map preserves `.has(id)` for badge gates
+ * and `.get(id)` for click-to-administer flows.
  */
-export function usePendingScheduleMap(): Set<string> {
+export function usePendingScheduleMap(): Map<string, MedicationSchedule> {
   const { data: schedules = [] } = useAllActiveSchedules();
   const { data: logs = [] } = useTodaysComplianceLogs();
 
@@ -24,11 +26,10 @@ export function usePendingScheduleMap(): Set<string> {
       logsByParticipant.set(log.participantId, list);
     }
 
-    const pending = new Set<string>();
+    const pending = new Map<string, MedicationSchedule>();
 
     for (const s of schedules) {
       if (!s.participantId || !s.active) continue;
-      // Parse "HH:MM:SS" against today
       const [h, m] = s.expectedTime.split(":").map(Number);
       const expected = new Date(todayStart);
       expected.setHours(h || 0, m || 0, 0, 0);
@@ -44,7 +45,13 @@ export function usePendingScheduleMap(): Set<string> {
         return name === medName;
       });
 
-      if (!matched) pending.add(s.participantId);
+      if (matched) continue;
+
+      // Keep the earliest-expected pending schedule for this participant.
+      const existing = pending.get(s.participantId);
+      if (!existing || s.expectedTime < existing.expectedTime) {
+        pending.set(s.participantId, s);
+      }
     }
 
     return pending;
