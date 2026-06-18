@@ -1404,6 +1404,37 @@ export async function archiveMedicationSchedule(id: string): Promise<void> {
   await updateMedicationSchedule(id, { active: false });
 }
 
+export type MedicationArchiveReference =
+  | "Doctor Certificate / Medical Order"
+  | "Carer Written Request"
+  | "Management Operational Directive";
+
+export interface MedicationDiscontinuationInput {
+  id: string;
+  authorizedById: string;
+  witnessedById: string;
+  referenceType: MedicationArchiveReference;
+  reason: string;
+}
+
+export async function discontinueMedicationSchedule(
+  input: MedicationDiscontinuationInput,
+): Promise<void> {
+  const { error } = await supabase
+    .from("participant_medication_schedules")
+    .update({
+      active: false,
+      status: "Archived",
+      archived_at: new Date().toISOString(),
+      archived_by_id: input.authorizedById,
+      archive_witnessed_by_id: input.witnessedById,
+      archive_reference_type: input.referenceType,
+      archive_reason: input.reason,
+    })
+    .eq("id", input.id);
+  if (error) throw error;
+}
+
 // ---------- suspension / bulk roster exceptions ----------
 
 /** Enumerate every YYYY-MM-DD between two inclusive dates. */

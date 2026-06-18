@@ -42,7 +42,7 @@ import {
   useUpdateParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
-  useArchiveMedicationSchedule,
+  
   useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
 import { CarerNetworkPanel } from "./carer-network-panel";
@@ -50,6 +50,7 @@ import { CarerNetworkPanel } from "./carer-network-panel";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { ScheduledMedicationModal } from "@/components/medication/scheduled-medication-modal";
+import { DiscontinueMedicationModal } from "@/components/medication/discontinue-medication-modal";
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { FinanceTab } from "@/components/finance/finance-tab";
 import { toast } from "sonner";
@@ -308,22 +309,13 @@ function SchedulingTab({
   onEdit: (s: MedicationSchedule) => void;
 }) {
   const { data: schedules = [], isLoading, error } = useParticipantSchedules(participantId);
-  const archive = useArchiveMedicationSchedule();
   const restore = useUpdateMedicationSchedule();
   const [showArchived, setShowArchived] = useState(false);
+  const [discontinueTarget, setDiscontinueTarget] = useState<MedicationSchedule | null>(null);
 
   const active = schedules.filter((s) => s.active);
   const visible = showArchived ? schedules : active;
   const archivedCount = schedules.length - active.length;
-
-  const onArchive = async (s: MedicationSchedule) => {
-    try {
-      await archive.mutateAsync(s.id);
-      toast.success("Medication archived", { description: `${s.medicationName} marked inactive.` });
-    } catch {
-      /* handled in hook */
-    }
-  };
 
   const onRestore = async (s: MedicationSchedule) => {
     try {
@@ -438,9 +430,8 @@ function SchedulingTab({
                           size="sm"
                           variant="ghost"
                           className="gap-1 text-destructive hover:text-destructive"
-                          onClick={() => onArchive(s)}
-                          disabled={archive.isPending}
-                          title="Archive (keeps history, sets active=false)"
+                          onClick={() => setDiscontinueTarget(s)}
+                          title="Discontinue this routine (dual sign-off required)"
                         >
                           <Archive className="h-3.5 w-3.5" />
                           Archive
@@ -466,6 +457,14 @@ function SchedulingTab({
           </table>
         </div>
       )}
+
+      <DiscontinueMedicationModal
+        open={!!discontinueTarget}
+        onOpenChange={(o) => {
+          if (!o) setDiscontinueTarget(null);
+        }}
+        schedule={discontinueTarget}
+      />
     </div>
   );
 }
