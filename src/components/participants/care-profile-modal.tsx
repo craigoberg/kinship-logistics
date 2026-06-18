@@ -42,7 +42,7 @@ import {
   useUpdateParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
-  useArchiveMedicationSchedule,
+  
   useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
 import { CarerNetworkPanel } from "./carer-network-panel";
