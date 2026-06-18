@@ -39,9 +39,19 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   carer: Carer | null;
+  /** Pre-fill linked participant when creating a brand-new carer. */
+  defaultParticipantId?: string | null;
+  /** Hide the participant picker entirely (use when launched from inside a participant profile). */
+  lockParticipant?: boolean;
 }
 
-export function CarerFormSheet({ open, onOpenChange, carer }: Props) {
+export function CarerFormSheet({
+  open,
+  onOpenChange,
+  carer,
+  defaultParticipantId = null,
+  lockParticipant = false,
+}: Props) {
   const isEdit = !!carer;
   const { data: participants = [] } = useParticipants();
 
@@ -68,8 +78,9 @@ export function CarerFormSheet({ open, onOpenChange, carer }: Props) {
     setStreetAddress(carer?.streetAddress ?? "");
     setIsPrimary(carer?.isPrimaryContact ?? false);
     setNotes(carer?.notes ?? "");
-    setParticipantId(carer?.participantId ?? null);
-  }, [open, carer]);
+    setParticipantId(carer?.participantId ?? defaultParticipantId ?? null);
+  }, [open, carer, defaultParticipantId]);
+
 
   const selectedParticipant = useMemo(
     () => participants.find((p) => p.id === participantId) ?? null,
