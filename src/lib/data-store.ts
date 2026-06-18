@@ -2283,7 +2283,7 @@ interface TripRow {
   driver_staff_id: string | null;
   event_id: string | null;
   trip_date: string;
-  start_odometer_km: number | string;
+  start_odometer: number | string;
   end_odometer_km: number | string | null;
   status: TripStatus;
   started_at: string;
@@ -2296,7 +2296,7 @@ function rowToTrip(r: TripRow): TransportTrip {
     driverStaffId: r.driver_staff_id,
     eventId: r.event_id,
     tripDate: r.trip_date,
-    startOdometerKm: Number(r.start_odometer_km),
+    startOdometerKm: Number(r.start_odometer),
     endOdometerKm: r.end_odometer_km == null ? null : Number(r.end_odometer_km),
     status: r.status,
     startedAt: r.started_at,
@@ -2499,7 +2499,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .insert({
       driver_staff_id: input.driverStaffId,
       event_id: input.eventId,
-      start_odometer_km: input.startOdometerKm,
+      start_odometer: input.startOdometerKm,
       start_odometer_variance_reason:
         input.varianceReason && input.varianceReason.trim().length > 0
           ? input.varianceReason.trim()
