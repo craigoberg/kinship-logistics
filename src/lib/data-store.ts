@@ -2241,3 +2241,365 @@ export async function insertEventLedger(input: NewEventLedger): Promise<void> {
     throw error;
   }
 }
+
+// ============================================================================
+// DRIVER MANIFEST: transport_trips + trip_legs
+// SQL: docs/sql/2026-06-19_driver_manifest.sql
+// ============================================================================
+
+export type TripStatus = "active" | "completed";
+export type LegStatus = "pending" | "en_route" | "arrived" | "completed";
+export type LegKind =
+  | "depot_to_client"
+  | "client_to_client"
+  | "client_to_venue"
+  | "venue_to_depot";
+
+export interface TransportTrip {
+  id: string;
+  driverStaffId: string | null;
+  eventId: string | null;
+  tripDate: string;
+  startOdometerKm: number;
+  endOdometerKm: number | null;
+  status: TripStatus;
+  startedAt: string;
+  completedAt: string | null;
+}
+
+interface TripRow {
+  id: string;
+  driver_staff_id: string | null;
+  event_id: string | null;
+  trip_date: string;
+  start_odometer_km: number | string;
+  end_odometer_km: number | string | null;
+  status: TripStatus;
+  started_at: string;
+  completed_at: string | null;
+}
+
+function rowToTrip(r: TripRow): TransportTrip {
+  return {
+    id: r.id,
+    driverStaffId: r.driver_staff_id,
+    eventId: r.event_id,
+    tripDate: r.trip_date,
+    startOdometerKm: Number(r.start_odometer_km),
+    endOdometerKm: r.end_odometer_km == null ? null : Number(r.end_odometer_km),
+    status: r.status,
+    startedAt: r.started_at,
+    completedAt: r.completed_at,
+  };
+}
+
+export interface TripLeg {
+  id: string;
+  tripId: string;
+  legIndex: number;
+  legKind: LegKind;
+  fromLabel: string;
+  toLabel: string;
+  fromParticipantId: string | null;
+  toParticipantId: string | null;
+  status: LegStatus;
+  startLat: number | null;
+  startLng: number | null;
+  startAt: string | null;
+  endLat: number | null;
+  endLng: number | null;
+  endAt: string | null;
+  gpsDistanceKm: number | null;
+  loggedDistanceKm: number | null;
+  passengerPresent: boolean | null;
+  noShowTriggeredAt: string | null;
+  medicationExpected: boolean;
+  medicationHandoverConfirmed: boolean;
+  unexpectedMedicationLogged: boolean;
+  unexpectedMedicationNotes: string | null;
+  completedAt: string | null;
+}
+
+interface LegRow {
+  id: string;
+  trip_id: string;
+  leg_index: number;
+  leg_kind: LegKind;
+  from_label: string;
+  to_label: string;
+  from_participant_id: string | null;
+  to_participant_id: string | null;
+  status: LegStatus;
+  start_lat: number | string | null;
+  start_lng: number | string | null;
+  start_at: string | null;
+  end_lat: number | string | null;
+  end_lng: number | string | null;
+  end_at: string | null;
+  gps_distance_km: number | string | null;
+  logged_distance_km: number | string | null;
+  passenger_present: boolean | null;
+  no_show_triggered_at: string | null;
+  medication_expected: boolean;
+  medication_handover_confirmed: boolean;
+  unexpected_medication_logged: boolean;
+  unexpected_medication_notes: string | null;
+  completed_at: string | null;
+}
+
+const numOrNull = (v: number | string | null) => (v == null ? null : Number(v));
+
+function rowToLeg(r: LegRow): TripLeg {
+  return {
+    id: r.id,
+    tripId: r.trip_id,
+    legIndex: r.leg_index,
+    legKind: r.leg_kind,
+    fromLabel: r.from_label,
+    toLabel: r.to_label,
+    fromParticipantId: r.from_participant_id,
+    toParticipantId: r.to_participant_id,
+    status: r.status,
+    startLat: numOrNull(r.start_lat),
+    startLng: numOrNull(r.start_lng),
+    startAt: r.start_at,
+    endLat: numOrNull(r.end_lat),
+    endLng: numOrNull(r.end_lng),
+    endAt: r.end_at,
+    gpsDistanceKm: numOrNull(r.gps_distance_km),
+    loggedDistanceKm: numOrNull(r.logged_distance_km),
+    passengerPresent: r.passenger_present,
+    noShowTriggeredAt: r.no_show_triggered_at,
+    medicationExpected: r.medication_expected,
+    medicationHandoverConfirmed: r.medication_handover_confirmed,
+    unexpectedMedicationLogged: r.unexpected_medication_logged,
+    unexpectedMedicationNotes: r.unexpected_medication_notes,
+    completedAt: r.completed_at,
+  };
+}
+
+export interface ActiveTripBundle {
+  trip: TransportTrip;
+  legs: TripLeg[];
+}
+
+function throwPg(prefix: string, error: { message: string; details?: string | null; hint?: string | null; code?: string | null }): never {
+  const parts = [
+    error.message,
+    error.details ? `details: ${error.details}` : null,
+    error.hint ? `hint: ${error.hint}` : null,
+    error.code ? `code: ${error.code}` : null,
+  ].filter(Boolean);
+  console.error(prefix, error);
+  throw new Error(parts.join(" · "));
+}
+
+export async function getActiveTripForDriver(
+  driverStaffId: string,
+): Promise<ActiveTripBundle | null> {
+  const { data: tripRow, error: tripErr } = await supabase
+    .from("transport_trips")
+    .select("*")
+    .eq("driver_staff_id", driverStaffId)
+    .eq("status", "active")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (tripErr) throwPg("[getActiveTripForDriver]", tripErr);
+  if (!tripRow) return null;
+  const trip = rowToTrip(tripRow as TripRow);
+  const { data: legRows, error: legErr } = await supabase
+    .from("trip_legs")
+    .select("*")
+    .eq("trip_id", trip.id)
+    .order("leg_index", { ascending: true });
+  if (legErr) throwPg("[getActiveTripForDriver:legs]", legErr);
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+}
+
+export interface StartTripInput {
+  driverStaffId: string;
+  eventId: string;
+  startOdometerKm: number;
+}
+
+export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
+  // 1. Build roster (ordered participants for this event).
+  const { data: bookingRows, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .select("participant_id, participants!inner(first_name, last_name)")
+    .eq("event_id", input.eventId)
+    .order("created_at", { ascending: true });
+  if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
+
+  const roster = (bookingRows ?? []).map((r) => {
+    const row = r as unknown as { participant_id: string; participants: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null };
+    const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
+    return {
+      id: row.participant_id,
+      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+    };
+  });
+
+  // 2. Resolve event venue.
+  const { data: eventRow, error: eventErr } = await supabase
+    .from("event_manifest")
+    .select("venue_name, title")
+    .eq("id", input.eventId)
+    .single();
+  if (eventErr) throwPg("[startTrip:event]", eventErr);
+  const venueLabel = (eventRow as { venue_name: string | null; title: string }).venue_name || (eventRow as { title: string }).title || "Venue";
+
+  // 3. Resolve which participants have active medication schedules.
+  const participantIds = roster.map((p) => p.id);
+  const medSet = new Set<string>();
+  if (participantIds.length) {
+    const { data: medRows } = await supabase
+      .from("participant_medication_schedules")
+      .select("participant_id")
+      .eq("active", true)
+      .in("participant_id", participantIds);
+    for (const m of medRows ?? []) medSet.add((m as { participant_id: string }).participant_id);
+  }
+
+  // 4. Insert trip row.
+  const { data: tripRow, error: tripErr } = await supabase
+    .from("transport_trips")
+    .insert({
+      driver_staff_id: input.driverStaffId,
+      event_id: input.eventId,
+      start_odometer_km: input.startOdometerKm,
+    })
+    .select("*")
+    .single();
+  if (tripErr) throwPg("[startTrip:insert]", tripErr);
+  const trip = rowToTrip(tripRow as TripRow);
+
+  // 5. Build leg chain: depot → client1 → ... → clientN → venue → depot.
+  const DEPOT = "Depot";
+  type LegSeed = {
+    leg_kind: LegKind;
+    from_label: string;
+    to_label: string;
+    from_participant_id: string | null;
+    to_participant_id: string | null;
+    medication_expected: boolean;
+  };
+  const seeds: LegSeed[] = [];
+  if (roster.length === 0) {
+    seeds.push({
+      leg_kind: "venue_to_depot",
+      from_label: DEPOT,
+      to_label: venueLabel,
+      from_participant_id: null,
+      to_participant_id: null,
+      medication_expected: false,
+    });
+  } else {
+    for (let i = 0; i < roster.length; i++) {
+      const to = roster[i];
+      const from = i === 0 ? null : roster[i - 1];
+      seeds.push({
+        leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+        from_label: from ? from.name : DEPOT,
+        to_label: to.name,
+        from_participant_id: from ? from.id : null,
+        to_participant_id: to.id,
+        medication_expected: medSet.has(to.id),
+      });
+    }
+    const last = roster[roster.length - 1];
+    seeds.push({
+      leg_kind: "client_to_venue",
+      from_label: last.name,
+      to_label: venueLabel,
+      from_participant_id: last.id,
+      to_participant_id: null,
+      medication_expected: false,
+    });
+  }
+  seeds.push({
+    leg_kind: "venue_to_depot",
+    from_label: venueLabel,
+    to_label: DEPOT,
+    from_participant_id: null,
+    to_participant_id: null,
+    medication_expected: false,
+  });
+
+  const legPayload = seeds.map((s, i) => ({
+    trip_id: trip.id,
+    leg_index: i + 1,
+    ...s,
+  }));
+  const { data: legRows, error: legErr } = await supabase
+    .from("trip_legs")
+    .insert(legPayload)
+    .select("*")
+    .order("leg_index", { ascending: true });
+  if (legErr) throwPg("[startTrip:legs]", legErr);
+
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+}
+
+export type LegPatch = Partial<{
+  status: LegStatus;
+  startLat: number | null;
+  startLng: number | null;
+  startAt: string | null;
+  endLat: number | null;
+  endLng: number | null;
+  endAt: string | null;
+  gpsDistanceKm: number | null;
+  loggedDistanceKm: number | null;
+  passengerPresent: boolean | null;
+  noShowTriggeredAt: string | null;
+  medicationHandoverConfirmed: boolean;
+  unexpectedMedicationLogged: boolean;
+  unexpectedMedicationNotes: string | null;
+  completedAt: string | null;
+}>;
+
+export async function patchTripLeg(legId: string, patch: LegPatch): Promise<TripLeg> {
+  const map: Record<string, unknown> = {};
+  if (patch.status !== undefined) map.status = patch.status;
+  if (patch.startLat !== undefined) map.start_lat = patch.startLat;
+  if (patch.startLng !== undefined) map.start_lng = patch.startLng;
+  if (patch.startAt !== undefined) map.start_at = patch.startAt;
+  if (patch.endLat !== undefined) map.end_lat = patch.endLat;
+  if (patch.endLng !== undefined) map.end_lng = patch.endLng;
+  if (patch.endAt !== undefined) map.end_at = patch.endAt;
+  if (patch.gpsDistanceKm !== undefined) map.gps_distance_km = patch.gpsDistanceKm;
+  if (patch.loggedDistanceKm !== undefined) map.logged_distance_km = patch.loggedDistanceKm;
+  if (patch.passengerPresent !== undefined) map.passenger_present = patch.passengerPresent;
+  if (patch.noShowTriggeredAt !== undefined) map.no_show_triggered_at = patch.noShowTriggeredAt;
+  if (patch.medicationHandoverConfirmed !== undefined) map.medication_handover_confirmed = patch.medicationHandoverConfirmed;
+  if (patch.unexpectedMedicationLogged !== undefined) map.unexpected_medication_logged = patch.unexpectedMedicationLogged;
+  if (patch.unexpectedMedicationNotes !== undefined) map.unexpected_medication_notes = patch.unexpectedMedicationNotes;
+  if (patch.completedAt !== undefined) map.completed_at = patch.completedAt;
+  map.updated_at = new Date().toISOString();
+  const { data, error } = await supabase
+    .from("trip_legs")
+    .update(map)
+    .eq("id", legId)
+    .select("*")
+    .single();
+  if (error) throwPg("[patchTripLeg]", error);
+  return rowToLeg(data as LegRow);
+}
+
+export async function completeTrip(tripId: string, endOdometerKm: number): Promise<TransportTrip> {
+  const { data, error } = await supabase
+    .from("transport_trips")
+    .update({
+      end_odometer_km: endOdometerKm,
+      status: "completed",
+      completed_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId)
+    .select("*")
+    .single();
+  if (error) throwPg("[completeTrip]", error);
+  return rowToTrip(data as TripRow);
+}

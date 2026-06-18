@@ -852,3 +852,69 @@ export function useUpdateEventBooking() {
     },
   });
 }
+
+// ---------- Driver Manifest hooks ----------
+import {
+  getActiveTripForDriver,
+  startTrip as startTripFn,
+  patchTripLeg as patchTripLegFn,
+  completeTrip as completeTripFn,
+  getStaffId,
+  type StartTripInput,
+  type LegPatch,
+} from "@/lib/data-store";
+
+const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;
+
+export function useActiveTrip() {
+  const driverId = getStaffId();
+  return useQuery({
+    queryKey: [...ACTIVE_TRIP_KEY, driverId],
+    queryFn: () => getActiveTripForDriver(driverId),
+    staleTime: 5_000,
+  });
+}
+
+function showRedToast(title: string, err: Error) {
+  toast.error(title, {
+    description: err.message,
+    duration: 12_000,
+    className: "border-red-700 bg-red-600 text-white font-medium",
+  });
+}
+
+export function useStartTrip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Omit<StartTripInput, "driverStaffId">) =>
+      startTripFn({ ...input, driverStaffId: getStaffId() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not start trip", err),
+  });
+}
+
+export function usePatchTripLeg() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ legId, patch }: { legId: string; patch: LegPatch }) =>
+      patchTripLegFn(legId, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Database rejected leg update", err),
+  });
+}
+
+export function useCompleteTrip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId, endOdometerKm }: { tripId: string; endOdometerKm: number }) =>
+      completeTripFn(tripId, endOdometerKm),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not close shift", err),
+  });
+}
