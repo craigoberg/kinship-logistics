@@ -255,11 +255,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </TabsContent>
 
             {/* TAB 5 — Finance & Ledger */}
-            <TabsContent value="finance" className="pt-4">
-              <FinanceTab
-                participantId={participant.id}
-                participantName={participant.fullName}
-              />
+            <TabsContent value="finance" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+                <FinanceTab
+                  participantId={participant.id}
+                  participantName={participant.fullName}
+                />
+              </div>
             </TabsContent>
           </Tabs>
         </DialogContent>
