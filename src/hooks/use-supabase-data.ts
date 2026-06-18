@@ -40,6 +40,8 @@ import {
   insertSchedule,
   updateMedicationSchedule,
   archiveMedicationSchedule,
+  discontinueMedicationSchedule,
+  type MedicationDiscontinuationInput,
   updateParticipant,
   insertParticipant,
   insertSyncLog,
@@ -352,6 +354,18 @@ export function useArchiveMedicationSchedule() {
     },
     onError: (err: Error) => {
       toast.error("Could not archive medication", { description: err.message });
+    },
+  });
+}
+
+export function useDiscontinueMedicationSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: MedicationDiscontinuationInput) =>
+      discontinueMedicationSchedule(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["medication_schedules"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }
