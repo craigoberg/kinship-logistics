@@ -17,7 +17,7 @@ import {
   useCarersRegistry,
   useParticipants,
 } from "@/hooks/use-supabase-data";
-import type { Carer, StaffMember } from "@/lib/data-store";
+import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
 
