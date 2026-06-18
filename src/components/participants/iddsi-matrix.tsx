@@ -16,7 +16,7 @@ export function IddsiMatrix({ liquids, foods, onChange, readOnly = false }: Prop
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <Row
         title="Liquids"
         subtitle="Levels 0 – 4"

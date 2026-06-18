@@ -122,7 +122,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92dvh] max-w-3xl overflow-y-auto border-border bg-card">
+        <DialogContent className="max-h-[92dvh] max-w-3xl overflow-x-hidden overflow-y-auto border-border bg-card">
           <DialogHeader>
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
@@ -155,22 +155,23 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </TabsList>
 
             {/* TAB 1 — Care Profile */}
-            <TabsContent value="profile" className="space-y-4 pt-4">
-              <div className="grid gap-3 sm:grid-cols-2">
-                <Field label="First name">
-                  <Input value={firstName} onChange={(e) => { setFirstName(e.target.value); setDirty(true); }} />
+            <TabsContent value="profile" className="space-y-3 pt-4">
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                <Field label="First name" className="sm:col-span-2">
+                  <Input value={firstName} onChange={(e) => { setFirstName(e.target.value); setDirty(true); }} className="h-9" />
                 </Field>
-                <Field label="Last name">
-                  <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} />
+                <Field label="Last name" className="sm:col-span-2">
+                  <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} className="h-9" />
                 </Field>
-                <Field label="NDIS number">
-                  <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} />
+                <Field label="NDIS number" className="sm:col-span-1">
+                  <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
                 </Field>
-                <Field label="Street address" className="sm:col-span-2">
+                <Field label="Street address" className="sm:col-span-4">
                   <Input
                     value={streetAddress}
                     onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
                     placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+                    className="h-9"
                   />
                 </Field>
               </div>
@@ -182,18 +183,18 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
 
 
 
-              <div className="space-y-2">
+              <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   IDDSI summary
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {liquid && (
-                    <div className={`rounded-md px-3 py-1.5 text-xs font-semibold ${liquid.swatch} ${liquid.text}`}>
+                    <div className={`rounded-md px-2 py-1 text-xs font-semibold ${liquid.swatch} ${liquid.text}`}>
                       Liquids · L{liquid.level} {liquid.name}
                     </div>
                   )}
                   {food && (
-                    <div className={`rounded-md px-3 py-1.5 text-xs font-semibold ${food.swatch} ${food.text}`}>
+                    <div className={`rounded-md px-2 py-1 text-xs font-semibold ${food.swatch} ${food.text}`}>
                       Foods · L{food.level} {food.name}
                     </div>
                   )}
@@ -206,7 +207,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 onChange={(next) => { setIddsi(next); setDirty(true); }}
               />
 
-              <DialogFooter className="mt-2">
+              <DialogFooter className="mt-1">
                 <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
