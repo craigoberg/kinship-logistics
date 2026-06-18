@@ -13,6 +13,7 @@ import { Route as TransportRouteImport } from './routes/transport'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as StaffRouteImport } from './routes/staff'
 import { Route as ParticipantsRouteImport } from './routes/participants'
+import { Route as ManifestRouteImport } from './routes/manifest'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -37,6 +38,11 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
   path: '/participants',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ManifestRoute = ManifestRouteImport.update({
+  id: '/manifest',
+  path: '/manifest',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
@@ -57,6 +63,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/events': typeof EventsRoute
+  '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
@@ -66,6 +73,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/events': typeof EventsRoute
+  '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
@@ -76,6 +84,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/events': typeof EventsRoute
+  '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
@@ -87,6 +96,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/events'
+    | '/manifest'
     | '/participants'
     | '/staff'
     | '/sync'
@@ -96,6 +106,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/events'
+    | '/manifest'
     | '/participants'
     | '/staff'
     | '/sync'
@@ -105,6 +116,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/events'
+    | '/manifest'
     | '/participants'
     | '/staff'
     | '/sync'
@@ -115,6 +127,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   EventsRoute: typeof EventsRoute
+  ManifestRoute: typeof ManifestRoute
   ParticipantsRoute: typeof ParticipantsRoute
   StaffRoute: typeof StaffRoute
   SyncRoute: typeof SyncRoute
@@ -151,6 +164,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ParticipantsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/manifest': {
+      id: '/manifest'
+      path: '/manifest'
+      fullPath: '/manifest'
+      preLoaderRoute: typeof ManifestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/events': {
       id: '/events'
       path: '/events'
@@ -179,6 +199,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   EventsRoute: EventsRoute,
+  ManifestRoute: ManifestRoute,
   ParticipantsRoute: ParticipantsRoute,
   StaffRoute: StaffRoute,
   SyncRoute: SyncRoute,
