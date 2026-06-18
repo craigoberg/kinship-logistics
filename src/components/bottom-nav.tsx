@@ -1,11 +1,12 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { LayoutDashboard, Users, Truck, RefreshCw, Settings, CalendarRange } from "lucide-react";
+import { LayoutDashboard, Users, Truck, RefreshCw, Settings, CalendarRange, Contact2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 export const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/participants", label: "Participants", icon: Users, exact: false },
   { to: "/events", label: "Events", icon: CalendarRange, exact: false },
+  { to: "/directory", label: "Directory", icon: Contact2, exact: false },
   { to: "/transport", label: "Transport", icon: Truck, exact: false },
   { to: "/sync", label: "Sync Queue", icon: RefreshCw, exact: false },
   { to: "/admin", label: "Admin", icon: Settings, exact: false },
@@ -21,7 +22,7 @@ export function BottomNav() {
       aria-label="Primary"
       className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
     >
-      <ul className="grid grid-cols-6">
+      <ul className="grid grid-cols-7">
         {NAV_ITEMS.map((item) => {
           const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
           const Icon = item.icon;

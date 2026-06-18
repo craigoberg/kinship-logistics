@@ -311,11 +311,25 @@ export async function hashPin(pin: string): Promise<string> {
 
 // ---------- staff_registry ----------
 
+export interface StaffCertification {
+  name: string;
+  number: string;
+  expiry: string | null; // ISO yyyy-mm-dd
+}
+
 export interface StaffMember {
   id: string;
   fullName: string;
   role: string | null;
   pinHash: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  personnelType: string | null;
+  active: boolean;
+  notes: string | null;
+  certifications: StaffCertification[];
+  createdAt: string | null;
 }
 
 interface StaffRow {
@@ -323,21 +337,194 @@ interface StaffRow {
   full_name: string;
   role: string | null;
   pin_hash: string | null;
+  phone: string | null;
+  email: string | null;
+  street_address: string | null;
+  personnel_type: string | null;
+  active: boolean | null;
+  notes: string | null;
+  certifications: unknown;
+  created_at: string | null;
 }
 
-export async function listStaffRegistry(): Promise<StaffMember[]> {
-  const { data, error } = await supabase
-    .from("staff_registry")
-    .select("id, full_name, role, pin_hash")
-    .order("full_name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r: StaffRow) => ({
+function rowToStaff(r: StaffRow): StaffMember {
+  const certs = Array.isArray(r.certifications) ? (r.certifications as StaffCertification[]) : [];
+  return {
     id: r.id,
     fullName: r.full_name,
     role: r.role,
     pinHash: r.pin_hash,
-  }));
+    phone: r.phone,
+    email: r.email,
+    streetAddress: r.street_address,
+    personnelType: r.personnel_type,
+    active: r.active ?? true,
+    notes: r.notes,
+    certifications: certs.map((c) => ({
+      name: c?.name ?? "",
+      number: c?.number ?? "",
+      expiry: c?.expiry ?? null,
+    })),
+    createdAt: r.created_at,
+  };
 }
+
+const STAFF_COLS =
+  "id, full_name, role, pin_hash, phone, email, street_address, personnel_type, active, notes, certifications, created_at";
+
+export async function listStaffRegistry(): Promise<StaffMember[]> {
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select(STAFF_COLS)
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToStaff(r as StaffRow));
+}
+
+export interface StaffPayload {
+  fullName: string;
+  role: string | null;
+  personnelType: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  active: boolean;
+  notes: string | null;
+  certifications: StaffCertification[];
+}
+
+function staffPayloadToRow(p: StaffPayload) {
+  return {
+    full_name: p.fullName,
+    role: p.role,
+    personnel_type: p.personnelType,
+    phone: p.phone,
+    email: p.email,
+    street_address: p.streetAddress,
+    active: p.active,
+    notes: p.notes,
+    certifications: p.certifications,
+  };
+}
+
+export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .insert(staffPayloadToRow(p))
+    .select(STAFF_COLS)
+    .single();
+  if (error) throw error;
+  return rowToStaff(data as StaffRow);
+}
+
+export async function updateStaffMember(id: string, p: StaffPayload): Promise<StaffMember> {
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .update(staffPayloadToRow(p))
+    .eq("id", id)
+    .select(STAFF_COLS)
+    .single();
+  if (error) throw error;
+  return rowToStaff(data as StaffRow);
+}
+
+// ---------- carers_registry ----------
+
+export interface Carer {
+  id: string;
+  participantId: string | null;
+  fullName: string;
+  relationship: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  isPrimaryContact: boolean;
+  notes: string | null;
+  createdAt: string | null;
+}
+
+interface CarerRow {
+  id: string;
+  participant_id: string | null;
+  full_name: string;
+  relationship: string | null;
+  phone: string | null;
+  email: string | null;
+  street_address: string | null;
+  is_primary_contact: boolean | null;
+  notes: string | null;
+  created_at: string | null;
+}
+
+function rowToCarer(r: CarerRow): Carer {
+  return {
+    id: r.id,
+    participantId: r.participant_id,
+    fullName: r.full_name,
+    relationship: r.relationship,
+    phone: r.phone,
+    email: r.email,
+    streetAddress: r.street_address,
+    isPrimaryContact: r.is_primary_contact ?? false,
+    notes: r.notes,
+    createdAt: r.created_at,
+  };
+}
+
+export async function listCarersRegistry(): Promise<Carer[]> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .select("*")
+    .order("full_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToCarer(r as CarerRow));
+}
+
+export interface CarerPayload {
+  participantId: string | null;
+  fullName: string;
+  relationship: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  isPrimaryContact: boolean;
+  notes: string | null;
+}
+
+function carerPayloadToRow(p: CarerPayload) {
+  return {
+    participant_id: p.participantId,
+    full_name: p.fullName,
+    relationship: p.relationship,
+    phone: p.phone,
+    email: p.email,
+    street_address: p.streetAddress,
+    is_primary_contact: p.isPrimaryContact,
+    notes: p.notes,
+  };
+}
+
+export async function insertCarer(p: CarerPayload): Promise<Carer> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .insert(carerPayloadToRow(p))
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
+export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
+  const { data, error } = await supabase
+    .from("carers_registry")
+    .update(carerPayloadToRow(p))
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToCarer(data as CarerRow);
+}
+
 
 // ---------- participant_medication_schedules ----------
 
