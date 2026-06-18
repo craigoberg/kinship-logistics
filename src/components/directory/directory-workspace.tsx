@@ -319,32 +319,24 @@ function ContactCell({ phone, email }: { phone: string | null; email: string | n
   );
 }
 
-function CertSummaryChips({
-  summary,
-}: {
-  summary: { active: number; expiring: number; expired: number; total: number };
-}) {
-  if (summary.total === 0) {
+function CertBadges({ certs }: { certs: StaffCertification[] }) {
+  if (!certs || certs.length === 0) {
     return <span className="text-xs text-muted-foreground">None on file</span>;
   }
   return (
     <div className="flex flex-wrap gap-1.5">
-      <Badge className="gap-1 bg-emerald-600 text-white hover:bg-emerald-600">
-        <BadgeCheck className="h-3 w-3" />
-        {summary.active} active
-      </Badge>
-      {summary.expiring > 0 && (
-        <Badge className="gap-1 bg-amber-500 text-black hover:bg-amber-500">
-          <AlertTriangle className="h-3 w-3" />
-          {summary.expiring} expiring
-        </Badge>
-      )}
-      {summary.expired > 0 && (
-        <Badge className="gap-1 bg-red-600 text-white hover:bg-red-600">
-          <AlertTriangle className="h-3 w-3" />
-          {summary.expired} expired
-        </Badge>
-      )}
+      {certs.map((c, i) => {
+        const status = certStatus(c.expiry);
+        const cfg = STATUS_BADGE[status];
+        const Icon = status === "permanent" || status === "valid" ? BadgeCheck : AlertTriangle;
+        return (
+          <Badge key={i} className={`gap-1 ${cfg.cls}`} title={c.name || "Certification"}>
+            <Icon className="h-3 w-3" />
+            <span className="max-w-[140px] truncate">{c.name || "Certification"}</span>
+            <span className="opacity-90">· {cfg.label}</span>
+          </Badge>
+        );
+      })}
     </div>
   );
 }
