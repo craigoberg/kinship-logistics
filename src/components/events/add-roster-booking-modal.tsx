@@ -43,6 +43,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
   const [bringsCarer, setBringsCarer] = useState(false);
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
+  const [participantTransport, setParticipantTransport] = useState(false);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -56,6 +57,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
       setBringsCarer(false);
       setCarerId("");
       setCarerTransport(false);
+      setParticipantTransport(false);
       setDirty(false);
     }
   }, [open]);
@@ -99,6 +101,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bringsCarer,
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
+        participantTransportRequired: participantTransport,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
