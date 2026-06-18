@@ -446,7 +446,40 @@ function SchedulingTab({
                     </span>
                   </td>
                   <td className="px-4 py-2 text-right">
-                    <div className="flex items-center justify-end gap-1">
+                    <div className="flex flex-wrap items-center justify-end gap-1">
+                      {s.active && (() => {
+                        const log = findTodaysAdministrationLog(s, todaysLogs);
+                        if (log) {
+                          const ts = new Date(log.timestamp);
+                          const hhmm = `${String(ts.getHours()).padStart(2, "0")}:${String(ts.getMinutes()).padStart(2, "0")}`;
+                          const meta = log.metadata as Record<string, unknown>;
+                          const status = String(meta.status ?? "Administered");
+                          const isGreen = status === "Administered";
+                          return (
+                            <span
+                              title="Already recorded today — see Care & Medication History for details"
+                              className={
+                                "inline-flex items-center gap-1 rounded-full px-2 py-1 text-[11px] font-semibold uppercase tracking-wide text-white " +
+                                (isGreen ? "bg-success" : "bg-warning")
+                              }
+                            >
+                              <CheckCircle2 className="h-3.5 w-3.5" />
+                              {status} {hhmm}
+                            </span>
+                          );
+                        }
+                        return (
+                          <Button
+                            size="sm"
+                            onClick={() => setGiveDoseTarget(s)}
+                            className="gap-1 bg-blue-600 text-white hover:bg-blue-700 focus-visible:ring-blue-500"
+                            title="Record a dual-witnessed administration"
+                          >
+                            <Syringe className="h-3.5 w-3.5" />
+                            Give Dose
+                          </Button>
+                        );
+                      })()}
                       <Button
                         size="sm"
                         variant="ghost"
@@ -496,6 +529,15 @@ function SchedulingTab({
           if (!o) setDiscontinueTarget(null);
         }}
         schedule={discontinueTarget}
+      />
+
+      <GiveDoseModal
+        open={!!giveDoseTarget}
+        onOpenChange={(o) => {
+          if (!o) setGiveDoseTarget(null);
+        }}
+        schedule={giveDoseTarget}
+        participantName={participantName}
       />
     </div>
   );
