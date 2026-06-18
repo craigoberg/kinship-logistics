@@ -105,19 +105,6 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
     }
     try {
       const updated = await updateMutation.mutateAsync({ id: participant.id, patch });
-      if (carerDirty && carerName.trim().length > 0) {
-        await upsertCarer.mutateAsync({
-          participantId: participant.id,
-          payload: {
-            fullName: carerName.trim(),
-            phone: carerPhone.trim() || null,
-            email: carerEmail.trim() || null,
-            streetAddress: carerAddress.trim() || null,
-            relationship: carerRelationship.trim() || null,
-            notes: null,
-          },
-        });
-      }
       toast.success("Profile updated", { description: `${updated.fullName} saved.` });
       onSaved?.(updated);
       setDirty(false);
@@ -130,6 +117,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       });
     }
   };
+
 
   return (
     <>
