@@ -389,6 +389,12 @@ export function AttendanceTab({ participantId, participantName }: Props) {
         participantId={participantId}
         participantName={participantName}
       />
+      <NoShowCountdownModal
+        open={noShowOpen}
+        onOpenChange={setNoShowOpen}
+        participantId={participantId}
+        participantName={participantName}
+      />
     </div>
   );
 }
