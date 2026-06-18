@@ -28,6 +28,7 @@ import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
 import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
+import { NoShowCountdownModal } from "./no-show-countdown-modal";
 import { toast } from "sonner";
 
 interface Props {
