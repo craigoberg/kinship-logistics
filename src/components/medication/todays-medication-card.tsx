@@ -20,8 +20,7 @@ import {
   useTodaysComplianceLogs,
 } from "@/hooks/use-supabase-data";
 import {
-  getDeviceUuid,
-  insertComplianceLog,
+  insertQuickAdministrationLog,
   type ComplianceLog,
   type MedicationSchedule,
   type Participant,
@@ -81,7 +80,7 @@ export function TodaysMedicationCard() {
   const rows: Row[] = useMemo(() => {
     return schedules
       .map<Row>((s) => {
-        const log = findAdministrationLog(s, logs);
+        const participant = participantById.get(s.participantId);
         const scheduledMinutes = timeToMinutes(s.expectedTime.slice(0, 5));
         let status: Status;
         if (log) status = "administered";
