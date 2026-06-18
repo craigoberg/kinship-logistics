@@ -2433,10 +2433,11 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
 
   const roster = (bookingRows ?? []).map((r) => {
-    const row = r as { participant_id: string; participants: { first_name: string; last_name: string } | null };
+    const row = r as unknown as { participant_id: string; participants: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null };
+    const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     return {
       id: row.participant_id,
-      name: `${row.participants?.first_name ?? ""} ${row.participants?.last_name ?? ""}`.trim() || "(participant)",
+      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
     };
   });
 
