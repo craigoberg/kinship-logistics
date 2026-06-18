@@ -162,6 +162,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 <Field label="NDIS number">
                   <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} />
                 </Field>
+                <Field label="Street address" className="sm:col-span-2">
+                  <Input
+                    value={streetAddress}
+                    onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
+                    placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+                  />
+                </Field>
               </div>
 
               <div className="space-y-2">
