@@ -21,7 +21,9 @@ import type { Carer, StaffMember } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
 
-const EXPIRY_WARN_DAYS = 60;
+const EXPIRY_WARN_DAYS = 30;
+
+type CertStatus = "permanent" | "valid" | "expiring" | "expired";
 
 function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
@@ -30,22 +32,21 @@ function daysUntil(iso: string | null): number | null {
   return Math.ceil((t - Date.now()) / 86_400_000);
 }
 
-function staffCertSummary(s: StaffMember) {
-  let active = 0;
-  let expiring = 0;
-  let expired = 0;
-  for (const c of s.certifications) {
-    const d = daysUntil(c.expiry);
-    if (d === null) {
-      active += 1;
-      continue;
-    }
-    if (d < 0) expired += 1;
-    else if (d <= EXPIRY_WARN_DAYS) expiring += 1;
-    else active += 1;
-  }
-  return { active, expiring, expired, total: s.certifications.length };
+function certStatus(expiry: string | null | undefined): CertStatus {
+  if (!expiry) return "permanent";
+  const d = daysUntil(expiry);
+  if (d === null) return "permanent";
+  if (d < 0) return "expired";
+  if (d <= EXPIRY_WARN_DAYS) return "expiring";
+  return "valid";
 }
+
+const STATUS_BADGE: Record<CertStatus, { label: string; cls: string }> = {
+  permanent: { label: "Permanent / Active", cls: "bg-emerald-600 text-white hover:bg-emerald-600" },
+  valid: { label: "Valid", cls: "bg-emerald-600 text-white hover:bg-emerald-600" },
+  expiring: { label: "Expiring Soon", cls: "bg-amber-500 text-black hover:bg-amber-500" },
+  expired: { label: "Expired", cls: "bg-red-600 text-white hover:bg-red-600" },
+};
 
 export function DirectoryWorkspace() {
   const [tab, setTab] = useState<"staff" | "carers">("staff");
