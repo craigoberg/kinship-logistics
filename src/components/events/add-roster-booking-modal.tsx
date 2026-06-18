@@ -172,6 +172,20 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
             </p>
           </div>
 
+          {/* ----- Transport logistics ----- */}
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Client requires bus transport?
+            </Label>
+            <Switch
+              checked={participantTransport}
+              onCheckedChange={(v) => {
+                setParticipantTransport(v);
+                setDirty(true);
+              }}
+            />
+          </div>
+
           {/* ----- Carer companion ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex items-center justify-between gap-2">
