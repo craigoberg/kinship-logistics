@@ -15,6 +15,18 @@ CREATE TABLE IF NOT EXISTS public.transport_trips (
   updated_at timestamptz NOT NULL DEFAULT now()
 );
 
+ALTER TABLE public.transport_trips
+  ADD COLUMN IF NOT EXISTS driver_staff_id uuid,
+  ADD COLUMN IF NOT EXISTS event_id uuid REFERENCES public.event_manifest(id) ON DELETE SET NULL,
+  ADD COLUMN IF NOT EXISTS trip_date date NOT NULL DEFAULT current_date,
+  ADD COLUMN IF NOT EXISTS start_odometer_km numeric,
+  ADD COLUMN IF NOT EXISTS end_odometer_km numeric,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'active',
+  ADD COLUMN IF NOT EXISTS started_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
+
 CREATE UNIQUE INDEX IF NOT EXISTS transport_trips_one_active_per_driver
   ON public.transport_trips (driver_staff_id)
   WHERE status = 'active' AND driver_staff_id IS NOT NULL;
@@ -57,6 +69,33 @@ CREATE TABLE IF NOT EXISTS public.trip_legs (
   updated_at timestamptz NOT NULL DEFAULT now(),
   UNIQUE (trip_id, leg_index)
 );
+
+ALTER TABLE public.trip_legs
+  ADD COLUMN IF NOT EXISTS trip_id uuid REFERENCES public.transport_trips(id) ON DELETE CASCADE,
+  ADD COLUMN IF NOT EXISTS leg_index int,
+  ADD COLUMN IF NOT EXISTS leg_kind text,
+  ADD COLUMN IF NOT EXISTS from_label text,
+  ADD COLUMN IF NOT EXISTS to_label text,
+  ADD COLUMN IF NOT EXISTS from_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS to_participant_id uuid,
+  ADD COLUMN IF NOT EXISTS status text NOT NULL DEFAULT 'pending',
+  ADD COLUMN IF NOT EXISTS start_lat numeric,
+  ADD COLUMN IF NOT EXISTS start_lng numeric,
+  ADD COLUMN IF NOT EXISTS start_at timestamptz,
+  ADD COLUMN IF NOT EXISTS end_lat numeric,
+  ADD COLUMN IF NOT EXISTS end_lng numeric,
+  ADD COLUMN IF NOT EXISTS end_at timestamptz,
+  ADD COLUMN IF NOT EXISTS gps_distance_km numeric,
+  ADD COLUMN IF NOT EXISTS logged_distance_km numeric,
+  ADD COLUMN IF NOT EXISTS passenger_present boolean,
+  ADD COLUMN IF NOT EXISTS no_show_triggered_at timestamptz,
+  ADD COLUMN IF NOT EXISTS medication_expected boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS medication_handover_confirmed boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS unexpected_medication_logged boolean NOT NULL DEFAULT false,
+  ADD COLUMN IF NOT EXISTS unexpected_medication_notes text,
+  ADD COLUMN IF NOT EXISTS completed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS created_at timestamptz NOT NULL DEFAULT now(),
+  ADD COLUMN IF NOT EXISTS updated_at timestamptz NOT NULL DEFAULT now();
 
 CREATE INDEX IF NOT EXISTS trip_legs_trip_id_idx ON public.trip_legs (trip_id, leg_index);
 
