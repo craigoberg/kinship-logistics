@@ -111,6 +111,8 @@ function InitializeTripScreen() {
     odoState !== "backwards" &&
     reasonOk &&
     !startTrip.isPending;
+  const isOdometerBackwards = odoState === "backwards";
+  const isVarianceHigh = odoState === "high_variance";
 
   const onOdoChange = (raw: string) => {
     const cleaned = raw.replace(/\D+/g, "");
