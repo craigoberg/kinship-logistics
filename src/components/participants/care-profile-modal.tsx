@@ -10,6 +10,8 @@ import {
   Pencil,
   Archive,
   ArchiveRestore,
+  Syringe,
+  CheckCircle2,
 } from "lucide-react";
 import {
   Dialog,
@@ -42,7 +44,7 @@ import {
   useUpdateParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
-  
+  useTodaysComplianceLogs,
   useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
 import { CarerNetworkPanel } from "./carer-network-panel";
@@ -51,6 +53,10 @@ import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { ScheduledMedicationModal } from "@/components/medication/scheduled-medication-modal";
 import { DiscontinueMedicationModal } from "@/components/medication/discontinue-medication-modal";
+import {
+  GiveDoseModal,
+  findTodaysAdministrationLog,
+} from "@/components/medication/give-dose-modal";
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { FinanceTab } from "@/components/finance/finance-tab";
 import { toast } from "sonner";
