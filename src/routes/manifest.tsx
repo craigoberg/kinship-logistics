@@ -78,6 +78,7 @@ function InitializeTripScreen() {
   useEffect(() => {
     if (!userTouchedOdo && lastEndOdo != null && odo === "") {
       setOdo(String(lastEndOdo));
+      setUserTouchedOdo(true);
     }
   }, [lastEndOdo, userTouchedOdo, odo]);
 
