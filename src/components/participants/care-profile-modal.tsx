@@ -219,17 +219,18 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </TabsContent>
 
             {/* TAB 2 — Medication Scheduling */}
-            <TabsContent value="scheduling" className="pt-4">
-              <SchedulingTab
-                participantId={participant.id}
-                participantName={participant.fullName}
-                onAdd={() => setScheduleOpen(true)}
-                onEdit={(s) => {
-                  setEditMedSchedule(s);
-                  setEditMedOpen(true);
-                }}
-              />
-
+            <TabsContent value="scheduling" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+                <SchedulingTab
+                  participantId={participant.id}
+                  participantName={participant.fullName}
+                  onAdd={() => setScheduleOpen(true)}
+                  onEdit={(s) => {
+                    setEditMedSchedule(s);
+                    setEditMedOpen(true);
+                  }}
+                />
+              </div>
             </TabsContent>
 
             {/* TAB 3 — History */}
