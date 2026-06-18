@@ -75,10 +75,12 @@ function InitializeTripScreen() {
   const [userTouchedOdo, setUserTouchedOdo] = useState(false);
 
   // Auto-populate odometer with last recorded closing reading on load.
+  // Hydrate React state at the same moment the value appears on screen so
+  // validation (and the submit button) react without a manual keystroke.
   useEffect(() => {
     if (!userTouchedOdo && lastEndOdo != null && odo === "") {
-      setOdo(String(lastEndOdo));
-      setUserTouchedOdo(true);
+      const fetchedValue = Number(lastEndOdo);
+      setOdo(fetchedValue.toString());
     }
   }, [lastEndOdo, userTouchedOdo, odo]);
 
