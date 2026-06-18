@@ -234,12 +234,14 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </TabsContent>
 
             {/* TAB 3 — History */}
-            <TabsContent value="history" className="pt-4">
-              <HistoryTab
-                participantId={participant.id}
-                query={historyQuery}
-                onQueryChange={setHistoryQuery}
-              />
+            <TabsContent value="history" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+                <HistoryTab
+                  participantId={participant.id}
+                  query={historyQuery}
+                  onQueryChange={setHistoryQuery}
+                />
+              </div>
             </TabsContent>
 
             {/* TAB 4 — Schedules & Attendance */}
