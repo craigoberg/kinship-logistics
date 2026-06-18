@@ -13,6 +13,11 @@ import {
   insertCarer,
   updateCarer,
   upsertPrimaryCarer,
+  setPrimaryCarer,
+  demoteCarer,
+  linkCarerToParticipant,
+  unlinkCarer,
+
   type StaffPayload,
   type CarerPayload,
   listSchedulesForParticipant,
