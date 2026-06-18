@@ -1793,6 +1793,8 @@ export interface EventRosterBooking {
   carerId: string | null;
   /** Whether the companion carer needs a physical bus seat. */
   carerTransportRequired: boolean;
+  /** Whether the participant themselves needs a physical bus seat. */
+  participantTransportRequired: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1809,6 +1811,7 @@ interface BookingRow {
   brings_carer: boolean | null;
   carer_id: string | null;
   carer_transport_required: boolean | null;
+  participant_transport_required: boolean | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1830,6 +1833,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     bringsCarer: r.brings_carer ?? false,
     carerId: r.carer_id ?? null,
     carerTransportRequired: r.carer_transport_required ?? false,
+    participantTransportRequired: r.participant_transport_required ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
