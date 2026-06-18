@@ -122,8 +122,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[92dvh] max-w-3xl overflow-x-hidden overflow-y-auto border-border bg-card">
-          <DialogHeader>
+        <DialogContent className="max-h-[85vh] max-w-3xl overflow-x-hidden flex flex-col border-border bg-card">
+          <DialogHeader className="shrink-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <DialogTitle className="truncate">{participant.fullName || "Participant"}</DialogTitle>
@@ -145,8 +145,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </div>
           </DialogHeader>
 
-          <Tabs defaultValue="profile" className="mt-2">
-            <TabsList className="w-full justify-start">
+          <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+            <TabsList className="w-full justify-start !h-auto flex-wrap gap-2 shrink-0">
               <TabsTrigger value="profile">Care Profile</TabsTrigger>
               <TabsTrigger value="scheduling">Medication Scheduling</TabsTrigger>
               <TabsTrigger value="history">Care &amp; Medication History</TabsTrigger>
@@ -155,59 +155,61 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </TabsList>
 
             {/* TAB 1 — Care Profile */}
-            <TabsContent value="profile" className="space-y-3 pt-4">
-              <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
-                <Field label="First name" className="sm:col-span-2">
-                  <Input value={firstName} onChange={(e) => { setFirstName(e.target.value); setDirty(true); }} className="h-9" />
-                </Field>
-                <Field label="Last name" className="sm:col-span-2">
-                  <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} className="h-9" />
-                </Field>
-                <Field label="NDIS number" className="sm:col-span-1">
-                  <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
-                </Field>
-                <Field label="Street address" className="sm:col-span-4">
-                  <Input
-                    value={streetAddress}
-                    onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
-                    placeholder="e.g. 42 Wattle Street, Parramatta NSW"
-                    className="h-9"
-                  />
-                </Field>
+            <TabsContent value="profile" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4 space-y-3">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
+                  <Field label="First name" className="sm:col-span-2">
+                    <Input value={firstName} onChange={(e) => { setFirstName(e.target.value); setDirty(true); }} className="h-9" />
+                  </Field>
+                  <Field label="Last name" className="sm:col-span-2">
+                    <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} className="h-9" />
+                  </Field>
+                  <Field label="NDIS number" className="sm:col-span-1">
+                    <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
+                  </Field>
+                  <Field label="Street address" className="sm:col-span-4">
+                    <Input
+                      value={streetAddress}
+                      onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
+                      placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+                      className="h-9"
+                    />
+                  </Field>
+                </div>
+
+                <CarerNetworkPanel
+                  participantId={participant.id}
+                  participantName={participant.fullName}
+                />
+
+
+
+                <div className="space-y-1">
+                  <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    IDDSI summary
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    {liquid && (
+                      <div className={`rounded-md px-2 py-1 text-xs font-semibold ${liquid.swatch} ${liquid.text}`}>
+                        Liquids · L{liquid.level} {liquid.name}
+                      </div>
+                    )}
+                    {food && (
+                      <div className={`rounded-md px-2 py-1 text-xs font-semibold ${food.swatch} ${food.text}`}>
+                        Foods · L{food.level} {food.name}
+                      </div>
+                    )}
+                  </div>
+                </div>
+
+                <IddsiMatrix
+                  liquids={iddsi.liquids}
+                  foods={iddsi.foods}
+                  onChange={(next) => { setIddsi(next); setDirty(true); }}
+                />
               </div>
 
-              <CarerNetworkPanel
-                participantId={participant.id}
-                participantName={participant.fullName}
-              />
-
-
-
-              <div className="space-y-1">
-                <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  IDDSI summary
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {liquid && (
-                    <div className={`rounded-md px-2 py-1 text-xs font-semibold ${liquid.swatch} ${liquid.text}`}>
-                      Liquids · L{liquid.level} {liquid.name}
-                    </div>
-                  )}
-                  {food && (
-                    <div className={`rounded-md px-2 py-1 text-xs font-semibold ${food.swatch} ${food.text}`}>
-                      Foods · L{food.level} {food.name}
-                    </div>
-                  )}
-                </div>
-              </div>
-
-              <IddsiMatrix
-                liquids={iddsi.liquids}
-                foods={iddsi.foods}
-                onChange={(next) => { setIddsi(next); setDirty(true); }}
-              />
-
-              <DialogFooter className="mt-1">
+              <DialogFooter className="mt-1 shrink-0">
                 <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
