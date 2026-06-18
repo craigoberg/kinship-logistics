@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Syringe, ShieldCheck } from "lucide-react";
+import { Syringe, ShieldCheck, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 import {
   Dialog,
@@ -80,6 +81,12 @@ export function GiveDoseModal({
   const [witnessedById, setWitnessedById] = useState("");
   const [status, setStatus] = useState<AdministrationStatus>("Administered");
   const [notes, setNotes] = useState("");
+  const [errors, setErrors] = useState<{
+    administeredBy?: string;
+    witnessedBy?: string;
+    notes?: string;
+    form?: string;
+  }>({});
 
   useEffect(() => {
     if (open) {
@@ -87,6 +94,7 @@ export function GiveDoseModal({
       setWitnessedById("");
       setStatus("Administered");
       setNotes("");
+      setErrors({});
     }
   }, [open]);
 
@@ -99,21 +107,45 @@ export function GiveDoseModal({
   const nowLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   const requiresNotes = status === "Refused";
-  const notesValid = !requiresNotes || notes.trim().length >= 10;
-
-  const canSubmit =
-    !!schedule &&
-    !!administeredById &&
-    !!witnessedById &&
-    administeredById !== witnessedById &&
-    notesValid &&
-    !giveDose.isPending;
 
   const submit = async () => {
-    if (!schedule || !canSubmit) return;
+    if (!schedule || giveDose.isPending) return;
+
+    // Click-time validation — surfaces visible per-field errors instead of
+    // silently disabling the button.
+    const next: typeof errors = {};
+    if (!administeredById) {
+      next.administeredBy = "Select the administering staff member.";
+    }
+    if (!witnessedById) {
+      next.witnessedBy = "Select a staff witness.";
+    }
+    if (
+      administeredById &&
+      witnessedById &&
+      administeredById === witnessedById
+    ) {
+      next.administeredBy =
+        "Administering staff and witness must be different people.";
+      next.witnessedBy =
+        "Administering staff and witness must be different people.";
+    }
+    if (requiresNotes && notes.trim().length < 10) {
+      next.notes =
+        "Refusal requires at least 10 characters of context for the audit trail.";
+    }
+    if (Object.keys(next).length > 0) {
+      next.form =
+        "Dual sign-off is mandatory. Please select a staff witness to verify medication delivery.";
+      setErrors(next);
+      return;
+    }
+    setErrors({});
+
     const administeredBy = activeStaff.find((s) => s.id === administeredById);
     const witnessedBy = activeStaff.find((s) => s.id === witnessedById);
     if (!administeredBy || !witnessedBy) return;
+
     try {
       await giveDose.mutateAsync({
         scheduleId: schedule.id,
@@ -128,13 +160,16 @@ export function GiveDoseModal({
         status,
         notes: notes.trim() || undefined,
       });
-      toast.success("Dose signed off", {
+      toast.success("Medication administration logged successfully.", {
         description: `${schedule.medicationName} — ${status} for ${participantName}.`,
+        className: "!bg-green-600 !text-white !border-green-700",
       });
       onOpenChange(false);
     } catch (err) {
-      toast.error("Sign-off failed", {
-        description: (err as Error).message,
+      // Keep the form open so the user can adjust and retry.
+      toast.error((err as Error).message || "Database rejected the sign-off.", {
+        description:
+          "Postgres rejected the insert. The form has been kept open so you can adjust and retry.",
         className: "!bg-red-600 !text-white !border-red-700",
         duration: 12_000,
       });
@@ -178,6 +213,16 @@ export function GiveDoseModal({
           </div>
         )}
 
+        {errors.form && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{errors.form}</span>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -185,10 +230,27 @@ export function GiveDoseModal({
             </Label>
             <Select
               value={administeredById}
-              onValueChange={setAdministeredById}
+              onValueChange={(v) => {
+                setAdministeredById(v);
+                setErrors((prev) => ({
+                  ...prev,
+                  administeredBy: undefined,
+                  witnessedBy:
+                    prev.witnessedBy && v && v !== witnessedById
+                      ? undefined
+                      : prev.witnessedBy,
+                  form: undefined,
+                }));
+              }}
               disabled={staffLoading}
             >
-              <SelectTrigger className="h-9">
+              <SelectTrigger
+                className={cn(
+                  "h-9",
+                  errors.administeredBy &&
+                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
+                )}
+              >
                 <SelectValue placeholder="Select staff…" />
               </SelectTrigger>
               <SelectContent>
@@ -200,6 +262,11 @@ export function GiveDoseModal({
                 ))}
               </SelectContent>
             </Select>
+            {errors.administeredBy && (
+              <p className="text-xs text-muted-foreground">
+                {errors.administeredBy}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
@@ -208,10 +275,27 @@ export function GiveDoseModal({
             </Label>
             <Select
               value={witnessedById}
-              onValueChange={setWitnessedById}
+              onValueChange={(v) => {
+                setWitnessedById(v);
+                setErrors((prev) => ({
+                  ...prev,
+                  witnessedBy: undefined,
+                  administeredBy:
+                    prev.administeredBy && v && v !== administeredById
+                      ? undefined
+                      : prev.administeredBy,
+                  form: undefined,
+                }));
+              }}
               disabled={staffLoading}
             >
-              <SelectTrigger className="h-9">
+              <SelectTrigger
+                className={cn(
+                  "h-9",
+                  errors.witnessedBy &&
+                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
+                )}
+              >
                 <SelectValue placeholder="Select witness…" />
               </SelectTrigger>
               <SelectContent>
@@ -225,6 +309,11 @@ export function GiveDoseModal({
                   ))}
               </SelectContent>
             </Select>
+            {errors.witnessedBy && (
+              <p className="text-xs text-muted-foreground">
+                {errors.witnessedBy}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5 sm:col-span-2">
@@ -255,13 +344,28 @@ export function GiveDoseModal({
               </Label>
               <Textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  if (errors.notes && e.target.value.trim().length >= 10) {
+                    setErrors((prev) => ({
+                      ...prev,
+                      notes: undefined,
+                      form: undefined,
+                    }));
+                  }
+                }}
                 rows={3}
                 placeholder="e.g. Participant refused 8am dose, stated nausea. Escalated to RN on duty."
                 maxLength={1000}
+                className={cn(
+                  errors.notes &&
+                    "border-destructive ring-1 ring-destructive/40 focus-visible:ring-destructive/40",
+                )}
               />
               <p className="text-[11px] text-muted-foreground">
-                Minimum 10 characters. {notes.trim().length}/1000
+                {errors.notes
+                  ? errors.notes
+                  : `Minimum 10 characters. ${notes.trim().length}/1000`}
               </p>
             </div>
           )}
@@ -271,11 +375,16 @@ export function GiveDoseModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+          <Button
+            onClick={submit}
+            disabled={giveDose.isPending}
+            className="gap-1.5"
+          >
             <ShieldCheck className="h-4 w-4" />
             {giveDose.isPending ? "Saving…" : "Confirm & Sign Off"}
           </Button>
         </DialogFooter>
+
       </DialogContent>
     </Dialog>
   );
