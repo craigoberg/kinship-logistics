@@ -55,6 +55,7 @@ function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooki
     bringsCarer: r.bringsCarer ?? false,
     carerId: r.carerId ?? null,
     carerTransportRequired: r.carerTransportRequired ?? false,
+    participantTransportRequired: r.participantTransportRequired ?? false,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
