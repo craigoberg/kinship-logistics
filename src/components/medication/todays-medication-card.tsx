@@ -79,6 +79,7 @@ export function TodaysMedicationCard() {
 
   const rows: Row[] = useMemo(() => {
     return schedules
+      .filter((s): s is MedicationSchedule & { participantId: string } => !!s.participantId)
       .map<Row>((s) => {
         const participant = participantById.get(s.participantId);
         const log = findAdministrationLog(s, logs);
@@ -108,7 +109,7 @@ export function TodaysMedicationCard() {
     setSubmitting(true);
     try {
       await insertQuickAdministrationLog({
-        participantId: confirm.schedule.participantId,
+        participantId: confirm.schedule.participantId as string,
         scheduleId: confirm.schedule.id,
         medicationName: confirm.schedule.medicationName,
         dosage: confirm.schedule.dosage,
