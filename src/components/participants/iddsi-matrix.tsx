@@ -16,7 +16,7 @@ export function IddsiMatrix({ liquids, foods, onChange, readOnly = false }: Prop
   };
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-3">
       <Row
         title="Liquids"
         subtitle="Levels 0 – 4"
@@ -55,7 +55,7 @@ function Row({
   const current = useMemo(() => levels.find((l) => l.level === selected), [levels, selected]);
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between gap-2">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
         <div>
           <div className="text-sm font-semibold">{title}</div>
           <div className="text-xs text-muted-foreground">{subtitle}</div>
@@ -69,7 +69,7 @@ function Row({
       <div
         role="radiogroup"
         aria-label={`IDDSI ${title.toLowerCase()} level`}
-        className="grid grid-cols-5 gap-2"
+        className="grid grid-cols-2 gap-2 sm:grid-cols-4"
       >
         {levels.map((l) => {
           const active = l.level === selected;
