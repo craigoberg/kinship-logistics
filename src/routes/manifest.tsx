@@ -175,7 +175,7 @@ function InitializeTripScreen() {
                 odoState === "high_variance" &&
                   "border-amber-500 focus-visible:ring-amber-500",
               )}
-              value={odo}
+              value={odo || ""}
               onChange={(e) => onOdoChange(e.target.value)}
               placeholder="48210"
             />
