@@ -53,7 +53,7 @@ function findAdministrationLog(
 ): ComplianceLog | undefined {
   const target = schedule.medicationName.trim().toLowerCase();
   return logs.find((l) => {
-    if (l.participantId !== schedule.participantId) return false;
+    if (!l.participantId || l.participantId !== schedule.participantId) return false;
     const meta = l.metadata as Record<string, unknown>;
     const name = String(meta.medication_name ?? "").trim().toLowerCase();
     return name === target;
@@ -81,6 +81,7 @@ export function TodaysMedicationCard() {
     return schedules
       .map<Row>((s) => {
         const participant = participantById.get(s.participantId);
+        const log = findAdministrationLog(s, logs);
         const scheduledMinutes = timeToMinutes(s.expectedTime.slice(0, 5));
         let status: Status;
         if (log) status = "administered";
@@ -89,7 +90,7 @@ export function TodaysMedicationCard() {
         else status = "future";
         return {
           schedule: s,
-          participant: participantById.get(s.participantId),
+          participant,
           scheduledMinutes,
           status,
           administeredLog: log,
@@ -106,20 +107,13 @@ export function TodaysMedicationCard() {
     if (!confirm) return;
     setSubmitting(true);
     try {
-      await insertComplianceLog({
-        participant_id: confirm.schedule.participantId,
-        action_performed: "MEDICATION_ADMIN_QUICK",
-        witness_1_identity: "Dashboard Quick Admin",
-        witness_2_identity: null,
-        timestamp: new Date().toISOString(),
-        metadata: {
-          medication_name: confirm.schedule.medicationName,
-          dosage: confirm.schedule.dosage,
-          scheduled_time: confirm.schedule.expectedTime,
-          schedule_id: confirm.schedule.id,
-          source: "dashboard_widget",
-          device_uuid: getDeviceUuid(),
-        },
+      await insertQuickAdministrationLog({
+        participantId: confirm.schedule.participantId,
+        scheduleId: confirm.schedule.id,
+        medicationName: confirm.schedule.medicationName,
+        dosage: confirm.schedule.dosage,
+        scheduledTime: confirm.schedule.expectedTime,
+        witnessIdentity: "Dashboard Quick Admin",
       });
       toast.success("Administration recorded", {
         description: `${confirm.schedule.medicationName} · ${confirm.participant?.fullName ?? "participant"}.`,
