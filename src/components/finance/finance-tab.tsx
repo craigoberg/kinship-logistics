@@ -143,7 +143,7 @@ export function FinanceTab({ participantId, participantName }: Props) {
                     <td className="px-4 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
                       {e.financialCode}
                     </td>
-                    <td className="px-4 py-2">{e.description || "—"}</td>
+                    <td className="px-4 py-2">{cleanDescription(e.description) || "—"}</td>
                     <td
                       className={
                         "whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums " +
