@@ -4,7 +4,8 @@ import { Input } from "@/components/ui/input";
 import { Card } from "@/components/ui/card";
 import { iddsiLevel } from "@/lib/iddsi";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
-import type { Participant } from "@/lib/data-store";
+import { GiveDoseModal } from "@/components/medication/give-dose-modal";
+import type { MedicationSchedule, Participant } from "@/lib/data-store";
 
 
 interface Props {
@@ -14,7 +15,12 @@ interface Props {
 
 export function ParticipantTable({ participants, onSelect }: Props) {
   const [q, setQ] = useState("");
+  const [verifying, setVerifying] = useState<{
+    schedule: MedicationSchedule;
+    participantName: string;
+  } | null>(null);
   const pending = usePendingScheduleMap();
+
 
 
   const filtered = useMemo(() => {
