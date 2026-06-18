@@ -81,6 +81,12 @@ export function GiveDoseModal({
   const [witnessedById, setWitnessedById] = useState("");
   const [status, setStatus] = useState<AdministrationStatus>("Administered");
   const [notes, setNotes] = useState("");
+  const [errors, setErrors] = useState<{
+    administeredBy?: string;
+    witnessedBy?: string;
+    notes?: string;
+    form?: string;
+  }>({});
 
   useEffect(() => {
     if (open) {
@@ -88,6 +94,7 @@ export function GiveDoseModal({
       setWitnessedById("");
       setStatus("Administered");
       setNotes("");
+      setErrors({});
     }
   }, [open]);
 
@@ -100,21 +107,45 @@ export function GiveDoseModal({
   const nowLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
 
   const requiresNotes = status === "Refused";
-  const notesValid = !requiresNotes || notes.trim().length >= 10;
-
-  const canSubmit =
-    !!schedule &&
-    !!administeredById &&
-    !!witnessedById &&
-    administeredById !== witnessedById &&
-    notesValid &&
-    !giveDose.isPending;
 
   const submit = async () => {
-    if (!schedule || !canSubmit) return;
+    if (!schedule || giveDose.isPending) return;
+
+    // Click-time validation — surfaces visible per-field errors instead of
+    // silently disabling the button.
+    const next: typeof errors = {};
+    if (!administeredById) {
+      next.administeredBy = "Select the administering staff member.";
+    }
+    if (!witnessedById) {
+      next.witnessedBy = "Select a staff witness.";
+    }
+    if (
+      administeredById &&
+      witnessedById &&
+      administeredById === witnessedById
+    ) {
+      next.administeredBy =
+        "Administering staff and witness must be different people.";
+      next.witnessedBy =
+        "Administering staff and witness must be different people.";
+    }
+    if (requiresNotes && notes.trim().length < 10) {
+      next.notes =
+        "Refusal requires at least 10 characters of context for the audit trail.";
+    }
+    if (Object.keys(next).length > 0) {
+      next.form =
+        "Dual sign-off is mandatory. Please select a staff witness to verify medication delivery.";
+      setErrors(next);
+      return;
+    }
+    setErrors({});
+
     const administeredBy = activeStaff.find((s) => s.id === administeredById);
     const witnessedBy = activeStaff.find((s) => s.id === witnessedById);
     if (!administeredBy || !witnessedBy) return;
+
     try {
       await giveDose.mutateAsync({
         scheduleId: schedule.id,
@@ -129,13 +160,16 @@ export function GiveDoseModal({
         status,
         notes: notes.trim() || undefined,
       });
-      toast.success("Dose signed off", {
+      toast.success("Medication administration logged successfully.", {
         description: `${schedule.medicationName} — ${status} for ${participantName}.`,
+        className: "!bg-green-600 !text-white !border-green-700",
       });
       onOpenChange(false);
     } catch (err) {
-      toast.error("Sign-off failed", {
-        description: (err as Error).message,
+      // Keep the form open so the user can adjust and retry.
+      toast.error((err as Error).message || "Database rejected the sign-off.", {
+        description:
+          "Postgres rejected the insert. The form has been kept open so you can adjust and retry.",
         className: "!bg-red-600 !text-white !border-red-700",
         duration: 12_000,
       });
