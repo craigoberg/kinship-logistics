@@ -41,7 +41,9 @@ import {
   updateMedicationSchedule,
   archiveMedicationSchedule,
   discontinueMedicationSchedule,
+  insertDualWitnessAdministrationLog,
   type MedicationDiscontinuationInput,
+  type DualWitnessAdministration,
   updateParticipant,
   insertParticipant,
   insertSyncLog,
@@ -369,6 +371,19 @@ export function useDiscontinueMedicationSchedule() {
     },
   });
 }
+
+export function useGiveDose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DualWitnessAdministration) =>
+      insertDualWitnessAdministrationLog(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
+    },
+  });
+}
+
 
 
 export function useStaffRegistry() {

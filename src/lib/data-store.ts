@@ -336,6 +336,54 @@ export async function insertQuickAdministrationLog(input: QuickMedicationLog): P
   if (error) throw error;
 }
 
+export type AdministrationStatus = "Administered" | "Refused" | "Missed";
+
+export interface DualWitnessAdministration {
+  scheduleId: string;
+  participantId: string;
+  medicationName: string;
+  dosage: string;
+  scheduledTime: string;
+  administeredById: string;
+  administeredByName: string;
+  witnessedById: string;
+  witnessedByName: string;
+  status: AdministrationStatus;
+  notes?: string;
+}
+
+/**
+ * Dual-witness "Give Dose" sign-off written from the Care Profile modal.
+ * Lands in compliance_audit_logs so the dashboard widget + Care History tab
+ * share one source of truth — no separate medication_administration_log
+ * table is provisioned.
+ */
+export async function insertDualWitnessAdministrationLog(
+  input: DualWitnessAdministration,
+): Promise<void> {
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: input.participantId,
+    action_performed: "MEDICATION_ADMIN_DUAL",
+    witness_1_identity: input.administeredByName,
+    witness_2_identity: input.witnessedByName,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      schedule_id: input.scheduleId,
+      medication_name: input.medicationName,
+      dosage: input.dosage,
+      scheduled_time: input.scheduledTime,
+      administered_by_id: input.administeredById,
+      witnessed_by_id: input.witnessedById,
+      status: input.status,
+      notes: input.notes ?? null,
+      source: "care_profile_give_dose",
+      device_uuid: getDeviceUuid(),
+    },
+  });
+  if (error) throw error;
+}
+
+
 /** SHA-256 hash → hex (browser only). Never store the raw PIN. */
 export async function hashPin(pin: string): Promise<string> {
   if (typeof crypto === "undefined" || !crypto.subtle) return `plain:${pin}`;
