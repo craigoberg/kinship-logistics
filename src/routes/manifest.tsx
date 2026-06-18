@@ -82,11 +82,6 @@ function InitializeTripScreen() {
     }
   }, [lastEndOdo, odo]);
 
-  useEffect(() => {
-    if (eventId) return;
-    const pool = todaysEvents.length ? todaysEvents : events;
-    if (pool.length > 0) setEventId(pool[0].id);
-  }, [eventId, todaysEvents, events]);
 
   const odoNum = odo === "" ? NaN : Number(odo);
   const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
