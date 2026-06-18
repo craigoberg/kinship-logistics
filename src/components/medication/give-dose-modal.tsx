@@ -213,6 +213,16 @@ export function GiveDoseModal({
           </div>
         )}
 
+        {errors.form && (
+          <div
+            role="alert"
+            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
+          >
+            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>{errors.form}</span>
+          </div>
+        )}
+
         <div className="grid gap-3 sm:grid-cols-2">
           <div className="grid gap-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -220,10 +230,27 @@ export function GiveDoseModal({
             </Label>
             <Select
               value={administeredById}
-              onValueChange={setAdministeredById}
+              onValueChange={(v) => {
+                setAdministeredById(v);
+                setErrors((prev) => ({
+                  ...prev,
+                  administeredBy: undefined,
+                  witnessedBy:
+                    prev.witnessedBy && v && v !== witnessedById
+                      ? undefined
+                      : prev.witnessedBy,
+                  form: undefined,
+                }));
+              }}
               disabled={staffLoading}
             >
-              <SelectTrigger className="h-9">
+              <SelectTrigger
+                className={cn(
+                  "h-9",
+                  errors.administeredBy &&
+                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
+                )}
+              >
                 <SelectValue placeholder="Select staff…" />
               </SelectTrigger>
               <SelectContent>
@@ -235,6 +262,11 @@ export function GiveDoseModal({
                 ))}
               </SelectContent>
             </Select>
+            {errors.administeredBy && (
+              <p className="text-xs text-muted-foreground">
+                {errors.administeredBy}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5">
@@ -243,10 +275,27 @@ export function GiveDoseModal({
             </Label>
             <Select
               value={witnessedById}
-              onValueChange={setWitnessedById}
+              onValueChange={(v) => {
+                setWitnessedById(v);
+                setErrors((prev) => ({
+                  ...prev,
+                  witnessedBy: undefined,
+                  administeredBy:
+                    prev.administeredBy && v && v !== administeredById
+                      ? undefined
+                      : prev.administeredBy,
+                  form: undefined,
+                }));
+              }}
               disabled={staffLoading}
             >
-              <SelectTrigger className="h-9">
+              <SelectTrigger
+                className={cn(
+                  "h-9",
+                  errors.witnessedBy &&
+                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
+                )}
+              >
                 <SelectValue placeholder="Select witness…" />
               </SelectTrigger>
               <SelectContent>
@@ -260,6 +309,11 @@ export function GiveDoseModal({
                   ))}
               </SelectContent>
             </Select>
+            {errors.witnessedBy && (
+              <p className="text-xs text-muted-foreground">
+                {errors.witnessedBy}
+              </p>
+            )}
           </div>
 
           <div className="grid gap-1.5 sm:col-span-2">
@@ -290,13 +344,28 @@ export function GiveDoseModal({
               </Label>
               <Textarea
                 value={notes}
-                onChange={(e) => setNotes(e.target.value)}
+                onChange={(e) => {
+                  setNotes(e.target.value);
+                  if (errors.notes && e.target.value.trim().length >= 10) {
+                    setErrors((prev) => ({
+                      ...prev,
+                      notes: undefined,
+                      form: undefined,
+                    }));
+                  }
+                }}
                 rows={3}
                 placeholder="e.g. Participant refused 8am dose, stated nausea. Escalated to RN on duty."
                 maxLength={1000}
+                className={cn(
+                  errors.notes &&
+                    "border-destructive ring-1 ring-destructive/40 focus-visible:ring-destructive/40",
+                )}
               />
               <p className="text-[11px] text-muted-foreground">
-                Minimum 10 characters. {notes.trim().length}/1000
+                {errors.notes
+                  ? errors.notes
+                  : `Minimum 10 characters. ${notes.trim().length}/1000`}
               </p>
             </div>
           )}
@@ -306,11 +375,16 @@ export function GiveDoseModal({
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+          <Button
+            onClick={submit}
+            disabled={giveDose.isPending}
+            className="gap-1.5"
+          >
             <ShieldCheck className="h-4 w-4" />
             {giveDose.isPending ? "Saving…" : "Confirm & Sign Off"}
           </Button>
         </DialogFooter>
+
       </DialogContent>
     </Dialog>
   );
