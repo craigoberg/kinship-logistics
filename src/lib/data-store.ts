@@ -2059,7 +2059,11 @@ export async function updateEventBooking(
     } else {
       updatePayload.carer_id = null;
       updatePayload.carer_transport_required = false;
-    }
+  }
+
+  if (input.participantTransportRequired !== undefined) {
+    updatePayload.participant_transport_required = input.participantTransportRequired;
+  }
   }
 
   // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
