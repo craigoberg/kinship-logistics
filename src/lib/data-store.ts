@@ -2283,7 +2283,7 @@ interface TripRow {
   driver_staff_id: string | null;
   event_id: string | null;
   trip_date: string;
-  start_odometer_km: number | string;
+  start_odometer: number | string;
   end_odometer_km: number | string | null;
   status: TripStatus;
   started_at: string;
