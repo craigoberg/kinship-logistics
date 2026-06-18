@@ -75,10 +75,12 @@ function InitializeTripScreen() {
   const [userTouchedOdo, setUserTouchedOdo] = useState(false);
 
   // Auto-populate odometer with last recorded closing reading on load.
+  // Hydrate React state at the same moment the value appears on screen so
+  // validation (and the submit button) react without a manual keystroke.
   useEffect(() => {
     if (!userTouchedOdo && lastEndOdo != null && odo === "") {
-      setOdo(String(lastEndOdo));
-      setUserTouchedOdo(true);
+      const fetchedValue = Number(lastEndOdo);
+      setOdo(fetchedValue.toString());
     }
   }, [lastEndOdo, userTouchedOdo, odo]);
 
@@ -135,6 +137,8 @@ function InitializeTripScreen() {
     );
   };
 
+  console.log("Current Validation State:", { eventId, odo, isOdometerBackwards });
+
   return (
     <div className="flex-1 overflow-y-auto p-4">
       <Card className="p-5">
@@ -173,7 +177,7 @@ function InitializeTripScreen() {
                 odoState === "high_variance" &&
                   "border-amber-500 focus-visible:ring-amber-500",
               )}
-              value={odo}
+              value={odo || ""}
               onChange={(e) => onOdoChange(e.target.value)}
               placeholder="48210"
             />
