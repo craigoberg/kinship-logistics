@@ -1,7 +1,7 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { DirectoryWorkspace } from "@/components/directory/directory-workspace";
 
-export const Route = createFileRoute("/directory")({
+export const Route = createFileRoute("/staff")({
   ssr: false,
   head: () => ({
     meta: [
