@@ -245,7 +245,7 @@ export function RosterTab({ event }: Props) {
                       {isOpen && (
                         <tr className="border-t border-border/40 bg-muted/10">
                           <td></td>
-                          <td colSpan={6} className="p-0">
+                          <td colSpan={7} className="p-0">
                             <BookingPaymentHistory
                               participantId={b.participantId}
                               eventId={event.id}
