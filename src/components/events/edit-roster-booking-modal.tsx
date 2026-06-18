@@ -62,6 +62,7 @@ export function EditRosterBookingModal({
   const [bringsCarer, setBringsCarer] = useState(false);
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
+  const [participantTransport, setParticipantTransport] = useState(false);
   const mutation = useUpdateEventBooking();
   const { data: carers = [] } = useCarersForParticipant(booking?.participantId ?? null);
 
@@ -79,6 +80,7 @@ export function EditRosterBookingModal({
       setBringsCarer(!!booking.bringsCarer);
       setCarerId(booking.carerId ?? "");
       setCarerTransport(!!booking.carerTransportRequired);
+      setParticipantTransport(!!booking.participantTransportRequired);
     }
   }, [open, booking, collected, eventTicketPrice]);
 
@@ -136,6 +138,7 @@ export function EditRosterBookingModal({
         bringsCarer,
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
+        participantTransportRequired: participantTransport,
       });
       toast.success("Booking updated", {
         description: result.refundLedger
@@ -311,6 +314,20 @@ export function EditRosterBookingModal({
               )}
             </div>
           )}
+
+          {/* ----- Transport logistics ----- */}
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Client requires bus transport?
+            </Label>
+            <Switch
+              checked={participantTransport}
+              onCheckedChange={(v) => {
+                setParticipantTransport(v);
+                setDirty(true);
+              }}
+            />
+          </div>
 
           {/* ----- Carer companion ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">

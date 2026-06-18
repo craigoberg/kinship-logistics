@@ -1793,6 +1793,8 @@ export interface EventRosterBooking {
   carerId: string | null;
   /** Whether the companion carer needs a physical bus seat. */
   carerTransportRequired: boolean;
+  /** Whether the participant themselves needs a physical bus seat. */
+  participantTransportRequired: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -1809,6 +1811,7 @@ interface BookingRow {
   brings_carer: boolean | null;
   carer_id: string | null;
   carer_transport_required: boolean | null;
+  participant_transport_required: boolean | null;
   created_at: string;
   updated_at: string;
   participants?: { first_name: string; last_name: string } | null;
@@ -1830,6 +1833,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     bringsCarer: r.brings_carer ?? false,
     carerId: r.carer_id ?? null,
     carerTransportRequired: r.carer_transport_required ?? false,
+    participantTransportRequired: r.participant_transport_required ?? false,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -1897,6 +1901,7 @@ export interface NewEventBooking {
   bringsCarer?: boolean;
   carerId?: string | null;
   carerTransportRequired?: boolean;
+  participantTransportRequired?: boolean;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
@@ -1913,6 +1918,7 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     brings_carer: bringsCarer,
     carer_id: bringsCarer ? input.carerId ?? null : null,
     carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
+    participant_transport_required: !!input.participantTransportRequired,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
@@ -2015,6 +2021,7 @@ export interface UpdateBookingInput {
   bringsCarer?: boolean;
   carerId?: string | null;
   carerTransportRequired?: boolean;
+  participantTransportRequired?: boolean;
 }
 
 export interface UpdateBookingResult {
@@ -2052,7 +2059,11 @@ export async function updateEventBooking(
     } else {
       updatePayload.carer_id = null;
       updatePayload.carer_transport_required = false;
-    }
+  }
+
+  if (input.participantTransportRequired !== undefined) {
+    updatePayload.participant_transport_required = input.participantTransportRequired;
+  }
   }
 
   // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
@@ -2421,6 +2432,26 @@ export interface StartTripInput {
   driverStaffId: string;
   eventId: string;
   startOdometerKm: number;
+  varianceReason?: string | null;
+}
+
+/** Returns the most recent closing odometer (end_odometer_km) recorded across
+ * all completed trips. Used for the variance check on the Initialize Run screen. */
+export async function getLastEndOdometer(): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("transport_trips")
+    .select("end_odometer_km, completed_at")
+    .eq("status", "completed")
+    .not("end_odometer_km", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[getLastEndOdometer]", error);
+    return null;
+  }
+  if (!data || data.end_odometer_km == null) return null;
+  return Number(data.end_odometer_km);
 }
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
@@ -2469,6 +2500,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       driver_staff_id: input.driverStaffId,
       event_id: input.eventId,
       start_odometer_km: input.startOdometerKm,
+      start_odometer_variance_reason:
+        input.varianceReason && input.varianceReason.trim().length > 0
+          ? input.varianceReason.trim()
+          : null,
     })
     .select("*")
     .single();

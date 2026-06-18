@@ -860,6 +860,7 @@ import {
   patchTripLeg as patchTripLegFn,
   completeTrip as completeTripFn,
   getStaffId,
+  getLastEndOdometer,
   type StartTripInput,
   type LegPatch,
 } from "@/lib/data-store";
@@ -872,6 +873,14 @@ export function useActiveTrip() {
     queryKey: [...ACTIVE_TRIP_KEY, driverId],
     queryFn: () => getActiveTripForDriver(driverId),
     staleTime: 5_000,
+  });
+}
+
+export function useLastEndOdometer() {
+  return useQuery({
+    queryKey: ["transport_trips", "last_end_odometer"],
+    queryFn: getLastEndOdometer,
+    staleTime: 30_000,
   });
 }
 

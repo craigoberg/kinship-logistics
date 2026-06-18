@@ -43,6 +43,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
   const [bringsCarer, setBringsCarer] = useState(false);
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
+  const [participantTransport, setParticipantTransport] = useState(false);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -56,6 +57,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
       setBringsCarer(false);
       setCarerId("");
       setCarerTransport(false);
+      setParticipantTransport(false);
       setDirty(false);
     }
   }, [open]);
@@ -99,6 +101,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bringsCarer,
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
+        participantTransportRequired: participantTransport,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
@@ -167,6 +170,20 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
             <p className="text-[11px] text-muted-foreground">
               Initial funds are written to the payment ledger for this event.
             </p>
+          </div>
+
+          {/* ----- Transport logistics ----- */}
+          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Client requires bus transport?
+            </Label>
+            <Switch
+              checked={participantTransport}
+              onCheckedChange={(v) => {
+                setParticipantTransport(v);
+                setDirty(true);
+              }}
+            />
           </div>
 
           {/* ----- Carer companion ----- */}
