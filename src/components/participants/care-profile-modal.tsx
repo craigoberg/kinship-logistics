@@ -309,22 +309,13 @@ function SchedulingTab({
   onEdit: (s: MedicationSchedule) => void;
 }) {
   const { data: schedules = [], isLoading, error } = useParticipantSchedules(participantId);
-  const archive = useArchiveMedicationSchedule();
   const restore = useUpdateMedicationSchedule();
   const [showArchived, setShowArchived] = useState(false);
+  const [discontinueTarget, setDiscontinueTarget] = useState<MedicationSchedule | null>(null);
 
   const active = schedules.filter((s) => s.active);
   const visible = showArchived ? schedules : active;
   const archivedCount = schedules.length - active.length;
-
-  const onArchive = async (s: MedicationSchedule) => {
-    try {
-      await archive.mutateAsync(s.id);
-      toast.success("Medication archived", { description: `${s.medicationName} marked inactive.` });
-    } catch {
-      /* handled in hook */
-    }
-  };
 
   const onRestore = async (s: MedicationSchedule) => {
     try {
