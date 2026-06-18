@@ -2432,6 +2432,26 @@ export interface StartTripInput {
   driverStaffId: string;
   eventId: string;
   startOdometerKm: number;
+  varianceReason?: string | null;
+}
+
+/** Returns the most recent closing odometer (end_odometer_km) recorded across
+ * all completed trips. Used for the variance check on the Initialize Run screen. */
+export async function getLastEndOdometer(): Promise<number | null> {
+  const { data, error } = await supabase
+    .from("transport_trips")
+    .select("end_odometer_km, completed_at")
+    .eq("status", "completed")
+    .not("end_odometer_km", "is", null)
+    .order("completed_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    console.error("[getLastEndOdometer]", error);
+    return null;
+  }
+  if (!data || data.end_odometer_km == null) return null;
+  return Number(data.end_odometer_km);
 }
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
@@ -2480,6 +2500,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       driver_staff_id: input.driverStaffId,
       event_id: input.eventId,
       start_odometer_km: input.startOdometerKm,
+      start_odometer_variance_reason:
+        input.varianceReason && input.varianceReason.trim().length > 0
+          ? input.varianceReason.trim()
+          : null,
     })
     .select("*")
     .single();
