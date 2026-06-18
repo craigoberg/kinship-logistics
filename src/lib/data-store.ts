@@ -2499,7 +2499,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .insert({
       driver_staff_id: input.driverStaffId,
       event_id: input.eventId,
-      start_odometer_km: input.startOdometerKm,
+      start_odometer: input.startOdometerKm,
       start_odometer_variance_reason:
         input.varianceReason && input.varianceReason.trim().length > 0
           ? input.varianceReason.trim()
