@@ -55,7 +55,7 @@ function Row({
   const current = useMemo(() => levels.find((l) => l.level === selected), [levels, selected]);
   return (
     <div>
-      <div className="mb-2 flex items-baseline justify-between gap-2">
+      <div className="mb-1 flex items-baseline justify-between gap-2">
         <div>
           <div className="text-sm font-semibold">{title}</div>
           <div className="text-xs text-muted-foreground">{subtitle}</div>
