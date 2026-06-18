@@ -307,6 +307,35 @@ export async function insertComplianceLog(payload: MedicationLogPayload): Promis
   if (error) throw error;
 }
 
+export interface QuickMedicationLog {
+  participantId: string;
+  scheduleId: string;
+  medicationName: string;
+  dosage: string;
+  scheduledTime: string;
+  witnessIdentity: string;
+}
+
+/** Lightweight 1-tap administration log written from the dashboard widget. */
+export async function insertQuickAdministrationLog(input: QuickMedicationLog): Promise<void> {
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: input.participantId,
+    action_performed: "MEDICATION_ADMIN_QUICK",
+    witness_1_identity: input.witnessIdentity,
+    witness_2_identity: null,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      medication_name: input.medicationName,
+      dosage: input.dosage,
+      scheduled_time: input.scheduledTime,
+      schedule_id: input.scheduleId,
+      source: "dashboard_widget",
+      device_uuid: getDeviceUuid(),
+    },
+  });
+  if (error) throw error;
+}
+
 /** SHA-256 hash → hex (browser only). Never store the raw PIN. */
 export async function hashPin(pin: string): Promise<string> {
   if (typeof crypto === "undefined" || !crypto.subtle) return `plain:${pin}`;

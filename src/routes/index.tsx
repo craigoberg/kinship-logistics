@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
+import { TodaysMedicationCard } from "@/components/medication/todays-medication-card";
 import type { TransportPayload } from "@/lib/data-store";
 import { formatDate, formatTime } from "@/lib/utils";
 
@@ -118,6 +119,9 @@ function Dashboard() {
           </div>
         </Card>
       </section>
+
+      <TodaysMedicationCard />
+
 
       {iddsiAlerts.length > 0 && (
         <Card className="space-y-3 p-5">
