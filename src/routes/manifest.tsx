@@ -134,7 +134,7 @@ function InitializeTripScreen() {
               type="number"
               value={odo}
               onChange={(e) => setOdo(e.target.value)}
-              placeholder="48210"
+              placeholder="Enter starting KM"
               className="h-14 text-lg tabular-nums"
             />
             {lastEndOdo != null && (
