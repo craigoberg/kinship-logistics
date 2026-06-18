@@ -1,129 +1,55 @@
-## Goal
+## Root cause
 
-Add an in-row "Give Dose" execution button to the Expected Routines table in the Care Profile modal, with a dual-witness sign-off sub-modal. Sign-offs write to `compliance_audit_logs` (shared with the existing dashboard widget and Care History tab) so the green "Completed HH:MM" chip and dashboard green state flip in lock-step.
+`GiveDoseModal` (the Medication Administration Verification dialog) already wires its submit handler to `useGiveDose` → writes to `compliance_audit_logs` (the table we agreed to reuse in place of `medication_administration_log`) and already invalidates the right query keys. The reason "Confirm & Sign Off" appears to do nothing is that the button is `disabled={!canSubmit}` — when either staff dropdown is empty (or the same person is picked twice, or refusal notes are too short) the click is silently swallowed with no visual feedback. Users see "nothing happens".
+
+The fix is to stop silently disabling, surface explicit per-field errors on click, and harden the success/error toasts and invalidations.
 
 ## Scope
 
-Files touched:
-- `src/components/medication/give-dose-modal.tsx` (new)
-- `src/components/participants/care-profile-modal.tsx` (extend `SchedulingTab`)
-- `src/lib/data-store.ts` (one helper, `insertDualWitnessAdministrationLog`)
-- `src/hooks/use-supabase-data.ts` (one hook, `useGiveDose`)
+Single file: `src/components/medication/give-dose-modal.tsx`. No DB/schema changes, no other components touched.
 
-No SQL migration. No schema change.
+## Changes
 
-## 1. Row-level status detection
+1. **Stop silent disable** — Replace `disabled={!canSubmit}` on the Confirm button with `disabled={giveDose.isPending}` only. Validation now runs inside `submit()` and reports errors visually.
 
-In `SchedulingTab`, call `useTodaysComplianceLogs()` and, for each row, find a log where:
-- `participantId === schedule.participantId`
-- `metadata.medication_name` (case/trim insensitive) matches `schedule.medicationName`
-- `actionPerformed` is one of `MEDICATION_ADMIN`, `MEDICATION_ADMIN_QUICK`, `MEDICATION_ADMIN_DUAL` (the new action tag)
+2. **Click-time validation with field-level errors**
+   - Add `errors` state: `{ administeredBy?: string; witnessedBy?: string; notes?: string; form?: string }`.
+   - On submit, validate before calling the mutation:
+     - `administeredById` empty → set `errors.administeredBy`.
+     - `witnessedById` empty → set `errors.witnessedBy`.
+     - Both filled but equal → set both to "Administering staff and witness must be different people."
+     - Status = Refused but notes < 10 chars → set `errors.notes`.
+   - If any error, set a top-of-form banner: **"Dual sign-off is mandatory. Please select a staff witness to verify medication delivery."** and `return` without calling the mutation.
+   - Clear an individual field's error as soon as the user changes that field (`onValueChange` / `onChange` handlers).
 
-Helper lives in `give-dose-modal.tsx` and is reused by the dashboard widget later if needed.
+3. **Visual error styling**
+   - On `<SelectTrigger>` for each dropdown: when its error is set, add `border-destructive ring-1 ring-destructive/40` (red outline).
+   - Below each dropdown with an error, render a small `text-xs text-muted-foreground` line with the message (low-contrast warning text as requested).
+   - Top-of-form red banner div (`border-destructive/40 bg-destructive/10 text-destructive`) for the dual-sign-off warning when any error is present.
 
-## 2. In-row UI
+4. **Submission pipeline (verify, no behavior change)**
+   - Continues to call `useGiveDose.mutateAsync({ scheduleId, participantId, medicationName, dosage, scheduledTime, administeredById, administeredByName, witnessedById, witnessedByName, status, notes })`. The hook persists to `compliance_audit_logs` with `action_performed: "MEDICATION_ADMIN_DUAL"` and metadata carrying `schedule_id`, `participant_id`, `administered_by_id`, `witnessed_by_id`, `status`, and `notes`.
 
-In the Actions cell, before Edit / Archive:
+5. **Success toast + closure**
+   - On success: `toast.success("Medication administration logged successfully.", { description: "${medicationName} — ${status} for ${participantName}.", className: "!bg-green-600 !text-white !border-green-700" })`, then `onOpenChange(false)`.
 
-- No log today → solid blue button `<Button className="bg-blue-600 text-white hover:bg-blue-700">Give Dose</Button>` with a Syringe icon. Click sets `giveDoseTarget = schedule`.
-- Log exists today → green chip `<span className="bg-success text-white …">✓ Completed HH:MM</span>` (HH:MM from the log timestamp). Non-clickable, with a `title` of "Already administered today — open Care History for details".
+6. **Cache invalidation on success** (extend existing hook invalidations to cover the dashboard widget key explicitly)
+   - In `src/hooks/use-supabase-data.ts` `useGiveDose.onSuccess`, in addition to the existing `["compliance_audit_logs"]` and `["participants"]`, add:
+     - `["compliance_audit_logs", "today"]` (dashboard's "Today's Care & Medication Schedule" — driven by `useTodaysComplianceLogs`)
+     - `["medication_schedules"]` (Care Profile "Expected routines" row state)
+   - This is the one tiny exception to the single-file scope; required so the red OVERDUE chip flips to green Administered without a refresh.
 
-Refused / Missed entries also count as "completed for today" so the row does not nag again — chip shows `Refused HH:MM` / `Missed HH:MM` in amber instead of green.
+7. **Bare-metal error toast on DB failure** — keep modal open
+   - Existing `catch` block stays but is upgraded to: `toast.error((err as Error).message || "Database rejected the sign-off.", { description: "Postgres rejected the insert. The form has been kept open so you can adjust and retry.", className: "!bg-red-600 !text-white !border-red-700", duration: 12_000 })`.
+   - Do NOT close the modal on error.
 
-## 3. Sub-modal — `GiveDoseModal`
+## Out of scope
 
-New file `src/components/medication/give-dose-modal.tsx`. Props: `{ open, onOpenChange, schedule, participantName }`.
+- No new `medication_administration_log` table (we agreed to reuse `compliance_audit_logs`).
+- No changes to `MedicationAdminModal` (the older PIN-witness dialog) or `TodaysMedicationCard`.
+- No staff-identity / current-user changes.
 
-Layout:
+## Files touched
 
-```text
-┌── Medication Administration Verification ──────────┐
-│  Administering Paracetamol — 500mg                 │
-│  to Jane Doe at 14:32                              │
-├────────────────────────────────────────────────────┤
-│  Administered By  [Select staff ▾]                 │
-│  Witnessed By     [Select staff ▾]                 │
-│  Status           [Administered ▾]                 │
-│  Notes (only if Status = Refused) [textarea]       │
-├────────────────────────────────────────────────────┤
-│  [Cancel]                [Confirm & Sign Off]      │
-└────────────────────────────────────────────────────┘
-```
-
-Validation:
-- Both staff dropdowns required, must be different.
-- Status required (default `Administered`).
-- If status is `Refused`, notes textarea is mandatory (min 10 chars). For `Administered` / `Missed`, notes are optional.
-
-"Administered By" default: blank (no current-user concept in the app yet — confirmed).
-
-## 4. Database write
-
-New helper in `src/lib/data-store.ts`:
-
-```ts
-export interface DualWitnessAdministration {
-  scheduleId: string;
-  participantId: string;
-  medicationName: string;
-  dosage: string;
-  scheduledTime: string;
-  administeredById: string;
-  administeredByName: string;
-  witnessedById: string;
-  witnessedByName: string;
-  status: "Administered" | "Refused" | "Missed";
-  notes?: string;
-}
-
-export async function insertDualWitnessAdministrationLog(
-  input: DualWitnessAdministration,
-): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
-    participant_id: input.participantId,
-    action_performed: "MEDICATION_ADMIN_DUAL",
-    witness_1_identity: input.administeredByName,
-    witness_2_identity: input.witnessedByName,
-    timestamp: new Date().toISOString(),
-    metadata: {
-      schedule_id: input.scheduleId,
-      medication_name: input.medicationName,
-      dosage: input.dosage,
-      scheduled_time: input.scheduledTime,
-      administered_by_id: input.administeredById,
-      witnessed_by_id: input.witnessedById,
-      status: input.status,
-      notes: input.notes ?? null,
-      source: "care_profile_give_dose",
-    },
-  });
-  if (error) throw error;
-}
-```
-
-`metadata.schedule_id`, `administered_by_id`, `witnessed_by_id`, and `status` capture the structured fields requested without needing a schema migration.
-
-## 5. React Query wiring
-
-New hook `useGiveDose` in `src/hooks/use-supabase-data.ts`:
-
-```ts
-mutationFn: insertDualWitnessAdministrationLog
-onSuccess:
-  qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] })   // covers "today", per-participant, and any future variants
-  qc.invalidateQueries({ queryKey: ["participants"] })
-onError: toast.error("Sign-off failed", {
-  description: err.message,
-  className: "!bg-red-600 !text-white !border-red-700",
-  duration: 12_000,
-})
-```
-
-The shared `["compliance_audit_logs", "today"]` invalidation immediately flips the dashboard widget's traffic-light to GREEN for that row.
-
-## 6. Out of scope
-
-- No new table, no migration.
-- No changes to the existing single-tap dashboard quick-administer flow.
-- No changes to `MedicationAdminModal` (the global ad-hoc record button stays as-is).
-- No current-user identity system — "Administered By" stays a manual pick per your answer.
+- `src/components/medication/give-dose-modal.tsx` (validation surface, error styling, toast polish)
+- `src/hooks/use-supabase-data.ts` (extend `useGiveDose.onSuccess` invalidation list)
