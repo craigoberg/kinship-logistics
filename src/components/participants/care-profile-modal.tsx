@@ -201,15 +201,26 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   participantName={participant.fullName}
                 />
 
-                <SchedulingTab
-                  participantId={participant.id}
-                  participantName={participant.fullName}
-                  onAdd={() => setScheduleOpen(true)}
-                  onEdit={(s) => {
-                    setEditMedSchedule(s);
-                    setEditMedOpen(true);
-                  }}
-                />
+                <div
+                  ref={medSectionRef}
+                  id="medication-scheduling-section"
+                  className={
+                    "scroll-mt-4 rounded-lg transition-all duration-700 " +
+                    (medPulse
+                      ? "ring-2 ring-warning ring-offset-2 ring-offset-card shadow-[0_0_0_4px_rgba(245,158,11,0.25)] animate-pulse"
+                      : "ring-0")
+                  }
+                >
+                  <SchedulingTab
+                    participantId={participant.id}
+                    participantName={participant.fullName}
+                    onAdd={() => setScheduleOpen(true)}
+                    onEdit={(s) => {
+                      setEditMedSchedule(s);
+                      setEditMedOpen(true);
+                    }}
+                  />
+                </div>
 
                 <div className="space-y-1">
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
