@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import { Syringe, ShieldCheck } from "lucide-react";
+import { Syringe, ShieldCheck, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
+import { cn } from "@/lib/utils";
 
 import {
   Dialog,
