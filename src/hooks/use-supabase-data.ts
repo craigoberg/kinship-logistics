@@ -372,6 +372,19 @@ export function useDiscontinueMedicationSchedule() {
   });
 }
 
+export function useGiveDose() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DualWitnessAdministration) =>
+      insertDualWitnessAdministrationLog(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
+    },
+  });
+}
+
+
 
 export function useStaffRegistry() {
   return useQuery({
