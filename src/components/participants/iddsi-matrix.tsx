@@ -82,7 +82,7 @@ function Row({
               disabled={readOnly}
               onClick={() => onSelect(l.level)}
               className={cn(
-                "group flex min-h-16 flex-col items-center justify-center gap-1 rounded-lg border-2 px-2 py-2 text-center transition-all",
+                "group flex h-10 flex-col items-center justify-center gap-0.5 rounded-md border-2 p-1.5 text-center transition-all",
                 "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
                 active
                   ? "border-foreground shadow-sm"
@@ -92,8 +92,8 @@ function Row({
                 readOnly && "cursor-not-allowed opacity-70",
               )}
             >
-              <span className="text-base font-bold leading-none">L{l.level}</span>
-              <span className="text-[10px] font-medium uppercase leading-tight tracking-wide">
+              <span className="text-xs font-bold leading-none">L{l.level}</span>
+              <span className="text-[10px] font-medium uppercase leading-none tracking-wide">
                 {l.name}
               </span>
             </button>
