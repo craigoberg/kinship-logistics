@@ -98,7 +98,16 @@ export function ParticipantTable({ participants, onSelect }: Props) {
                 <td className="px-4 py-3 font-medium">
                   <div className="flex items-center gap-2">
                     <span>{p.fullName}</span>
-                    {pending.has(p.id) && <PendingBadge />}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
                 </td>
 
