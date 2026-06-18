@@ -129,6 +129,7 @@ interface ParticipantRow {
   first_name: string;
   last_name: string;
   ndis_number: string;
+  street_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   dual_witness_pin_hash: string | null;
@@ -143,6 +144,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     lastName: r.last_name ?? "",
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     ndisNumber: r.ndis_number,
+    streetAddress: r.street_address ?? null,
     iddsi: {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
@@ -190,6 +192,7 @@ export interface ParticipantPatch {
   firstName?: string;
   lastName?: string;
   ndisNumber?: string;
+  streetAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -198,6 +201,7 @@ export interface NewParticipant {
   firstName: string;
   lastName: string;
   ndisNumber: string;
+  streetAddress?: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -207,6 +211,7 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     first_name: input.firstName,
     last_name: input.lastName,
     ndis_number: input.ndisNumber,
+    street_address: input.streetAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
     dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
@@ -228,6 +233,7 @@ export async function updateParticipant(
   if (patch.firstName !== undefined) row.first_name = patch.firstName;
   if (patch.lastName !== undefined) row.last_name = patch.lastName;
   if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
+  if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
   if (patch.iddsi !== undefined) {
     row.iddsi_level_liquids = patch.iddsi.liquids;
     row.iddsi_level_solids = patch.iddsi.foods;
