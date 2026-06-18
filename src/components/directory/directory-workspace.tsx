@@ -17,11 +17,13 @@ import {
   useCarersRegistry,
   useParticipants,
 } from "@/hooks/use-supabase-data";
-import type { Carer, StaffMember } from "@/lib/data-store";
+import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
 
-const EXPIRY_WARN_DAYS = 60;
+const EXPIRY_WARN_DAYS = 30;
+
+type CertStatus = "permanent" | "valid" | "expiring" | "expired";
 
 function daysUntil(iso: string | null): number | null {
   if (!iso) return null;
@@ -30,22 +32,21 @@ function daysUntil(iso: string | null): number | null {
   return Math.ceil((t - Date.now()) / 86_400_000);
 }
 
-function staffCertSummary(s: StaffMember) {
-  let active = 0;
-  let expiring = 0;
-  let expired = 0;
-  for (const c of s.certifications) {
-    const d = daysUntil(c.expiry);
-    if (d === null) {
-      active += 1;
-      continue;
-    }
-    if (d < 0) expired += 1;
-    else if (d <= EXPIRY_WARN_DAYS) expiring += 1;
-    else active += 1;
-  }
-  return { active, expiring, expired, total: s.certifications.length };
+function certStatus(expiry: string | null | undefined): CertStatus {
+  if (!expiry) return "permanent";
+  const d = daysUntil(expiry);
+  if (d === null) return "permanent";
+  if (d < 0) return "expired";
+  if (d <= EXPIRY_WARN_DAYS) return "expiring";
+  return "valid";
 }
+
+const STATUS_BADGE: Record<CertStatus, { label: string; cls: string }> = {
+  permanent: { label: "Permanent / Active", cls: "bg-emerald-600 text-white hover:bg-emerald-600" },
+  valid: { label: "Valid", cls: "bg-emerald-600 text-white hover:bg-emerald-600" },
+  expiring: { label: "Expiring Soon", cls: "bg-amber-500 text-black hover:bg-amber-500" },
+  expired: { label: "Expired", cls: "bg-red-600 text-white hover:bg-red-600" },
+};
 
 export function DirectoryWorkspace() {
   const [tab, setTab] = useState<"staff" | "carers">("staff");
@@ -149,7 +150,6 @@ export function DirectoryWorkspace() {
                   <EmptyRow colSpan={6} label="No personnel found." />
                 ) : (
                   filteredStaff.map((s) => {
-                    const summary = staffCertSummary(s);
                     return (
                       <TableRow key={s.id}>
                         <TableCell className="font-medium">{s.fullName}</TableCell>
@@ -170,7 +170,7 @@ export function DirectoryWorkspace() {
                           )}
                         </TableCell>
                         <TableCell>
-                          <CertSummaryChips summary={summary} />
+                          <CertBadges certs={s.certifications} />
                         </TableCell>
                         <TableCell className="text-right">
                           <Button
@@ -319,32 +319,24 @@ function ContactCell({ phone, email }: { phone: string | null; email: string | n
   );
 }
 
-function CertSummaryChips({
-  summary,
-}: {
-  summary: { active: number; expiring: number; expired: number; total: number };
-}) {
-  if (summary.total === 0) {
+function CertBadges({ certs }: { certs: StaffCertification[] }) {
+  if (!certs || certs.length === 0) {
     return <span className="text-xs text-muted-foreground">None on file</span>;
   }
   return (
     <div className="flex flex-wrap gap-1.5">
-      <Badge className="gap-1 bg-emerald-600 text-white hover:bg-emerald-600">
-        <BadgeCheck className="h-3 w-3" />
-        {summary.active} active
-      </Badge>
-      {summary.expiring > 0 && (
-        <Badge className="gap-1 bg-amber-500 text-black hover:bg-amber-500">
-          <AlertTriangle className="h-3 w-3" />
-          {summary.expiring} expiring
-        </Badge>
-      )}
-      {summary.expired > 0 && (
-        <Badge className="gap-1 bg-red-600 text-white hover:bg-red-600">
-          <AlertTriangle className="h-3 w-3" />
-          {summary.expired} expired
-        </Badge>
-      )}
+      {certs.map((c, i) => {
+        const status = certStatus(c.expiry);
+        const cfg = STATUS_BADGE[status];
+        const Icon = status === "permanent" || status === "valid" ? BadgeCheck : AlertTriangle;
+        return (
+          <Badge key={i} className={`gap-1 ${cfg.cls}`} title={c.name || "Certification"}>
+            <Icon className="h-3 w-3" />
+            <span className="max-w-[140px] truncate">{c.name || "Certification"}</span>
+            <span className="opacity-90">· {cfg.label}</span>
+          </Badge>
+        );
+      })}
     </div>
   );
 }
