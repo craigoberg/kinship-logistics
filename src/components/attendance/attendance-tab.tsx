@@ -47,6 +47,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
 
   const schedulesQ = useAttendanceSchedules(participantId);
   const logsQ = useAttendanceLogs(participantId);
