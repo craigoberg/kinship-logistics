@@ -122,8 +122,9 @@ export function RosterTab({ event }: Props) {
                   <th className="w-8 px-2 py-2"></th>
                   <th className="px-4 py-2 font-medium">Participant</th>
                   <th className="px-4 py-2 font-medium">Booking status</th>
-                  <th className="px-4 py-2 text-right font-medium">Amount paid</th>
-                  <th className="px-4 py-2 text-right font-medium">Balance</th>
+                  <th className="px-4 py-2 text-right font-medium">Booking cost</th>
+                  <th className="px-4 py-2 text-right font-medium">Total paid</th>
+                  <th className="px-4 py-2 text-right font-medium">Net balance</th>
                   <th className="px-4 py-2 text-right font-medium">Status</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
@@ -176,15 +177,27 @@ export function RosterTab({ event }: Props) {
                         </td>
                         <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
                         <td className="px-4 py-2 text-right font-semibold tabular-nums">
+                          ${fmtMoney(baselineCost)}
+                          {b.customPrice != null && b.customPrice !== event.ticketPrice && (
+                            <span className="ml-1 text-[10px] uppercase tracking-wide text-info">
+                              custom
+                            </span>
+                          )}
+                        </td>
+                        <td className="px-4 py-2 text-right font-semibold tabular-nums">
                           ${fmtMoney(netLedgerSum)}
                         </td>
                         <td
                           className={
                             "px-4 py-2 text-right font-semibold tabular-nums " +
-                            (trueBalance <= 0 ? "text-success" : "text-warning")
+                            (b.bookingStatus === "Cancelled"
+                              ? "text-muted-foreground"
+                              : trueBalance <= 0
+                                ? "text-success"
+                                : "text-warning")
                           }
                         >
-                          ${fmtMoney(Math.max(0, trueBalance))}
+                          ${fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
                         </td>
                         <td className="px-4 py-2 text-right">
                           <PaidBadge
@@ -232,7 +245,7 @@ export function RosterTab({ event }: Props) {
                       {isOpen && (
                         <tr className="border-t border-border/40 bg-muted/10">
                           <td></td>
-                          <td colSpan={6} className="p-0">
+                          <td colSpan={7} className="p-0">
                             <BookingPaymentHistory
                               participantId={b.participantId}
                               eventId={event.id}
