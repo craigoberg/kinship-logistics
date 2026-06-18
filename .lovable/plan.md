@@ -1,109 +1,129 @@
-# Plan: Emergency Carer & Bus Transport Expansion
+## Goal
 
-## 1. Schema additions (migration)
+Add an in-row "Give Dose" execution button to the Expected Routines table in the Care Profile modal, with a dual-witness sign-off sub-modal. Sign-offs write to `compliance_audit_logs` (shared with the existing dashboard widget and Care History tab) so the green "Completed HH:MM" chip and dashboard green state flip in lock-step.
 
-Add columns required by the spec (raise red toast if missing — but we will create them):
+## Scope
 
-- `carers_registry.is_primary_contact` (boolean, default false)
-- `carers_registry.relationship` (text, nullable) — if not already present
-- `carers_registry.address` (text, nullable) — if not already present
-- `event_roster_bookings.brings_carer` (boolean, default false)
-- `event_roster_bookings.carer_id` (uuid, nullable, FK → `carers_registry.id`)
-- `event_roster_bookings.carer_transport_required` (boolean, default false)
+Files touched:
+- `src/components/medication/give-dose-modal.tsx` (new)
+- `src/components/participants/care-profile-modal.tsx` (extend `SchedulingTab`)
+- `src/lib/data-store.ts` (one helper, `insertDualWitnessAdministrationLog`)
+- `src/hooks/use-supabase-data.ts` (one hook, `useGiveDose`)
 
-Partial unique index on `carers_registry (participant_id) WHERE is_primary_contact`
-so each participant has at most one primary contact. Standard `GRANT`s on touched
-tables.
+No SQL migration. No schema change.
 
-## 2. Data layer (`src/lib/data-store.ts` + `src/hooks/use-supabase-data.ts`)
+## 1. Row-level status detection
 
-- Extend `Carer` interface with `isPrimaryContact`, `relationship`, `address`.
-- Extend `RosterBooking` interface with `bringsCarer`, `carerId`, `carerTransportRequired`.
-- Add `listCarersForParticipant(participantId)` query helper.
-- Add `upsertPrimaryCarer(participantId, payload)` — sets all others to
-  `is_primary_contact = false` first, then inserts/updates the primary.
-- Map the new booking columns in roster fetch + insert + update payloads.
-- New hook: `usePrimaryCarer(participantId)`.
+In `SchedulingTab`, call `useTodaysComplianceLogs()` and, for each row, find a log where:
+- `participantId === schedule.participantId`
+- `metadata.medication_name` (case/trim insensitive) matches `schedule.medicationName`
+- `actionPerformed` is one of `MEDICATION_ADMIN`, `MEDICATION_ADMIN_QUICK`, `MEDICATION_ADMIN_DUAL` (the new action tag)
 
-## 3. Participants — Primary Carer section
+Helper lives in `give-dose-modal.tsx` and is reused by the dashboard widget later if needed.
 
-`care-profile-modal.tsx` (Care Profile tab) and `add-participant-modal.tsx`:
+## 2. In-row UI
 
-- Add **“Primary Carer & Emergency Network”** card under the address field.
-- Fields: Name, Phone, Email, Address, Relationship.
-- On save, call `upsertPrimaryCarer` alongside the participant patch in the same
-  try/catch (red toast on failure, invalidate `['participants']` + `['carers_registry']`).
+In the Actions cell, before Edit / Archive:
 
-## 4. Event Roster modals
+- No log today → solid blue button `<Button className="bg-blue-600 text-white hover:bg-blue-700">Give Dose</Button>` with a Syringe icon. Click sets `giveDoseTarget = schedule`.
+- Log exists today → green chip `<span className="bg-success text-white …">✓ Completed HH:MM</span>` (HH:MM from the log timestamp). Non-clickable, with a `title` of "Already administered today — open Care History for details".
 
-`add-roster-booking-modal.tsx` and `edit-roster-booking-modal.tsx`:
+Refused / Missed entries also count as "completed for today" so the row does not nag again — chip shows `Refused HH:MM` / `Missed HH:MM` in amber instead of green.
 
-- Add two Switches:
-  1. **Carer Attending Event?** → `bringsCarer`. When on, show a dropdown
-     populated from `listCarersForParticipant(participantId)` with the primary
-     carer pre-selected; stored as `carerId`.
-  2. **Carer Requires Bus Transport Seat?** → `carerTransportRequired`
-     (disabled unless `bringsCarer` is true).
-- Persist all three fields in the booking insert/update payload.
+## 3. Sub-modal — `GiveDoseModal`
 
-## 5. Roster table display (`roster-tab.tsx`)
+New file `src/components/medication/give-dose-modal.tsx`. Props: `{ open, onOpenChange, schedule, participantName }`.
 
-Under each participant row’s name, when `bringsCarer === true` render:
+Layout:
 
-```
-+1 Carer: <carer name>   [🚌 seat] (only if carer_transport_required)
+```text
+┌── Medication Administration Verification ──────────┐
+│  Administering Paracetamol — 500mg                 │
+│  to Jane Doe at 14:32                              │
+├────────────────────────────────────────────────────┤
+│  Administered By  [Select staff ▾]                 │
+│  Witnessed By     [Select staff ▾]                 │
+│  Status           [Administered ▾]                 │
+│  Notes (only if Status = Refused) [textarea]       │
+├────────────────────────────────────────────────────┤
+│  [Cancel]                [Confirm & Sign Off]      │
+└────────────────────────────────────────────────────┘
 ```
 
-Update the header summary “Total Seats Occupied” chip to:
+Validation:
+- Both staff dropdowns required, must be different.
+- Status required (default `Administered`).
+- If status is `Refused`, notes textarea is mandatory (min 10 chars). For `Administered` / `Missed`, notes are optional.
+
+"Administered By" default: blank (no current-user concept in the app yet — confirmed).
+
+## 4. Database write
+
+New helper in `src/lib/data-store.ts`:
 
 ```ts
-const totalSeatsOccupied =
-  activeBookings.length +
-  activeBookings.filter(b => b.carerTransportRequired).length;
+export interface DualWitnessAdministration {
+  scheduleId: string;
+  participantId: string;
+  medicationName: string;
+  dosage: string;
+  scheduledTime: string;
+  administeredById: string;
+  administeredByName: string;
+  witnessedById: string;
+  witnessedByName: string;
+  status: "Administered" | "Refused" | "Missed";
+  notes?: string;
+}
+
+export async function insertDualWitnessAdministrationLog(
+  input: DualWitnessAdministration,
+): Promise<void> {
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: input.participantId,
+    action_performed: "MEDICATION_ADMIN_DUAL",
+    witness_1_identity: input.administeredByName,
+    witness_2_identity: input.witnessedByName,
+    timestamp: new Date().toISOString(),
+    metadata: {
+      schedule_id: input.scheduleId,
+      medication_name: input.medicationName,
+      dosage: input.dosage,
+      scheduled_time: input.scheduledTime,
+      administered_by_id: input.administeredById,
+      witnessed_by_id: input.witnessedById,
+      status: input.status,
+      notes: input.notes ?? null,
+      source: "care_profile_give_dose",
+    },
+  });
+  if (error) throw error;
+}
 ```
 
-Apply the same formula anywhere transport capacity is summed (transport list
-totals if present — left untouched if not currently bus-aware).
+`metadata.schedule_id`, `administered_by_id`, `witnessed_by_id`, and `status` capture the structured fields requested without needing a schema migration.
 
-## 6. No-Show Countdown overlay
+## 5. React Query wiring
 
-New component `src/components/attendance/no-show-countdown-modal.tsx`:
+New hook `useGiveDose` in `src/hooks/use-supabase-data.ts`:
 
-- Trigger: a red “Trigger No-Show Countdown” button on each roster row and on
-  each attendance row.
-- Modal:
-  - Big monospaced **MM:SS** clock counting down from 5:00 (uses `setInterval`,
-    cleared on close; auto-flashes red in last 60s).
-  - Loads `usePrimaryCarer(participant.id)`; displays Name, Relationship,
-    Phone in large type.
-  - **Click to Call** button → `tel:` link with phone number.
-  - Empty-state when no primary carer is on file.
+```ts
+mutationFn: insertDualWitnessAdministrationLog
+onSuccess:
+  qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] })   // covers "today", per-participant, and any future variants
+  qc.invalidateQueries({ queryKey: ["participants"] })
+onError: toast.error("Sign-off failed", {
+  description: err.message,
+  className: "!bg-red-600 !text-white !border-red-700",
+  duration: 12_000,
+})
+```
 
-Wire into `roster-tab.tsx` row actions and `attendance-tab.tsx` row actions.
+The shared `["compliance_audit_logs", "today"]` invalidation immediately flips the dashboard widget's traffic-light to GREEN for that row.
 
-## 7. Cache invalidation
+## 6. Out of scope
 
-On any mutation success, invalidate the relevant keys:
-`['participants']`, `['carers_registry']`, `['event_manifest']`,
-`['events']`, `['attendance']`.
-
-## Out of scope
-
-- Bus route assignment UI (only the seat-count formula is updated as requested).
-- Push notifications when countdown hits zero (modal stays open, staff dial out).
-
----
-
-**Files touched**
-
-- new migration (carers/bookings columns + grants)
-- new `src/components/attendance/no-show-countdown-modal.tsx`
-- edit `src/lib/data-store.ts`, `src/hooks/use-supabase-data.ts`
-- edit `src/components/participants/care-profile-modal.tsx`,
-  `src/components/participants/add-participant-modal.tsx`
-- edit `src/components/events/add-roster-booking-modal.tsx`,
-  `src/components/events/edit-roster-booking-modal.tsx`,
-  `src/components/events/roster-tab.tsx`
-- edit `src/components/attendance/attendance-tab.tsx`
-
-Approve and I’ll implement straight through.
+- No new table, no migration.
+- No changes to the existing single-tap dashboard quick-administer flow.
+- No changes to `MedicationAdminModal` (the global ad-hoc record button stays as-is).
+- No current-user identity system — "Administered By" stays a manual pick per your answer.
