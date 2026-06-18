@@ -52,6 +52,9 @@ function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooki
     isFullyPaid: trueBalance <= 0,
     notes: r.notes,
     customPrice: r.customPrice,
+    bringsCarer: r.bringsCarer ?? false,
+    carerId: r.carerId ?? null,
+    carerTransportRequired: r.carerTransportRequired ?? false,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };

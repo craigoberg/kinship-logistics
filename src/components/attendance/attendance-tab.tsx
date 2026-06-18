@@ -9,6 +9,7 @@ import {
   CalendarOff,
   ClipboardList,
   Search,
+  AlertTriangle,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -27,6 +28,7 @@ import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
 import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
+import { NoShowCountdownModal } from "./no-show-countdown-modal";
 import { toast } from "sonner";
 
 interface Props {
@@ -45,6 +47,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
+  const [noShowOpen, setNoShowOpen] = useState(false);
 
   const schedulesQ = useAttendanceSchedules(participantId);
   const logsQ = useAttendanceLogs(participantId);
@@ -266,6 +269,14 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                 className="h-9 pl-9"
               />
             </div>
+            <Button
+              variant="outline"
+              onClick={() => setNoShowOpen(true)}
+              className="gap-1.5 border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Trigger No-Show Countdown
+            </Button>
             <Button onClick={() => setAbsenceOpen(true)} className="gap-1.5">
               <CalendarOff className="h-4 w-4" />
               Log Planned Absence / Suspension
@@ -375,6 +386,12 @@ export function AttendanceTab({ participantId, participantName }: Props) {
       <LogPlannedAbsenceModal
         open={absenceOpen}
         onOpenChange={setAbsenceOpen}
+        participantId={participantId}
+        participantName={participantName}
+      />
+      <NoShowCountdownModal
+        open={noShowOpen}
+        onOpenChange={setNoShowOpen}
         participantId={participantId}
         participantName={participantName}
       />

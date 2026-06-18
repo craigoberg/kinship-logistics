@@ -8,8 +8,11 @@ import {
   insertStaffMember,
   updateStaffMember,
   listCarersRegistry,
+  listCarersForParticipant,
+  getPrimaryCarer,
   insertCarer,
   updateCarer,
+  upsertPrimaryCarer,
   type StaffPayload,
   type CarerPayload,
   listSchedulesForParticipant,
@@ -403,6 +406,45 @@ export function useUpdateCarer() {
       updateCarer(id, payload),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["carers_registry"] });
+      qc.invalidateQueries({ queryKey: ["carers_for_participant"] });
+      qc.invalidateQueries({ queryKey: ["primary_carer"] });
+    },
+  });
+}
+
+export function useCarersForParticipant(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["carers_for_participant", participantId],
+    queryFn: () => listCarersForParticipant(participantId as string),
+    enabled: !!participantId,
+    staleTime: 30_000,
+  });
+}
+
+export function usePrimaryCarer(participantId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["primary_carer", participantId],
+    queryFn: () => getPrimaryCarer(participantId as string),
+    enabled: !!participantId,
+    staleTime: 30_000,
+  });
+}
+
+export function useUpsertPrimaryCarer() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      participantId,
+      payload,
+    }: {
+      participantId: string;
+      payload: Omit<CarerPayload, "participantId" | "isPrimaryContact">;
+    }) => upsertPrimaryCarer(participantId, payload),
+    onSuccess: (_data, vars) => {
+      qc.invalidateQueries({ queryKey: ["carers_registry"] });
+      qc.invalidateQueries({ queryKey: ["carers_for_participant", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["primary_carer", vars.participantId] });
+      qc.invalidateQueries({ queryKey: ["participants"] });
     },
   });
 }

@@ -1,14 +1,19 @@
 import { Fragment, useMemo, useState } from "react";
-import { ChevronDown, ChevronRight, CircleDollarSign, Pencil, Search, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, HeartHandshake, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
-import { useEventBookings, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
+import {
+  useEventBookings,
+  useEventPaymentLedgerForEvent,
+  useCarersRegistry,
+} from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
+import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 
 interface Props {
   event: EventManifest;
@@ -23,9 +28,26 @@ export function RosterTab({ event }: Props) {
   const [addOpen, setAddOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
+  const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
+  const { data: carersAll = [] } = useCarersRegistry();
+
+  const carersById = useMemo(() => {
+    const m = new Map<string, (typeof carersAll)[number]>();
+    carersAll.forEach((c) => m.set(c.id, c));
+    return m;
+  }, [carersAll]);
+
+  const activeBookings = useMemo(
+    () => bookings.filter((b) => b.bookingStatus !== "Cancelled"),
+    [bookings],
+  );
+  const totalSeatsOccupied =
+    activeBookings.length +
+    activeBookings.filter((b) => b.carerTransportRequired).length;
+  const carerSeats = activeBookings.filter((b) => b.carerTransportRequired).length;
 
   const ledgerTotalsByParticipant = useMemo(() => {
     return paymentLedger.reduce((totals, entry) => {
@@ -84,10 +106,19 @@ export function RosterTab({ event }: Props) {
             {isLoading ? "Loading…" : `${bookings.length} participants on roster.`}
           </p>
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
-          <UserPlus className="h-4 w-4" />
-          Add Participant to Roster
-        </Button>
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
+            <Bus className="h-3.5 w-3.5 text-info" />
+            Bus seats: <span className="tabular-nums text-info">{totalSeatsOccupied}</span>
+            <span className="text-muted-foreground">
+              ({activeBookings.length} pax + {carerSeats} carer{carerSeats === 1 ? "" : "s"})
+            </span>
+          </div>
+          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+            <UserPlus className="h-4 w-4" />
+            Add Participant to Roster
+          </Button>
+        </div>
       </div>
 
       <div className="relative w-full sm:max-w-sm">
@@ -169,6 +200,17 @@ export function RosterTab({ event }: Props) {
                               </Tooltip>
                             )}
                           </div>
+                          {b.bringsCarer && (
+                            <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-info">
+                              <HeartHandshake className="h-3 w-3" />
+                              +1 Carer: {(b.carerId && carersById.get(b.carerId)?.fullName) || "Unassigned"}
+                              {b.carerTransportRequired && (
+                                <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                                  <Bus className="h-3 w-3" /> seat
+                                </span>
+                              )}
+                            </div>
+                          )}
                           {b.notes && (
                             <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
                               “{b.notes}”
@@ -239,6 +281,20 @@ export function RosterTab({ event }: Props) {
                               </TooltipTrigger>
                               <TooltipContent>Edit Booking</TooltipContent>
                             </Tooltip>
+                            <Tooltip>
+                              <TooltipTrigger asChild>
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  onClick={() => setNoShowFor(b)}
+                                  className="h-7 w-7 text-destructive hover:text-destructive"
+                                  aria-label="Trigger no-show countdown"
+                                >
+                                  <AlertTriangle className="h-4 w-4" />
+                                </Button>
+                              </TooltipTrigger>
+                              <TooltipContent>Trigger No-Show Countdown</TooltipContent>
+                            </Tooltip>
                           </div>
                         </td>
                       </tr>
@@ -283,6 +339,15 @@ export function RosterTab({ event }: Props) {
         eventTitle={event.title}
         eventTicketPrice={event.ticketPrice}
       />
+
+      {noShowFor && (
+        <NoShowCountdownModal
+          open={true}
+          onOpenChange={(o) => !o && setNoShowFor(null)}
+          participantId={noShowFor.participantId}
+          participantName={noShowFor.participantName}
+        />
+      )}
     </div>
   );
 }

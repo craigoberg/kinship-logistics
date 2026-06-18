@@ -21,7 +21,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useUpdateEventBooking } from "@/hooks/use-supabase-data";
+import { useUpdateEventBooking, useCarersForParticipant } from "@/hooks/use-supabase-data";
 import type { EventRosterBooking } from "@/lib/data-store";
 
 interface Props {
@@ -59,7 +59,11 @@ export function EditRosterBookingModal({
   const [refundAmount, setRefundAmount] = useState<string>("0");
   const [refundDate, setRefundDate] = useState<string>(todayISO());
   const [amendedPrice, setAmendedPrice] = useState<string>("0");
+  const [bringsCarer, setBringsCarer] = useState(false);
+  const [carerId, setCarerId] = useState<string>("");
+  const [carerTransport, setCarerTransport] = useState(false);
   const mutation = useUpdateEventBooking();
+  const { data: carers = [] } = useCarersForParticipant(booking?.participantId ?? null);
 
   const collected = booking?.amountPaid ?? 0;
 
@@ -72,8 +76,18 @@ export function EditRosterBookingModal({
       setRefundAmount(collected > 0 ? collected.toFixed(2) : "0");
       setRefundDate(todayISO());
       setAmendedPrice(Number(booking.customPrice ?? eventTicketPrice ?? 0).toFixed(2));
+      setBringsCarer(!!booking.bringsCarer);
+      setCarerId(booking.carerId ?? "");
+      setCarerTransport(!!booking.carerTransportRequired);
     }
   }, [open, booking, collected, eventTicketPrice]);
+
+  useEffect(() => {
+    if (bringsCarer && !carerId && carers.length > 0) {
+      const primary = carers.find((c) => c.isPrimaryContact) ?? carers[0];
+      setCarerId(primary.id);
+    }
+  }, [bringsCarer, carerId, carers]);
 
   const showRefundPanel = bookingStatus === "Cancelled" && collected > 0;
   const parsedRefund = useMemo(() => {
@@ -119,6 +133,9 @@ export function EditRosterBookingModal({
               participantId: booking.participantId,
             }
           : null,
+        bringsCarer,
+        carerId: bringsCarer ? carerId || null : null,
+        carerTransportRequired: bringsCarer ? carerTransport : false,
       });
       toast.success("Booking updated", {
         description: result.refundLedger
@@ -294,6 +311,69 @@ export function EditRosterBookingModal({
               )}
             </div>
           )}
+
+          {/* ----- Carer companion ----- */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Carer attending event?
+              </Label>
+              <Switch
+                checked={bringsCarer}
+                onCheckedChange={(v) => {
+                  setBringsCarer(v);
+                  if (!v) {
+                    setCarerId("");
+                    setCarerTransport(false);
+                  }
+                  setDirty(true);
+                }}
+              />
+            </div>
+            {bringsCarer && (
+              <>
+                <Select
+                  value={carerId || undefined}
+                  onValueChange={(v) => {
+                    setCarerId(v);
+                    setDirty(true);
+                  }}
+                >
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        carers.length === 0
+                          ? "No carers registered for this participant"
+                          : "Select carer"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {carers.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.fullName}
+                        {c.isPrimaryContact ? " · Primary" : ""}
+                        {c.relationship ? ` · ${c.relationship}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <div className="flex items-center justify-between gap-2 pt-1">
+                  <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                    Carer requires bus transport seat?
+                  </Label>
+                  <Switch
+                    checked={carerTransport}
+                    onCheckedChange={(v) => {
+                      setCarerTransport(v);
+                      setDirty(true);
+                    }}
+                  />
+                </div>
+              </>
+            )}
+          </div>
+
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
