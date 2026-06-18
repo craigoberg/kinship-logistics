@@ -122,8 +122,9 @@ export function RosterTab({ event }: Props) {
                   <th className="w-8 px-2 py-2"></th>
                   <th className="px-4 py-2 font-medium">Participant</th>
                   <th className="px-4 py-2 font-medium">Booking status</th>
-                  <th className="px-4 py-2 text-right font-medium">Amount paid</th>
-                  <th className="px-4 py-2 text-right font-medium">Balance</th>
+                  <th className="px-4 py-2 text-right font-medium">Booking cost</th>
+                  <th className="px-4 py-2 text-right font-medium">Total paid</th>
+                  <th className="px-4 py-2 text-right font-medium">Net balance</th>
                   <th className="px-4 py-2 text-right font-medium">Status</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
