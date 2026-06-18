@@ -33,6 +33,7 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
+  const [streetAddress, setStreetAddress] = useState("");
   const [liquids, setLiquids] = useState(0);
   const [foods, setFoods] = useState(7);
   const [pinHash, setPinHash] = useState("");
@@ -43,6 +44,7 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
       setFirstName("");
       setLastName("");
       setNdisNumber("");
+      setStreetAddress("");
       setLiquids(0);
       setFoods(7);
       setPinHash("");
@@ -61,6 +63,7 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         ndisNumber: ndisNumber.trim(),
+        streetAddress: streetAddress.trim() || null,
         iddsi: { liquids, foods },
         dualWitnessPinHash: pinHash.trim() || null,
       });
@@ -69,6 +72,8 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
     } catch (err) {
       toast.error("Could not add participant", {
         description: (err as Error).message,
+        className: "!bg-red-600 !text-white !border-red-700",
+        duration: 12_000,
       });
     }
   };
