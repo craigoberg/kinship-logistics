@@ -154,7 +154,6 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
             <TabsList className="w-full justify-start !h-auto flex-wrap gap-2 shrink-0">
               <TabsTrigger value="profile">Care Profile</TabsTrigger>
-              <TabsTrigger value="scheduling">Medication Scheduling</TabsTrigger>
               <TabsTrigger value="history">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance">Schedules &amp; Attendance</TabsTrigger>
               <TabsTrigger value="finance">Finance &amp; Ledger</TabsTrigger>
@@ -188,7 +187,15 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   participantName={participant.fullName}
                 />
 
-
+                <SchedulingTab
+                  participantId={participant.id}
+                  participantName={participant.fullName}
+                  onAdd={() => setScheduleOpen(true)}
+                  onEdit={(s) => {
+                    setEditMedSchedule(s);
+                    setEditMedOpen(true);
+                  }}
+                />
 
                 <div className="space-y-1">
                   <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -208,11 +215,20 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   </div>
                 </div>
 
-                <IddsiMatrix
-                  liquids={iddsi.liquids}
-                  foods={iddsi.foods}
-                  onChange={(next) => { setIddsi(next); setDirty(true); }}
-                />
+                <Accordion type="single" collapsible className="w-full">
+                  <AccordionItem value="iddsi-edit" className="border-border">
+                    <AccordionTrigger className="text-xs font-semibold uppercase tracking-wide text-muted-foreground hover:no-underline">
+                      Modify IDDSI Nutrition Levels
+                    </AccordionTrigger>
+                    <AccordionContent className="pt-2">
+                      <IddsiMatrix
+                        liquids={iddsi.liquids}
+                        foods={iddsi.foods}
+                        onChange={(next) => { setIddsi(next); setDirty(true); }}
+                      />
+                    </AccordionContent>
+                  </AccordionItem>
+                </Accordion>
               </div>
 
               <DialogFooter className="mt-1 shrink-0">
@@ -224,22 +240,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
               </DialogFooter>
             </TabsContent>
 
-            {/* TAB 2 — Medication Scheduling */}
-            <TabsContent value="scheduling" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4">
-                <SchedulingTab
-                  participantId={participant.id}
-                  participantName={participant.fullName}
-                  onAdd={() => setScheduleOpen(true)}
-                  onEdit={(s) => {
-                    setEditMedSchedule(s);
-                    setEditMedOpen(true);
-                  }}
-                />
-              </div>
-            </TabsContent>
-
-            {/* TAB 3 — History */}
+            {/* TAB 2 — History */}
             <TabsContent value="history" className="flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto pr-1 pt-4">
                 <HistoryTab
