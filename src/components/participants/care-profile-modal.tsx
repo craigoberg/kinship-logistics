@@ -339,9 +339,11 @@ function SchedulingTab({
   onEdit: (s: MedicationSchedule) => void;
 }) {
   const { data: schedules = [], isLoading, error } = useParticipantSchedules(participantId);
+  const { data: todaysLogs = [] } = useTodaysComplianceLogs();
   const restore = useUpdateMedicationSchedule();
   const [showArchived, setShowArchived] = useState(false);
   const [discontinueTarget, setDiscontinueTarget] = useState<MedicationSchedule | null>(null);
+  const [giveDoseTarget, setGiveDoseTarget] = useState<MedicationSchedule | null>(null);
 
   const active = schedules.filter((s) => s.active);
   const visible = showArchived ? schedules : active;
