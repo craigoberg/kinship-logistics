@@ -269,6 +269,14 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                 className="h-9 pl-9"
               />
             </div>
+            <Button
+              variant="outline"
+              onClick={() => setNoShowOpen(true)}
+              className="gap-1.5 border-destructive/60 text-destructive hover:bg-destructive/10 hover:text-destructive"
+            >
+              <AlertTriangle className="h-4 w-4" />
+              Trigger No-Show Countdown
+            </Button>
             <Button onClick={() => setAbsenceOpen(true)} className="gap-1.5">
               <CalendarOff className="h-4 w-4" />
               Log Planned Absence / Suspension
