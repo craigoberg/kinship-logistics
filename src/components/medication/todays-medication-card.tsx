@@ -1,7 +1,5 @@
 import { useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
 import { Pill, CheckCircle2, Clock, AlertOctagon } from "lucide-react";
-import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,13 +12,13 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 
+import { GiveDoseModal } from "@/components/medication/give-dose-modal";
 import {
   useAllActiveSchedules,
   useParticipants,
   useTodaysComplianceLogs,
 } from "@/hooks/use-supabase-data";
 import {
-  insertQuickAdministrationLog,
   type ComplianceLog,
   type MedicationSchedule,
   type Participant,
@@ -41,12 +39,6 @@ function timeToMinutes(hhmm: string): number {
   return (h || 0) * 60 + (m || 0);
 }
 
-function formatHHMM(totalMinutes: number): string {
-  const h = Math.floor(totalMinutes / 60) % 24;
-  const m = totalMinutes % 60;
-  return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
-}
-
 function findAdministrationLog(
   schedule: MedicationSchedule,
   logs: ComplianceLog[],
@@ -64,10 +56,8 @@ export function TodaysMedicationCard() {
   const { data: schedules = [], isLoading: schedLoading } = useAllActiveSchedules();
   const { data: participants = [] } = useParticipants();
   const { data: logs = [] } = useTodaysComplianceLogs();
-  const [confirm, setConfirm] = useState<Row | null>(null);
-  const [submitting, setSubmitting] = useState(false);
+  const [verifying, setVerifying] = useState<Row | null>(null);
   const [historyFor, setHistoryFor] = useState<Row | null>(null);
-  const qc = useQueryClient();
 
   const nowMinutes =
     new Date().getHours() * 60 + new Date().getMinutes();
@@ -103,37 +93,6 @@ export function TodaysMedicationCard() {
         return a.scheduledMinutes - b.scheduledMinutes;
       });
   }, [schedules, logs, participantById, nowMinutes]);
-
-  const submitConfirm = async () => {
-    if (!confirm) return;
-    setSubmitting(true);
-    try {
-      await insertQuickAdministrationLog({
-        participantId: confirm.schedule.participantId as string,
-        scheduleId: confirm.schedule.id,
-        medicationName: confirm.schedule.medicationName,
-        dosage: confirm.schedule.dosage,
-        scheduledTime: confirm.schedule.expectedTime,
-        witnessIdentity: "Dashboard Quick Admin",
-      });
-      toast.success("Administration recorded", {
-        description: `${confirm.schedule.medicationName} · ${confirm.participant?.fullName ?? "participant"}.`,
-      });
-      qc.invalidateQueries({ queryKey: ["compliance_audit_logs", "today"] });
-      qc.invalidateQueries({
-        queryKey: ["compliance_audit_logs", confirm.schedule.participantId],
-      });
-      setConfirm(null);
-    } catch (err) {
-      toast.error("Could not record administration", {
-        description: (err as Error).message,
-        className: "!bg-red-600 !text-white !border-red-700",
-        duration: 12_000,
-      });
-    } finally {
-      setSubmitting(false);
-    }
-  };
 
   return (
     <Card className="space-y-3 p-5">
@@ -176,7 +135,11 @@ export function TodaysMedicationCard() {
                     {r.schedule.expectedTime.slice(0, 5)}
                   </td>
                   <td className="px-3 py-2 text-right">
-                    <StatusButton row={r} onAdminister={() => setConfirm(r)} onHistory={() => setHistoryFor(r)} />
+                    <StatusButton
+                      row={r}
+                      onAdminister={() => setVerifying(r)}
+                      onHistory={() => setHistoryFor(r)}
+                    />
                   </td>
                 </tr>
               ))}
@@ -185,41 +148,12 @@ export function TodaysMedicationCard() {
         </div>
       )}
 
-      <Dialog open={!!confirm} onOpenChange={(o) => !o && setConfirm(null)}>
-        <DialogContent className="max-w-md">
-          <DialogHeader>
-            <DialogTitle>Confirm administration</DialogTitle>
-            <DialogDescription>
-              {confirm && (
-                <>
-                  Confirm administration of{" "}
-                  <span className="font-semibold text-foreground">
-                    {confirm.schedule.medicationName}
-                  </span>{" "}
-                  ({confirm.schedule.dosage}) to{" "}
-                  <span className="font-semibold text-foreground">
-                    {confirm.participant?.fullName ?? "participant"}
-                  </span>{" "}
-                  at{" "}
-                  <span className="font-semibold text-foreground tabular-nums">
-                    {formatHHMM(nowMinutes)}
-                  </span>
-                  ?
-                </>
-              )}
-            </DialogDescription>
-          </DialogHeader>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setConfirm(null)} disabled={submitting}>
-              Cancel
-            </Button>
-            <Button onClick={submitConfirm} disabled={submitting} className="gap-1.5">
-              <CheckCircle2 className="h-4 w-4" />
-              {submitting ? "Recording…" : "Confirm sign-off"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GiveDoseModal
+        open={!!verifying}
+        onOpenChange={(o) => !o && setVerifying(null)}
+        schedule={verifying?.schedule ?? null}
+        participantName={verifying?.participant?.fullName ?? ""}
+      />
 
       <Dialog open={!!historyFor} onOpenChange={(o) => !o && setHistoryFor(null)}>
         <DialogContent className="max-w-md">
@@ -231,10 +165,10 @@ export function TodaysMedicationCard() {
           </DialogHeader>
           {historyFor?.administeredLog ? (
             <div className="space-y-2 text-sm">
-              <Row label="Administered at" value={new Date(historyFor.administeredLog.timestamp).toLocaleString()} />
-              <Row label="Witness 1" value={historyFor.administeredLog.witness1 ?? "—"} />
-              <Row label="Witness 2" value={historyFor.administeredLog.witness2 ?? "—"} />
-              <Row label="Action" value={historyFor.administeredLog.actionPerformed} />
+              <LogRow label="Administered at" value={new Date(historyFor.administeredLog.timestamp).toLocaleString()} />
+              <LogRow label="Witness 1" value={historyFor.administeredLog.witness1 ?? "—"} />
+              <LogRow label="Witness 2" value={historyFor.administeredLog.witness2 ?? "—"} />
+              <LogRow label="Action" value={historyFor.administeredLog.actionPerformed} />
             </div>
           ) : (
             <p className="text-sm text-muted-foreground">No log entry available.</p>
@@ -305,7 +239,7 @@ function StatusButton({
   );
 }
 
-function Row({ label, value }: { label: string; value: string }) {
+function LogRow({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
