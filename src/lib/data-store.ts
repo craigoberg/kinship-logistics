@@ -2021,6 +2021,7 @@ export interface UpdateBookingInput {
   bringsCarer?: boolean;
   carerId?: string | null;
   carerTransportRequired?: boolean;
+  participantTransportRequired?: boolean;
 }
 
 export interface UpdateBookingResult {
