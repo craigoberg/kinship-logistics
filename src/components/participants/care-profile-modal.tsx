@@ -235,7 +235,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
 
               <DialogFooter className="mt-2">
                 <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
-                <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
+                <Button onClick={save} disabled={(!dirty && !carerDirty) || updateMutation.isPending || upsertCarer.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
                 </Button>
