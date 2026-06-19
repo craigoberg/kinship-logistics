@@ -18,6 +18,9 @@ export interface Participant {
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
   ndisNumber: string;
   streetAddress: string | null;
+  /** Coordinator-managed permanent pickup address, used by the manifest engine
+   * unless a per-event override is set on the booking. */
+  permanentPickupAddress: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash: string | null;
   createdAt: string;
@@ -130,6 +133,7 @@ interface ParticipantRow {
   last_name: string;
   ndis_number: string;
   street_address: string | null;
+  permanent_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   dual_witness_pin_hash: string | null;
@@ -145,6 +149,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
+    permanentPickupAddress: r.permanent_pickup_address ?? null,
     iddsi: {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
@@ -193,6 +198,7 @@ export interface ParticipantPatch {
   lastName?: string;
   ndisNumber?: string;
   streetAddress?: string | null;
+  permanentPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -202,6 +208,7 @@ export interface NewParticipant {
   lastName: string;
   ndisNumber: string;
   streetAddress?: string | null;
+  permanentPickupAddress?: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -212,6 +219,7 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     last_name: input.lastName,
     ndis_number: input.ndisNumber,
     street_address: input.streetAddress ?? null,
+    permanent_pickup_address: input.permanentPickupAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
     dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
@@ -234,6 +242,8 @@ export async function updateParticipant(
   if (patch.lastName !== undefined) row.last_name = patch.lastName;
   if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
   if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
+  if (patch.permanentPickupAddress !== undefined)
+    row.permanent_pickup_address = patch.permanentPickupAddress;
   if (patch.iddsi !== undefined) {
     row.iddsi_level_liquids = patch.iddsi.liquids;
     row.iddsi_level_solids = patch.iddsi.foods;
