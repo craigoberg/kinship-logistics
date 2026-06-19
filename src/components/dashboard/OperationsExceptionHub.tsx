@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { Link } from "@tanstack/react-router";
 import {
   AlertOctagon,
   AlertTriangle,
@@ -8,10 +9,12 @@ import {
   Pill,
   ShieldAlert,
   ShieldCheck,
+  Stethoscope,
   Truck,
   UserCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
@@ -33,6 +36,7 @@ interface BucketRow {
   title: string;
   detail: string;
   severity: Severity;
+  action?: React.ReactNode;
 }
 
 interface Bucket {
@@ -60,7 +64,16 @@ export function OperationsExceptionHub() {
     title: r.title,
     detail: r.detail,
     severity: r.severity,
+    action: (
+      <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
+        <Link to="/participants" aria-label={`Manage medicals for ${r.participantName}`}>
+          <Stethoscope className="mr-1 h-3.5 w-3.5" />
+          Manage Medicals
+        </Link>
+      </Button>
+    ),
   }));
+
 
   const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
     items.map((r, idx) => ({
@@ -282,12 +295,15 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
               </td>
               <td className="px-3 py-2 text-muted-foreground">{r.detail}</td>
               <td className="px-3 py-2 text-right">
-                {isLive ? (
+                {r.action ? (
+                  r.action
+                ) : isLive ? (
                   <span className="text-[11px] text-muted-foreground">Triaged on manifest</span>
                 ) : (
                   <DeferAction />
                 )}
               </td>
+
             </tr>
           ))}
         </tbody>
