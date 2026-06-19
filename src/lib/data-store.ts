@@ -2713,20 +2713,57 @@ export async function getLastEndOdometer(): Promise<number | null> {
 
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
-  // 1. Build roster (ordered participants for this event).
+  // 1. Build roster (ordered participants for this event) and pull every
+  //    address signal needed for the 3-tier target_address fallback.
   const { data: bookingRows, error: bookingErr } = await supabase
     .from("event_roster_bookings")
-    .select("participant_id, participants!inner(first_name, last_name)")
+    .select(
+      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, permanent_pickup_address, street_address)",
+    )
     .eq("event_id", input.eventId)
     .order("created_at", { ascending: true });
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
 
-  const roster = (bookingRows ?? []).map((r) => {
-    const row = r as unknown as { participant_id: string; participants: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null };
+  type RosterEntry = {
+    id: string;
+    name: string;
+    /** Strict 3-tier fallback: override → permanent → street → null. */
+    address: string | null;
+  };
+  const roster: RosterEntry[] = (bookingRows ?? []).map((r) => {
+    const row = r as unknown as {
+      participant_id: string;
+      trip_pickup_address_override: string | null;
+      participants:
+        | {
+            first_name: string;
+            last_name: string;
+            permanent_pickup_address: string | null;
+            street_address: string | null;
+          }
+        | Array<{
+            first_name: string;
+            last_name: string;
+            permanent_pickup_address: string | null;
+            street_address: string | null;
+          }>
+        | null;
+    };
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
+    const override = (row.trip_pickup_address_override ?? "").trim();
+    const permanent = (p?.permanent_pickup_address ?? "").trim();
+    const street = (p?.street_address ?? "").trim();
     return {
       id: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+      address:
+        override.length > 0
+          ? override
+          : permanent.length > 0
+            ? permanent
+            : street.length > 0
+              ? street
+              : null,
     };
   });
 
@@ -2779,6 +2816,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     from_participant_id: string | null;
     to_participant_id: string | null;
     medication_expected: boolean;
+    target_address: string | null;
   };
   const seeds: LegSeed[] = [];
   if (roster.length === 0) {
@@ -2789,6 +2827,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       from_participant_id: null,
       to_participant_id: null,
       medication_expected: false,
+      target_address: null,
     });
   } else {
     for (let i = 0; i < roster.length; i++) {
@@ -2801,6 +2840,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         from_participant_id: from ? from.id : null,
         to_participant_id: to.id,
         medication_expected: medSet.has(to.id),
+        target_address: to.address,
       });
     }
     const last = roster[roster.length - 1];
@@ -2811,6 +2851,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       from_participant_id: last.id,
       to_participant_id: null,
       medication_expected: false,
+      target_address: null,
     });
   }
   seeds.push({
@@ -2820,6 +2861,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     from_participant_id: null,
     to_participant_id: null,
     medication_expected: false,
+    target_address: null,
   });
 
   const legPayload = seeds.map((s, i) => ({
