@@ -2592,6 +2592,7 @@ export interface TripLeg {
   noShowTriggeredAt: string | null;
   medicationExpected: boolean;
   medicationHandoverConfirmed: boolean;
+  medicationHandoverStatus: MedicationHandoverStatus | null;
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
@@ -2599,6 +2600,11 @@ export interface TripLeg {
    * the 3-tier fallback override → permanent → street. */
   targetAddress: string | null;
 }
+
+export type MedicationHandoverStatus =
+  | "collected"
+  | "expected_not_provided"
+  | "not_required";
 
 interface LegRow {
   id: string;
