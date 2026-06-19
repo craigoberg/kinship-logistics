@@ -612,6 +612,7 @@ import {
   listEvents,
   listConfirmedEvents,
   findMostRecentEventByType,
+  listPriorEventsForClone,
   refreshBookingMedicalSnapshot,
 
   insertEvent,
@@ -645,6 +646,14 @@ export function usePriorEventOfType(
       findMostRecentEventByType(eventTypeCode as string, excludeEventId ?? null),
     enabled: !!eventTypeCode,
     staleTime: 30_000,
+  });
+}
+
+export function usePriorEventsForClone(excludeEventId?: string | null) {
+  return useQuery({
+    queryKey: ["events", "prior-clone-list", excludeEventId ?? null],
+    queryFn: () => listPriorEventsForClone(excludeEventId ?? null),
+    staleTime: 60_000,
   });
 }
 

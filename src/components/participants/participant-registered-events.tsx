@@ -58,7 +58,7 @@ function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooki
     participantTransportRequired: r.participantTransportRequired ?? false,
     tripPickupAddressOverride: r.tripPickupAddressOverride ?? null,
     dynamicMedicalNotesSnapshot: r.dynamicMedicalNotesSnapshot ?? null,
-    participantPermanentPickupAddress: r.participantPermanentPickupAddress ?? null,
+    participantRegularPickupAddress: r.participantRegularPickupAddress ?? null,
     participantStreetAddress: r.participantStreetAddress ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,

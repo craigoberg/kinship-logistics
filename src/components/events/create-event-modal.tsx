@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Copy } from "lucide-react";
+import { Plus, Copy, Check, ChevronsUpDown, X } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,10 +12,19 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { LookupSelect } from "@/components/lookups/lookup-select";
-import { useInsertEvent, usePriorEventOfType } from "@/hooks/use-supabase-data";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import { cn } from "@/lib/utils";
+import { useInsertEvent, usePriorEventsForClone } from "@/hooks/use-supabase-data";
 
 interface Props {
   open: boolean;
@@ -35,12 +44,11 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const [endDate, setEndDate] = useState("");
   const [ticketPrice, setTicketPrice] = useState("0.00");
   const [description, setDescription] = useState("");
-  const [cloneEnabled, setCloneEnabled] = useState(false);
+  const [sourceEventId, setSourceEventId] = useState<string | null>(null);
+  const [cloneOpen, setCloneOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEvent();
-  const { data: priorEvent, isLoading: priorLoading } = usePriorEventOfType(
-    cloneEnabled ? eventTypeCode : null,
-  );
+  const { data: priorEvents = [], isLoading: priorLoading } = usePriorEventsForClone();
 
   useEffect(() => {
     if (open) {
@@ -51,10 +59,15 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
       setEndDate("");
       setTicketPrice("0.00");
       setDescription("");
-      setCloneEnabled(false);
+      setSourceEventId(null);
       setDirty(false);
     }
   }, [open]);
+
+  const selectedSource = useMemo(
+    () => priorEvents.find((e) => e.id === sourceEventId) ?? null,
+    [priorEvents, sourceEventId],
+  );
 
   const priceNumber = Number(ticketPrice);
   const valid = useMemo(
@@ -72,29 +85,26 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      // end_date is NOT NULL in event_manifest — mirror start_date when blank
-      // (covers single-day events where the operator leaves the end-date field empty).
       const resolvedEndDate = endDate && endDate.length === 10 ? endDate : startDate;
       await mutation.mutateAsync({
         title: title.trim(),
-        eventTypeCode, // canonical lookup code, e.g. EVT-SINGLE / EVT-MULTI
+        eventTypeCode,
         venue: venue.trim(),
-        startDate, // already YYYY-MM-DD from <input type="date">
+        startDate,
         endDate: resolvedEndDate,
         ticketPrice: priceNumber,
         description: description.trim() || null,
         status: "Planning",
-        cloneFromEventId: cloneEnabled && priorEvent ? priorEvent.id : null,
+        cloneFromEventId: sourceEventId,
       });
       toast.success(
-        cloneEnabled && priorEvent
-          ? `Event created · Roster cloned from "${priorEvent.title}"`
+        selectedSource
+          ? `Event created · Roster cloned from "${selectedSource.title}"`
           : "Event created",
         { description: title.trim() },
       );
       onOpenChange(false);
     } catch (err) {
-      // Keep the modal OPEN so the operator can correct the payload.
       const msg = err instanceof Error ? err.message : String(err);
       toast.error("Event NOT saved — fix and retry", {
         description: msg,
@@ -111,146 +121,199 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-border bg-card">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden border-border bg-card">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Create new event</DialogTitle>
           <DialogDescription>
             All fields are stored against <span className="font-mono">event_manifest</span>.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="grid gap-3 pt-1">
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Event title
-            </Label>
-            <Input
-              value={title}
-              onChange={(e) => mark(setTitle)(e.target.value)}
-              placeholder="e.g. Coastal Picnic Day"
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <div className="grid gap-3 pt-1">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Event type
-              </Label>
-              <LookupSelect
-                category="event_types"
-                value={eventTypeCode}
-                onChange={(code) => mark(setEventTypeCode)(code)}
-                placeholder="Select event type"
-              />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Ticket price (AUD)
+                Event title
               </Label>
               <Input
-                type="number"
-                inputMode="decimal"
-                min="0"
-                step="0.01"
-                value={ticketPrice}
-                onChange={(e) => mark(setTicketPrice)(e.target.value)}
-                className="tabular-nums"
+                value={title}
+                onChange={(e) => mark(setTitle)(e.target.value)}
+                placeholder="e.g. Coastal Picnic Day"
               />
             </div>
-          </div>
 
-          {/* ----- Rinse & Repeat: Clone Prior Event ----- */}
-          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
-            <div className="flex items-center justify-between gap-2">
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Event type
+                </Label>
+                <LookupSelect
+                  category="event_types"
+                  value={eventTypeCode}
+                  onChange={(code) => mark(setEventTypeCode)(code)}
+                  placeholder="Select event type"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Ticket price (AUD)
+                </Label>
+                <Input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  value={ticketPrice}
+                  onChange={(e) => mark(setTicketPrice)(e.target.value)}
+                  className="tabular-nums"
+                />
+              </div>
+            </div>
+
+            {/* ----- Clone roster from any prior event (searchable) ----- */}
+            <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
               <Label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 <Copy className="h-3.5 w-3.5" /> Clone roster from prior event
               </Label>
-              <Switch
-                checked={cloneEnabled}
-                onCheckedChange={(v) => {
-                  setCloneEnabled(v);
-                  setDirty(true);
-                }}
-                disabled={!eventTypeCode}
-              />
-            </div>
-            {!eventTypeCode ? (
-              <p className="text-[11px] text-muted-foreground">
-                Pick an event type first to enable cloning.
-              </p>
-            ) : cloneEnabled ? (
-              priorLoading ? (
-                <p className="text-[11px] text-muted-foreground">Looking up most recent…</p>
-              ) : priorEvent ? (
+
+              <div className="flex items-center gap-2">
+                <Popover open={cloneOpen} onOpenChange={setCloneOpen}>
+                  <PopoverTrigger asChild>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      role="combobox"
+                      aria-expanded={cloneOpen}
+                      className="h-9 flex-1 justify-between bg-background font-normal"
+                    >
+                      <span className={cn("truncate", !selectedSource && "text-muted-foreground")}>
+                        {selectedSource
+                          ? `${selectedSource.title} · ${selectedSource.startDate}`
+                          : priorLoading
+                            ? "Loading events…"
+                            : "Pick a past event to clone its roster…"}
+                      </span>
+                      <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+                    </Button>
+                  </PopoverTrigger>
+                  <PopoverContent className="w-[--radix-popover-trigger-width] p-0" align="start">
+                    <Command>
+                      <CommandInput placeholder="Search by title or date…" />
+                      <CommandList>
+                        <CommandEmpty>No matching events.</CommandEmpty>
+                        <CommandGroup>
+                          {priorEvents.map((ev) => (
+                            <CommandItem
+                              key={ev.id}
+                              value={`${ev.title} ${ev.startDate} ${ev.venue ?? ""}`}
+                              onSelect={() => {
+                                setSourceEventId(ev.id);
+                                setDirty(true);
+                                setCloneOpen(false);
+                              }}
+                            >
+                              <Check
+                                className={cn(
+                                  "mr-2 h-4 w-4",
+                                  sourceEventId === ev.id ? "opacity-100" : "opacity-0",
+                                )}
+                              />
+                              <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
+                                <span className="truncate font-medium">{ev.title}</span>
+                                <span className="shrink-0 text-[11px] text-muted-foreground">
+                                  {ev.startDate}
+                                </span>
+                              </div>
+                            </CommandItem>
+                          ))}
+                        </CommandGroup>
+                      </CommandList>
+                    </Command>
+                  </PopoverContent>
+                </Popover>
+
+                {selectedSource && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-9 w-9 shrink-0"
+                    onClick={() => {
+                      setSourceEventId(null);
+                      setDirty(true);
+                    }}
+                    aria-label="Clear cloned source"
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                )}
+              </div>
+
+              {selectedSource ? (
                 <div className="rounded bg-background/60 px-2 py-1.5 text-[11px]">
-                  <span className="font-semibold">Source:</span> {priorEvent.title}{" "}
-                  <span className="text-muted-foreground">· {priorEvent.startDate}</span>
+                  <span className="font-semibold">Source:</span> {selectedSource.title}{" "}
+                  <span className="text-muted-foreground">· {selectedSource.startDate}</span>
                   <div className="mt-0.5 text-muted-foreground">
-                    Roster will be copied · financials reset · medical snapshots refreshed · status forced to <strong>Planning</strong>.
+                    Roster will be copied · financials reset · medical snapshots refreshed · status forced to{" "}
+                    <strong>Planning</strong>.
                   </div>
                 </div>
               ) : (
-                <p className="text-[11px] text-warning">
-                  No prior event of this type found — toggle off to create blank.
+                <p className="text-[11px] text-muted-foreground">
+                  Leave empty for a blank roster, or pick any past event as a template.
                 </p>
-              )
-            ) : (
-              <p className="text-[11px] text-muted-foreground">
-                Off: new event starts with an empty roster.
-              </p>
-            )}
-          </div>
+              )}
+            </div>
 
-
-
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Venue
-            </Label>
-            <Input
-              value={venue}
-              onChange={(e) => mark(setVenue)(e.target.value)}
-              placeholder="e.g. Bondi Pavilion"
-            />
-          </div>
-
-          <div className="grid gap-3 sm:grid-cols-2">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Start date
+                Venue
               </Label>
               <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => mark(setStartDate)(e.target.value)}
+                value={venue}
+                onChange={(e) => mark(setVenue)(e.target.value)}
+                placeholder="e.g. Bondi Pavilion"
               />
             </div>
+
+            <div className="grid gap-3 sm:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Start date
+                </Label>
+                <Input
+                  type="date"
+                  value={startDate}
+                  onChange={(e) => mark(setStartDate)(e.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  End date (optional)
+                </Label>
+                <Input
+                  type="date"
+                  value={endDate}
+                  onChange={(e) => mark(setEndDate)(e.target.value)}
+                />
+              </div>
+            </div>
+
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                End date (optional)
+                Description (optional)
               </Label>
-              <Input
-                type="date"
-                value={endDate}
-                onChange={(e) => mark(setEndDate)(e.target.value)}
+              <Textarea
+                value={description}
+                onChange={(e) => mark(setDescription)(e.target.value)}
+                rows={3}
+                placeholder="Short briefing for coordinators…"
               />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Description (optional)
-            </Label>
-            <Textarea
-              value={description}
-              onChange={(e) => mark(setDescription)(e.target.value)}
-              rows={3}
-              placeholder="Short briefing for coordinators…"
-            />
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t border-border pt-3">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>

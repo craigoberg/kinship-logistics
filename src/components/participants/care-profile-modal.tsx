@@ -73,6 +73,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
   const [streetAddress, setStreetAddress] = useState("");
+  const [regularPickupAddress, setRegularPickupAddress] = useState("");
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -97,6 +98,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       setLastName(participant.lastName);
       setNdisNumber(participant.ndisNumber);
       setStreetAddress(participant.streetAddress ?? "");
+      setRegularPickupAddress(participant.regularPickupAddress ?? "");
       setIddsi(participant.iddsi);
       setDirty(false);
     }
@@ -115,6 +117,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       lastName,
       ndisNumber,
       streetAddress: streetAddress.trim() || null,
+      regularPickupAddress: regularPickupAddress.trim() || null,
       iddsi,
     };
     if (!online) {
@@ -174,6 +177,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
             <TabsList className="w-full justify-start h-auto flex-wrap gap-2 flex-shrink-0 min-h-[44px]">
               <TabsTrigger value="profile" className="h-10 py-2 px-3">Care Profile</TabsTrigger>
+              <TabsTrigger value="contact" className="h-10 py-2 px-3">Contact Information</TabsTrigger>
               <TabsTrigger value="history" className="h-10 py-2 px-3">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance" className="h-10 py-2 px-3">Schedules &amp; Attendance</TabsTrigger>
               <TabsTrigger value="finance" className="h-10 py-2 px-3">Finance &amp; Ledger</TabsTrigger>
@@ -192,15 +196,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   <Field label="NDIS number" className="sm:col-span-1">
                     <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
                   </Field>
-                  <Field label="Street address" className="sm:col-span-4">
-                    <Input
-                      value={streetAddress}
-                      onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
-                      placeholder="e.g. 42 Wattle Street, Parramatta NSW"
-                      className="h-9"
-                    />
-                  </Field>
+                  <div className="sm:col-span-3" />
                 </div>
+
+                <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
+                  Phone, email, home and pickup addresses live in the{" "}
+                  <strong className="text-foreground">Contact Information</strong> tab.
+                </p>
 
                 <CarerNetworkPanel
                   participantId={participant.id}
@@ -270,6 +272,62 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 </Button>
               </DialogFooter>
             </TabsContent>
+
+            {/* TAB — Contact Information */}
+            <TabsContent value="contact" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4 space-y-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Phone number">
+                    <Input
+                      type="tel"
+                      placeholder="Schema column not yet provisioned"
+                      disabled
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Email address">
+                    <Input
+                      type="email"
+                      placeholder="Schema column not yet provisioned"
+                      disabled
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Home / Street address" className="sm:col-span-2">
+                    <Input
+                      value={streetAddress}
+                      onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
+                      placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Regular pickup address" className="sm:col-span-2">
+                    <Input
+                      value={regularPickupAddress}
+                      onChange={(e) => { setRegularPickupAddress(e.target.value); setDirty(true); }}
+                      placeholder="Leave blank to fall back to the Home address"
+                      className="h-9"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {regularPickupAddress.trim().length > 0
+                        ? "Used as the default pickup on every event manifest unless an event override is set."
+                        : streetAddress.trim().length > 0
+                          ? <>Will use: <span className="font-medium text-foreground">{streetAddress.trim()}</span></>
+                          : "No address on file — manifests will leave the pickup blank."}
+                    </p>
+                  </Field>
+                </div>
+              </div>
+
+              <DialogFooter className="mt-1 shrink-0">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
+                  <Save className="h-4 w-4" />
+                  {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+
 
             {/* TAB 2 — History */}
             <TabsContent value="history" className="flex flex-col overflow-hidden">

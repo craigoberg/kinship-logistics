@@ -20,7 +20,7 @@ export interface Participant {
   streetAddress: string | null;
   /** Coordinator-managed permanent pickup address, used by the manifest engine
    * unless a per-event override is set on the booking. */
-  permanentPickupAddress: string | null;
+  regularPickupAddress: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash: string | null;
   createdAt: string;
@@ -133,7 +133,7 @@ interface ParticipantRow {
   last_name: string;
   ndis_number: string;
   street_address: string | null;
-  permanent_pickup_address: string | null;
+  regular_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   dual_witness_pin_hash: string | null;
@@ -149,7 +149,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
-    permanentPickupAddress: r.permanent_pickup_address ?? null,
+    regularPickupAddress: r.regular_pickup_address ?? null,
     iddsi: {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
@@ -198,7 +198,7 @@ export interface ParticipantPatch {
   lastName?: string;
   ndisNumber?: string;
   streetAddress?: string | null;
-  permanentPickupAddress?: string | null;
+  regularPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -208,7 +208,7 @@ export interface NewParticipant {
   lastName: string;
   ndisNumber: string;
   streetAddress?: string | null;
-  permanentPickupAddress?: string | null;
+  regularPickupAddress?: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -219,7 +219,7 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     last_name: input.lastName,
     ndis_number: input.ndisNumber,
     street_address: input.streetAddress ?? null,
-    permanent_pickup_address: input.permanentPickupAddress ?? null,
+    regular_pickup_address: input.regularPickupAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
     dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
@@ -242,8 +242,8 @@ export async function updateParticipant(
   if (patch.lastName !== undefined) row.last_name = patch.lastName;
   if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
   if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
-  if (patch.permanentPickupAddress !== undefined)
-    row.permanent_pickup_address = patch.permanentPickupAddress;
+  if (patch.regularPickupAddress !== undefined)
+    row.regular_pickup_address = patch.regularPickupAddress;
   if (patch.iddsi !== undefined) {
     row.iddsi_level_liquids = patch.iddsi.liquids;
     row.iddsi_level_solids = patch.iddsi.foods;
@@ -1840,15 +1840,15 @@ export interface EventRosterBooking {
   /** Whether the participant themselves needs a physical bus seat. */
   participantTransportRequired: boolean;
   /** One-off pickup address override for THIS event only. Wins over the
-   * participant's permanent_pickup_address when the manifest is seeded. */
+   * participant's regular_pickup_address when the manifest is seeded. */
   tripPickupAddressOverride: string | null;
   /** Frozen snapshot of critical medical alerts taken at the moment this
    * participant was added to the roster (or last refreshed by a coordinator). */
   dynamicMedicalNotesSnapshot: string | null;
-  /** Permanent pickup address read through the participants join — convenience
-   * mirror of participant.permanent_pickup_address so the roster table can
+  /** Regular pickup address read through the participants join — convenience
+   * mirror of participant.regular_pickup_address so the roster table can
    * render it without a second fetch. */
-  participantPermanentPickupAddress: string | null;
+  participantRegularPickupAddress: string | null;
   /** Mirror of participant.street_address from the join — last-tier fallback. */
   participantStreetAddress: string | null;
   createdAt: string;
@@ -1876,7 +1876,7 @@ interface BookingRow {
     | {
         first_name: string;
         last_name: string;
-        permanent_pickup_address?: string | null;
+        regular_pickup_address?: string | null;
         street_address?: string | null;
       }
     | null;
@@ -1901,7 +1901,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     participantTransportRequired: r.participant_transport_required ?? false,
     tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
-    participantPermanentPickupAddress: r.participants?.permanent_pickup_address ?? null,
+    participantRegularPickupAddress: r.participants?.regular_pickup_address ?? null,
     participantStreetAddress: r.participants?.street_address ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -1910,7 +1910,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
 
 
 const BOOKING_PARTICIPANT_SELECT =
-  "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address)";
+  "*, participants!inner(first_name, last_name, regular_pickup_address, street_address)";
 
 export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
   const { data, error } = await supabase
@@ -1936,7 +1936,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
+      "*, participants!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
@@ -2135,6 +2135,28 @@ export async function findMostRecentEventByType(
   const filtered = excludeEventId ? rows.filter((r) => r.id !== excludeEventId) : rows;
   return filtered.length > 0 ? rowToEvent(filtered[0]) : null;
 }
+
+/** All non-cancelled events, ordered newest-first, for the clone-source picker. */
+export async function listPriorEventsForClone(
+  excludeEventId?: string | null,
+  limit = 200,
+): Promise<EventManifest[]> {
+  let query = supabase
+    .from("event_manifest")
+    .select("*")
+    .neq("status", "Cancelled")
+    .order("start_date", { ascending: false })
+    .limit(limit);
+  if (excludeEventId) query = query.neq("id", excludeEventId);
+  const { data, error } = await query;
+  if (error) {
+    console.error("[listPriorEventsForClone]", error);
+    return [];
+  }
+  return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
+}
+
+
 
 /**
  * Clone every roster booking from one event onto another.
@@ -2718,7 +2740,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const { data: bookingRows, error: bookingErr } = await supabase
     .from("event_roster_bookings")
     .select(
-      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, permanent_pickup_address, street_address)",
+      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("event_id", input.eventId)
     .order("created_at", { ascending: true });
@@ -2738,20 +2760,20 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         | {
             first_name: string;
             last_name: string;
-            permanent_pickup_address: string | null;
+            regular_pickup_address: string | null;
             street_address: string | null;
           }
         | Array<{
             first_name: string;
             last_name: string;
-            permanent_pickup_address: string | null;
+            regular_pickup_address: string | null;
             street_address: string | null;
           }>
         | null;
     };
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const override = (row.trip_pickup_address_override ?? "").trim();
-    const permanent = (p?.permanent_pickup_address ?? "").trim();
+    const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
     return {
       id: row.participant_id,
@@ -2759,8 +2781,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       address:
         override.length > 0
           ? override
-          : permanent.length > 0
-            ? permanent
+          : regular.length > 0
+            ? regular
             : street.length > 0
               ? street
               : null,
