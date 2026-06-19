@@ -4042,6 +4042,7 @@ function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
   };
 }
 
+// SMS boundary: any external dispatch worker triggered by this insert must send EXACTLY this text — "Alert: Active Sev 1 Escalation raised. Please log into Yada Connect immediately to process."
 export async function raiseOperationalEscalation(input: {
   clearanceId: string | null;
   driverName: string;
@@ -4087,5 +4088,80 @@ export function subscribeToEscalation(
     .subscribe();
   return () => {
     supabase.removeChannel(channel);
+  };
+}
+
+/** Fetch every escalation that is still awaiting coordinator pickup. */
+export async function listPendingEscalations(): Promise<OperationalEscalation[]> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("*")
+    .eq("status", "pending")
+    .order("created_at", { ascending: true });
+  if (error) throwPg("[listPendingEscalations]", error);
+  return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
+}
+
+/** Unfiltered realtime feed for the coordinator escalation pool. */
+export function subscribeToEscalationPool(
+  cb: (event: { type: "INSERT" | "UPDATE"; row: OperationalEscalation }) => void,
+): () => void {
+  const channel = supabase
+    .channel("escalation-pool")
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "operational_escalations" },
+      (payload) =>
+        cb({
+          type: "INSERT",
+          row: rowToEscalation(payload.new as OperationalEscalationRow),
+        }),
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "operational_escalations" },
+      (payload) =>
+        cb({
+          type: "UPDATE",
+          row: rowToEscalation(payload.new as OperationalEscalationRow),
+        }),
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+export interface ClaimEscalationResult {
+  success: boolean;
+  claimedByName?: string;
+  escalation?: OperationalEscalation;
+}
+
+/**
+ * Atomic, collision-safe claim via the live `claim_operational_escalation`
+ * security-definer RPC. The RPC returns a single JSON row with `success`,
+ * `claimed_by_name`, and the updated escalation row.
+ */
+export async function claimOperationalEscalation(
+  escalationId: string,
+  staffId: string,
+): Promise<ClaimEscalationResult> {
+  const { data, error } = await supabase.rpc("claim_operational_escalation", {
+    p_escalation_id: escalationId,
+    p_staff_id: staffId,
+  });
+  if (error) throwPg("[claimOperationalEscalation]", error);
+  // RPC returns either a single object or an array depending on declaration.
+  const payload = Array.isArray(data) ? data[0] : data;
+  if (!payload) return { success: false };
+  const rawRow = (payload.escalation ?? payload.row ?? null) as
+    | OperationalEscalationRow
+    | null;
+  return {
+    success: !!payload.success,
+    claimedByName:
+      payload.claimed_by_name ?? payload.claimedByName ?? undefined,
+    escalation: rawRow ? rowToEscalation(rawRow) : undefined,
   };
 }

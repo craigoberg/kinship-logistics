@@ -13,6 +13,7 @@ import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
+import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
 
 function NotFoundComponent() {
   return (
@@ -131,6 +132,7 @@ function RootComponent() {
         <Outlet />
       </AppShell>
       <NotificationSimulator />
+      <GlobalEscalationInterceptor />
     </QueryClientProvider>
   );
 }
