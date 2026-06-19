@@ -6,12 +6,12 @@ import {
   CalendarIcon,
   CheckCircle2,
   ShieldAlert,
+  ShieldCheck,
   Truck,
   UserCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -21,58 +21,72 @@ import {
   DAY_ANOMALY_PLACEHOLDERS,
   VEHICLE_COMPLIANCE_PLACEHOLDERS,
   STAFF_CERT_PLACEHOLDERS,
+  ASSET_LIABILITY_PLACEHOLDERS,
   type PlaceholderRow,
 } from "@/hooks/use-exception-feed";
 
-type Tone = "critical" | "warning" | "info" | "clear";
-
-interface SectionRow {
+interface BucketRow {
   key: string;
   title: string;
   detail: string;
 }
 
-const toneStyles: Record<Tone, { border: string; tint: string; badge: string; icon: string }> = {
-  critical: {
-    border: "border-l-destructive",
-    tint: "bg-destructive/5",
-    badge: "bg-destructive text-destructive-foreground",
-    icon: "text-destructive",
-  },
-  warning: {
-    border: "border-l-warning",
-    tint: "bg-warning/5",
-    badge: "bg-warning/15 text-warning border border-warning/30",
-    icon: "text-warning",
-  },
-  info: {
-    border: "border-l-amber-500",
-    tint: "bg-amber-500/5",
-    badge: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30",
-    icon: "text-amber-600 dark:text-amber-400",
-  },
-  clear: {
-    border: "border-l-green-600",
-    tint: "bg-green-500/5",
-    badge: "bg-green-600 text-white",
-    icon: "text-green-600 dark:text-green-400",
-  },
-};
+interface Bucket {
+  id: string;
+  label: string;
+  icon: LucideIcon;
+  isLive: boolean;
+  rows: BucketRow[];
+}
 
 export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
 
-  const criticalRows: SectionRow[] = medExceptions.map((m) => ({
+  const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
     title: `${m.participantName} · Leg ${m.legNumber}${m.eventTitle ? ` (${m.eventTitle})` : ""}`,
     detail: m.exceptionLabel,
   }));
 
-  const toRows = (items: readonly PlaceholderRow[]): SectionRow[] =>
-    items.map((r, idx) => ({ key: `${r.title}-${idx}`, title: r.title, detail: r.detail }));
+  const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
+    items.map((r, idx) => ({ key: `${prefix}-${idx}`, title: r.title, detail: r.detail }));
+
+  const buckets: Bucket[] = [
+    { id: "on-road", label: "On-Road Issues", icon: AlertOctagon, isLive: true, rows: liveRows },
+    {
+      id: "day-anomaly",
+      label: "Start/End Day Anomaly",
+      icon: AlertTriangle,
+      isLive: false,
+      rows: toRows(DAY_ANOMALY_PLACEHOLDERS, "day"),
+    },
+    {
+      id: "vehicle",
+      label: "Vehicle Compliance",
+      icon: Truck,
+      isLive: false,
+      rows: toRows(VEHICLE_COMPLIANCE_PLACEHOLDERS, "veh"),
+    },
+    {
+      id: "staff",
+      label: "Staff Certifications",
+      icon: UserCheck,
+      isLive: false,
+      rows: toRows(STAFF_CERT_PLACEHOLDERS, "staff"),
+    },
+    {
+      id: "asset",
+      label: "Asset & Liability Insurance",
+      icon: ShieldCheck,
+      isLive: false,
+      rows: toRows(ASSET_LIABILITY_PLACEHOLDERS, "asset"),
+    },
+  ];
+
+  const drillBuckets = buckets.filter((b) => b.rows.length > 0);
 
   return (
-    <Card className="space-y-4 p-5">
+    <Card className="space-y-5 p-5">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-destructive" />
@@ -83,147 +97,137 @@ export function OperationsExceptionHub() {
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-destructive/60" />
             <span className="relative inline-flex h-2 w-2 rounded-full bg-destructive" />
           </span>
-          Live
+          {isLoading ? "Checking…" : "Live"}
         </div>
       </header>
 
-      <div className="space-y-3">
-        <Section
-          icon={AlertOctagon}
-          tone="critical"
-          title="Critical · On-Road"
-          subtitle={isLoading ? "Checking…" : "Active medication handover exceptions"}
-          rows={criticalRows}
-        />
-        <Section
-          icon={AlertTriangle}
-          tone="warning"
-          title="Start/End-of-Day Anomalies & Incidents"
-          rows={toRows(DAY_ANOMALY_PLACEHOLDERS)}
-          isPreview
-        />
-        <Section
-          icon={Truck}
-          tone="info"
-          title="Vehicle Compliance"
-          rows={toRows(VEHICLE_COMPLIANCE_PLACEHOLDERS)}
-          isPreview
-        />
-        <Section
-          icon={UserCheck}
-          tone="info"
-          title="Staff Certifications"
-          rows={toRows(STAFF_CERT_PLACEHOLDERS)}
-          isPreview
-        />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+        {buckets.map((b) => (
+          <StatusTile key={b.id} bucket={b} />
+        ))}
       </div>
+
+      {drillBuckets.length > 0 && (
+        <div className="space-y-4">
+          {drillBuckets.map((b) => (
+            <DrillTable key={b.id} bucket={b} />
+          ))}
+        </div>
+      )}
     </Card>
   );
 }
 
-function Section({
-  icon: Icon,
-  tone,
-  title,
-  subtitle,
-  rows,
-  isPreview,
-}: {
-  icon: LucideIcon;
-  tone: Tone;
-  title: string;
-  subtitle?: string;
-  rows: SectionRow[];
-  isPreview?: boolean;
-}) {
-  const isClear = rows.length === 0;
-  const effectiveTone: Tone = isClear ? "clear" : tone;
-  const s = toneStyles[effectiveTone];
-  return (
-    <section className={cn("rounded-md border-l-4 px-4 py-3", s.border, s.tint)}>
-      <div className="flex items-center justify-between gap-2">
-        <div className="flex min-w-0 items-center gap-2">
-          <Icon className={cn("h-4 w-4 shrink-0", s.icon)} />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h4 className="truncate text-sm font-semibold">{title}</h4>
-              {isPreview && (
-                <span className="rounded-full border border-border bg-background px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
-                  Preview
-                </span>
-              )}
-            </div>
-            {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
-          </div>
-        </div>
-        {!isClear && (
-          <Badge className={cn("shrink-0 tabular-nums", s.badge)} variant="outline">
-            {rows.length}
-          </Badge>
-        )}
-      </div>
+function tileToneClass(count: number, isLive: boolean): string {
+  if (count === 0) return "bg-green-600 text-white";
+  if (count <= 2) return "bg-yellow-500 text-black";
+  return cn("bg-destructive text-destructive-foreground", isLive && "animate-pulse");
+}
 
-      <ul className="mt-2 space-y-1.5">
-        {isClear ? (
-          <li className="flex items-center gap-2 text-xs text-green-700 dark:text-green-400">
-            <CheckCircle2 className="h-3.5 w-3.5" />
-            All clear
-          </li>
-        ) : (
-          rows.map((r) =>
-            isPreview ? <DeferRow key={r.key} row={r} /> : <PlainRow key={r.key} row={r} />,
-          )
+function StatusTile({ bucket }: { bucket: Bucket }) {
+  const { label, icon: Icon, rows, isLive } = bucket;
+  const count = rows.length;
+  const isClear = count === 0;
+  const tone = tileToneClass(count, isLive);
+
+  return (
+    <div
+      className={cn(
+        "relative flex min-h-32 flex-col justify-between rounded-lg p-4 shadow-sm transition",
+        tone,
+      )}
+    >
+      <div className="flex items-start justify-between gap-2">
+        <Icon className="h-5 w-5 shrink-0 opacity-90" />
+        {!isClear && (
+          <span className="rounded-md bg-black/20 px-2 py-0.5 text-xs font-bold tabular-nums">
+            {count}
+          </span>
         )}
-      </ul>
+        {isClear && <CheckCircle2 className="h-5 w-5 shrink-0 opacity-90" />}
+      </div>
+      <div className="mt-3">
+        <div className="text-sm font-semibold leading-tight">{label}</div>
+        <div className="mt-1 text-[11px] uppercase tracking-wide opacity-80">
+          {isLive ? "Live" : "Preview"}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function DrillTable({ bucket }: { bucket: Bucket }) {
+  const { label, icon: Icon, rows, isLive } = bucket;
+  return (
+    <section className="rounded-md border border-border bg-background/40">
+      <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
+        <div className="flex items-center gap-2">
+          <Icon className="h-4 w-4 text-muted-foreground" />
+          <h4 className="text-sm font-semibold">{label}</h4>
+        </div>
+        <span className="text-xs text-muted-foreground tabular-nums">
+          {rows.length} {rows.length === 1 ? "item" : "items"}
+        </span>
+      </header>
+      <table className="w-full text-xs">
+        <thead className="text-left text-muted-foreground">
+          <tr>
+            <th className="px-3 py-2 font-medium">Item</th>
+            <th className="px-3 py-2 font-medium">Detail</th>
+            <th className="px-3 py-2 text-right font-medium">Action</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((r) => (
+            <tr key={r.key} className="border-t border-border/60">
+              <td className="px-3 py-2 font-medium">{r.title}</td>
+              <td className="px-3 py-2 text-muted-foreground">{r.detail}</td>
+              <td className="px-3 py-2 text-right">
+                {isLive ? (
+                  <span className="text-[11px] text-muted-foreground">Triaged on manifest</span>
+                ) : (
+                  <DeferAction />
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </section>
   );
 }
 
-function PlainRow({ row }: { row: SectionRow }) {
-  return (
-    <li className="flex items-start justify-between gap-3 rounded-sm bg-background/60 px-2 py-1.5 text-xs">
-      <span className="min-w-0 truncate font-medium">{row.title}</span>
-      <span className="min-w-0 flex-1 truncate text-right text-muted-foreground">{row.detail}</span>
-    </li>
-  );
-}
-
-function DeferRow({ row }: { row: SectionRow }) {
+function DeferAction() {
   const [date, setDate] = useState<Date | undefined>(undefined);
   return (
-    <li>
-      <Popover>
-        <PopoverTrigger asChild>
-          <button
-            type="button"
-            className="flex w-full items-start justify-between gap-3 rounded-sm bg-background/60 px-2 py-1.5 text-left text-xs transition hover:bg-background"
-          >
-            <span className="min-w-0 truncate font-medium">{row.title}</span>
-            <span className="min-w-0 flex-1 truncate text-right text-muted-foreground">{row.detail}</span>
-          </button>
-        </PopoverTrigger>
-        <PopoverContent align="end" className="w-auto p-3">
-          <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-            <CalendarIcon className="h-3.5 w-3.5" />
-            Defer item until action date arrives.
-          </div>
-          <Calendar
-            mode="single"
-            selected={date}
-            onSelect={setDate}
-            initialFocus
-            className={cn("p-2 pointer-events-auto")}
-          />
-          <div className="mt-2 flex items-center justify-between gap-2">
-            <span className="text-[11px] text-muted-foreground">
-              {date ? format(date, "PPP") : "No date selected"}
-            </span>
-            <Button size="sm" disabled>
-              Defer (coming soon)
-            </Button>
-          </div>
-        </PopoverContent>
-      </Popover>
-    </li>
+    <Popover>
+      <PopoverTrigger asChild>
+        <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
+          <CalendarIcon className="mr-1 h-3.5 w-3.5" />
+          Defer
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="end" className="w-auto p-3">
+        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <CalendarIcon className="h-3.5 w-3.5" />
+          Defer item until action date arrives.
+        </div>
+        <Calendar
+          mode="single"
+          selected={date}
+          onSelect={setDate}
+          initialFocus
+          className={cn("p-2 pointer-events-auto")}
+        />
+        <div className="mt-2 flex items-center justify-between gap-2">
+          <span className="text-[11px] text-muted-foreground">
+            {date ? format(date, "PPP") : "No date selected"}
+          </span>
+          <Button size="sm" disabled>
+            Defer (coming soon)
+          </Button>
+        </div>
+      </PopoverContent>
+    </Popover>
   );
 }
