@@ -2730,6 +2730,7 @@ export interface MedicationExceptionRow {
   tripId: string;
   legNumber: number;
   participantName: string;
+  eventTitle: string | null;
   status: Extract<MedicationHandoverStatus, "collected_damaged" | "expected_not_provided">;
   exceptionLabel: string;
 }
@@ -2741,14 +2742,17 @@ export async function listActiveMedicationExceptions(): Promise<MedicationExcept
   // 1) Find currently active trips.
   const { data: tripRows, error: tripErr } = await supabase
     .from("transport_trips")
-    .select("id, status, completed_at")
+    .select("id, event_id, status, completed_at")
     .or("status.eq.active,completed_at.is.null");
   if (tripErr) {
     console.warn("[listActiveMedicationExceptions:trips]", tripErr);
     return [];
   }
-  const activeTripIds = (tripRows ?? []).map((r) => r.id as string);
-  if (activeTripIds.length === 0) return [];
+  const trips = tripRows ?? [];
+  if (trips.length === 0) return [];
+  const eventIdByTrip = new Map<string, string | null>();
+  for (const t of trips) eventIdByTrip.set(t.id as string, (t.event_id as string | null) ?? null);
+  const activeTripIds = trips.map((r) => r.id as string);
 
   // 2) Pull legs in those trips with an exception handover status.
   const { data: legRows, error: legErr } = await supabase
@@ -2763,7 +2767,7 @@ export async function listActiveMedicationExceptions(): Promise<MedicationExcept
   const legs = legRows ?? [];
   if (legs.length === 0) return [];
 
-  // 3) Resolve participant names.
+  // 3) Resolve participant names (first_name + last_name).
   const participantIds = Array.from(
     new Set(
       legs
@@ -2775,19 +2779,39 @@ export async function listActiveMedicationExceptions(): Promise<MedicationExcept
   if (participantIds.length > 0) {
     const { data: pRows } = await supabase
       .from("participants")
-      .select("id, full_name")
+      .select("id, first_name, last_name")
       .in("id", participantIds);
-    for (const p of pRows ?? []) nameById.set(p.id as string, (p.full_name as string) ?? "Unknown");
+    for (const p of pRows ?? []) {
+      const full = `${(p.first_name as string | null) ?? ""} ${(p.last_name as string | null) ?? ""}`.trim();
+      nameById.set(p.id as string, full || "Unknown participant");
+    }
+  }
+
+  // 4) Resolve event titles in a single batched query.
+  const eventIds = Array.from(
+    new Set(Array.from(eventIdByTrip.values()).filter((id): id is string => Boolean(id))),
+  );
+  const eventTitleById = new Map<string, string>();
+  if (eventIds.length > 0) {
+    const { data: eRows } = await supabase
+      .from("event_manifest")
+      .select("id, title")
+      .in("id", eventIds);
+    for (const e of eRows ?? []) eventTitleById.set(e.id as string, (e.title as string) ?? "");
   }
 
   return legs.map((l) => {
     const pid = (l.to_participant_id as string | null) ?? (l.from_participant_id as string | null);
     const status = l.medication_handover_status as MedicationExceptionRow["status"];
+    const tripId = l.trip_id as string;
+    const eventId = eventIdByTrip.get(tripId) ?? null;
+    const eventTitle = eventId ? (eventTitleById.get(eventId) ?? null) : null;
     return {
       legId: l.id as string,
-      tripId: l.trip_id as string,
+      tripId,
       legNumber: (l.leg_index as number) + 1,
       participantName: pid ? (nameById.get(pid) ?? "Unknown participant") : "Unknown participant",
+      eventTitle,
       status,
       exceptionLabel:
         status === "collected_damaged"
