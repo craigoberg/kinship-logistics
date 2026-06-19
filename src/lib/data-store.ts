@@ -2154,6 +2154,9 @@ export async function listPriorEventsForClone(
     return [];
   }
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
+}
+
+
 
 /**
  * Clone every roster booking from one event onto another.
