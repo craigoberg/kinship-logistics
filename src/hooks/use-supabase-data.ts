@@ -610,6 +610,8 @@ export function useInsertLedgerEntry() {
 // ============================================================================
 import {
   listEvents,
+  listLiveEvents,
+
   insertEvent,
   updateEvent,
   listEventBookings,
@@ -638,6 +640,15 @@ export function useEvents() {
     staleTime: 30_000,
   });
 }
+
+export function useLiveEvents() {
+  return useQuery({
+    queryKey: ["events", "live"],
+    queryFn: listLiveEvents,
+    staleTime: 30_000,
+  });
+}
+
 
 export function useEventBookings(eventId: string | null | undefined) {
   return useQuery({

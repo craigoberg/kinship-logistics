@@ -22,9 +22,10 @@ import {
   useStartTrip,
   usePatchTripLeg,
   useCompleteTrip,
-  useEvents,
+  useLiveEvents,
   useLastEndOdometer,
 } from "@/hooks/use-supabase-data";
+
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
@@ -62,7 +63,7 @@ function ManifestPage() {
 /* -------------------- Initialize -------------------- */
 
 function InitializeTripScreen() {
-  const { data: events = [] } = useEvents();
+  const { data: events = [] } = useLiveEvents();
   const { data: lastEndOdo = null } = useLastEndOdometer();
   const startTrip = useStartTrip();
   const today = new Date().toISOString().slice(0, 10);
