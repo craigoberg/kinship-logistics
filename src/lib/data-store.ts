@@ -2603,6 +2603,8 @@ export interface TripLeg {
 
 export type MedicationHandoverStatus =
   | "collected"
+  | "collected_intact"
+  | "collected_damaged"
   | "expected_not_provided"
   | "not_required";
 
