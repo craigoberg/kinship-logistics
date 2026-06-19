@@ -385,7 +385,9 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
     String(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0),
   );
   const [present, setPresent] = useState<boolean>(leg.passengerPresent ?? true);
-  const [medConfirmed, setMedConfirmed] = useState(leg.medicationHandoverConfirmed);
+  const [medStatus, setMedStatus] = useState<MedicationHandoverStatus | null>(
+    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected" : null),
+  );
   const [extraMed, setExtraMed] = useState(leg.unexpectedMedicationLogged);
   const [extraNotes, setExtraNotes] = useState(leg.unexpectedMedicationNotes ?? "");
   const [showNoShow, setShowNoShow] = useState(false);
