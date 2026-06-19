@@ -93,9 +93,26 @@ interface Bucket {
 }
 
 export function OperationsExceptionHub() {
+  const qc = useQueryClient();
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
+
+  const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
+    queryKey: ["pending-manager-reviews"],
+    queryFn: () => listClearancesAwaitingManagerReview(),
+    refetchInterval: 10_000,
+  });
+  const pendingReviews = pendingReviewsQ.data ?? [];
+  const [activeReview, setActiveReview] =
+    useState<PendingManagerReviewRow | null>(null);
+
+  useEffect(() => {
+    const off = subscribeToPendingReviews(() => {
+      qc.invalidateQueries({ queryKey: ["pending-manager-reviews"] });
+    });
+    return off;
+  }, [qc]);
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
