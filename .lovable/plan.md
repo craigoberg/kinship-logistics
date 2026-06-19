@@ -1,52 +1,22 @@
-## Problem
+## Why the screen flashes back to Initialize
 
-Clicking "Start Daily Trip" successfully creates the `transport_trips` row, but the follow-up bulk insert into `trip_legs` fails with `23502: null value in column "leg_type" of relation "trip_legs" violates not-null constraint`.
+The mutation succeeds, but the page-level check `useActiveTrip()` only returns a trip when its row has `status = 'active'`.
 
-The app code (`src/lib/data-store.ts`) writes the leg category into `leg_kind` (values like `depot_to_client`, `client_to_client`, `client_to_venue`, `venue_to_depot`). The live database, however, also has a legacy `leg_type` column marked `NOT NULL` that the app never populates. Our own `docs/sql/2026-06-19_driver_manifest.sql` only defines `leg_kind` — `leg_type` is leftover from an earlier schema iteration that was applied directly to the database.
+In `startTrip` (`src/lib/data-store.ts` line 2497) the insert does not set `status`, so the DB default kicks in and the new row lands with `status = "Not Started"` (confirmed in the network log response). The active-trip query (`getActiveTripForDriver`, line 2415) filters `.eq("status", "active")`, finds nothing, and `ManifestPage` re-renders `InitializeTripScreen`. That is exactly the "Opening… → back to the same screen" behaviour, with no console error because the insert itself succeeded.
+
+A second, related inconsistency: the insert writes the odometer into the legacy `start_odometer` column only. The newer `start_odometer_km` column (the one `getLastEndOdometer` and downstream UI prefer) stays null.
 
 ## Fix
 
-Run a schema migration on `public.trip_legs` that:
+Edit the `transport_trips` insert in `startTrip` (`src/lib/data-store.ts` ~line 2497) to explicitly set:
 
-1. Backfills `leg_type` for any existing rows from `leg_kind` (so the column isn't empty).
-2. Drops the `NOT NULL` constraint on `leg_type`.
-3. Adds a `BEFORE INSERT` trigger that mirrors `leg_kind` into `leg_type` automatically, so the legacy column stays populated for anything still reading it without requiring app changes.
+- `status: "active"` — so `getActiveTripForDriver` finds the newly-created trip and the manifest screen swaps to `ActiveTripScreen`.
+- `start_odometer_km: input.startOdometerKm` — mirror the value into the canonical column alongside the legacy `start_odometer` write that's already there.
 
-This keeps the application code untouched (it continues to send only `leg_kind`) and preserves the legacy column for any reports / views that may still reference it.
-
-### SQL
-
-```sql
-UPDATE public.trip_legs
-SET leg_type = leg_kind
-WHERE leg_type IS NULL AND leg_kind IS NOT NULL;
-
-ALTER TABLE public.trip_legs
-  ALTER COLUMN leg_type DROP NOT NULL;
-
-CREATE OR REPLACE FUNCTION public.trip_legs_sync_leg_type()
-RETURNS trigger
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF NEW.leg_type IS NULL THEN
-    NEW.leg_type := NEW.leg_kind;
-  END IF;
-  RETURN NEW;
-END;
-$$;
-
-DROP TRIGGER IF EXISTS trip_legs_sync_leg_type ON public.trip_legs;
-CREATE TRIGGER trip_legs_sync_leg_type
-BEFORE INSERT OR UPDATE ON public.trip_legs
-FOR EACH ROW EXECUTE FUNCTION public.trip_legs_sync_leg_type();
-```
+No other code changes. No DB migration. The `trip_legs` insert path is unchanged (the previous SQL migrations you ran already cover `leg_type` and `sequence_order`).
 
 ## Verification
 
-After the migration, click "Start Daily Trip" again with an event + odometer selected. Expected: `trip_legs` POST returns 201, the manifest UI advances to the in-progress trip view, and no `23502` error appears in the console.
-
-## Out of scope
-
-- No application code changes — `data-store.ts` continues to use `leg_kind` only.
-- Not dropping `leg_type` outright in case other DB objects (views, reports) still reference it.
+1. Pick the Disco event, accept the populated odometer, click **Start Daily Trip**.
+2. Expect the page to swap to the leg-by-leg `ActiveTripScreen` and a "Daily run started" toast.
+3. Confirm in network tab: the POST to `transport_trips` response now shows `"status":"active"` and `"start_odometer_km":1000`.
