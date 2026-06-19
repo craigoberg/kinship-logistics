@@ -42,3 +42,19 @@ export const PRE_TRIP_SCHEMA: OperationalSchema = {
   ],
   primaryActionText: "Safety Check Complete, Ready to Roll",
 };
+
+/** Human-friendly translation of the `gate_id` column on `operational_escalations`. */
+export function prettyGateLabel(gateId: string): string {
+  const map: Record<string, string> = {
+    "passenger-manifest":
+      "Passenger Manifest Audit Failure — Missing Passengers",
+    "manifest_accounting":
+      "Passenger Manifest Audit Failure — Missing Passengers",
+  };
+  if (map[gateId]) return map[gateId];
+  return gateId
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((w) => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase())
+    .join(" ");
+}
