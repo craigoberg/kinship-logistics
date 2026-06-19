@@ -55,6 +55,7 @@ import {
   DEFAULT_STAFF_UUID,
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
