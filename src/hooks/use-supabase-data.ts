@@ -611,6 +611,8 @@ export function useInsertLedgerEntry() {
 import {
   listEvents,
   listConfirmedEvents,
+  findMostRecentEventByType,
+  refreshBookingMedicalSnapshot,
 
   insertEvent,
   updateEvent,
@@ -632,6 +634,43 @@ import {
 } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+
+export function usePriorEventOfType(
+  eventTypeCode: string | null | undefined,
+  excludeEventId?: string | null,
+) {
+  return useQuery({
+    queryKey: ["events", "prior-by-type", eventTypeCode, excludeEventId ?? null],
+    queryFn: () =>
+      findMostRecentEventByType(eventTypeCode as string, excludeEventId ?? null),
+    enabled: !!eventTypeCode,
+    staleTime: 30_000,
+  });
+}
+
+export function useRefreshBookingSnapshot() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      bookingId,
+      participantId,
+    }: {
+      bookingId: string;
+      participantId: string;
+      eventId?: string;
+    }) => refreshBookingMedicalSnapshot(bookingId, participantId),
+    onSuccess: (_d, vars) => {
+      qc.invalidateQueries({ queryKey: ["event_roster_bookings"] });
+      if (vars.eventId) {
+        qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
+      }
+    },
+    onError: (err: Error) => {
+      toast.error("Could not refresh medical snapshot", { description: err.message });
+    },
+  });
+}
+
 
 export function useEvents() {
   return useQuery({
