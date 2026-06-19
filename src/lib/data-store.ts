@@ -2923,7 +2923,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .order("leg_index", { ascending: true });
   if (legErr) throwPg("[startTrip:legs]", legErr);
 
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+  const eventTitle = await fetchEventTitle(trip.eventId);
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
 export type LegPatch = Partial<{
