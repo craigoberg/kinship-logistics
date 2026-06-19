@@ -610,7 +610,7 @@ export function useInsertLedgerEntry() {
 // ============================================================================
 import {
   listEvents,
-  listLiveEvents,
+  listConfirmedEvents,
 
   insertEvent,
   updateEvent,
@@ -641,10 +641,10 @@ export function useEvents() {
   });
 }
 
-export function useLiveEvents() {
+export function useConfirmedEvents() {
   return useQuery({
-    queryKey: ["events", "live"],
-    queryFn: listLiveEvents,
+    queryKey: ["events", "confirmed"],
+    queryFn: listConfirmedEvents,
     staleTime: 30_000,
   });
 }
