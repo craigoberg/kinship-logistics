@@ -3191,7 +3191,11 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
   };
 }
 
-export type ClearanceStatus = "passed" | "failed";
+export type ClearanceStatus =
+  | "passed"
+  | "failed"
+  | "awaiting_manager_review"
+  | "authorized_override";
 
 export interface AssetDailyClearance {
   id: string;
@@ -3201,6 +3205,13 @@ export interface AssetDailyClearance {
   startOdometer: number;
   status: ClearanceStatus;
   notes: string | null;
+  accumulatedIssues: string | null;
+  driverComfortDeclared: boolean;
+  requiresManagerReview: boolean;
+  driverAuthStaffId: string | null;
+  driverAuthPinVerifiedAt: string | null;
+  managerAuthStaffId: string | null;
+  managerAuthPinVerifiedAt: string | null;
   createdAt: string;
 }
 
@@ -3212,6 +3223,13 @@ interface AssetDailyClearanceRow {
   start_odometer: number | string;
   status: ClearanceStatus;
   notes: string | null;
+  accumulated_issues: string | null;
+  driver_comfort_declared: boolean | null;
+  requires_manager_review: boolean | null;
+  driver_auth_staff_id: string | null;
+  driver_auth_pin_verified_at: string | null;
+  manager_auth_staff_id: string | null;
+  manager_auth_pin_verified_at: string | null;
   created_at: string;
 }
 
@@ -3224,6 +3242,13 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
     startOdometer: Number(r.start_odometer),
     status: r.status,
     notes: r.notes,
+    accumulatedIssues: r.accumulated_issues ?? null,
+    driverComfortDeclared: r.driver_comfort_declared ?? false,
+    requiresManagerReview: r.requires_manager_review ?? false,
+    driverAuthStaffId: r.driver_auth_staff_id,
+    driverAuthPinVerifiedAt: r.driver_auth_pin_verified_at,
+    managerAuthStaffId: r.manager_auth_staff_id,
+    managerAuthPinVerifiedAt: r.manager_auth_pin_verified_at,
     createdAt: r.created_at,
   };
 }
