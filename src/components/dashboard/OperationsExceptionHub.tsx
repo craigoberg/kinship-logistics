@@ -150,6 +150,13 @@ export function OperationsExceptionHub() {
         title: r.title,
         detail: r.detail,
         severity: r.severity,
+        action:
+          r.kind === "hoist" && r.participantId && r.participantName ? (
+            <SplitManifestAction
+              participantId={r.participantId}
+              participantName={r.participantName}
+            />
+          ) : undefined,
       })),
     },
     {
