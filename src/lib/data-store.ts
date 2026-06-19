@@ -3166,6 +3166,7 @@ export interface TransportAsset {
   regoPlate: string;
   passengerCapacity: number;
   isActive: boolean;
+  vehicleCategory: string | null;
 }
 
 interface TransportAssetRow {
@@ -3175,6 +3176,7 @@ interface TransportAssetRow {
   rego_plate: string;
   passenger_capacity: number;
   is_active: boolean;
+  vehicle_category: string | null;
 }
 
 function rowToAsset(r: TransportAssetRow): TransportAsset {
@@ -3185,6 +3187,7 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
     regoPlate: r.rego_plate,
     passengerCapacity: Number(r.passenger_capacity),
     isActive: r.is_active,
+    vehicleCategory: r.vehicle_category ?? null,
   };
 }
 
