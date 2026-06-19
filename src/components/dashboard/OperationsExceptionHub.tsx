@@ -244,6 +244,64 @@ export function OperationsExceptionHub() {
           ))}
         </div>
       )}
+
+      <section className="rounded-md border-2 border-red-600/40 bg-red-600/5">
+        <header className="flex items-center justify-between gap-2 border-b border-red-600/30 px-3 py-2">
+          <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
+            <ShieldAlert className="h-4 w-4" />
+            <h4 className="text-sm font-semibold">
+              Pending Driver Review (RED dual-PIN handshake)
+            </h4>
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {pendingReviews.length}{" "}
+            {pendingReviews.length === 1 ? "vehicle" : "vehicles"}
+          </span>
+        </header>
+        {pendingReviews.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground">
+            No drivers awaiting joint review.
+          </div>
+        ) : (
+          <ul className="divide-y divide-red-600/20">
+            {pendingReviews.map((r) => {
+              const managerDone = !!r.clearance.managerAuthPinVerifiedAt;
+              return (
+                <li
+                  key={r.clearance.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold">{r.assetName}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {r.assetRego ?? "—"} · submitted{" "}
+                      {new Date(r.clearance.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-700"
+                    onClick={() => setActiveReview(r)}
+                  >
+                    {managerDone ? "Awaiting driver…" : "Open joint review"}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <ManagerJointReviewModal
+        open={!!activeReview}
+        onOpenChange={(o) => {
+          if (!o) setActiveReview(null);
+        }}
+        row={activeReview}
+      />
     </Card>
   );
 }
