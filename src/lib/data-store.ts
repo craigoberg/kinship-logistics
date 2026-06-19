@@ -2451,19 +2451,28 @@ export interface StartTripInput {
 export async function getLastEndOdometer(): Promise<number | null> {
   const { data, error } = await supabase
     .from("transport_trips")
-    .select("end_odometer_km, completed_at")
-    .eq("status", "completed")
-    .not("end_odometer_km", "is", null)
-    .order("completed_at", { ascending: false })
+    .select("end_odometer, end_odometer_km, start_odometer_km, completed_at, updated_at, created_at")
+    .order("updated_at", { ascending: false, nullsFirst: false })
     .limit(1)
     .maybeSingle();
   if (error) {
     console.error("[getLastEndOdometer]", error);
     return null;
   }
-  if (!data || data.end_odometer_km == null) return null;
-  return Number(data.end_odometer_km);
+  if (!data) return null;
+  const row = data as {
+    end_odometer?: number | null;
+    end_odometer_km?: number | null;
+    start_odometer_km?: number | null;
+  };
+  const raw =
+    row.end_odometer_km ??
+    row.end_odometer ??
+    row.start_odometer_km ??
+    null;
+  return raw == null ? null : Number(raw);
 }
+
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
   // 1. Build roster (ordered participants for this event).
