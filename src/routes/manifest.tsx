@@ -42,6 +42,7 @@ import {
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
+import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary } from "@/lib/data-store";
 import {
   listTransportAssets,
@@ -428,6 +429,21 @@ function WalkaroundChecklist({
         startOdometer: Math.round(startOdometer),
         items,
       });
+
+      // Fire dev-mode notification router for every failed checkpoint.
+      const driverName = staffName(driverStaffId);
+      input.checkpoints.forEach((c) => {
+        const row = items.find((it) => it.checkpointId === c.id);
+        if (!row || row.passed !== false) return;
+        triggerInspectionAlert(
+          asset.name,
+          driverName,
+          c.label,
+          toSeverity(c.impactLevel),
+          row.notes,
+        );
+      });
+
       return { bundle, forceProceed: input.forceProceed };
     },
     onSuccess: ({ bundle, forceProceed }) => {
