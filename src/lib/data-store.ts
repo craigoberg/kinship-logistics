@@ -2573,6 +2573,9 @@ export interface TripLeg {
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
+  /** Resolved destination address for this leg, populated at seed time via
+   * the 3-tier fallback override → permanent → street. */
+  targetAddress: string | null;
 }
 
 interface LegRow {
@@ -2600,6 +2603,7 @@ interface LegRow {
   unexpected_medication_logged: boolean;
   unexpected_medication_notes: string | null;
   completed_at: string | null;
+  target_address: string | null;
 }
 
 const numOrNull = (v: number | string | null) => (v == null ? null : Number(v));
@@ -2630,6 +2634,7 @@ function rowToLeg(r: LegRow): TripLeg {
     unexpectedMedicationLogged: r.unexpected_medication_logged,
     unexpectedMedicationNotes: r.unexpected_medication_notes,
     completedAt: r.completed_at,
+    targetAddress: r.target_address ?? null,
   };
 }
 
