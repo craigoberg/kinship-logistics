@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
-  DAY_ANOMALY_PLACEHOLDERS,
+  useStartEndDayAnomalies,
   VEHICLE_COMPLIANCE_PLACEHOLDERS,
   STAFF_CERT_PLACEHOLDERS,
   ASSET_LIABILITY_PLACEHOLDERS,
@@ -51,6 +51,7 @@ interface Bucket {
 export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
+  const { data: dayAnomalyRows } = useStartEndDayAnomalies();
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
@@ -105,8 +106,13 @@ export function OperationsExceptionHub() {
       anchorId: "exception-section-day-anomaly",
       label: "Start/End Day Anomaly",
       icon: AlertTriangle,
-      isLive: false,
-      rows: toRows(DAY_ANOMALY_PLACEHOLDERS, "day"),
+      isLive: true,
+      rows: dayAnomalyRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+      })),
     },
     {
       id: "vehicle",
