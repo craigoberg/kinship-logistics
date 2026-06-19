@@ -2660,6 +2660,7 @@ function rowToLeg(r: LegRow): TripLeg {
     noShowTriggeredAt: r.no_show_triggered_at,
     medicationExpected: r.medication_expected,
     medicationHandoverConfirmed: r.medication_handover_confirmed,
+    medicationHandoverStatus: r.medication_handover_status ?? null,
     unexpectedMedicationLogged: r.unexpected_medication_logged,
     unexpectedMedicationNotes: r.unexpected_medication_notes,
     completedAt: r.completed_at,
