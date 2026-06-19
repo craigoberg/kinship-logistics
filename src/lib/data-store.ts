@@ -1910,7 +1910,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
 
 
 const BOOKING_PARTICIPANT_SELECT =
-  "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address)";
+  "*, participants!inner(first_name, last_name, regular_pickup_address, street_address)";
 
 export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
   const { data, error } = await supabase
