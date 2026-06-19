@@ -3695,7 +3695,7 @@ export async function listClearancesAwaitingManagerReview(): Promise<
     .from("asset_daily_clearance")
     .select("*")
     .eq("status", "awaiting_manager_review")
-    .order("created_at", { ascending: true });
+    .order("clearance_date", { ascending: true });
   if (error) {
     console.error("[listClearancesAwaitingManagerReview] failed", error);
     return [];
