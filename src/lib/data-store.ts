@@ -2862,7 +2862,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   //    Prevents unique-key violations from double-clicks or double-mounts.
   const { data: existingTrip, error: existingErr } = await supabase
     .from("transport_trips")
-    .select("id")
+    .select("*")
     .eq("event_id", input.eventId)
     .eq("driver_staff_id", input.driverStaffId)
     .not("status", "in", "(completed,cancelled)")
@@ -2871,7 +2871,19 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .maybeSingle();
   if (existingErr) throwPg("[startTrip:existingLookup]", existingErr);
   if (existingTrip) {
-    return getActiveTripBundle((existingTrip as { id: string }).id);
+    const existing = rowToTrip(existingTrip as TripRow);
+    const { data: legRows, error: legErr } = await supabase
+      .from("trip_legs")
+      .select("*")
+      .eq("trip_id", existing.id)
+      .order("leg_index", { ascending: true });
+    if (legErr) throwPg("[startTrip:existingLegs]", legErr);
+    const eventTitle = await fetchEventTitle(existing.eventId);
+    return {
+      trip: existing,
+      legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+      eventTitle,
+    };
   }
 
   // 1. Build roster (ordered participants for this event) and pull every
