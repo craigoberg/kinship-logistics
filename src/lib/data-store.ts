@@ -1876,7 +1876,7 @@ interface BookingRow {
     | {
         first_name: string;
         last_name: string;
-        permanent_pickup_address?: string | null;
+        regular_pickup_address?: string | null;
         street_address?: string | null;
       }
     | null;
