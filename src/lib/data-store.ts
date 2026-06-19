@@ -1656,11 +1656,11 @@ export async function listEvents(): Promise<EventManifest[]> {
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
 }
 
-export async function listLiveEvents(): Promise<EventManifest[]> {
+export async function listConfirmedEvents(): Promise<EventManifest[]> {
   const { data, error } = await supabase
     .from("event_manifest")
     .select("*")
-    .in("status", ["Open", "Active"])
+    .eq("status", "Confirmed")
     .order("start_date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
