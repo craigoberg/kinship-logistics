@@ -2208,7 +2208,7 @@ export async function recordEventPaymentMilestone(
     .from("event_roster_bookings")
     .update({ amount_paid: newTotal, is_fully_paid: fullyPaid })
     .eq("id", input.bookingId)
-    .select("*, participants!inner(first_name, last_name)")
+    .select(BOOKING_PARTICIPANT_SELECT)
     .single();
   if (bookingErr) {
     console.error("[recordEventPaymentMilestone] booking update failed", bookingErr);
@@ -2258,6 +2258,8 @@ export interface UpdateBookingInput {
   carerId?: string | null;
   carerTransportRequired?: boolean;
   participantTransportRequired?: boolean;
+  /** One-off pickup override for this event. `null` clears it; `undefined` leaves it. */
+  tripPickupAddressOverride?: string | null;
 }
 
 export interface UpdateBookingResult {
@@ -2302,6 +2304,12 @@ export async function updateEventBooking(
   }
   }
 
+  if (input.tripPickupAddressOverride !== undefined) {
+    const v = (input.tripPickupAddressOverride ?? "").toString().trim();
+    updatePayload.trip_pickup_address_override = v.length > 0 ? v : null;
+  }
+
+
   // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
   let priceAdjustmentDelta = 0;
   const currentPaid = Number(input.currentAmountPaid ?? 0);
@@ -2326,7 +2334,7 @@ export async function updateEventBooking(
     .from("event_roster_bookings")
     .update(updatePayload)
     .eq("id", input.bookingId)
-    .select("*, participants!inner(first_name, last_name)")
+    .select(BOOKING_PARTICIPANT_SELECT)
     .single();
   if (error) {
     console.error("[updateEventBooking] failed", error);
