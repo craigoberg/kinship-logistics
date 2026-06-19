@@ -195,12 +195,12 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
     <>
       <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
         <div className="flex items-center justify-between px-4 py-3">
-          <div className="min-w-0">
-            <div className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
-              Daily Run · {trip.tripDate}
+          <div className="min-w-0 flex-1 pr-3">
+            <div className="truncate text-base font-bold leading-tight">
+              {bundle.eventTitle ?? "Daily Run"}
             </div>
-            <div className="truncate text-base font-bold">
-              Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
+            <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
+              {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
           </div>
           <div className="text-right">
