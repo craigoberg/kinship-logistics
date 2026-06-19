@@ -368,7 +368,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             type="button"
             disabled={busy}
             onClick={() => runGps("start")}
-            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
+            className="h-14 w-full animate-pulse rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
           >
             🚀 Depart Stop
           </button>
@@ -387,7 +387,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   );
   const [present, setPresent] = useState<boolean>(leg.passengerPresent ?? true);
   const [medStatus, setMedStatus] = useState<MedicationHandoverStatus | null>(
-    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected" : null),
+    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
   );
   const [extraMed, setExtraMed] = useState(leg.unexpectedMedicationLogged);
   const [extraNotes, setExtraNotes] = useState(leg.unexpectedMedicationNotes ?? "");
@@ -396,11 +396,21 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
 
-  const medSatisfied = medStatus === "collected" || medStatus === "expected_not_provided" || medStatus === "not_required";
+  const medSatisfied =
+    medStatus === "collected_intact" ||
+    medStatus === "collected_damaged" ||
+    medStatus === "expected_not_provided" ||
+    medStatus === "not_required";
+  const expectedMedSatisfied =
+    medStatus === "collected_intact" ||
+    medStatus === "collected_damaged" ||
+    medStatus === "expected_not_provided";
+  const exceptionFlagged =
+    medStatus === "collected_damaged" || medStatus === "expected_not_provided";
   const blocked =
     !loggedKm ||
     Number.isNaN(Number(loggedKm)) ||
-    (leg.medicationExpected && !(medStatus === "collected" || medStatus === "expected_not_provided")) ||
+    (leg.medicationExpected && !expectedMedSatisfied) ||
     (!leg.medicationExpected && !medSatisfied) ||
     (extraMed && extraNotes.trim().length < 3);
 
@@ -413,7 +423,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           loggedDistanceKm: Number(loggedKm),
           passengerPresent: present,
           medicationHandoverStatus: medStatus,
-          medicationHandoverConfirmed: medStatus === "collected",
+          medicationHandoverConfirmed: medStatus === "collected_intact" || medStatus === "collected_damaged",
           unexpectedMedicationLogged: extraMed,
           unexpectedMedicationNotes: extraMed ? extraNotes.trim() : null,
           completedAt: new Date().toISOString(),
@@ -500,25 +510,34 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           className="mt-2 grid gap-2"
         >
           <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="collected" id={`med-coll-${leg.id}`} />
+            <RadioGroupItem value="collected_intact" id={`med-intact-${leg.id}`} />
             <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-            <span className="font-medium">Collected</span>
+            <span className="font-medium">Collected &amp; Intact</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value="collected_damaged" id={`med-dmg-${leg.id}`} />
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            <span className="font-medium">Collected but Damaged / Compromised</span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
             <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
             <span className="font-medium">Expected but Not Provided</span>
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
-            <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
-            <span className="font-medium">Not Required</span>
-          </label>
+          {!leg.medicationExpected && (
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
+              <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
+              <span className="font-medium">Not Required</span>
+            </label>
+          )}
         </RadioGroup>
-        {medStatus === "expected_not_provided" && (
+        {exceptionFlagged && (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>An office exception flag will be recorded against this leg.</span>
+            <span>
+              Manager exception flag will be recorded against this leg.
+            </span>
           </div>
         )}
       </div>
