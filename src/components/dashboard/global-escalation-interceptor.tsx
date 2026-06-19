@@ -1,0 +1,221 @@
+import { useEffect, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useRouterState } from "@tanstack/react-router";
+import { toast } from "sonner";
+import { AlertOctagon } from "lucide-react";
+
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { cn } from "@/lib/utils";
+
+import {
+  DEFAULT_STAFF_UUID,
+  claimOperationalEscalation,
+  getStaffId,
+  listPendingEscalations,
+  subscribeToEscalationPool,
+  type OperationalEscalation,
+} from "@/lib/data-store";
+import { prettyGateLabel } from "@/lib/operational-forms";
+
+import { EscalationConsultationModal } from "./escalation-consultation-modal";
+
+const HIDDEN_ROUTES = new Set<string>(["/manifest", "/auth"]);
+
+function relativeAge(iso: string): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "just now";
+  const secs = Math.max(1, Math.floor((Date.now() - t) / 1000));
+  if (secs < 60) return `${secs}s ago`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.floor(hrs / 24)}d ago`;
+}
+
+export function GlobalEscalationInterceptor() {
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const hidden = HIDDEN_ROUTES.has(pathname);
+
+  const [queue, setQueue] = useState<OperationalEscalation[]>([]);
+  const [claiming, setClaiming] = useState(false);
+  const [consultTarget, setConsultTarget] =
+    useState<OperationalEscalation | null>(null);
+  const [tick, setTick] = useState(0);
+
+  // Baseline post-login fetch.
+  const baseline = useQuery({
+    queryKey: ["pending-escalations"],
+    queryFn: listPendingEscalations,
+    staleTime: 30_000,
+  });
+
+  useEffect(() => {
+    if (baseline.data) {
+      setQueue((prev) => {
+        const seen = new Set(prev.map((e) => e.id));
+        const additions = baseline.data.filter((e) => !seen.has(e.id));
+        return additions.length ? [...prev, ...additions] : prev;
+      });
+    }
+  }, [baseline.data]);
+
+  // Realtime escalation pool.
+  useEffect(() => {
+    const off = subscribeToEscalationPool(({ type, row }) => {
+      if (type === "INSERT") {
+        if (row.status !== "pending") return;
+        setQueue((prev) =>
+          prev.some((e) => e.id === row.id) ? prev : [...prev, row],
+        );
+      } else if (type === "UPDATE") {
+        if (row.status !== "pending") {
+          setQueue((prev) => prev.filter((e) => e.id !== row.id));
+        }
+      }
+    });
+    return off;
+  }, []);
+
+  // Tick to refresh "12s ago" label every second while modal is open.
+  const active = queue[0] ?? null;
+  useEffect(() => {
+    if (!active) return;
+    const id = setInterval(() => setTick((t) => t + 1), 1000);
+    return () => clearInterval(id);
+  }, [active]);
+
+  const ageLabel = useMemo(
+    () => (active ? relativeAge(active.createdAt) : ""),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [active, tick],
+  );
+
+  const handleClaim = async () => {
+    if (!active || claiming) return;
+    setClaiming(true);
+    const target = active;
+    // Optimistically pop the active item so the UI feels instant.
+    setQueue((prev) => prev.filter((e) => e.id !== target.id));
+    try {
+      const staffId = getStaffId() || DEFAULT_STAFF_UUID;
+      const result = await claimOperationalEscalation(target.id, staffId);
+      if (result.success) {
+        setConsultTarget(result.escalation ?? target);
+      } else {
+        toast.info(
+          `This incident has already been claimed by ${result.claimedByName ?? "another coordinator"}. Check the Exception Hub for active status updates.`,
+        );
+      }
+    } catch (err) {
+      // Re-queue on outright failure so we don't lose the alert.
+      setQueue((prev) =>
+        prev.some((e) => e.id === target.id) ? prev : [target, ...prev],
+      );
+      toast.error("Could not claim escalation", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setClaiming(false);
+    }
+  };
+
+  const showModal = !hidden && !!active;
+
+  return (
+    <>
+      <Dialog open={showModal}>
+        {/* Non-dismissible: no onOpenChange handler, escape/outside ignored. */}
+        <DialogContent
+          showCloseButton={false}
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onPointerDownOutside={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+          className="border-2 border-amber-500/70 bg-slate-950 p-0 text-slate-100 sm:max-w-lg"
+        >
+          {active && (
+            <>
+              <DialogHeader className="rounded-t-lg border-b border-amber-500/40 bg-amber-500/15 px-6 py-4">
+                <DialogTitle className="flex items-center gap-3 text-amber-400">
+                  <span className="relative flex h-3 w-3">
+                    <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex h-3 w-3 rounded-full bg-amber-500" />
+                  </span>
+                  <AlertOctagon className="h-5 w-5" />
+                  <span className="text-base font-extrabold uppercase tracking-wide">
+                    🚨 Critical Sev 1 Escalation
+                  </span>
+                </DialogTitle>
+              </DialogHeader>
+
+              <div className="space-y-4 px-6 py-5">
+                <div className="space-y-2 rounded-md border border-slate-800 bg-slate-900 p-4">
+                  <ContextRow label="Driver" value={active.driverName} />
+                  <ContextRow label="Vehicle" value={active.vehicleInfo} />
+                  <ContextRow
+                    label="Failed Gate"
+                    value={prettyGateLabel(active.gateId)}
+                    valueClass="text-amber-300"
+                  />
+                  <ContextRow label="Raised" value={ageLabel} />
+                </div>
+
+                {queue.length > 1 && (
+                  <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                    {queue.length - 1} more pending escalation
+                    {queue.length - 1 === 1 ? "" : "s"} queued behind this one.
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  disabled={claiming}
+                  onClick={handleClaim}
+                  className={cn(
+                    "h-16 w-full rounded-xl bg-blue-600 text-lg font-bold text-white shadow-lg transition hover:bg-blue-700",
+                    claiming && "cursor-not-allowed opacity-60",
+                  )}
+                >
+                  {claiming
+                    ? "Claiming…"
+                    : "👉 CLAIM INCIDENT & OPEN CONSULTATION"}
+                </button>
+              </div>
+            </>
+          )}
+        </DialogContent>
+      </Dialog>
+
+      <EscalationConsultationModal
+        escalation={consultTarget}
+        onClose={() => setConsultTarget(null)}
+      />
+    </>
+  );
+}
+
+function ContextRow({
+  label,
+  value,
+  valueClass,
+}: {
+  label: string;
+  value: string;
+  valueClass?: string;
+}) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-28 shrink-0 text-[11px] font-bold uppercase tracking-wide text-slate-400">
+        {label}
+      </span>
+      <span className={cn("text-sm font-medium text-slate-100", valueClass)}>
+        {value}
+      </span>
+    </div>
+  );
+}
