@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { format } from "date-fns";
+import { Link } from "@tanstack/react-router";
 import {
   AlertOctagon,
   AlertTriangle,
@@ -8,10 +9,12 @@ import {
   Pill,
   ShieldAlert,
   ShieldCheck,
+  Stethoscope,
   Truck,
   UserCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
