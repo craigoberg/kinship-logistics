@@ -125,6 +125,27 @@ export function getStaffId(): string {
   return localStorage.getItem(STAFF_KEY) || DEFAULT_STAFF_UUID;
 }
 
+/**
+ * Returns a valid staff UUID that exists in `staff_registry`.
+ * - If localStorage has a non-placeholder staffId, use it.
+ * - Otherwise (common in dev/no-login mode), fall back to the first staff row
+ *   so Postgres FK constraints (e.g. claim_operational_escalation) succeed.
+ */
+export async function resolveStaffIdWithFallback(): Promise<string> {
+  const local = getStaffId();
+  if (local && local !== DEFAULT_STAFF_UUID) return local;
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id")
+    .limit(1)
+    .maybeSingle();
+  if (error) throwPg("[resolveStaffIdWithFallback]", error);
+  if (!data?.id) {
+    throw new Error("No staff records available to attribute this action.");
+  }
+  return data.id as string;
+}
+
 // ---------- row mappers ----------
 
 interface ParticipantRow {
