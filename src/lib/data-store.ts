@@ -198,7 +198,7 @@ export interface ParticipantPatch {
   lastName?: string;
   ndisNumber?: string;
   streetAddress?: string | null;
-  permanentPickupAddress?: string | null;
+  regularPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
