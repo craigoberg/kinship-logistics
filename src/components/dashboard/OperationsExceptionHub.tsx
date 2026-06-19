@@ -5,6 +5,7 @@ import {
   AlertTriangle,
   CalendarIcon,
   CheckCircle2,
+  Pill,
   ShieldAlert,
   ShieldCheck,
   Truck,
@@ -18,6 +19,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import {
   useMedicationExceptions,
+  useMedicationScheduleExceptions,
   DAY_ANOMALY_PLACEHOLDERS,
   VEHICLE_COMPLIANCE_PLACEHOLDERS,
   STAFF_CERT_PLACEHOLDERS,
@@ -35,6 +37,7 @@ interface BucketRow {
 
 interface Bucket {
   id: string;
+  anchorId: string;
   label: string;
   icon: LucideIcon;
   isLive: boolean;
@@ -43,12 +46,20 @@ interface Bucket {
 
 export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
+  const { data: medScheduleRows } = useMedicationScheduleExceptions();
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
     title: `${m.participantName} · Leg ${m.legNumber}${m.eventTitle ? ` (${m.eventTitle})` : ""}`,
     detail: m.exceptionLabel,
     severity: m.severity,
+  }));
+
+  const medScheduleBucketRows: BucketRow[] = medScheduleRows.map((r) => ({
+    key: r.key,
+    title: r.title,
+    detail: r.detail,
+    severity: r.severity,
   }));
 
   const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
@@ -59,11 +70,26 @@ export function OperationsExceptionHub() {
       severity: r.severity,
     }));
 
-
   const buckets: Bucket[] = [
-    { id: "on-road", label: "On-Road Issues", icon: AlertOctagon, isLive: true, rows: liveRows },
+    {
+      id: "medication",
+      anchorId: "exception-section-medication",
+      label: "Medication Schedules",
+      icon: Pill,
+      isLive: true,
+      rows: medScheduleBucketRows,
+    },
+    {
+      id: "on-road",
+      anchorId: "exception-section-onroad",
+      label: "On-Road Issues",
+      icon: AlertOctagon,
+      isLive: true,
+      rows: liveRows,
+    },
     {
       id: "day-anomaly",
+      anchorId: "exception-section-day-anomaly",
       label: "Start/End Day Anomaly",
       icon: AlertTriangle,
       isLive: false,
@@ -71,6 +97,7 @@ export function OperationsExceptionHub() {
     },
     {
       id: "vehicle",
+      anchorId: "exception-section-vehicle",
       label: "Vehicle Compliance",
       icon: Truck,
       isLive: false,
@@ -78,6 +105,7 @@ export function OperationsExceptionHub() {
     },
     {
       id: "staff",
+      anchorId: "exception-section-staff",
       label: "Staff Certifications",
       icon: UserCheck,
       isLive: false,
@@ -85,6 +113,7 @@ export function OperationsExceptionHub() {
     },
     {
       id: "asset",
+      anchorId: "exception-section-asset",
       label: "Asset & Liability Insurance",
       icon: ShieldCheck,
       isLive: false,
@@ -93,6 +122,11 @@ export function OperationsExceptionHub() {
   ];
 
   const drillBuckets = buckets.filter((b) => b.rows.length > 0);
+
+  const handleTileClick = (b: Bucket) => {
+    if (b.rows.length === 0) return;
+    document.getElementById(b.anchorId)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
   return (
     <Card className="space-y-5 p-5">
@@ -110,9 +144,9 @@ export function OperationsExceptionHub() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
         {buckets.map((b) => (
-          <StatusTile key={b.id} bucket={b} />
+          <StatusTile key={b.id} bucket={b} onClick={() => handleTileClick(b)} />
         ))}
       </div>
 
@@ -147,17 +181,29 @@ function tileToneClass(rows: BucketRow[], isLive: boolean): string {
   }
 }
 
-function StatusTile({ bucket }: { bucket: Bucket }) {
+function StatusTile({ bucket, onClick }: { bucket: Bucket; onClick: () => void }) {
   const { label, icon: Icon, rows, isLive } = bucket;
   const count = rows.length;
   const isClear = count === 0;
   const tone = tileToneClass(rows, isLive);
+  const interactive = !isClear;
 
   return (
-    <div
+    <button
+      type="button"
+      onClick={onClick}
+      disabled={!interactive}
+      aria-label={
+        interactive
+          ? `${label}: ${count} ${count === 1 ? "item" : "items"} — scroll to details`
+          : `${label}: all clear`
+      }
       className={cn(
-        "relative flex min-h-32 flex-col justify-between rounded-lg p-4 shadow-sm transition",
+        "relative flex min-h-32 flex-col justify-between rounded-lg p-4 text-left shadow-sm transition",
         tone,
+        interactive
+          ? "cursor-pointer hover:brightness-110 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-foreground/40"
+          : "cursor-default",
       )}
     >
       <div className="flex items-start justify-between gap-2">
@@ -175,7 +221,7 @@ function StatusTile({ bucket }: { bucket: Bucket }) {
           {isLive ? "Live" : "Preview"}
         </div>
       </div>
-    </div>
+    </button>
   );
 }
 
@@ -198,9 +244,9 @@ const severityLabel: Record<Severity, string> = {
 };
 
 function DrillTable({ bucket }: { bucket: Bucket }) {
-  const { label, icon: Icon, rows, isLive } = bucket;
+  const { label, icon: Icon, rows, isLive, anchorId } = bucket;
   return (
-    <section className="rounded-md border border-border bg-background/40">
+    <section id={anchorId} className="scroll-mt-20 rounded-md border border-border bg-background/40">
       <header className="flex items-center justify-between gap-2 border-b border-border px-3 py-2">
         <div className="flex items-center gap-2">
           <Icon className="h-4 w-4 text-muted-foreground" />
@@ -249,7 +295,6 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
     </section>
   );
 }
-
 
 function DeferAction() {
   const [date, setDate] = useState<Date | undefined>(undefined);
