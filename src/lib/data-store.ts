@@ -2719,7 +2719,8 @@ export async function getActiveTripForDriver(
     .eq("trip_id", trip.id)
     .order("leg_index", { ascending: true });
   if (legErr) throwPg("[getActiveTripForDriver:legs]", legErr);
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+  const eventTitle = await fetchEventTitle(trip.eventId);
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
 export interface StartTripInput {
