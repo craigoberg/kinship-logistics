@@ -41,7 +41,8 @@ import {
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
-import type { TripLeg, ActiveTripBundle } from "@/lib/data-store";
+import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus } from "@/lib/data-store";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
