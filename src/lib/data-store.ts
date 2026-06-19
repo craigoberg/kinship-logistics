@@ -133,7 +133,7 @@ interface ParticipantRow {
   last_name: string;
   ndis_number: string;
   street_address: string | null;
-  permanent_pickup_address: string | null;
+  regular_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   dual_witness_pin_hash: string | null;
