@@ -3232,7 +3232,9 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
 export async function listTransportAssets(): Promise<TransportAsset[]> {
   const { data, error } = await supabase
     .from("transport_assets")
-    .select("*")
+    .select(
+      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category",
+    )
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
   if (error) {
