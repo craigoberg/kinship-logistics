@@ -2136,6 +2136,25 @@ export async function findMostRecentEventByType(
   return filtered.length > 0 ? rowToEvent(filtered[0]) : null;
 }
 
+/** All non-cancelled events, ordered newest-first, for the clone-source picker. */
+export async function listPriorEventsForClone(
+  excludeEventId?: string | null,
+  limit = 200,
+): Promise<EventManifest[]> {
+  let query = supabase
+    .from("event_manifest")
+    .select("*")
+    .neq("status", "Cancelled")
+    .order("start_date", { ascending: false })
+    .limit(limit);
+  if (excludeEventId) query = query.neq("id", excludeEventId);
+  const { data, error } = await query;
+  if (error) {
+    console.error("[listPriorEventsForClone]", error);
+    return [];
+  }
+  return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
+
 /**
  * Clone every roster booking from one event onto another.
  * - Reuses participant + carer wiring, custom_price, notes.
