@@ -85,17 +85,25 @@ function ManifestPage() {
 
 /* -------------------- Initialize -------------------- */
 
+type InitStep = "vehicle" | "clearance" | "event";
+
+function todayDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function staffName(staffId: string): string {
+  return STAFF_DIRECTORY.find((s) => s.id === staffId)?.name ?? "Driver";
+}
+
 function InitializeTripScreen() {
-  const { data: events = [] } = useConfirmedEvents();
+  const today = todayDateStr();
   const { data: lastEndOdo = null } = useLastEndOdometer();
-  const startTrip = useStartTrip();
-  const today = new Date().toISOString().slice(0, 10);
-  const todaysEvents = useMemo(
-    () => events.filter((e) => e.startDate <= today && (e.endDate ?? e.startDate) >= today),
-    [events, today],
-  );
-  const [eventId, setEventId] = useState("");
+
+  const [step, setStep] = useState<InitStep>("vehicle");
+  const [assetId, setAssetId] = useState("");
   const [odo, setOdo] = useState("");
+  const [clearanceOk, setClearanceOk] = useState(false);
   const hasHydratedOdoRef = useRef(false);
 
   useEffect(() => {
@@ -106,25 +114,453 @@ function InitializeTripScreen() {
     }
   }, [lastEndOdo, odo]);
 
+  const assetsQ = useQuery({
+    queryKey: ["transport-assets"],
+    queryFn: () => listTransportAssets(),
+    staleTime: 5 * 60_000,
+  });
+  const activeAssets = useMemo(
+    () => (assetsQ.data ?? []).filter((a) => a.isActive),
+    [assetsQ.data],
+  );
+  const selectedAsset = useMemo(
+    () => activeAssets.find((a) => a.id === assetId) ?? null,
+    [activeAssets, assetId],
+  );
 
   const odoNum = odo === "" ? NaN : Number(odo);
   const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
 
-  const isButtonDisabled = !eventId || !odoReasonable || startTrip.isPending;
+  const proceedToClearance = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!selectedAsset || !odoReasonable) return;
+    setStep("clearance");
+  };
 
+  return (
+    <div className="flex-1 overflow-y-auto p-4">
+      {step === "vehicle" && (
+        <Card className="p-5">
+          <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            Step 1 of 3 — pick today's vehicle and record the starting odometer.
+          </p>
+          <form onSubmit={proceedToClearance} className="mt-5 space-y-4">
+            <div className="grid gap-2">
+              <Label htmlFor="asset">Select Vehicle</Label>
+              <Select value={assetId} onValueChange={setAssetId}>
+                <SelectTrigger id="asset" className="h-12">
+                  <SelectValue placeholder={assetsQ.isLoading ? "Loading fleet…" : "Today's vehicle…"} />
+                </SelectTrigger>
+                <SelectContent>
+                  {activeAssets.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>
+                      {a.name} · {a.regoPlate} · {a.passengerCapacity} seats
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="grid gap-2">
+              <Label htmlFor="odo">Starting Odometer reading (KM)</Label>
+              <Input
+                id="odo"
+                type="number"
+                value={odo}
+                onChange={(e) => setOdo(e.target.value)}
+                placeholder="Enter starting KM"
+                className="h-14 text-lg tabular-nums"
+              />
+              {lastEndOdo != null && (
+                <p className="text-[11px] text-muted-foreground">
+                  Last recorded closing odometer:{" "}
+                  <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
+                  {odoNum === lastEndOdo && " · pre-filled"}
+                </p>
+              )}
+            </div>
+            <button
+              type="submit"
+              disabled={!assetId || !odoReasonable}
+              className={cn(
+                "h-14 w-full rounded-xl font-bold text-white shadow transition",
+                !assetId || !odoReasonable
+                  ? "bg-blue-600 opacity-60 cursor-not-allowed"
+                  : "bg-blue-600 hover:bg-blue-700",
+              )}
+            >
+              Continue to Vehicle Clearance →
+            </button>
+          </form>
+        </Card>
+      )}
 
+      {step === "clearance" && selectedAsset && (
+        <ClearanceGate
+          asset={selectedAsset}
+          startOdometer={odoNum}
+          dateStr={today}
+          onCleared={() => {
+            setClearanceOk(true);
+            setStep("event");
+          }}
+          onBack={() => setStep("vehicle")}
+        />
+      )}
+
+      {step === "event" && selectedAsset && clearanceOk && (
+        <EventPickAndStart
+          asset={selectedAsset}
+          startOdometer={odoNum}
+          onBack={() => setStep("clearance")}
+        />
+      )}
+    </div>
+  );
+}
+
+/* -------------------- Clearance Gate -------------------- */
+
+function ClearanceGate({
+  asset,
+  startOdometer,
+  dateStr,
+  onCleared,
+  onBack,
+}: {
+  asset: TransportAsset;
+  startOdometer: number;
+  dateStr: string;
+  onCleared: () => void;
+  onBack: () => void;
+}) {
+  const existingQ = useQuery<AssetDailyClearance | null>({
+    queryKey: ["asset-clearance", asset.id, dateStr],
+    queryFn: () => getClearanceForAssetOnDate(asset.id, dateStr),
+    staleTime: 30_000,
+  });
+
+  if (existingQ.isLoading) {
+    return (
+      <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearance…
+      </Card>
+    );
+  }
+
+  const existing = existingQ.data ?? null;
+
+  if (existing && existing.status === "passed") {
+    return (
+      <FastPassBanner
+        asset={asset}
+        clearance={existing}
+        onConfirm={onCleared}
+        onBack={onBack}
+      />
+    );
+  }
+
+  if (existing && existing.status === "failed") {
+    return (
+      <Card className="border-2 border-destructive/60 bg-destructive/5 p-5">
+        <div className="flex items-center gap-2 text-destructive">
+          <ShieldAlert className="h-5 w-5" />
+          <h2 className="text-lg font-extrabold">Vehicle NOT cleared today</h2>
+        </div>
+        <p className="mt-2 text-sm text-muted-foreground">
+          {asset.name} ({asset.regoPlate}) failed today's walkaround. The coordinator must
+          resolve the flagged checkpoints before this vehicle can be dispatched.
+        </p>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-4 h-12 w-full rounded-xl border-2 border-destructive bg-transparent font-bold text-destructive transition hover:bg-destructive/10"
+        >
+          ← Pick a different vehicle
+        </button>
+      </Card>
+    );
+  }
+
+  return (
+    <WalkaroundChecklist
+      asset={asset}
+      startOdometer={startOdometer}
+      dateStr={dateStr}
+      onPassed={onCleared}
+      onBack={onBack}
+    />
+  );
+}
+
+function FastPassBanner({
+  asset,
+  clearance,
+  onConfirm,
+  onBack,
+}: {
+  asset: TransportAsset;
+  clearance: AssetDailyClearance;
+  onConfirm: () => void;
+  onBack: () => void;
+}) {
+  const time = new Date(clearance.createdAt).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+  const driver = staffName(clearance.driverStaffId);
+
+  return (
+    <Card className="border-2 border-green-600 bg-green-600/10 p-5">
+      <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+        <ShieldCheck className="h-6 w-6" />
+        <h2 className="text-lg font-extrabold">Fast-Pass · Vehicle Cleared</h2>
+      </div>
+      <p className="mt-3 text-sm">
+        <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared
+        for service at <span className="font-mono font-semibold">{time}</span> by{" "}
+        <span className="font-semibold">{driver}</span>.
+      </p>
+      <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
+        Please inspect for obvious new damage before departing.
+      </p>
+      <button
+        type="button"
+        onClick={onConfirm}
+        className="mt-5 h-14 w-full rounded-xl bg-green-600 text-base font-bold text-white shadow transition hover:bg-green-700"
+      >
+        ✓ Confirm &amp; Roll
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+      >
+        ← Change vehicle
+      </button>
+    </Card>
+  );
+}
+
+/* -------------------- Walkaround Checklist -------------------- */
+
+interface ChecklistAnswer {
+  passed: boolean;
+  notes: string;
+}
+
+function WalkaroundChecklist({
+  asset,
+  startOdometer,
+  dateStr,
+  onPassed,
+  onBack,
+}: {
+  asset: TransportAsset;
+  startOdometer: number;
+  dateStr: string;
+  onPassed: () => void;
+  onBack: () => void;
+}) {
+  const qc = useQueryClient();
+  const checkpointsQ = useQuery<AssetCheckpoint[]>({
+    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
+    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
+    staleTime: 5 * 60_000,
+  });
+
+  const [answers, setAnswers] = useState<Record<string, ChecklistAnswer>>({});
+
+  const submitMut = useMutation({
+    mutationFn: async (checkpoints: AssetCheckpoint[]) => {
+      const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+      const items = checkpoints.map((c) => {
+        const a = answers[c.id] ?? { passed: false, notes: "" };
+        return {
+          checkpointId: c.id,
+          checkpointLabel: c.label,
+          passed: a.passed,
+          isMandatory: c.isMandatory,
+          notes: a.notes.trim() ? a.notes.trim() : null,
+        };
+      });
+      return insertAssetClearanceWithItems({
+        assetId: asset.id,
+        clearanceDate: dateStr,
+        driverStaffId,
+        startOdometer: Math.round(startOdometer),
+        items,
+      });
+    },
+    onSuccess: (bundle) => {
+      qc.invalidateQueries({ queryKey: ["asset-clearance", asset.id, dateStr] });
+      qc.invalidateQueries({ queryKey: ["start-end-day-anomalies"] });
+      if (bundle.clearance.status === "passed") {
+        toast.success("Vehicle cleared", { description: `${asset.name} passed walkaround.` });
+        onPassed();
+      } else {
+        toast.error("Vehicle NOT cleared", {
+          description: "A mandatory checkpoint failed. Coordinator notified.",
+          className: "border-red-700 bg-red-600 text-white font-medium",
+        });
+      }
+    },
+    onError: (e: Error) => {
+      toast.error("Could not log clearance", { description: e.message });
+    },
+  });
+
+  if (checkpointsQ.isLoading) {
+    return (
+      <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading walkaround checklist…
+      </Card>
+    );
+  }
+
+  const checkpoints = checkpointsQ.data ?? [];
+  const allAnswered = checkpoints.every((c) => answers[c.id]?.passed !== undefined);
+
+  const setPassed = (id: string, passed: boolean) =>
+    setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { notes: "" }), passed } }));
+  const setNotes = (id: string, notes: string) =>
+    setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { passed: false }), notes } }));
+
+  return (
+    <Card className="p-5">
+      <div className="flex items-center gap-2">
+        <ClipboardCheck className="h-5 w-5 text-blue-600" />
+        <h2 className="text-lg font-extrabold">Daily Walkaround — {asset.name}</h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {asset.regoPlate} · Tick every checkpoint as PASS or FAIL. Mandatory failures block dispatch.
+      </p>
+
+      <div className="mt-5 space-y-3">
+        {checkpoints.map((c) => {
+          const a = answers[c.id];
+          const decided = a?.passed !== undefined;
+          const failed = a?.passed === false;
+          return (
+            <div
+              key={c.id}
+              className={cn(
+                "rounded-lg border p-3",
+                failed
+                  ? "border-destructive/60 bg-destructive/5"
+                  : decided
+                    ? "border-green-600/40 bg-green-600/5"
+                    : "border-border",
+              )}
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-semibold">{c.label}</div>
+                  <div className="mt-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
+                    {c.category ?? "general"} · {c.isMandatory ? "mandatory" : "optional"}
+                  </div>
+                </div>
+                <div className="flex shrink-0 gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPassed(c.id, true)}
+                    className={cn(
+                      "h-9 rounded-md border px-3 text-xs font-bold transition",
+                      a?.passed === true
+                        ? "border-green-600 bg-green-600 text-white"
+                        : "border-border bg-background text-muted-foreground hover:border-green-600/60",
+                    )}
+                  >
+                    PASS
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPassed(c.id, false)}
+                    className={cn(
+                      "h-9 rounded-md border px-3 text-xs font-bold transition",
+                      a?.passed === false
+                        ? "border-destructive bg-destructive text-destructive-foreground"
+                        : "border-border bg-background text-muted-foreground hover:border-destructive/60",
+                    )}
+                  >
+                    FAIL
+                  </button>
+                </div>
+              </div>
+              {failed && (
+                <div className="mt-2 grid gap-1">
+                  <Label htmlFor={`note-${c.id}`} className="text-xs">
+                    Notes (what failed?)
+                  </Label>
+                  <Textarea
+                    id={`note-${c.id}`}
+                    rows={2}
+                    value={a?.notes ?? ""}
+                    onChange={(e) => setNotes(c.id, e.target.value)}
+                    placeholder="e.g. left brake light intermittent"
+                  />
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+
+      <button
+        type="button"
+        disabled={!allAnswered || submitMut.isPending}
+        onClick={() => submitMut.mutate(checkpoints)}
+        className={cn(
+          "mt-5 h-14 w-full rounded-xl font-bold text-white shadow transition",
+          !allAnswered || submitMut.isPending
+            ? "bg-blue-600 opacity-60"
+            : "bg-blue-600 hover:bg-blue-700",
+        )}
+      >
+        {submitMut.isPending ? "Submitting clearance…" : "Submit Walkaround & Clear Vehicle"}
+      </button>
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+      >
+        ← Change vehicle
+      </button>
+    </Card>
+  );
+}
+
+/* -------------------- Event Picker + Start Trip -------------------- */
+
+function EventPickAndStart({
+  asset,
+  startOdometer,
+  onBack,
+}: {
+  asset: TransportAsset;
+  startOdometer: number;
+  onBack: () => void;
+}) {
+  const { data: events = [] } = useConfirmedEvents();
+  const startTrip = useStartTrip();
+  const today = todayDateStr();
+  const todaysEvents = useMemo(
+    () => events.filter((e) => e.startDate <= today && (e.endDate ?? e.startDate) >= today),
+    [events, today],
+  );
+  const [eventId, setEventId] = useState("");
   const inFlightRef = useRef(false);
+
+  const disabled = !eventId || startTrip.isPending;
+
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
-    if (isButtonDisabled || !Number.isFinite(odoNum)) return;
+    if (disabled) return;
     if (inFlightRef.current || startTrip.isPending) return;
     inFlightRef.current = true;
     startTrip.mutate(
-      {
-        eventId,
-        startOdometerKm: odoNum,
-        varianceReason: null,
-      },
+      { eventId, startOdometerKm: startOdometer, varianceReason: null },
       {
         onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
         onSettled: () => {
@@ -135,62 +571,49 @@ function InitializeTripScreen() {
   };
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
-      <Card className="p-5">
-        <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          Pick today's event manifest and capture the starting odometer to open the leg itinerary.
-        </p>
-        <form onSubmit={submit} className="mt-5 space-y-4">
-          <div className="grid gap-2">
-            <Label htmlFor="event">Select Event</Label>
-            <Select value={eventId} onValueChange={setEventId}>
-              <SelectTrigger id="event" className="h-12">
-                <SelectValue placeholder={todaysEvents.length ? "Today's events…" : "No events today — pick any"} />
-              </SelectTrigger>
-              <SelectContent>
-                {(todaysEvents.length ? todaysEvents : events).map((e) => (
-                  <SelectItem key={e.id} value={e.id}>
-                    {e.title} · {e.startDate}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="grid gap-2">
-            <Label htmlFor="odo">Starting Odometer reading (KM)</Label>
-            <Input
-              id="odo"
-              type="number"
-              value={odo}
-              onChange={(e) => setOdo(e.target.value)}
-              placeholder="Enter starting KM"
-              className="h-14 text-lg tabular-nums"
-            />
-            {lastEndOdo != null && (
-              <p className="text-[11px] text-muted-foreground">
-                Last recorded closing odometer:{" "}
-                <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
-                {odoNum === lastEndOdo && " · pre-filled"}
-              </p>
-            )}
-          </div>
-
-          <button
-            type="submit"
-            disabled={isButtonDisabled}
-            className={cn(
-              "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              isButtonDisabled
-                ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                : "bg-blue-600 opacity-100 cursor-pointer hover:bg-blue-700",
-            )}
-          >
-            {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
-          </button>
-        </form>
-      </Card>
-    </div>
+    <Card className="p-5">
+      <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
+        <ShieldCheck className="h-5 w-5" />
+        <h2 className="text-lg font-extrabold">{asset.name} cleared · pick event</h2>
+      </div>
+      <p className="mt-1 text-sm text-muted-foreground">
+        Step 3 of 3 — select today's event manifest to open the leg itinerary.
+      </p>
+      <form onSubmit={submit} className="mt-5 space-y-4">
+        <div className="grid gap-2">
+          <Label htmlFor="event">Select Event</Label>
+          <Select value={eventId} onValueChange={setEventId}>
+            <SelectTrigger id="event" className="h-12">
+              <SelectValue placeholder={todaysEvents.length ? "Today's events…" : "No events today — pick any"} />
+            </SelectTrigger>
+            <SelectContent>
+              {(todaysEvents.length ? todaysEvents : events).map((e) => (
+                <SelectItem key={e.id} value={e.id}>
+                  {e.title} · {e.startDate}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <button
+          type="submit"
+          disabled={disabled}
+          className={cn(
+            "h-14 w-full rounded-xl font-bold text-white shadow transition",
+            disabled ? "bg-blue-600 opacity-60 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700",
+          )}
+        >
+          {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
+        </button>
+        <button
+          type="button"
+          onClick={onBack}
+          className="mt-1 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+        >
+          ← Back to clearance
+        </button>
+      </form>
+    </Card>
   );
 }
 
