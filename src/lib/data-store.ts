@@ -3456,9 +3456,7 @@ export async function insertAssetClearanceWithItems(input: {
   const itemRows = input.items.map((i) => ({
     clearance_id: clearance.id,
     checkpoint_id: i.checkpointId,
-    checkpoint_label: i.checkpointLabel,
-    passed: i.passed,
-    is_mandatory: i.isMandatory,
+    is_passed: i.passed,
     notes: i.notes ?? null,
   }));
   const { data, error } = await supabase
