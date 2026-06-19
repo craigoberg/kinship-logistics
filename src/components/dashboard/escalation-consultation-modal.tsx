@@ -44,7 +44,7 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
     }
     setSubmitting(status);
     try {
-      const staffId = getStaffId() || DEFAULT_STAFF_UUID;
+      const staffId = await resolveStaffIdWithFallback();
       const { error } = await supabase
         .from("operational_escalations")
         .update({
