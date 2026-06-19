@@ -1685,6 +1685,11 @@ export interface NewEvent {
   endDate?: string | null;
   ticketPrice: number;
   description?: string | null;
+  /** Canonical event status. Defaults to 'Planning' when omitted. */
+  status?: string;
+  /** When set, the roster from this source event is copied into the new event
+   * after insert (financial fields reset, fresh medical snapshots). */
+  cloneFromEventId?: string | null;
 }
 
 function toIsoDate(value: string | null | undefined): string | null {
@@ -1706,7 +1711,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   const endIso = toIsoDate(input.endDate ?? null) ?? startIso;
 
   // Verified live schema on event_manifest:
-  // title · event_type · venue_name · start_date · end_date · ticket_price · description
+  // title · event_type · venue_name · start_date · end_date · ticket_price · description · status
   const payload = {
     title: input.title,
     event_type: input.eventTypeCode,
@@ -1715,6 +1720,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     end_date: endIso,
     ticket_price: input.ticketPrice,
     description: input.description ?? null,
+    status: (input.status && input.status.trim().length > 0) ? input.status : "Planning",
   };
 
   console.warn("[insertEvent] active Supabase URL:", supabaseUrl);
@@ -1740,8 +1746,25 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     throw new Error(parts.join(" · "));
   }
 
-  return rowToEvent(data as EventManifestRow);
+  const event = rowToEvent(data as EventManifestRow);
+
+  // Optional rinse-and-repeat clone of roster bookings from a prior event.
+  if (input.cloneFromEventId) {
+    try {
+      await cloneEventRoster(input.cloneFromEventId, event.id);
+    } catch (cloneErr) {
+      console.error("[insertEvent] roster clone failed (event already created)", cloneErr);
+      // Don't roll back the event itself — surface the failure to the caller
+      // so the UI can flag the half-completed clone.
+      throw new Error(
+        `Event created but roster clone failed: ${cloneErr instanceof Error ? cloneErr.message : String(cloneErr)}`,
+      );
+    }
+  }
+
+  return event;
 }
+
 
 
 export interface UpdateEventInput {
