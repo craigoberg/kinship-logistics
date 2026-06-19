@@ -6,11 +6,13 @@ import {
   listTodaysComplianceLogs,
   listParticipants,
   listFailedClearancesWithItems,
+  getTodayManifestSummary,
   type MedicationExceptionRow,
   type MedicationSchedule,
   type ComplianceLog,
   type Participant,
   type FailedClearanceReport,
+  type TodayManifestSummary,
 } from "@/lib/data-store";
 
 export type Severity = "critical" | "warning" | "info";
@@ -212,6 +214,9 @@ export interface DayAnomalyRow {
   title: string;
   detail: string;
   severity: Severity;
+  kind?: "hoist" | "other";
+  participantId?: string;
+  participantName?: string;
 }
 
 function todayDateStr(): string {
@@ -221,10 +226,13 @@ function todayDateStr(): string {
   ).padStart(2, "0")}`;
 }
 
+const HOIST_HINT_RX = /hoist|wheelchair/i;
+
 /**
  * Streams today's failed vehicle clearances into the dashboard's
- * Start/End Day Anomaly tile. Each failed clearance produces one row per
- * failed checkpoint; mandatory failures escalate to critical.
+ * Start/End Day Anomaly tile. Hoist failures are expanded into one row
+ * per hoist-dependent passenger on today's manifest so coordinators can
+ * trigger a per-passenger Split Manifest action.
  */
 export function useStartEndDayAnomalies() {
   const date = todayDateStr();
@@ -234,9 +242,15 @@ export function useStartEndDayAnomalies() {
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
+  const summaryQ = useQuery<TodayManifestSummary>({
+    queryKey: ["today-manifest-summary", date],
+    queryFn: () => getTodayManifestSummary(date),
+    staleTime: 30_000,
+  });
 
   const rows = useMemo<DayAnomalyRow[]>(() => {
     const reports = q.data ?? [];
+    const hoistDeps = summaryQ.data?.hoistDependents ?? [];
     const out: DayAnomalyRow[] = [];
     for (const r of reports) {
       const label = r.assetRego ? `${r.assetName} (${r.assetRego})` : r.assetName;
@@ -246,24 +260,41 @@ export function useStartEndDayAnomalies() {
           title: `${label} — Clearance Failed`,
           detail: r.clearance.notes ?? "Driver flagged the vehicle as not cleared for service.",
           severity: "critical",
+          kind: "other",
         });
         continue;
       }
       for (const item of r.failedItems) {
-        out.push({
-          key: `${r.clearance.id}:${item.id}`,
-          title: `${label} — ${item.checkpointLabel}`,
-          detail: item.notes?.trim()
-            ? item.notes.trim()
-            : item.isMandatory
-              ? "Mandatory checkpoint failed — vehicle not cleared."
-              : "Non-mandatory checkpoint flagged.",
-          severity: item.isMandatory ? "critical" : "warning",
-        });
+        const isHoist = HOIST_HINT_RX.test(item.checkpointLabel);
+        if (isHoist && hoistDeps.length > 0) {
+          for (const dep of hoistDeps) {
+            out.push({
+              key: `${r.clearance.id}:${item.id}:${dep.participantId}`,
+              title: `${label} — ${dep.participantName} requires hoist`,
+              detail: `Hoist fault on ${item.checkpointLabel}. ${dep.reason ? `Medical note: ${dep.reason}` : "Reroute to alternative transport."}`,
+              severity: "critical",
+              kind: "hoist",
+              participantId: dep.participantId,
+              participantName: dep.participantName,
+            });
+          }
+        } else {
+          out.push({
+            key: `${r.clearance.id}:${item.id}`,
+            title: `${label} — ${item.checkpointLabel}`,
+            detail: item.notes?.trim()
+              ? item.notes.trim()
+              : item.isMandatory
+                ? "Mandatory checkpoint failed — vehicle not cleared."
+                : "Non-mandatory checkpoint flagged.",
+            severity: item.isMandatory ? "critical" : "warning",
+            kind: isHoist ? "hoist" : "other",
+          });
+        }
       }
     }
     return out;
-  }, [q.data]);
+  }, [q.data, summaryQ.data]);
 
   return { data: rows, isLoading: q.isLoading };
 }

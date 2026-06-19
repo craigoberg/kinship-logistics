@@ -3550,3 +3550,167 @@ export async function listFailedClearancesWithItems(
     failedItems: items.filter((i) => i.clearanceId === m.id),
   }));
 }
+
+// ---------------------------------------------------------------------------
+// CAPACITY + HOIST MANIFEST SUMMARY (used by clearance gate + day anomaly hub)
+// ---------------------------------------------------------------------------
+
+export interface HoistDependent {
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  participantName: string;
+  reason: string;
+}
+
+export interface TodayManifestSummary {
+  dateStr: string;
+  eventIds: string[];
+  totalSeatsBooked: number;
+  hoistDependents: HoistDependent[];
+}
+
+const HOIST_HINT = /hoist|wheelchair/i;
+
+/**
+ * Aggregates today's confirmed bookings across all events that overlap the
+ * given date and returns the combined seat demand + any hoist-dependent
+ * passengers (detected via the dynamic medical notes snapshot).
+ */
+export async function getTodayManifestSummary(
+  dateStr: string,
+): Promise<TodayManifestSummary> {
+  const { data: events, error: evErr } = await supabase
+    .from("event_manifest")
+    .select("id,title,start_date,end_date,status")
+    .eq("status", "Confirmed")
+    .lte("start_date", dateStr);
+  if (evErr) {
+    console.warn("[getTodayManifestSummary:events]", evErr);
+    return { dateStr, eventIds: [], totalSeatsBooked: 0, hoistDependents: [] };
+  }
+  const todays = (events ?? []).filter(
+    (e: { start_date: string; end_date: string | null }) =>
+      (e.end_date ?? e.start_date) >= dateStr,
+  ) as Array<{ id: string; title: string }>;
+  if (todays.length === 0) {
+    return { dateStr, eventIds: [], totalSeatsBooked: 0, hoistDependents: [] };
+  }
+  const eventIds = todays.map((e) => e.id);
+  const titleById = new Map(todays.map((e) => [e.id, e.title]));
+
+  const { data: bookings, error: bkErr } = await supabase
+    .from("event_roster_bookings")
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .in("event_id", eventIds);
+  if (bkErr) {
+    console.warn("[getTodayManifestSummary:bookings]", bkErr);
+    return {
+      dateStr,
+      eventIds,
+      totalSeatsBooked: 0,
+      hoistDependents: [],
+    };
+  }
+
+  const rows = (bookings ?? []).map((r) => rowToBooking(r as BookingRow));
+  let totalSeatsBooked = 0;
+  const hoistDependents: HoistDependent[] = [];
+  for (const b of rows) {
+    // Skip explicitly cancelled/rerouted bookings.
+    const status = (b.bookingStatus ?? "").toLowerCase();
+    if (status.includes("cancel") || status.includes("rerout")) continue;
+    if (b.participantTransportRequired) totalSeatsBooked += 1;
+    if (b.bringsCarer && b.carerTransportRequired) totalSeatsBooked += 1;
+    if (HOIST_HINT.test(b.dynamicMedicalNotesSnapshot ?? "")) {
+      hoistDependents.push({
+        bookingId: b.id,
+        eventId: b.eventId,
+        eventTitle: titleById.get(b.eventId) ?? "(event)",
+        participantId: b.participantId,
+        participantName: b.participantName,
+        reason: (b.dynamicMedicalNotesSnapshot ?? "").trim(),
+      });
+    }
+  }
+  return { dateStr, eventIds, totalSeatsBooked, hoistDependents };
+}
+
+// ---------------------------------------------------------------------------
+// SPLIT MANIFEST — reroute a hoist-dependent passenger to alt transport
+// ---------------------------------------------------------------------------
+
+export interface RerouteResult {
+  bookingsUpdated: number;
+  legsRemoved: number;
+}
+
+/**
+ * Coordinator action when a vehicle's hoist fails. For every booking the
+ * participant holds on the given date we flip the status to
+ * "Rerouted-Alt-Transport", strip the bus-seat flags so the manifest
+ * stops reserving capacity, and delete any pending trip_legs that still
+ * reference them.
+ */
+export async function rerouteParticipantForDate(
+  participantId: string,
+  dateStr: string,
+): Promise<RerouteResult> {
+  const summary = await getTodayManifestSummary(dateStr);
+  const targetBookings: Array<{ id: string; eventId: string }> = [];
+  if (summary.eventIds.length > 0) {
+    const { data: bookings } = await supabase
+      .from("event_roster_bookings")
+      .select("id,event_id,notes")
+      .eq("participant_id", participantId)
+      .in("event_id", summary.eventIds);
+    for (const b of (bookings ?? []) as Array<{ id: string; event_id: string; notes: string | null }>) {
+      const note = b.notes ?? "";
+      const tag = "[REROUTED] Rerouted to Alternative Transport";
+      const nextNote = note.includes(tag) ? note : `${tag}${note ? `\n${note}` : ""}`;
+      const { error } = await supabase
+        .from("event_roster_bookings")
+        .update({
+          booking_status: "Rerouted-Alt-Transport",
+          participant_transport_required: false,
+          carer_transport_required: false,
+          notes: nextNote,
+        })
+        .eq("id", b.id);
+      if (error) {
+        console.error("[rerouteParticipantForDate:bookingUpdate]", error);
+      } else {
+        targetBookings.push({ id: b.id, eventId: b.event_id });
+      }
+    }
+  }
+
+  // Drop pending legs in active trips for this participant.
+  const { data: activeTrips } = await supabase
+    .from("transport_trips")
+    .select("id")
+    .eq("trip_date", dateStr)
+    .eq("status", "active");
+  let legsRemoved = 0;
+  const tripIds = ((activeTrips ?? []) as Array<{ id: string }>).map((t) => t.id);
+  if (tripIds.length > 0) {
+    const { data: legs } = await supabase
+      .from("trip_legs")
+      .select("id")
+      .in("trip_id", tripIds)
+      .neq("status", "completed")
+      .or(`to_participant_id.eq.${participantId},from_participant_id.eq.${participantId}`);
+    const legIds = ((legs ?? []) as Array<{ id: string }>).map((l) => l.id);
+    if (legIds.length > 0) {
+      const { error } = await supabase.from("trip_legs").delete().in("id", legIds);
+      if (error) {
+        console.error("[rerouteParticipantForDate:legsDelete]", error);
+      } else {
+        legsRemoved = legIds.length;
+      }
+    }
+  }
+
+  return { bookingsUpdated: targetBookings.length, legsRemoved };
+}
