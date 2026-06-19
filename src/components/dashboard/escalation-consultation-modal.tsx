@@ -15,8 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import {
-  DEFAULT_STAFF_UUID,
-  getStaffId,
+  resolveStaffIdWithFallback,
   type OperationalEscalation,
 } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
@@ -45,7 +44,7 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
     }
     setSubmitting(status);
     try {
-      const staffId = getStaffId() || DEFAULT_STAFF_UUID;
+      const staffId = await resolveStaffIdWithFallback();
       const { error } = await supabase
         .from("operational_escalations")
         .update({
