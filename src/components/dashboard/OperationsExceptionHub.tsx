@@ -1,6 +1,8 @@
 import { useState } from "react";
 import { format } from "date-fns";
 import { Link } from "@tanstack/react-router";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   AlertOctagon,
   AlertTriangle,
@@ -9,6 +11,7 @@ import {
   Pill,
   ShieldAlert,
   ShieldCheck,
+  Split,
   Stethoscope,
   Truck,
   UserCheck,
@@ -20,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
+import { rerouteParticipantForDate } from "@/lib/data-store";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
@@ -30,6 +34,40 @@ import {
   type PlaceholderRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
+
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function SplitManifestAction({ participantId, participantName }: { participantId: string; participantName: string }) {
+  const qc = useQueryClient();
+  const mut = useMutation({
+    mutationFn: () => rerouteParticipantForDate(participantId, todayStr()),
+    onSuccess: (res) => {
+      toast.success(`${participantName} rerouted`, {
+        description: `${res.bookingsUpdated} booking(s) flagged · ${res.legsRemoved} active leg(s) removed.`,
+      });
+      qc.invalidateQueries({ queryKey: ["start-end-day-anomalies"] });
+      qc.invalidateQueries({ queryKey: ["today-manifest-summary"] });
+      qc.invalidateQueries({ queryKey: ["transport_trips", "active"] });
+    },
+    onError: (e: Error) =>
+      toast.error("Could not reroute passenger", { description: e.message }),
+  });
+  return (
+    <Button
+      size="sm"
+      variant="outline"
+      className="h-7 px-2 text-xs"
+      onClick={() => mut.mutate()}
+      disabled={mut.isPending}
+    >
+      <Split className="mr-1 h-3.5 w-3.5" />
+      {mut.isPending ? "Rerouting…" : "Split Manifest / Arrange Alt Transport"}
+    </Button>
+  );
+}
 
 interface BucketRow {
   key: string;
