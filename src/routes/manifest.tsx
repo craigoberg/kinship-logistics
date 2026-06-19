@@ -103,9 +103,12 @@ function InitializeTripScreen() {
   const isButtonDisabled = !eventId || !odoReasonable || startTrip.isPending;
 
 
+  const inFlightRef = useRef(false);
   const submit = (e: React.FormEvent) => {
     e.preventDefault();
     if (isButtonDisabled || !Number.isFinite(odoNum)) return;
+    if (inFlightRef.current || startTrip.isPending) return;
+    inFlightRef.current = true;
     startTrip.mutate(
       {
         eventId,
@@ -114,6 +117,9 @@ function InitializeTripScreen() {
       },
       {
         onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
+        onSettled: () => {
+          inFlightRef.current = false;
+        },
       },
     );
   };
