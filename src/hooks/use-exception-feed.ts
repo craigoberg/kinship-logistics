@@ -202,3 +202,68 @@ export const ASSET_LIABILITY_PLACEHOLDERS: readonly PlaceholderRow[] = [
     severity: "info",
   },
 ] as const;
+
+// ---------------------------------------------------------------------------
+// START / END DAY ANOMALY — live vehicle clearance failures for today
+// ---------------------------------------------------------------------------
+
+export interface DayAnomalyRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+function todayDateStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+    d.getDate(),
+  ).padStart(2, "0")}`;
+}
+
+/**
+ * Streams today's failed vehicle clearances into the dashboard's
+ * Start/End Day Anomaly tile. Each failed clearance produces one row per
+ * failed checkpoint; mandatory failures escalate to critical.
+ */
+export function useStartEndDayAnomalies() {
+  const date = todayDateStr();
+  const q = useQuery<FailedClearanceReport[]>({
+    queryKey: ["start-end-day-anomalies", date],
+    queryFn: () => listFailedClearancesWithItems(date),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const rows = useMemo<DayAnomalyRow[]>(() => {
+    const reports = q.data ?? [];
+    const out: DayAnomalyRow[] = [];
+    for (const r of reports) {
+      const label = r.assetRego ? `${r.assetName} (${r.assetRego})` : r.assetName;
+      if (r.failedItems.length === 0) {
+        out.push({
+          key: r.clearance.id,
+          title: `${label} — Clearance Failed`,
+          detail: r.clearance.notes ?? "Driver flagged the vehicle as not cleared for service.",
+          severity: "critical",
+        });
+        continue;
+      }
+      for (const item of r.failedItems) {
+        out.push({
+          key: `${r.clearance.id}:${item.id}`,
+          title: `${label} — ${item.checkpointLabel}`,
+          detail: item.notes?.trim()
+            ? item.notes.trim()
+            : item.isMandatory
+              ? "Mandatory checkpoint failed — vehicle not cleared."
+              : "Non-mandatory checkpoint flagged.",
+          severity: item.isMandatory ? "critical" : "warning",
+        });
+      }
+    }
+    return out;
+  }, [q.data]);
+
+  return { data: rows, isLoading: q.isLoading };
+}
