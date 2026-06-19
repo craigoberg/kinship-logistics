@@ -177,6 +177,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
             <TabsList className="w-full justify-start h-auto flex-wrap gap-2 flex-shrink-0 min-h-[44px]">
               <TabsTrigger value="profile" className="h-10 py-2 px-3">Care Profile</TabsTrigger>
+              <TabsTrigger value="contact" className="h-10 py-2 px-3">Contact Information</TabsTrigger>
               <TabsTrigger value="history" className="h-10 py-2 px-3">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance" className="h-10 py-2 px-3">Schedules &amp; Attendance</TabsTrigger>
               <TabsTrigger value="finance" className="h-10 py-2 px-3">Finance &amp; Ledger</TabsTrigger>
