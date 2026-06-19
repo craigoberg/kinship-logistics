@@ -429,6 +429,91 @@ export function EditRosterBookingModal({
             )}
           </div>
 
+          {/* ----- Pickup addresses (coordinator overrides) ----- */}
+          <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              <MapPin className="h-3.5 w-3.5" /> Pickup addresses
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="permanent-addr" className="text-[11px] font-medium text-muted-foreground">
+                Permanent pickup address
+              </Label>
+              <Input
+                id="permanent-addr"
+                value={permanentAddress}
+                placeholder="e.g. 12 Sunrise Cres, Bondi NSW 2026"
+                onChange={(e) => {
+                  setPermanentAddress(e.target.value);
+                  setDirty(true);
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Saved to participant profile — used on every future event.
+              </p>
+            </div>
+
+            <div className="space-y-1">
+              <Label htmlFor="override-addr" className="text-[11px] font-medium text-muted-foreground">
+                One-off pickup override (this event only)
+              </Label>
+              <Input
+                id="override-addr"
+                value={tripPickupOverride}
+                placeholder="Leave blank to use the permanent address"
+                onChange={(e) => {
+                  setTripPickupOverride(e.target.value);
+                  setDirty(true);
+                }}
+              />
+              <p className="text-[10px] text-muted-foreground">
+                Overrides permanent address for this event's manifest only.
+              </p>
+            </div>
+          </div>
+
+          {/* ----- Frozen medical alerts snapshot ----- */}
+          <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                <HeartPulse className="h-3.5 w-3.5" /> Medical alerts snapshot
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={refreshSnapshot.isPending}
+                onClick={() =>
+                  refreshSnapshot.mutate(
+                    {
+                      bookingId: booking.id,
+                      participantId: booking.participantId,
+                      eventId: booking.eventId,
+                    },
+                    {
+                      onSuccess: () => toast.success("Medical snapshot refreshed"),
+                    },
+                  )
+                }
+              >
+                <RefreshCw className={"h-3.5 w-3.5 " + (refreshSnapshot.isPending ? "animate-spin" : "")} />
+                Re-snapshot
+              </Button>
+            </div>
+            {booking.dynamicMedicalNotesSnapshot && booking.dynamicMedicalNotesSnapshot.trim().length > 0 ? (
+              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/60 p-2 font-mono text-[11px] leading-snug text-foreground">
+                {booking.dynamicMedicalNotesSnapshot}
+              </pre>
+            ) : (
+              <p className="text-[11px] italic text-muted-foreground">
+                No critical alerts captured. Click "Re-snapshot" to rebuild from the compliance &amp; medication tables.
+              </p>
+            )}
+          </div>
+
+
+
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
