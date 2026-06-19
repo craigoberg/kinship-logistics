@@ -13,10 +13,9 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
-  DEFAULT_STAFF_UUID,
   claimOperationalEscalation,
-  getStaffId,
   listPendingEscalations,
+  resolveStaffIdWithFallback,
   subscribeToEscalationPool,
   type OperationalEscalation,
 } from "@/lib/data-store";
@@ -103,7 +102,7 @@ export function GlobalEscalationInterceptor() {
     // Optimistically pop the active item so the UI feels instant.
     setQueue((prev) => prev.filter((e) => e.id !== target.id));
     try {
-      const staffId = getStaffId() || DEFAULT_STAFF_UUID;
+      const staffId = await resolveStaffIdWithFallback();
       const result = await claimOperationalEscalation(target.id, staffId);
       if (result.success) {
         setConsultTarget(result.escalation ?? target);
