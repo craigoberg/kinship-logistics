@@ -22,9 +22,10 @@ import {
   useStartTrip,
   usePatchTripLeg,
   useCompleteTrip,
-  useEvents,
+  useLiveEvents,
   useLastEndOdometer,
 } from "@/hooks/use-supabase-data";
+
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
