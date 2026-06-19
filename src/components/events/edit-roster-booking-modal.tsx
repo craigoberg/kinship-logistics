@@ -133,12 +133,12 @@ export function EditRosterBookingModal({
       // (if any) BEFORE the booking update so the join read on the booking
       // refetch reflects the new value.
       const newPermanent = permanentAddress.trim();
-      const originalPermanent = (booking.participantPermanentPickupAddress ?? "").trim();
+      const originalPermanent = (booking.participantRegularPickupAddress ?? "").trim();
       if (newPermanent !== originalPermanent) {
         try {
           await updateParticipant.mutateAsync({
             id: booking.participantId,
-            patch: { permanentPickupAddress: newPermanent.length > 0 ? newPermanent : null },
+            patch: { regularPickupAddress: newPermanent.length > 0 ? newPermanent : null },
           });
         } catch (e) {
           // Surface, but don't block the rest of the save.
