@@ -1901,7 +1901,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     participantTransportRequired: r.participant_transport_required ?? false,
     tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
-    participantPermanentPickupAddress: r.participants?.permanent_pickup_address ?? null,
+    participantRegularPickupAddress: r.participants?.regular_pickup_address ?? null,
     participantStreetAddress: r.participants?.street_address ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
