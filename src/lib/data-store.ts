@@ -2671,6 +2671,21 @@ function rowToLeg(r: LegRow): TripLeg {
 export interface ActiveTripBundle {
   trip: TransportTrip;
   legs: TripLeg[];
+  eventTitle: string | null;
+}
+
+async function fetchEventTitle(eventId: string | null): Promise<string | null> {
+  if (!eventId) return null;
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("title")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fetchEventTitle]", error);
+    return null;
+  }
+  return (data?.title as string | undefined) ?? null;
 }
 
 function throwPg(prefix: string, error: { message: string; details?: string | null; hint?: string | null; code?: string | null }): never {
