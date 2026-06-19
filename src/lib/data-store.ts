@@ -2857,6 +2857,23 @@ export async function getLastEndOdometer(): Promise<number | null> {
 
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
+  // 0. Defensive guard: if an active (not completed/cancelled) trip already
+  //    exists for this driver + event, return it instead of inserting again.
+  //    Prevents unique-key violations from double-clicks or double-mounts.
+  const { data: existingTrip, error: existingErr } = await supabase
+    .from("transport_trips")
+    .select("id")
+    .eq("event_id", input.eventId)
+    .eq("driver_staff_id", input.driverStaffId)
+    .not("status", "in", "(completed,cancelled)")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) throwPg("[startTrip:existingLookup]", existingErr);
+  if (existingTrip) {
+    return getActiveTripBundle((existingTrip as { id: string }).id);
+  }
+
   // 1. Build roster (ordered participants for this event) and pull every
   //    address signal needed for the 3-tier target_address fallback.
   const { data: bookingRows, error: bookingErr } = await supabase
