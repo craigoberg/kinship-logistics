@@ -273,6 +273,62 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
               </DialogFooter>
             </TabsContent>
 
+            {/* TAB — Contact Information */}
+            <TabsContent value="contact" className="flex flex-col overflow-hidden">
+              <div className="flex-1 overflow-y-auto pr-1 pt-4 space-y-4">
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <Field label="Phone number">
+                    <Input
+                      type="tel"
+                      placeholder="Schema column not yet provisioned"
+                      disabled
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Email address">
+                    <Input
+                      type="email"
+                      placeholder="Schema column not yet provisioned"
+                      disabled
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Home / Street address" className="sm:col-span-2">
+                    <Input
+                      value={streetAddress}
+                      onChange={(e) => { setStreetAddress(e.target.value); setDirty(true); }}
+                      placeholder="e.g. 42 Wattle Street, Parramatta NSW"
+                      className="h-9"
+                    />
+                  </Field>
+                  <Field label="Regular pickup address" className="sm:col-span-2">
+                    <Input
+                      value={regularPickupAddress}
+                      onChange={(e) => { setRegularPickupAddress(e.target.value); setDirty(true); }}
+                      placeholder="Leave blank to fall back to the Home address"
+                      className="h-9"
+                    />
+                    <p className="mt-1 text-[11px] text-muted-foreground">
+                      {regularPickupAddress.trim().length > 0
+                        ? "Used as the default pickup on every event manifest unless an event override is set."
+                        : streetAddress.trim().length > 0
+                          ? <>Will use: <span className="font-medium text-foreground">{streetAddress.trim()}</span></>
+                          : "No address on file — manifests will leave the pickup blank."}
+                    </p>
+                  </Field>
+                </div>
+              </div>
+
+              <DialogFooter className="mt-1 shrink-0">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
+                  <Save className="h-4 w-4" />
+                  {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
+                </Button>
+              </DialogFooter>
+            </TabsContent>
+
+
             {/* TAB 2 — History */}
             <TabsContent value="history" className="flex flex-col overflow-hidden">
               <div className="flex-1 overflow-y-auto pr-1 pt-4">
