@@ -295,12 +295,15 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
               </td>
               <td className="px-3 py-2 text-muted-foreground">{r.detail}</td>
               <td className="px-3 py-2 text-right">
-                {isLive ? (
+                {r.action ? (
+                  r.action
+                ) : isLive ? (
                   <span className="text-[11px] text-muted-foreground">Triaged on manifest</span>
                 ) : (
                   <DeferAction />
                 )}
               </td>
+
             </tr>
           ))}
         </tbody>
