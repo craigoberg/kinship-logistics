@@ -196,7 +196,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   <Field label="NDIS number" className="sm:col-span-1">
                     <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
                   </Field>
-                  <Field label="" className="sm:col-span-3" />
+                  <div className="sm:col-span-3" />
                 </div>
 
                 <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
