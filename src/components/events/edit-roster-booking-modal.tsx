@@ -530,6 +530,7 @@ export function EditRosterBookingModal({
               }}
             />
           </div>
+          </div>
         </div>
 
         <DialogFooter className="shrink-0 border-t border-border pt-3">
