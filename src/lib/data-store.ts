@@ -149,7 +149,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
-    permanentPickupAddress: r.permanent_pickup_address ?? null,
+    regularPickupAddress: r.regular_pickup_address ?? null,
     iddsi: {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
