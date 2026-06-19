@@ -286,11 +286,45 @@ function ClearanceGate({
   }
 
   return (
-    <WalkaroundChecklist
+    <IssueAccumulatorGate
       asset={asset}
       startOdometer={startOdometer}
       dateStr={dateStr}
       onPassed={onCleared}
+      onBack={onBack}
+    />
+  );
+}
+
+function IssueAccumulatorGate({
+  asset,
+  startOdometer,
+  dateStr,
+  onPassed,
+  onBack,
+}: {
+  asset: TransportAsset;
+  startOdometer: number;
+  dateStr: string;
+  onPassed: () => void;
+  onBack: () => void;
+}) {
+  const checkpointsQ = useQuery<AssetCheckpoint[]>({
+    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
+    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
+    staleTime: 5 * 60_000,
+  });
+  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+  const driverName = staffName(driverStaffId);
+
+  return (
+    <IssueAccumulatorPanel
+      asset={asset}
+      startOdometer={startOdometer}
+      dateStr={dateStr}
+      checkpoints={checkpointsQ.data ?? []}
+      driverName={driverName}
+      onCleared={onPassed}
       onBack={onBack}
     />
   );
