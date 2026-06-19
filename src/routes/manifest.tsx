@@ -423,7 +423,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           loggedDistanceKm: Number(loggedKm),
           passengerPresent: present,
           medicationHandoverStatus: medStatus,
-          medicationHandoverConfirmed: medStatus === "collected",
+          medicationHandoverConfirmed: medStatus === "collected_intact" || medStatus === "collected_damaged",
           unexpectedMedicationLogged: extraMed,
           unexpectedMedicationNotes: extraMed ? extraNotes.trim() : null,
           completedAt: new Date().toISOString(),
