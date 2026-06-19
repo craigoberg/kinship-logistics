@@ -193,15 +193,16 @@ export function EditRosterBookingModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-md border-border bg-card">
-        <DialogHeader>
+      <DialogContent className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-border bg-card">
+        <DialogHeader className="shrink-0">
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
             Update <strong>{booking.participantName}</strong>'s booking status, cost and billing notes.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-3 pt-1">
+        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+          <div className="space-y-3 pt-1">
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Booking status
