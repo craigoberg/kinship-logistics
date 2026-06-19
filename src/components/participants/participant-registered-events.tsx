@@ -56,6 +56,10 @@ function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooki
     carerId: r.carerId ?? null,
     carerTransportRequired: r.carerTransportRequired ?? false,
     participantTransportRequired: r.participantTransportRequired ?? false,
+    tripPickupAddressOverride: r.tripPickupAddressOverride ?? null,
+    dynamicMedicalNotesSnapshot: r.dynamicMedicalNotesSnapshot ?? null,
+    participantPermanentPickupAddress: r.participantPermanentPickupAddress ?? null,
+    participantStreetAddress: r.participantStreetAddress ?? null,
     createdAt: r.createdAt,
     updatedAt: r.updatedAt,
   };
