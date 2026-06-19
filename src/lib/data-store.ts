@@ -3041,8 +3041,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     trip_id: trip.id,
     leg_index: i + 1,
     status: "pending" as LegStatus,
+    medication_handover_status: "not_required" as MedicationHandoverStatus,
     ...s,
   }));
+
   const { data: legRows, error: legErr } = await supabase
     .from("trip_legs")
     .insert(legPayload)
@@ -3120,13 +3122,24 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
 
 export async function cancelTrip(tripId: string): Promise<TransportTrip> {
   // Clear medication exception flags first so ghost alerts don't leak onto
-  // the coordinator's Operations Exception Hub after cancellation.
-  const { error: legResetErr } = await supabase
+  // the coordinator's Operations Exception Hub after cancellation. If the trip
+  // has zero legs attached, skip the leg update entirely and proceed straight
+  // to flipping the parent trip status so the driver is never left in limbo.
+  const { count: legCount, error: legCountErr } = await supabase
     .from("trip_legs")
-    .update({ medication_handover_status: "not_required" })
-    .eq("trip_id", tripId)
-    .in("medication_handover_status", ["collected_damaged", "expected_not_provided"]);
-  if (legResetErr) console.warn("[cancelTrip:legReset]", legResetErr);
+    .select("id", { count: "exact", head: true })
+    .eq("trip_id", tripId);
+  if (legCountErr) console.warn("[cancelTrip:legCount]", legCountErr);
+
+  if ((legCount ?? 0) > 0) {
+    const { error: legResetErr } = await supabase
+      .from("trip_legs")
+      .update({ medication_handover_status: "not_required" })
+      .eq("trip_id", tripId)
+      .in("medication_handover_status", ["collected_damaged", "expected_not_provided"]);
+    if (legResetErr) console.warn("[cancelTrip:legReset]", legResetErr);
+  }
+
 
   const { data, error } = await supabase
     .from("transport_trips")
