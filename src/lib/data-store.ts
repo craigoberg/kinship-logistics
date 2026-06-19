@@ -2587,6 +2587,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const legPayload = seeds.map((s, i) => ({
     trip_id: trip.id,
     leg_index: i + 1,
+    status: "pending" as LegStatus,
     ...s,
   }));
   const { data: legRows, error: legErr } = await supabase
