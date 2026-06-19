@@ -23,12 +23,14 @@ import {
   STAFF_CERT_PLACEHOLDERS,
   ASSET_LIABILITY_PLACEHOLDERS,
   type PlaceholderRow,
+  type Severity,
 } from "@/hooks/use-exception-feed";
 
 interface BucketRow {
   key: string;
   title: string;
   detail: string;
+  severity: Severity;
 }
 
 interface Bucket {
@@ -46,10 +48,17 @@ export function OperationsExceptionHub() {
     key: m.legId,
     title: `${m.participantName} · Leg ${m.legNumber}${m.eventTitle ? ` (${m.eventTitle})` : ""}`,
     detail: m.exceptionLabel,
+    severity: m.severity,
   }));
 
   const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
-    items.map((r, idx) => ({ key: `${prefix}-${idx}`, title: r.title, detail: r.detail }));
+    items.map((r, idx) => ({
+      key: `${prefix}-${idx}`,
+      title: r.title,
+      detail: r.detail,
+      severity: r.severity,
+    }));
+
 
   const buckets: Bucket[] = [
     { id: "on-road", label: "On-Road Issues", icon: AlertOctagon, isLive: true, rows: liveRows },
@@ -118,17 +127,31 @@ export function OperationsExceptionHub() {
   );
 }
 
-function tileToneClass(count: number, isLive: boolean): string {
-  if (count === 0) return "bg-green-600 text-white";
-  if (count <= 2) return "bg-yellow-500 text-black";
-  return cn("bg-destructive text-destructive-foreground", isLive && "animate-pulse");
+function worstSeverity(rows: BucketRow[]): Severity | null {
+  if (rows.some((r) => r.severity === "critical")) return "critical";
+  if (rows.some((r) => r.severity === "warning")) return "warning";
+  if (rows.length > 0) return "info";
+  return null;
+}
+
+function tileToneClass(rows: BucketRow[], isLive: boolean): string {
+  switch (worstSeverity(rows)) {
+    case null:
+      return "bg-green-600 text-white";
+    case "info":
+      return "bg-amber-500 text-black";
+    case "warning":
+      return "bg-yellow-500 text-black";
+    case "critical":
+      return cn("bg-destructive text-destructive-foreground", isLive && "animate-pulse");
+  }
 }
 
 function StatusTile({ bucket }: { bucket: Bucket }) {
   const { label, icon: Icon, rows, isLive } = bucket;
   const count = rows.length;
   const isClear = count === 0;
-  const tone = tileToneClass(count, isLive);
+  const tone = tileToneClass(rows, isLive);
 
   return (
     <div
@@ -156,6 +179,24 @@ function StatusTile({ bucket }: { bucket: Bucket }) {
   );
 }
 
+const rowAccent: Record<Severity, string> = {
+  critical: "border-l-4 border-l-destructive bg-destructive/5",
+  warning: "border-l-4 border-l-yellow-500 bg-yellow-500/5",
+  info: "border-l-4 border-l-amber-500 bg-amber-500/5",
+};
+
+const severityChip: Record<Severity, string> = {
+  critical: "bg-destructive/15 text-destructive border border-destructive/30",
+  warning: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300 border border-yellow-500/30",
+  info: "bg-amber-500/15 text-amber-700 dark:text-amber-300 border border-amber-500/30",
+};
+
+const severityLabel: Record<Severity, string> = {
+  critical: "Critical",
+  warning: "Warning",
+  info: "Info",
+};
+
 function DrillTable({ bucket }: { bucket: Bucket }) {
   const { label, icon: Icon, rows, isLive } = bucket;
   return (
@@ -179,8 +220,20 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={r.key} className="border-t border-border/60">
-              <td className="px-3 py-2 font-medium">{r.title}</td>
+            <tr key={r.key} className={cn("border-t border-border/60", rowAccent[r.severity])}>
+              <td className="px-3 py-2 font-medium">
+                <span className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+                      severityChip[r.severity],
+                    )}
+                  >
+                    {severityLabel[r.severity]}
+                  </span>
+                  <span>{r.title}</span>
+                </span>
+              </td>
               <td className="px-3 py-2 text-muted-foreground">{r.detail}</td>
               <td className="px-3 py-2 text-right">
                 {isLive ? (
@@ -196,6 +249,7 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
     </section>
   );
 }
+
 
 function DeferAction() {
   const [date, setDate] = useState<Date | undefined>(undefined);
