@@ -159,6 +159,50 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
             </div>
           </div>
 
+          {/* ----- Rinse & Repeat: Clone Prior Event ----- */}
+          <div className="space-y-2 rounded-lg border border-border bg-muted/30 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <Label className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <Copy className="h-3.5 w-3.5" /> Clone roster from prior event
+              </Label>
+              <Switch
+                checked={cloneEnabled}
+                onCheckedChange={(v) => {
+                  setCloneEnabled(v);
+                  setDirty(true);
+                }}
+                disabled={!eventTypeCode}
+              />
+            </div>
+            {!eventTypeCode ? (
+              <p className="text-[11px] text-muted-foreground">
+                Pick an event type first to enable cloning.
+              </p>
+            ) : cloneEnabled ? (
+              priorLoading ? (
+                <p className="text-[11px] text-muted-foreground">Looking up most recent…</p>
+              ) : priorEvent ? (
+                <div className="rounded bg-background/60 px-2 py-1.5 text-[11px]">
+                  <span className="font-semibold">Source:</span> {priorEvent.title}{" "}
+                  <span className="text-muted-foreground">· {priorEvent.startDate}</span>
+                  <div className="mt-0.5 text-muted-foreground">
+                    Roster will be copied · financials reset · medical snapshots refreshed · status forced to <strong>Planning</strong>.
+                  </div>
+                </div>
+              ) : (
+                <p className="text-[11px] text-warning">
+                  No prior event of this type found — toggle off to create blank.
+                </p>
+              )
+            ) : (
+              <p className="text-[11px] text-muted-foreground">
+                Off: new event starts with an empty roster.
+              </p>
+            )}
+          </div>
+
+
+
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Venue
