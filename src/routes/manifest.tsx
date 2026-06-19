@@ -63,7 +63,7 @@ function ManifestPage() {
 /* -------------------- Initialize -------------------- */
 
 function InitializeTripScreen() {
-  const { data: events = [] } = useEvents();
+  const { data: events = [] } = useLiveEvents();
   const { data: lastEndOdo = null } = useLastEndOdometer();
   const startTrip = useStartTrip();
   const today = new Date().toISOString().slice(0, 10);
