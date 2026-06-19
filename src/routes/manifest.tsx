@@ -837,6 +837,20 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
     if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeLeg?.id]);
 
+  // Detect coordinator reroutes — when legs disappear between polls, notify the driver.
+  const prevLegIdsRef = useRef<string[]>(legs.map((l) => l.id));
+  useEffect(() => {
+    const currentIds = new Set(legs.map((l) => l.id));
+    const dropped = prevLegIdsRef.current.filter((id) => !currentIds.has(id));
+    if (dropped.length > 0) {
+      toast.info("Coordinator updated your manifest", {
+        description: `${dropped.length} stop${dropped.length === 1 ? "" : "s"} rerouted to alternative transport.`,
+      });
+    }
+    prevLegIdsRef.current = legs.map((l) => l.id);
+  }, [legs]);
+
+
   return (
     <>
       <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
