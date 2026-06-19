@@ -10,6 +10,7 @@ import { MedicationAdminModal } from "@/components/medication/medication-admin-m
 import { TodaysMedicationCard } from "@/components/medication/todays-medication-card";
 import type { TransportPayload } from "@/lib/data-store";
 import { formatDate, formatTime } from "@/lib/utils";
+import { OperationsExceptionHub } from "@/components/dashboard/OperationsExceptionHub";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -69,7 +70,10 @@ function Dashboard() {
         />
       </section>
 
+      <OperationsExceptionHub />
+
       <section className="grid gap-4 md:grid-cols-3">
+
         <Card className="space-y-3 p-5 md:col-span-2">
           <div className="flex items-center justify-between">
             <h3 className="text-base font-semibold">Recent transport activity</h3>
