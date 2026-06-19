@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Plus, Copy } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -12,9 +12,10 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { LookupSelect } from "@/components/lookups/lookup-select";
-import { useInsertEvent } from "@/hooks/use-supabase-data";
+import { useInsertEvent, usePriorEventOfType } from "@/hooks/use-supabase-data";
 
 interface Props {
   open: boolean;
@@ -34,8 +35,12 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const [endDate, setEndDate] = useState("");
   const [ticketPrice, setTicketPrice] = useState("0.00");
   const [description, setDescription] = useState("");
+  const [cloneEnabled, setCloneEnabled] = useState(false);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEvent();
+  const { data: priorEvent, isLoading: priorLoading } = usePriorEventOfType(
+    cloneEnabled ? eventTypeCode : null,
+  );
 
   useEffect(() => {
     if (open) {
@@ -46,6 +51,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
       setEndDate("");
       setTicketPrice("0.00");
       setDescription("");
+      setCloneEnabled(false);
       setDirty(false);
     }
   }, [open]);
