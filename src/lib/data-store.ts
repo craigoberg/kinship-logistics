@@ -18,6 +18,9 @@ export interface Participant {
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
   ndisNumber: string;
   streetAddress: string | null;
+  /** Coordinator-managed permanent pickup address, used by the manifest engine
+   * unless a per-event override is set on the booking. */
+  permanentPickupAddress: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash: string | null;
   createdAt: string;
@@ -130,6 +133,7 @@ interface ParticipantRow {
   last_name: string;
   ndis_number: string;
   street_address: string | null;
+  permanent_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   dual_witness_pin_hash: string | null;
@@ -145,6 +149,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
+    permanentPickupAddress: r.permanent_pickup_address ?? null,
     iddsi: {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
@@ -193,6 +198,7 @@ export interface ParticipantPatch {
   lastName?: string;
   ndisNumber?: string;
   streetAddress?: string | null;
+  permanentPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -202,6 +208,7 @@ export interface NewParticipant {
   lastName: string;
   ndisNumber: string;
   streetAddress?: string | null;
+  permanentPickupAddress?: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
 }
@@ -212,6 +219,7 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     last_name: input.lastName,
     ndis_number: input.ndisNumber,
     street_address: input.streetAddress ?? null,
+    permanent_pickup_address: input.permanentPickupAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
     dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
@@ -234,6 +242,8 @@ export async function updateParticipant(
   if (patch.lastName !== undefined) row.last_name = patch.lastName;
   if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
   if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
+  if (patch.permanentPickupAddress !== undefined)
+    row.permanent_pickup_address = patch.permanentPickupAddress;
   if (patch.iddsi !== undefined) {
     row.iddsi_level_liquids = patch.iddsi.liquids;
     row.iddsi_level_solids = patch.iddsi.foods;
@@ -1675,6 +1685,11 @@ export interface NewEvent {
   endDate?: string | null;
   ticketPrice: number;
   description?: string | null;
+  /** Canonical event status. Defaults to 'Planning' when omitted. */
+  status?: string;
+  /** When set, the roster from this source event is copied into the new event
+   * after insert (financial fields reset, fresh medical snapshots). */
+  cloneFromEventId?: string | null;
 }
 
 function toIsoDate(value: string | null | undefined): string | null {
@@ -1696,7 +1711,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   const endIso = toIsoDate(input.endDate ?? null) ?? startIso;
 
   // Verified live schema on event_manifest:
-  // title · event_type · venue_name · start_date · end_date · ticket_price · description
+  // title · event_type · venue_name · start_date · end_date · ticket_price · description · status
   const payload = {
     title: input.title,
     event_type: input.eventTypeCode,
@@ -1705,6 +1720,7 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     end_date: endIso,
     ticket_price: input.ticketPrice,
     description: input.description ?? null,
+    status: (input.status && input.status.trim().length > 0) ? input.status : "Planning",
   };
 
   console.warn("[insertEvent] active Supabase URL:", supabaseUrl);
@@ -1730,8 +1746,25 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     throw new Error(parts.join(" · "));
   }
 
-  return rowToEvent(data as EventManifestRow);
+  const event = rowToEvent(data as EventManifestRow);
+
+  // Optional rinse-and-repeat clone of roster bookings from a prior event.
+  if (input.cloneFromEventId) {
+    try {
+      await cloneEventRoster(input.cloneFromEventId, event.id);
+    } catch (cloneErr) {
+      console.error("[insertEvent] roster clone failed (event already created)", cloneErr);
+      // Don't roll back the event itself — surface the failure to the caller
+      // so the UI can flag the half-completed clone.
+      throw new Error(
+        `Event created but roster clone failed: ${cloneErr instanceof Error ? cloneErr.message : String(cloneErr)}`,
+      );
+    }
+  }
+
+  return event;
 }
+
 
 
 export interface UpdateEventInput {
@@ -1806,6 +1839,18 @@ export interface EventRosterBooking {
   carerTransportRequired: boolean;
   /** Whether the participant themselves needs a physical bus seat. */
   participantTransportRequired: boolean;
+  /** One-off pickup address override for THIS event only. Wins over the
+   * participant's permanent_pickup_address when the manifest is seeded. */
+  tripPickupAddressOverride: string | null;
+  /** Frozen snapshot of critical medical alerts taken at the moment this
+   * participant was added to the roster (or last refreshed by a coordinator). */
+  dynamicMedicalNotesSnapshot: string | null;
+  /** Permanent pickup address read through the participants join — convenience
+   * mirror of participant.permanent_pickup_address so the roster table can
+   * render it without a second fetch. */
+  participantPermanentPickupAddress: string | null;
+  /** Mirror of participant.street_address from the join — last-tier fallback. */
+  participantStreetAddress: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1823,9 +1868,18 @@ interface BookingRow {
   carer_id: string | null;
   carer_transport_required: boolean | null;
   participant_transport_required: boolean | null;
+  trip_pickup_address_override: string | null;
+  dynamic_medical_notes_snapshot: string | null;
   created_at: string;
   updated_at: string;
-  participants?: { first_name: string; last_name: string } | null;
+  participants?:
+    | {
+        first_name: string;
+        last_name: string;
+        permanent_pickup_address?: string | null;
+        street_address?: string | null;
+      }
+    | null;
 }
 
 function rowToBooking(r: BookingRow): EventRosterBooking {
@@ -1845,15 +1899,23 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     carerId: r.carer_id ?? null,
     carerTransportRequired: r.carer_transport_required ?? false,
     participantTransportRequired: r.participant_transport_required ?? false,
+    tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
+    dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
+    participantPermanentPickupAddress: r.participants?.permanent_pickup_address ?? null,
+    participantStreetAddress: r.participants?.street_address ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
+
+const BOOKING_PARTICIPANT_SELECT =
+  "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address)";
+
 export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
   const { data, error } = await supabase
     .from("event_roster_bookings")
-    .select("*, participants!inner(first_name, last_name)")
+    .select(BOOKING_PARTICIPANT_SELECT)
     .eq("event_id", eventId)
     .order("created_at", { ascending: true });
   if (error) throw error;
@@ -1874,7 +1936,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name), event_manifest!inner(title, start_date, end_date, ticket_price)",
+      "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
@@ -1913,12 +1975,24 @@ export interface NewEventBooking {
   carerId?: string | null;
   carerTransportRequired?: boolean;
   participantTransportRequired?: boolean;
+  tripPickupAddressOverride?: string | null;
+  /** Optional pre-built snapshot. Omit to auto-build from compliance + meds. */
+  dynamicMedicalNotesSnapshot?: string | null;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
   const amount = input.amountPaid ?? 0;
   const trimmedNotes = (input.notes ?? "").trim();
   const bringsCarer = !!input.bringsCarer;
+  const trimmedOverride = (input.tripPickupAddressOverride ?? "").trim();
+
+  // Auto-snapshot compliance + active meds at the moment of roster inclusion.
+  // If a caller (e.g. cloneEventRoster) precomputes one we accept it as-is.
+  const snapshot =
+    input.dynamicMedicalNotesSnapshot !== undefined
+      ? input.dynamicMedicalNotesSnapshot
+      : await buildMedicalAlertSnapshot(input.participantId);
+
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
@@ -1930,6 +2004,9 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     carer_id: bringsCarer ? input.carerId ?? null : null,
     carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
     participant_transport_required: !!input.participantTransportRequired,
+    trip_pickup_address_override: trimmedOverride.length > 0 ? trimmedOverride : null,
+    dynamic_medical_notes_snapshot:
+      snapshot && snapshot.trim().length > 0 ? snapshot : null,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
@@ -1946,6 +2023,154 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     });
   }
 }
+
+// ---------- Compliance snapshot + event cloning ----------
+
+/** Record types treated as "Medical Alert" inside the
+ * `participant_compliance_and_alerts` table. */
+const MEDICAL_ALERT_RECORD_TYPE = "Medical Alert";
+
+interface ComplianceAlertRow {
+  record_type: string | null;
+  reference_data: string | null;
+  notes: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * Build the frozen "dynamic medical notes" snapshot for a participant.
+ * Pulls 'Medical Alert' rows from participant_compliance_and_alerts and the
+ * participant's currently active medication schedules, formatted into a
+ * compact multi-line string. Returns "" when nothing critical is on file.
+ */
+export async function buildMedicalAlertSnapshot(participantId: string): Promise<string> {
+  const lines: string[] = [];
+
+  const { data: alertRows, error: alertErr } = await supabase
+    .from("participant_compliance_and_alerts")
+    .select("record_type, reference_data, notes, created_at")
+    .eq("participant_id", participantId)
+    .eq("record_type", MEDICAL_ALERT_RECORD_TYPE)
+    .order("created_at", { ascending: false });
+  if (alertErr) {
+    // Non-fatal: snapshot is best-effort. Log + carry on so the booking insert
+    // is not blocked by an unrelated read failure.
+    console.warn("[buildMedicalAlertSnapshot] alerts read failed", alertErr);
+  } else if (alertRows && alertRows.length > 0) {
+    lines.push("⚠️ MEDICAL ALERTS");
+    for (const r of alertRows as ComplianceAlertRow[]) {
+      const ref = (r.reference_data ?? "").trim();
+      const note = (r.notes ?? "").trim();
+      const body = [ref, note].filter(Boolean).join(" — ");
+      if (body.length > 0) lines.push(`• ${body}`);
+    }
+  }
+
+  const { data: medRows, error: medErr } = await supabase
+    .from("participant_medication_schedules")
+    .select("medication_name, dosage, frequency, time_slot")
+    .eq("participant_id", participantId)
+    .eq("active", true);
+  if (medErr) {
+    console.warn("[buildMedicalAlertSnapshot] meds read failed", medErr);
+  } else if (medRows && medRows.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("💊 ACTIVE MEDICATIONS");
+    for (const m of medRows as Array<{
+      medication_name?: string | null;
+      dosage?: string | null;
+      frequency?: string | null;
+      time_slot?: string | null;
+    }>) {
+      const parts = [
+        m.medication_name?.trim(),
+        m.dosage?.trim(),
+        m.frequency?.trim() || m.time_slot?.trim() || null,
+      ].filter((p): p is string => !!p && p.length > 0);
+      if (parts.length > 0) lines.push(`• ${parts.join(" · ")}`);
+    }
+  }
+
+  // Cap at ~2KB so an unusually chatty profile cannot bloat the booking row.
+  const out = lines.join("\n");
+  return out.length > 2000 ? out.slice(0, 1997) + "…" : out;
+}
+
+/** Re-build the snapshot for a single booking and persist it. */
+export async function refreshBookingMedicalSnapshot(
+  bookingId: string,
+  participantId: string,
+): Promise<string> {
+  const snapshot = await buildMedicalAlertSnapshot(participantId);
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update({
+      dynamic_medical_notes_snapshot: snapshot.length > 0 ? snapshot : null,
+    })
+    .eq("id", bookingId);
+  if (error) {
+    console.error("[refreshBookingMedicalSnapshot] update failed", error);
+    throw error;
+  }
+  return snapshot;
+}
+
+/** Look up the most recent event of the given type for the clone engine. */
+export async function findMostRecentEventByType(
+  eventTypeCode: string,
+  excludeEventId?: string | null,
+): Promise<EventManifest | null> {
+  let query = supabase
+    .from("event_manifest")
+    .select("*")
+    .eq("event_type", eventTypeCode)
+    .order("start_date", { ascending: false })
+    .limit(excludeEventId ? 2 : 1);
+  const { data, error } = await query;
+  if (error) {
+    console.error("[findMostRecentEventByType]", error);
+    return null;
+  }
+  const rows = (data ?? []) as EventManifestRow[];
+  const filtered = excludeEventId ? rows.filter((r) => r.id !== excludeEventId) : rows;
+  return filtered.length > 0 ? rowToEvent(filtered[0]) : null;
+}
+
+/**
+ * Clone every roster booking from one event onto another.
+ * - Reuses participant + carer wiring, custom_price, notes.
+ * - Resets payment fields (amount_paid=0, is_fully_paid=false, status=Confirmed).
+ * - Drops any one-off pickup override (those are per-trip).
+ * - Re-snapshots medical alerts at clone time so the new event row reflects
+ *   the participant's current medical state, not the source event's.
+ */
+export async function cloneEventRoster(
+  sourceEventId: string,
+  targetEventId: string,
+): Promise<number> {
+  const source = await listEventBookings(sourceEventId);
+  if (source.length === 0) return 0;
+  for (const b of source) {
+    await insertEventBooking({
+      eventId: targetEventId,
+      participantId: b.participantId,
+      bookingStatus: "Confirmed",
+      amountPaid: 0,
+      ticketPrice: b.customPrice ?? 0,
+      notes: b.notes,
+      bringsCarer: b.bringsCarer,
+      carerId: b.carerId,
+      carerTransportRequired: b.carerTransportRequired,
+      participantTransportRequired: b.participantTransportRequired,
+      tripPickupAddressOverride: null,
+      // Force a fresh snapshot rather than carrying the source row forward.
+      dynamicMedicalNotesSnapshot: undefined,
+    });
+  }
+  return source.length;
+}
+
+
 
 /**
  * Record an incremental payment milestone against an existing roster booking.
@@ -1983,7 +2208,7 @@ export async function recordEventPaymentMilestone(
     .from("event_roster_bookings")
     .update({ amount_paid: newTotal, is_fully_paid: fullyPaid })
     .eq("id", input.bookingId)
-    .select("*, participants!inner(first_name, last_name)")
+    .select(BOOKING_PARTICIPANT_SELECT)
     .single();
   if (bookingErr) {
     console.error("[recordEventPaymentMilestone] booking update failed", bookingErr);
@@ -2033,6 +2258,8 @@ export interface UpdateBookingInput {
   carerId?: string | null;
   carerTransportRequired?: boolean;
   participantTransportRequired?: boolean;
+  /** One-off pickup override for this event. `null` clears it; `undefined` leaves it. */
+  tripPickupAddressOverride?: string | null;
 }
 
 export interface UpdateBookingResult {
@@ -2077,6 +2304,12 @@ export async function updateEventBooking(
   }
   }
 
+  if (input.tripPickupAddressOverride !== undefined) {
+    const v = (input.tripPickupAddressOverride ?? "").toString().trim();
+    updatePayload.trip_pickup_address_override = v.length > 0 ? v : null;
+  }
+
+
   // ----- Price amendment delta (skipped when a cancellation refund is firing) -----
   let priceAdjustmentDelta = 0;
   const currentPaid = Number(input.currentAmountPaid ?? 0);
@@ -2101,7 +2334,7 @@ export async function updateEventBooking(
     .from("event_roster_bookings")
     .update(updatePayload)
     .eq("id", input.bookingId)
-    .select("*, participants!inner(first_name, last_name)")
+    .select(BOOKING_PARTICIPANT_SELECT)
     .single();
   if (error) {
     console.error("[updateEventBooking] failed", error);
@@ -2340,6 +2573,9 @@ export interface TripLeg {
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
+  /** Resolved destination address for this leg, populated at seed time via
+   * the 3-tier fallback override → permanent → street. */
+  targetAddress: string | null;
 }
 
 interface LegRow {
@@ -2367,6 +2603,7 @@ interface LegRow {
   unexpected_medication_logged: boolean;
   unexpected_medication_notes: string | null;
   completed_at: string | null;
+  target_address: string | null;
 }
 
 const numOrNull = (v: number | string | null) => (v == null ? null : Number(v));
@@ -2397,6 +2634,7 @@ function rowToLeg(r: LegRow): TripLeg {
     unexpectedMedicationLogged: r.unexpected_medication_logged,
     unexpectedMedicationNotes: r.unexpected_medication_notes,
     completedAt: r.completed_at,
+    targetAddress: r.target_address ?? null,
   };
 }
 
@@ -2475,20 +2713,57 @@ export async function getLastEndOdometer(): Promise<number | null> {
 
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
-  // 1. Build roster (ordered participants for this event).
+  // 1. Build roster (ordered participants for this event) and pull every
+  //    address signal needed for the 3-tier target_address fallback.
   const { data: bookingRows, error: bookingErr } = await supabase
     .from("event_roster_bookings")
-    .select("participant_id, participants!inner(first_name, last_name)")
+    .select(
+      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, permanent_pickup_address, street_address)",
+    )
     .eq("event_id", input.eventId)
     .order("created_at", { ascending: true });
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
 
-  const roster = (bookingRows ?? []).map((r) => {
-    const row = r as unknown as { participant_id: string; participants: { first_name: string; last_name: string } | { first_name: string; last_name: string }[] | null };
+  type RosterEntry = {
+    id: string;
+    name: string;
+    /** Strict 3-tier fallback: override → permanent → street → null. */
+    address: string | null;
+  };
+  const roster: RosterEntry[] = (bookingRows ?? []).map((r) => {
+    const row = r as unknown as {
+      participant_id: string;
+      trip_pickup_address_override: string | null;
+      participants:
+        | {
+            first_name: string;
+            last_name: string;
+            permanent_pickup_address: string | null;
+            street_address: string | null;
+          }
+        | Array<{
+            first_name: string;
+            last_name: string;
+            permanent_pickup_address: string | null;
+            street_address: string | null;
+          }>
+        | null;
+    };
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
+    const override = (row.trip_pickup_address_override ?? "").trim();
+    const permanent = (p?.permanent_pickup_address ?? "").trim();
+    const street = (p?.street_address ?? "").trim();
     return {
       id: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+      address:
+        override.length > 0
+          ? override
+          : permanent.length > 0
+            ? permanent
+            : street.length > 0
+              ? street
+              : null,
     };
   });
 
@@ -2541,6 +2816,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     from_participant_id: string | null;
     to_participant_id: string | null;
     medication_expected: boolean;
+    target_address: string | null;
   };
   const seeds: LegSeed[] = [];
   if (roster.length === 0) {
@@ -2551,6 +2827,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       from_participant_id: null,
       to_participant_id: null,
       medication_expected: false,
+      target_address: null,
     });
   } else {
     for (let i = 0; i < roster.length; i++) {
@@ -2563,6 +2840,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         from_participant_id: from ? from.id : null,
         to_participant_id: to.id,
         medication_expected: medSet.has(to.id),
+        target_address: to.address,
       });
     }
     const last = roster[roster.length - 1];
@@ -2573,6 +2851,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       from_participant_id: last.id,
       to_participant_id: null,
       medication_expected: false,
+      target_address: null,
     });
   }
   seeds.push({
@@ -2582,6 +2861,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     from_participant_id: null,
     to_participant_id: null,
     medication_expected: false,
+    target_address: null,
   });
 
   const legPayload = seeds.map((s, i) => ({

@@ -262,6 +262,12 @@ function LegRow({ leg }: { leg: TripLeg }) {
         <div className="truncate font-medium">
           {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
         </div>
+        {leg.targetAddress && (
+          <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{leg.targetAddress}</span>
+          </div>
+        )}
       </div>
       {done ? (
         <div className="flex items-center gap-1 text-xs font-semibold text-green-600">
@@ -333,6 +339,12 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
           <div className="truncate text-lg font-bold leading-tight">{leg.fromLabel}</div>
           <div className="text-xs text-slate-400">↓</div>
           <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
+          {leg.targetAddress && (
+            <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+              <span className="break-words">{leg.targetAddress}</span>
+            </div>
+          )}
         </div>
       </div>
 
