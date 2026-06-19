@@ -2628,6 +2628,7 @@ interface LegRow {
   no_show_triggered_at: string | null;
   medication_expected: boolean;
   medication_handover_confirmed: boolean;
+  medication_handover_status: MedicationHandoverStatus | null;
   unexpected_medication_logged: boolean;
   unexpected_medication_notes: string | null;
   completed_at: string | null;
