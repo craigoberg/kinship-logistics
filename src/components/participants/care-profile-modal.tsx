@@ -73,6 +73,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
   const [streetAddress, setStreetAddress] = useState("");
+  const [regularPickupAddress, setRegularPickupAddress] = useState("");
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
   const [scheduleOpen, setScheduleOpen] = useState(false);
