@@ -23,7 +23,7 @@ import { cn } from "@/lib/utils";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
-  DAY_ANOMALY_PLACEHOLDERS,
+  useStartEndDayAnomalies,
   VEHICLE_COMPLIANCE_PLACEHOLDERS,
   STAFF_CERT_PLACEHOLDERS,
   ASSET_LIABILITY_PLACEHOLDERS,
