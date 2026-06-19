@@ -15,8 +15,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 
 import {
-  DEFAULT_STAFF_UUID,
-  getStaffId,
+  resolveStaffIdWithFallback,
   type OperationalEscalation,
 } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
