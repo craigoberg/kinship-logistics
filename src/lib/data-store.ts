@@ -3315,3 +3315,238 @@ export async function insertAssetDailyClearance(
   if (error) throwPg("[insertAssetDailyClearance]", error);
   return rowToClearance(data as AssetDailyClearanceRow);
 }
+
+// ============================================================================
+// ASSET CHECKPOINTS + CLEARANCE ITEMS (drill-down walkaround results)
+// SQL: docs/sql/2026-06-23_asset_checkpoints_and_items.sql
+// ============================================================================
+
+export interface AssetCheckpoint {
+  id: string;
+  assetId: string | null;
+  vehicleCategory: string | null;
+  label: string;
+  category: string | null;
+  isMandatory: boolean;
+  sortOrder: number;
+  isActive: boolean;
+}
+
+interface AssetCheckpointRow {
+  id: string;
+  asset_id: string | null;
+  vehicle_category: string | null;
+  label: string;
+  category: string | null;
+  is_mandatory: boolean;
+  sort_order: number;
+  is_active: boolean;
+}
+
+function rowToCheckpoint(r: AssetCheckpointRow): AssetCheckpoint {
+  return {
+    id: r.id,
+    assetId: r.asset_id,
+    vehicleCategory: r.vehicle_category,
+    label: r.label,
+    category: r.category,
+    isMandatory: r.is_mandatory,
+    sortOrder: Number(r.sort_order),
+    isActive: r.is_active,
+  };
+}
+
+/**
+ * Loads the active checkpoint library applicable to a given vehicle.
+ * Matches: checkpoints scoped directly to the asset, checkpoints scoped
+ * to the asset's vehicle_category, and the global 'all' fallback list.
+ */
+export async function listCheckpointsForAsset(
+  assetId: string,
+  vehicleCategory: string | null,
+): Promise<AssetCheckpoint[]> {
+  // OR filter accepts (asset_id.eq.<id>, vehicle_category.eq.<cat>, vehicle_category.eq.all)
+  const orClauses = [`asset_id.eq.${assetId}`, `vehicle_category.eq.all`];
+  if (vehicleCategory) orClauses.push(`vehicle_category.eq.${vehicleCategory}`);
+  const { data, error } = await supabase
+    .from("asset_checkpoints")
+    .select("*")
+    .eq("is_active", true)
+    .or(orClauses.join(","))
+    .order("sort_order", { ascending: true })
+    .order("label", { ascending: true });
+  if (error) {
+    console.error("[listCheckpointsForAsset] failed", error);
+    return [];
+  }
+  return ((data ?? []) as AssetCheckpointRow[]).map(rowToCheckpoint);
+}
+
+export interface AssetClearanceItem {
+  id: string;
+  clearanceId: string;
+  checkpointId: string | null;
+  checkpointLabel: string;
+  passed: boolean;
+  isMandatory: boolean;
+  notes: string | null;
+}
+
+interface AssetClearanceItemRow {
+  id: string;
+  clearance_id: string;
+  checkpoint_id: string | null;
+  checkpoint_label: string;
+  passed: boolean;
+  is_mandatory: boolean;
+  notes: string | null;
+}
+
+function rowToClearanceItem(r: AssetClearanceItemRow): AssetClearanceItem {
+  return {
+    id: r.id,
+    clearanceId: r.clearance_id,
+    checkpointId: r.checkpoint_id,
+    checkpointLabel: r.checkpoint_label,
+    passed: r.passed,
+    isMandatory: r.is_mandatory,
+    notes: r.notes,
+  };
+}
+
+export interface NewClearanceItemInput {
+  checkpointId: string | null;
+  checkpointLabel: string;
+  passed: boolean;
+  isMandatory: boolean;
+  notes?: string | null;
+}
+
+export interface AssetClearanceBundle {
+  clearance: AssetDailyClearance;
+  items: AssetClearanceItem[];
+}
+
+/**
+ * Inserts the master clearance row and the per-question result rows.
+ * Status is computed authoritatively from the items: any mandatory checkpoint
+ * failed → 'failed', else 'passed'. The DB UNIQUE(asset_id, clearance_date)
+ * remains the final guard.
+ */
+export async function insertAssetClearanceWithItems(input: {
+  assetId: string;
+  clearanceDate: string;
+  driverStaffId: string;
+  startOdometer: number;
+  items: NewClearanceItemInput[];
+  notes?: string | null;
+}): Promise<AssetClearanceBundle> {
+  const computedStatus: ClearanceStatus = input.items.some(
+    (i) => i.isMandatory && !i.passed,
+  )
+    ? "failed"
+    : "passed";
+
+  const clearance = await insertAssetDailyClearance({
+    assetId: input.assetId,
+    clearanceDate: input.clearanceDate,
+    driverStaffId: input.driverStaffId,
+    startOdometer: input.startOdometer,
+    status: computedStatus,
+    notes: input.notes ?? null,
+  });
+
+  if (input.items.length === 0) {
+    return { clearance, items: [] };
+  }
+
+  const itemRows = input.items.map((i) => ({
+    clearance_id: clearance.id,
+    checkpoint_id: i.checkpointId,
+    checkpoint_label: i.checkpointLabel,
+    passed: i.passed,
+    is_mandatory: i.isMandatory,
+    notes: i.notes ?? null,
+  }));
+  const { data, error } = await supabase
+    .from("asset_clearance_items")
+    .insert(itemRows)
+    .select("*");
+  if (error) {
+    // Best-effort cleanup of the master row so the day is retryable.
+    await supabase.from("asset_daily_clearance").delete().eq("id", clearance.id);
+    throwPg("[insertAssetClearanceWithItems:items]", error);
+  }
+  return {
+    clearance,
+    items: ((data ?? []) as AssetClearanceItemRow[]).map(rowToClearanceItem),
+  };
+}
+
+export interface FailedClearanceReport {
+  clearance: AssetDailyClearance;
+  assetName: string;
+  assetRego: string | null;
+  failedItems: AssetClearanceItem[];
+}
+
+/**
+ * Returns every FAILED clearance recorded for the given calendar date,
+ * with the asset display name and the specific failed checkpoint rows
+ * needed by the Start/End Day Anomaly dashboard feed.
+ */
+export async function listFailedClearancesWithItems(
+  dateStr: string,
+): Promise<FailedClearanceReport[]> {
+  const { data: clearances, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("clearance_date", dateStr)
+    .eq("status", "failed")
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("[listFailedClearancesWithItems:master] failed", error);
+    return [];
+  }
+  const masters = ((clearances ?? []) as AssetDailyClearanceRow[]).map(rowToClearance);
+  if (masters.length === 0) return [];
+
+  const ids = masters.map((m) => m.id);
+  const assetIds = Array.from(new Set(masters.map((m) => m.assetId)));
+
+  const [itemsRes, assetsRes] = await Promise.all([
+    supabase
+      .from("asset_clearance_items")
+      .select("*")
+      .in("clearance_id", ids)
+      .eq("passed", false),
+    supabase
+      .from("transport_assets")
+      .select("id,name,rego_plate")
+      .in("id", assetIds),
+  ]);
+
+  if (itemsRes.error) {
+    console.error("[listFailedClearancesWithItems:items]", itemsRes.error);
+  }
+  if (assetsRes.error) {
+    console.error("[listFailedClearancesWithItems:assets]", assetsRes.error);
+  }
+
+  const items = ((itemsRes.data ?? []) as AssetClearanceItemRow[]).map(rowToClearanceItem);
+  const assetById = new Map<string, { name: string; rego: string | null }>();
+  for (const a of (assetsRes.data ?? []) as Array<{
+    id: string;
+    name: string;
+    rego_plate: string | null;
+  }>) {
+    assetById.set(a.id, { name: a.name, rego: a.rego_plate });
+  }
+
+  return masters.map((m) => ({
+    clearance: m,
+    assetName: assetById.get(m.assetId)?.name ?? "Unknown vehicle",
+    assetRego: assetById.get(m.assetId)?.rego ?? null,
+    failedItems: items.filter((i) => i.clearanceId === m.id),
+  }));
+}
