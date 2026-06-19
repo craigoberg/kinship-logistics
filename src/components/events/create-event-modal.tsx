@@ -83,8 +83,15 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
         endDate: resolvedEndDate,
         ticketPrice: priceNumber,
         description: description.trim() || null,
+        status: "Planning",
+        cloneFromEventId: cloneEnabled && priorEvent ? priorEvent.id : null,
       });
-      toast.success("Event created", { description: title.trim() });
+      toast.success(
+        cloneEnabled && priorEvent
+          ? `Event created · Roster cloned from "${priorEvent.title}"`
+          : "Event created",
+        { description: title.trim() },
+      );
       onOpenChange(false);
     } catch (err) {
       // Keep the modal OPEN so the operator can correct the payload.
