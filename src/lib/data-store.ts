@@ -2661,3 +2661,17 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
   if (error) throwPg("[completeTrip]", error);
   return rowToTrip(data as TripRow);
 }
+
+export async function cancelTrip(tripId: string): Promise<TransportTrip> {
+  const { data, error } = await supabase
+    .from("transport_trips")
+    .update({
+      status: "cancelled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId)
+    .select("*")
+    .single();
+  if (error) throwPg("[cancelTrip]", error);
+  return rowToTrip(data as TripRow);
+}
