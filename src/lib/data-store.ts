@@ -1936,7 +1936,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name, permanent_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
+      "*, participants!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
