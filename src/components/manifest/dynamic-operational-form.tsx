@@ -231,6 +231,10 @@ export function DynamicOperationalForm({
         gateId: firstUnverifiedGate.id,
       });
       setForkOpen(false);
+      toast.success(
+        "🚨 Sev 1 Escalation Active. Broadcast signals and backup SMS alerts have been dispatched to the Office Pool.",
+        { duration: 8000 },
+      );
       onEscalated(esc);
     } catch {
       toast.error("Network error. Please contact the office via phone directly.");
