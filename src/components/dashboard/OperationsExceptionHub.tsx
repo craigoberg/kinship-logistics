@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertOctagon,
@@ -23,7 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { rerouteParticipantForDate } from "@/lib/data-store";
+import {
+  listClearancesAwaitingManagerReview,
+  rerouteParticipantForDate,
+  subscribeToPendingReviews,
+  type PendingManagerReviewRow,
+} from "@/lib/data-store";
+import { ManagerJointReviewModal } from "./manager-joint-review-modal";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
@@ -87,9 +93,26 @@ interface Bucket {
 }
 
 export function OperationsExceptionHub() {
+  const qc = useQueryClient();
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
+
+  const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
+    queryKey: ["pending-manager-reviews"],
+    queryFn: () => listClearancesAwaitingManagerReview(),
+    refetchInterval: 10_000,
+  });
+  const pendingReviews = pendingReviewsQ.data ?? [];
+  const [activeReview, setActiveReview] =
+    useState<PendingManagerReviewRow | null>(null);
+
+  useEffect(() => {
+    const off = subscribeToPendingReviews(() => {
+      qc.invalidateQueries({ queryKey: ["pending-manager-reviews"] });
+    });
+    return off;
+  }, [qc]);
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
@@ -221,6 +244,64 @@ export function OperationsExceptionHub() {
           ))}
         </div>
       )}
+
+      <section className="rounded-md border-2 border-red-600/40 bg-red-600/5">
+        <header className="flex items-center justify-between gap-2 border-b border-red-600/30 px-3 py-2">
+          <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
+            <ShieldAlert className="h-4 w-4" />
+            <h4 className="text-sm font-semibold">
+              Pending Driver Review (RED dual-PIN handshake)
+            </h4>
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {pendingReviews.length}{" "}
+            {pendingReviews.length === 1 ? "vehicle" : "vehicles"}
+          </span>
+        </header>
+        {pendingReviews.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground">
+            No drivers awaiting joint review.
+          </div>
+        ) : (
+          <ul className="divide-y divide-red-600/20">
+            {pendingReviews.map((r) => {
+              const managerDone = !!r.clearance.managerAuthPinVerifiedAt;
+              return (
+                <li
+                  key={r.clearance.id}
+                  className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+                >
+                  <div className="min-w-0">
+                    <div className="truncate font-semibold">{r.assetName}</div>
+                    <div className="truncate text-xs text-muted-foreground">
+                      {r.assetRego ?? "—"} · submitted{" "}
+                      {new Date(r.clearance.createdAt).toLocaleTimeString([], {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                      })}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    className="bg-red-600 hover:bg-red-700"
+                    onClick={() => setActiveReview(r)}
+                  >
+                    {managerDone ? "Awaiting driver…" : "Open joint review"}
+                  </Button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </section>
+
+      <ManagerJointReviewModal
+        open={!!activeReview}
+        onOpenChange={(o) => {
+          if (!o) setActiveReview(null);
+        }}
+        row={activeReview}
+      />
     </Card>
   );
 }

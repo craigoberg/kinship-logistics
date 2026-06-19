@@ -55,6 +55,7 @@ import {
   DEFAULT_STAFF_UUID,
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -286,11 +287,45 @@ function ClearanceGate({
   }
 
   return (
-    <WalkaroundChecklist
+    <IssueAccumulatorGate
       asset={asset}
       startOdometer={startOdometer}
       dateStr={dateStr}
       onPassed={onCleared}
+      onBack={onBack}
+    />
+  );
+}
+
+function IssueAccumulatorGate({
+  asset,
+  startOdometer,
+  dateStr,
+  onPassed,
+  onBack,
+}: {
+  asset: TransportAsset;
+  startOdometer: number;
+  dateStr: string;
+  onPassed: () => void;
+  onBack: () => void;
+}) {
+  const checkpointsQ = useQuery<AssetCheckpoint[]>({
+    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
+    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
+    staleTime: 5 * 60_000,
+  });
+  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+  const driverName = staffName(driverStaffId);
+
+  return (
+    <IssueAccumulatorPanel
+      asset={asset}
+      startOdometer={startOdometer}
+      dateStr={dateStr}
+      checkpoints={checkpointsQ.data ?? []}
+      driverName={driverName}
+      onCleared={onPassed}
       onBack={onBack}
     />
   );

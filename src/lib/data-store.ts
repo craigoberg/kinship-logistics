@@ -3191,7 +3191,11 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
   };
 }
 
-export type ClearanceStatus = "passed" | "failed";
+export type ClearanceStatus =
+  | "passed"
+  | "failed"
+  | "awaiting_manager_review"
+  | "authorized_override";
 
 export interface AssetDailyClearance {
   id: string;
@@ -3201,6 +3205,13 @@ export interface AssetDailyClearance {
   startOdometer: number;
   status: ClearanceStatus;
   notes: string | null;
+  accumulatedIssues: string | null;
+  driverComfortDeclared: boolean;
+  requiresManagerReview: boolean;
+  driverAuthStaffId: string | null;
+  driverAuthPinVerifiedAt: string | null;
+  managerAuthStaffId: string | null;
+  managerAuthPinVerifiedAt: string | null;
   createdAt: string;
 }
 
@@ -3212,6 +3223,13 @@ interface AssetDailyClearanceRow {
   start_odometer: number | string;
   status: ClearanceStatus;
   notes: string | null;
+  accumulated_issues: string | null;
+  driver_comfort_declared: boolean | null;
+  requires_manager_review: boolean | null;
+  driver_auth_staff_id: string | null;
+  driver_auth_pin_verified_at: string | null;
+  manager_auth_staff_id: string | null;
+  manager_auth_pin_verified_at: string | null;
   created_at: string;
 }
 
@@ -3224,6 +3242,13 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
     startOdometer: Number(r.start_odometer),
     status: r.status,
     notes: r.notes,
+    accumulatedIssues: r.accumulated_issues ?? null,
+    driverComfortDeclared: r.driver_comfort_declared ?? false,
+    requiresManagerReview: r.requires_manager_review ?? false,
+    driverAuthStaffId: r.driver_auth_staff_id,
+    driverAuthPinVerifiedAt: r.driver_auth_pin_verified_at,
+    managerAuthStaffId: r.manager_auth_staff_id,
+    managerAuthPinVerifiedAt: r.manager_auth_pin_verified_at,
     createdAt: r.created_at,
   };
 }
@@ -3377,6 +3402,8 @@ export async function listCheckpointsForAsset(
   return ((data ?? []) as AssetCheckpointRow[]).map(rowToCheckpoint);
 }
 
+export type ClearanceIssueSeverity = "green" | "yellow" | "red";
+
 export interface AssetClearanceItem {
   id: string;
   clearanceId: string;
@@ -3385,16 +3412,21 @@ export interface AssetClearanceItem {
   passed: boolean;
   isMandatory: boolean;
   notes: string | null;
+  severity: ClearanceIssueSeverity | null;
+  workaroundText: string | null;
 }
 
 interface AssetClearanceItemRow {
   id: string;
   clearance_id: string;
   checkpoint_id: string | null;
-  checkpoint_label: string;
-  passed: boolean;
-  is_mandatory: boolean;
+  checkpoint_label?: string | null;
+  is_passed: boolean | null;
+  passed?: boolean | null;
+  is_mandatory?: boolean | null;
   notes: string | null;
+  severity: ClearanceIssueSeverity | null;
+  workaround_text: string | null;
 }
 
 function rowToClearanceItem(r: AssetClearanceItemRow): AssetClearanceItem {
@@ -3402,10 +3434,12 @@ function rowToClearanceItem(r: AssetClearanceItemRow): AssetClearanceItem {
     id: r.id,
     clearanceId: r.clearance_id,
     checkpointId: r.checkpoint_id,
-    checkpointLabel: r.checkpoint_label,
-    passed: r.passed,
-    isMandatory: r.is_mandatory,
+    checkpointLabel: r.checkpoint_label ?? "",
+    passed: (r.is_passed ?? r.passed ?? false) as boolean,
+    isMandatory: r.is_mandatory ?? false,
     notes: r.notes,
+    severity: r.severity ?? null,
+    workaroundText: r.workaround_text ?? null,
   };
 }
 
@@ -3415,6 +3449,8 @@ export interface NewClearanceItemInput {
   passed: boolean;
   isMandatory: boolean;
   notes?: string | null;
+  severity?: ClearanceIssueSeverity | null;
+  workaroundText?: string | null;
 }
 
 export interface AssetClearanceBundle {
@@ -3424,9 +3460,11 @@ export interface AssetClearanceBundle {
 
 /**
  * Inserts the master clearance row and the per-question result rows.
- * Status is computed authoritatively from the items: any mandatory checkpoint
- * failed → 'failed', else 'passed'. The DB UNIQUE(asset_id, clearance_date)
- * remains the final guard.
+ * Status is computed authoritatively from the items:
+ *   - any RED severity item → 'awaiting_manager_review' (dual-PIN gate)
+ *   - any mandatory failed item → 'failed'
+ *   - else 'passed'
+ * The DB UNIQUE(asset_id, clearance_date) remains the final guard.
  */
 export async function insertAssetClearanceWithItems(input: {
   assetId: string;
@@ -3434,20 +3472,44 @@ export async function insertAssetClearanceWithItems(input: {
   driverStaffId: string;
   startOdometer: number;
   items: NewClearanceItemInput[];
+  accumulatedIssues?: string | null;
+  driverComfortDeclared?: boolean;
 }): Promise<AssetClearanceBundle> {
-  const computedStatus: ClearanceStatus = input.items.some(
-    (i) => i.isMandatory && !i.passed,
-  )
-    ? "failed"
-    : "passed";
+  const hasRed = input.items.some((i) => i.severity === "red");
+  const mandatoryFail = input.items.some((i) => i.isMandatory && !i.passed);
+  const computedStatus: ClearanceStatus = hasRed
+    ? "awaiting_manager_review"
+    : mandatoryFail
+      ? "failed"
+      : "passed";
 
-  const clearance = await insertAssetDailyClearance({
-    assetId: input.assetId,
-    clearanceDate: input.clearanceDate,
-    driverStaffId: input.driverStaffId,
-    startOdometer: input.startOdometer,
-    status: computedStatus,
-  });
+  // Direct insert (not via insertAssetDailyClearance) so we can persist the
+  // new accumulator / declaration columns in one round-trip.
+  const existing = await getClearanceForAssetOnDate(
+    input.assetId,
+    input.clearanceDate,
+  );
+  if (existing) {
+    throw new Error(
+      `Clearance already recorded for this vehicle on ${input.clearanceDate}.`,
+    );
+  }
+  const { data: clearanceRow, error: clearanceErr } = await supabase
+    .from("asset_daily_clearance")
+    .insert({
+      asset_id: input.assetId,
+      clearance_date: input.clearanceDate,
+      driver_staff_id: input.driverStaffId,
+      start_odometer: input.startOdometer,
+      status: computedStatus,
+      accumulated_issues: input.accumulatedIssues ?? null,
+      driver_comfort_declared: !!input.driverComfortDeclared,
+      requires_manager_review: hasRed,
+    })
+    .select("*")
+    .single();
+  if (clearanceErr) throwPg("[insertAssetClearanceWithItems:master]", clearanceErr);
+  const clearance = rowToClearance(clearanceRow as AssetDailyClearanceRow);
 
   if (input.items.length === 0) {
     return { clearance, items: [] };
@@ -3458,6 +3520,8 @@ export async function insertAssetClearanceWithItems(input: {
     checkpoint_id: i.checkpointId,
     is_passed: i.passed,
     notes: i.notes ?? null,
+    severity: i.severity ?? null,
+    workaround_text: i.workaroundText ?? null,
   }));
   const { data, error } = await supabase
     .from("asset_clearance_items")
@@ -3471,6 +3535,220 @@ export async function insertAssetClearanceWithItems(input: {
   return {
     clearance,
     items: ((data ?? []) as AssetClearanceItemRow[]).map(rowToClearanceItem),
+  };
+}
+
+// ============================================================================
+// DUAL-PIN HANDSHAKE — Driver comfort declaration + Manager joint review.
+// SQL: docs/sql/2026-06-24_dual_pin_handshake.sql
+// ============================================================================
+
+/** Verifies a 4-digit onboarding PIN against staff_registry.pin_hash. */
+export async function verifyStaffPin(
+  staffId: string,
+  pin: string,
+): Promise<boolean> {
+  const { data, error } = await supabase.rpc("verify_staff_pin", {
+    _staff_id: staffId,
+    _pin: pin,
+  });
+  if (error) {
+    console.error("[verifyStaffPin] failed", error);
+    return false;
+  }
+  return data === true;
+}
+
+/** Manager side of the dual-PIN handshake — must run BEFORE the driver PIN. */
+export async function submitManagerAuthorization(
+  clearanceId: string,
+  managerStaffId: string,
+  pin: string,
+): Promise<AssetDailyClearance> {
+  const ok = await verifyStaffPin(managerStaffId, pin);
+  if (!ok) throw new Error("Invalid manager PIN.");
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .update({
+      manager_auth_staff_id: managerStaffId,
+      manager_auth_pin_verified_at: new Date().toISOString(),
+    })
+    .eq("id", clearanceId)
+    .select("*")
+    .single();
+  if (error) throwPg("[submitManagerAuthorization]", error);
+  return rowToClearance(data as AssetDailyClearanceRow);
+}
+
+/**
+ * Driver side of the handshake. For RED clearances the manager PIN must
+ * already be verified; both sides verified flips status to authorized_override.
+ * For non-RED comfort declarations, it simply locks the driver PIN.
+ */
+export async function submitDriverAuthorization(
+  clearanceId: string,
+  driverStaffId: string,
+  pin: string,
+): Promise<AssetDailyClearance> {
+  const ok = await verifyStaffPin(driverStaffId, pin);
+  if (!ok) throw new Error("Invalid driver PIN.");
+
+  const { data: current, error: readErr } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("id", clearanceId)
+    .single();
+  if (readErr) throwPg("[submitDriverAuthorization:read]", readErr);
+  const currentClearance = rowToClearance(current as AssetDailyClearanceRow);
+
+  if (
+    currentClearance.requiresManagerReview &&
+    !currentClearance.managerAuthPinVerifiedAt
+  ) {
+    throw new Error(
+      "Manager authorization is still pending — wait for joint review.",
+    );
+  }
+
+  const nowIso = new Date().toISOString();
+  const nextStatus: ClearanceStatus = currentClearance.requiresManagerReview
+    ? "authorized_override"
+    : currentClearance.status;
+
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .update({
+      driver_auth_staff_id: driverStaffId,
+      driver_auth_pin_verified_at: nowIso,
+      status: nextStatus,
+    })
+    .eq("id", clearanceId)
+    .select("*")
+    .single();
+  if (error) throwPg("[submitDriverAuthorization]", error);
+  return rowToClearance(data as AssetDailyClearanceRow);
+}
+
+/** Single-row fetch by clearance id — used by the dashboard joint review. */
+export async function getClearanceById(
+  clearanceId: string,
+): Promise<AssetDailyClearance | null> {
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("id", clearanceId)
+    .maybeSingle();
+  if (error) {
+    console.error("[getClearanceById] failed", error);
+    return null;
+  }
+  return data ? rowToClearance(data as AssetDailyClearanceRow) : null;
+}
+
+/** Items list for a single clearance — read-only mirror for dashboard. */
+export async function listClearanceItems(
+  clearanceId: string,
+): Promise<AssetClearanceItem[]> {
+  const { data, error } = await supabase
+    .from("asset_clearance_items")
+    .select("*")
+    .eq("clearance_id", clearanceId);
+  if (error) {
+    console.error("[listClearanceItems] failed", error);
+    return [];
+  }
+  return ((data ?? []) as AssetClearanceItemRow[]).map(rowToClearanceItem);
+}
+
+export interface PendingManagerReviewRow {
+  clearance: AssetDailyClearance;
+  assetName: string;
+  assetRego: string | null;
+}
+
+/** Active clearances waiting for the manager half of the dual-PIN handshake. */
+export async function listClearancesAwaitingManagerReview(): Promise<
+  PendingManagerReviewRow[]
+> {
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("status", "awaiting_manager_review")
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("[listClearancesAwaitingManagerReview] failed", error);
+    return [];
+  }
+  const clearances = ((data ?? []) as AssetDailyClearanceRow[]).map(
+    rowToClearance,
+  );
+  if (clearances.length === 0) return [];
+
+  const assetIds = Array.from(new Set(clearances.map((c) => c.assetId)));
+  const { data: assets } = await supabase
+    .from("transport_assets")
+    .select("id,name,rego_plate")
+    .in("id", assetIds);
+  const byId = new Map<string, { name: string; rego: string | null }>();
+  for (const a of (assets ?? []) as Array<{
+    id: string;
+    name: string;
+    rego_plate: string | null;
+  }>) {
+    byId.set(a.id, { name: a.name, rego: a.rego_plate });
+  }
+
+  return clearances.map((c) => {
+    const meta = byId.get(c.assetId);
+    return {
+      clearance: c,
+      assetName: meta?.name ?? "Unknown vehicle",
+      assetRego: meta?.rego ?? null,
+    };
+  });
+}
+
+/** Realtime subscription for a single clearance row. Returns cleanup fn. */
+export function subscribeToClearance(
+  clearanceId: string,
+  cb: (next: AssetDailyClearance) => void,
+): () => void {
+  const channel = supabase
+    .channel(`clearance-${clearanceId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "asset_daily_clearance",
+        filter: `id=eq.${clearanceId}`,
+      },
+      (payload) => {
+        cb(rowToClearance(payload.new as AssetDailyClearanceRow));
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}
+
+/** Realtime subscription for the manager review queue. */
+export function subscribeToPendingReviews(cb: () => void): () => void {
+  const channel = supabase
+    .channel(`pending-manager-reviews`)
+    .on(
+      "postgres_changes",
+      {
+        event: "*",
+        schema: "public",
+        table: "asset_daily_clearance",
+      },
+      () => cb(),
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
   };
 }
 
@@ -3510,7 +3788,7 @@ export async function listFailedClearancesWithItems(
       .from("asset_clearance_items")
       .select("*")
       .in("clearance_id", ids)
-      .eq("passed", false),
+      .eq("is_passed", false),
     supabase
       .from("transport_assets")
       .select("id,name,rego_plate")
