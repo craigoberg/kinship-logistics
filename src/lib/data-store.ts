@@ -3284,7 +3284,6 @@ export interface NewAssetDailyClearance {
   driverStaffId: string;
   startOdometer: number;
   status: ClearanceStatus;
-  notes?: string | null;
 }
 
 /**
@@ -3310,7 +3309,6 @@ export async function insertAssetDailyClearance(
       driver_staff_id: input.driverStaffId,
       start_odometer: input.startOdometer,
       status: input.status,
-      notes: input.notes ?? null,
     })
     .select("*")
     .single();
@@ -3436,7 +3434,6 @@ export async function insertAssetClearanceWithItems(input: {
   driverStaffId: string;
   startOdometer: number;
   items: NewClearanceItemInput[];
-  notes?: string | null;
 }): Promise<AssetClearanceBundle> {
   const computedStatus: ClearanceStatus = input.items.some(
     (i) => i.isMandatory && !i.passed,
@@ -3450,7 +3447,6 @@ export async function insertAssetClearanceWithItems(input: {
     driverStaffId: input.driverStaffId,
     startOdometer: input.startOdometer,
     status: computedStatus,
-    notes: input.notes ?? null,
   });
 
   if (input.items.length === 0) {
