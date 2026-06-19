@@ -870,6 +870,7 @@ import {
   startTrip as startTripFn,
   patchTripLeg as patchTripLegFn,
   completeTrip as completeTripFn,
+  cancelTrip as cancelTripFn,
   getStaffId,
   getLastEndOdometer,
   type StartTripInput,
