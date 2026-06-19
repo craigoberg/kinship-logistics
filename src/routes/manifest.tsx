@@ -306,10 +306,10 @@ function FastPassBanner({
   onConfirm: () => void;
   onBack: () => void;
 }) {
-  const time = new Date(clearance.createdAt).toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const parsed = clearance.createdAt ? new Date(clearance.createdAt) : null;
+  const time = parsed && !isNaN(parsed.getTime())
+    ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+    : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const driver = staffName(clearance.driverStaffId);
 
   return (
