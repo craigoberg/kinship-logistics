@@ -557,3 +557,49 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
     </div>
   );
 }
+
+function CancelTripButton({ tripId }: { tripId: string }) {
+  const cancel = useCancelTrip();
+  const [open, setOpen] = useState(false);
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          className="h-11 w-full rounded-xl border-2 border-red-600 bg-transparent text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+          disabled={cancel.isPending}
+        >
+          ✕ Cancel / Reset Trip
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel this run?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Logged kilometres and leg captures will be discarded. This cannot be undone.
+            You'll return to the event selection screen.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Driving</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 text-white hover:bg-red-700"
+            onClick={() =>
+              cancel.mutate(
+                { tripId },
+                {
+                  onSuccess: () => {
+                    toast.success("Run cancelled");
+                    setOpen(false);
+                  },
+                },
+              )
+            }
+          >
+            Cancel Trip
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
+  );
+}
