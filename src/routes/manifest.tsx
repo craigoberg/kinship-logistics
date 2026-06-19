@@ -313,26 +313,64 @@ function IssueAccumulatorGate({
   onPassed: () => void;
   onBack: () => void;
 }) {
-  const checkpointsQ = useQuery<AssetCheckpoint[]>({
-    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
-    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
-    staleTime: 5 * 60_000,
-  });
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
+  const [escalation, setEscalation] = useState<OperationalEscalation | null>(null);
+  const [redHandshake, setRedHandshake] = useState<{
+    clearance: AssetDailyClearance;
+    issues: import("@/components/manifest/dynamic-operational-form").DraftIssue[];
+  } | null>(null);
+
+  if (escalation) {
+    return (
+      <RedHandshakeWaitingPanel
+        asset={asset}
+        driverName={driverName}
+        escalationId={escalation.id}
+        onAuthorized={onPassed}
+        onBack={() => {
+          setEscalation(null);
+          onBack();
+        }}
+      />
+    );
+  }
+
+  if (redHandshake) {
+    return (
+      <RedHandshakeWaitingPanel
+        asset={asset}
+        driverName={driverName}
+        clearance={redHandshake.clearance}
+        issues={redHandshake.issues}
+        onAuthorized={onPassed}
+        onBack={() => {
+          setRedHandshake(null);
+          onBack();
+        }}
+      />
+    );
+  }
 
   return (
-    <IssueAccumulatorPanel
+    <DynamicOperationalForm
+      schema={PRE_TRIP_SCHEMA}
       asset={asset}
       startOdometer={startOdometer}
       dateStr={dateStr}
-      checkpoints={checkpointsQ.data ?? []}
       driverName={driverName}
       onCleared={onPassed}
+      onEscalated={(esc) => setEscalation(esc)}
+      onRedHandshake={(clearance, issues) =>
+        setRedHandshake({ clearance, issues })
+      }
       onBack={onBack}
     />
   );
 }
+
+// Keep `IssueAccumulatorPanel` imported (legacy backwards compat).
+void IssueAccumulatorPanel;
 
 function FastPassBanner({
   asset,
