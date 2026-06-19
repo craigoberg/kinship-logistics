@@ -130,6 +130,7 @@ function RootComponent() {
       <AppShell>
         <Outlet />
       </AppShell>
+      <NotificationSimulator />
     </QueryClientProvider>
   );
 }
