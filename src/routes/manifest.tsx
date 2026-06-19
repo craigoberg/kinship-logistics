@@ -351,6 +351,16 @@ interface ChecklistAnswer {
   notes: string;
 }
 
+const SEATBELT_RX = /seat\s*belt|seatbelt/i;
+const HOIST_RX = /hoist|wheelchair/i;
+
+function isSeatbeltCheckpoint(c: AssetCheckpoint): boolean {
+  return SEATBELT_RX.test(c.label);
+}
+function isHoistCheckpoint(c: AssetCheckpoint): boolean {
+  return HOIST_RX.test(c.label);
+}
+
 function WalkaroundChecklist({
   asset,
   startOdometer,
@@ -371,34 +381,64 @@ function WalkaroundChecklist({
     staleTime: 5 * 60_000,
   });
 
+  const manifestSummaryQ = useQuery<TodayManifestSummary>({
+    queryKey: ["today-manifest-summary", dateStr],
+    queryFn: () => getTodayManifestSummary(dateStr),
+    staleTime: 60_000,
+  });
+  const summary = manifestSummaryQ.data;
+  const totalPassengers = summary?.totalSeatsBooked ?? 0;
+  const hoistDependents = summary?.hoistDependents ?? [];
+  const hoistRequiredCount = hoistDependents.length;
+
   const [answers, setAnswers] = useState<Record<string, ChecklistAnswer>>({});
+  const [brokenBelts, setBrokenBelts] = useState<string>("");
+  const [overrideUnlocked, setOverrideUnlocked] = useState(false);
+  const [pinDialogOpen, setPinDialogOpen] = useState(false);
+  const [pinInput, setPinInput] = useState("");
 
   const submitMut = useMutation({
-    mutationFn: async (checkpoints: AssetCheckpoint[]) => {
+    mutationFn: async (
+      input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean },
+    ) => {
       const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
-      const items = checkpoints.map((c) => {
+      const items = input.checkpoints.map((c) => {
         const a = answers[c.id] ?? { passed: false, notes: "" };
+        let notes = a.notes.trim();
+        if (isSeatbeltCheckpoint(c) && a.passed === false) {
+          const n = Number(brokenBelts) || 0;
+          notes = `${n} faulty seatbelt(s). ${notes}`.trim();
+        }
+        if (isHoistCheckpoint(c) && a.passed === false && hoistRequiredCount > 0) {
+          notes = `Hoist fault — ${hoistRequiredCount} hoist passenger(s) flagged for reroute. ${notes}`.trim();
+        }
         return {
           checkpointId: c.id,
           checkpointLabel: c.label,
           passed: a.passed,
           isMandatory: c.isMandatory,
-          notes: a.notes.trim() ? a.notes.trim() : null,
+          notes: notes ? notes : null,
         };
       });
-      return insertAssetClearanceWithItems({
+      const bundle = await insertAssetClearanceWithItems({
         assetId: asset.id,
         clearanceDate: dateStr,
         driverStaffId,
         startOdometer: Math.round(startOdometer),
         items,
       });
+      return { bundle, forceProceed: input.forceProceed };
     },
-    onSuccess: (bundle) => {
+    onSuccess: ({ bundle, forceProceed }) => {
       qc.invalidateQueries({ queryKey: ["asset-clearance", asset.id, dateStr] });
       qc.invalidateQueries({ queryKey: ["start-end-day-anomalies"] });
       if (bundle.clearance.status === "passed") {
         toast.success("Vehicle cleared", { description: `${asset.name} passed walkaround.` });
+        onPassed();
+      } else if (forceProceed) {
+        toast.warning("Cleared with cautions", {
+          description: "Coordinator has been notified of the flagged checkpoints.",
+        });
         onPassed();
       } else {
         toast.error("Vehicle NOT cleared", {
@@ -428,6 +468,53 @@ function WalkaroundChecklist({
   const setNotes = (id: string, notes: string) =>
     setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { passed: false }), notes } }));
 
+  // Derived seatbelt + hoist state.
+  const seatbeltFailedCp = checkpoints.find(
+    (c) => isSeatbeltCheckpoint(c) && answers[c.id]?.passed === false,
+  );
+  const hoistFailedCp = checkpoints.find(
+    (c) => isHoistCheckpoint(c) && answers[c.id]?.passed === false,
+  );
+  const brokenBeltCount = Math.max(0, Math.floor(Number(brokenBelts) || 0));
+  const baselineCapacity = asset.passengerCapacity;
+  const effectiveCapacity = Math.max(0, baselineCapacity - brokenBeltCount);
+  const capacityMismatch =
+    !!seatbeltFailedCp && brokenBeltCount > 0 && totalPassengers > effectiveCapacity;
+  const seatbeltSoftPass =
+    !!seatbeltFailedCp && brokenBeltCount > 0 && !capacityMismatch;
+  const hoistSoftPass = !!hoistFailedCp; // hoist fail never hard-locks driver
+
+  // Determine other mandatory hard failures (i.e. mandatory fails that are
+  // NOT seatbelt-with-capacity-ok and NOT hoist).
+  const otherMandatoryHardFail = checkpoints.some((c) => {
+    const a = answers[c.id];
+    if (!a || a.passed !== false || !c.isMandatory) return false;
+    if (isHoistCheckpoint(c)) return false;
+    if (isSeatbeltCheckpoint(c)) return capacityMismatch && !overrideUnlocked;
+    return true;
+  });
+
+  const forceProceed = (seatbeltSoftPass || hoistSoftPass) && !otherMandatoryHardFail;
+  const submitBlocked =
+    !allAnswered ||
+    submitMut.isPending ||
+    (capacityMismatch && !overrideUnlocked) ||
+    (!!seatbeltFailedCp && brokenBeltCount <= 0) ||
+    otherMandatoryHardFail && !forceProceed;
+
+  const handleOverrideSubmit = () => {
+    if (pinInput.trim() === "0000") {
+      setOverrideUnlocked(true);
+      setPinDialogOpen(false);
+      setPinInput("");
+      toast.success("Manager override accepted", {
+        description: "Capacity mismatch unlocked — proceed with caution.",
+      });
+    } else {
+      toast.error("Invalid override PIN");
+    }
+  };
+
   return (
     <Card className="p-5">
       <div className="flex items-center gap-2">
@@ -437,12 +524,18 @@ function WalkaroundChecklist({
       <p className="mt-1 text-sm text-muted-foreground">
         {asset.regoPlate} · Tick every checkpoint as PASS or FAIL. Mandatory failures block dispatch.
       </p>
+      <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
+        Capacity {baselineCapacity} seats · {totalPassengers} booked today
+        {hoistRequiredCount > 0 && ` · ${hoistRequiredCount} hoist-dependent`}
+      </div>
 
       <div className="mt-5 space-y-3">
         {checkpoints.map((c) => {
           const a = answers[c.id];
           const decided = a?.passed !== undefined;
           const failed = a?.passed === false;
+          const seatbelt = isSeatbeltCheckpoint(c);
+          const hoist = isHoistCheckpoint(c);
           return (
             <div
               key={c.id}
@@ -489,7 +582,96 @@ function WalkaroundChecklist({
                   </button>
                 </div>
               </div>
-              {failed && (
+
+              {failed && seatbelt && (
+                <div className="mt-3 space-y-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3">
+                  <Label htmlFor={`belts-${c.id}`} className="text-xs font-semibold">
+                    How many seatbelts are faulty?
+                  </Label>
+                  <Input
+                    id={`belts-${c.id}`}
+                    type="number"
+                    min={1}
+                    max={baselineCapacity}
+                    value={brokenBelts}
+                    onChange={(e) => {
+                      setBrokenBelts(e.target.value);
+                      setOverrideUnlocked(false);
+                    }}
+                    className="h-10 w-32 tabular-nums"
+                    placeholder="e.g. 2"
+                  />
+                  {brokenBeltCount > 0 && (
+                    <div className="text-[11px] text-muted-foreground">
+                      Effective capacity:{" "}
+                      <span className="font-bold tabular-nums">{effectiveCapacity}</span>{" "}
+                      seats · Booked today:{" "}
+                      <span className="font-bold tabular-nums">{totalPassengers}</span>
+                    </div>
+                  )}
+                  {capacityMismatch && !overrideUnlocked && (
+                    <div className="rounded-md border-2 border-destructive bg-destructive/10 p-2 text-xs text-destructive">
+                      <div className="font-bold uppercase">Capacity Mismatch Emergency</div>
+                      <div className="mt-1">
+                        {totalPassengers} passengers cannot fit in {effectiveCapacity}{" "}
+                        usable seats. Manager override required to dispatch.
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setPinDialogOpen(true)}
+                        className="mt-2 h-9 w-full rounded-md bg-destructive font-bold text-destructive-foreground hover:opacity-90"
+                      >
+                        Request Manager Override PIN
+                      </button>
+                    </div>
+                  )}
+                  {seatbeltSoftPass && (
+                    <div className="rounded-md border border-yellow-600 bg-yellow-500/20 p-2 text-xs text-yellow-900 dark:text-yellow-200">
+                      <div className="font-bold uppercase">Clearance Granted with Cautions</div>
+                      <div className="mt-1">
+                        Do not use the faulty seat(s). Remaining vehicle capacity is sufficient for your run.
+                      </div>
+                    </div>
+                  )}
+                  {overrideUnlocked && (
+                    <div className="rounded-md border border-amber-600 bg-amber-500/20 p-2 text-xs text-amber-900 dark:text-amber-200">
+                      Manager override active — proceed with caution. Coordinator notified.
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {failed && hoist && (
+                <div
+                  className={cn(
+                    "mt-3 rounded-md border p-3 text-xs",
+                    hoistRequiredCount > 0
+                      ? "border-amber-600 bg-amber-500/15 text-amber-900 dark:text-amber-200"
+                      : "border-slate-500/60 bg-slate-500/10 text-muted-foreground",
+                  )}
+                >
+                  {hoistRequiredCount > 0 ? (
+                    <>
+                      <div className="font-bold uppercase">Hoist fault recorded</div>
+                      <div className="mt-1">
+                        Manifest contains <b>{hoistRequiredCount}</b> hoist-dependent passenger(s).
+                        Proceeding with mobile passengers only. Coordinator has been alerted to
+                        reroute affected clients.
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      <div className="font-bold uppercase">Minor maintenance flagged</div>
+                      <div className="mt-1">
+                        No hoist-dependent passengers on today's manifest — logged silently as a
+                        maintenance follow-up.
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+
+              {failed && !seatbelt && !hoist && (
                 <div className="mt-2 grid gap-1">
                   <Label htmlFor={`note-${c.id}`} className="text-xs">
                     Notes (what failed?)
@@ -510,13 +692,11 @@ function WalkaroundChecklist({
 
       <button
         type="button"
-        disabled={!allAnswered || submitMut.isPending}
-        onClick={() => submitMut.mutate(checkpoints)}
+        disabled={submitBlocked}
+        onClick={() => submitMut.mutate({ checkpoints, forceProceed })}
         className={cn(
           "mt-5 h-14 w-full rounded-xl font-bold text-white shadow transition",
-          !allAnswered || submitMut.isPending
-            ? "bg-blue-600 opacity-60"
-            : "bg-blue-600 hover:bg-blue-700",
+          submitBlocked ? "bg-blue-600 opacity-60" : "bg-blue-600 hover:bg-blue-700",
         )}
       >
         {submitMut.isPending ? "Submitting clearance…" : "Submit Walkaround & Clear Vehicle"}
@@ -528,9 +708,34 @@ function WalkaroundChecklist({
       >
         ← Change vehicle
       </button>
+
+      <AlertDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Manager Override Required</AlertDialogTitle>
+            <AlertDialogDescription>
+              Capacity mismatch detected. Enter the 4-digit manager PIN to authorise dispatch.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <Input
+            type="password"
+            inputMode="numeric"
+            maxLength={4}
+            value={pinInput}
+            onChange={(e) => setPinInput(e.target.value)}
+            placeholder="••••"
+            className="h-12 text-center text-lg tracking-[0.5em]"
+          />
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={() => setPinInput("")}>Cancel</AlertDialogCancel>
+            <AlertDialogAction onClick={handleOverrideSubmit}>Unlock</AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </Card>
   );
 }
+
 
 /* -------------------- Event Picker + Start Trip -------------------- */
 
