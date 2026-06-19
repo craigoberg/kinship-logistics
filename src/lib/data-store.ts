@@ -2960,6 +2960,7 @@ export async function patchTripLeg(legId: string, patch: LegPatch): Promise<Trip
   if (patch.passengerPresent !== undefined) map.passenger_present = patch.passengerPresent;
   if (patch.noShowTriggeredAt !== undefined) map.no_show_triggered_at = patch.noShowTriggeredAt;
   if (patch.medicationHandoverConfirmed !== undefined) map.medication_handover_confirmed = patch.medicationHandoverConfirmed;
+  if (patch.medicationHandoverStatus !== undefined) map.medication_handover_status = patch.medicationHandoverStatus;
   if (patch.unexpectedMedicationLogged !== undefined) map.unexpected_medication_logged = patch.unexpectedMedicationLogged;
   if (patch.unexpectedMedicationNotes !== undefined) map.unexpected_medication_notes = patch.unexpectedMedicationNotes;
   if (patch.completedAt !== undefined) map.completed_at = patch.completedAt;
