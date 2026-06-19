@@ -20,7 +20,7 @@ export interface Participant {
   streetAddress: string | null;
   /** Coordinator-managed permanent pickup address, used by the manifest engine
    * unless a per-event override is set on the booking. */
-  permanentPickupAddress: string | null;
+  regularPickupAddress: string | null;
   iddsi: { liquids: number; foods: number };
   dualWitnessPinHash: string | null;
   createdAt: string;
