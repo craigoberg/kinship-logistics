@@ -68,7 +68,11 @@ export function EditRosterBookingModal({
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
   const [participantTransport, setParticipantTransport] = useState(false);
+  const [permanentAddress, setPermanentAddress] = useState<string>("");
+  const [tripPickupOverride, setTripPickupOverride] = useState<string>("");
   const mutation = useUpdateEventBooking();
+  const updateParticipant = useUpdateParticipant();
+  const refreshSnapshot = useRefreshBookingSnapshot();
   const { data: carers = [] } = useCarersForParticipant(booking?.participantId ?? null);
 
   const collected = booking?.amountPaid ?? 0;
@@ -86,6 +90,8 @@ export function EditRosterBookingModal({
       setCarerId(booking.carerId ?? "");
       setCarerTransport(!!booking.carerTransportRequired);
       setParticipantTransport(!!booking.participantTransportRequired);
+      setPermanentAddress(booking.participantPermanentPickupAddress ?? "");
+      setTripPickupOverride(booking.tripPickupAddressOverride ?? "");
     }
   }, [open, booking, collected, eventTicketPrice]);
 
