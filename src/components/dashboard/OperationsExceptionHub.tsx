@@ -23,12 +23,14 @@ import {
   STAFF_CERT_PLACEHOLDERS,
   ASSET_LIABILITY_PLACEHOLDERS,
   type PlaceholderRow,
+  type Severity,
 } from "@/hooks/use-exception-feed";
 
 interface BucketRow {
   key: string;
   title: string;
   detail: string;
+  severity: Severity;
 }
 
 interface Bucket {
@@ -46,10 +48,17 @@ export function OperationsExceptionHub() {
     key: m.legId,
     title: `${m.participantName} · Leg ${m.legNumber}${m.eventTitle ? ` (${m.eventTitle})` : ""}`,
     detail: m.exceptionLabel,
+    severity: m.severity,
   }));
 
   const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
-    items.map((r, idx) => ({ key: `${prefix}-${idx}`, title: r.title, detail: r.detail }));
+    items.map((r, idx) => ({
+      key: `${prefix}-${idx}`,
+      title: r.title,
+      detail: r.detail,
+      severity: r.severity,
+    }));
+
 
   const buckets: Bucket[] = [
     { id: "on-road", label: "On-Road Issues", icon: AlertOctagon, isLive: true, rows: liveRows },
