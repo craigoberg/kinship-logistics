@@ -1840,15 +1840,15 @@ export interface EventRosterBooking {
   /** Whether the participant themselves needs a physical bus seat. */
   participantTransportRequired: boolean;
   /** One-off pickup address override for THIS event only. Wins over the
-   * participant's permanent_pickup_address when the manifest is seeded. */
+   * participant's regular_pickup_address when the manifest is seeded. */
   tripPickupAddressOverride: string | null;
   /** Frozen snapshot of critical medical alerts taken at the moment this
    * participant was added to the roster (or last refreshed by a coordinator). */
   dynamicMedicalNotesSnapshot: string | null;
-  /** Permanent pickup address read through the participants join — convenience
-   * mirror of participant.permanent_pickup_address so the roster table can
+  /** Regular pickup address read through the participants join — convenience
+   * mirror of participant.regular_pickup_address so the roster table can
    * render it without a second fetch. */
-  participantPermanentPickupAddress: string | null;
+  participantRegularPickupAddress: string | null;
   /** Mirror of participant.street_address from the join — last-tier fallback. */
   participantStreetAddress: string | null;
   createdAt: string;
