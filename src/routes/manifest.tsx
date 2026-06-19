@@ -18,11 +18,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   useActiveTrip,
   useStartTrip,
   usePatchTripLeg,
   useCompleteTrip,
-  useLiveEvents,
+  useCancelTrip,
+  useConfirmedEvents,
   useLastEndOdometer,
 } from "@/hooks/use-supabase-data";
 
