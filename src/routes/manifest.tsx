@@ -510,25 +510,34 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           className="mt-2 grid gap-2"
         >
           <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="collected" id={`med-coll-${leg.id}`} />
+            <RadioGroupItem value="collected_intact" id={`med-intact-${leg.id}`} />
             <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-            <span className="font-medium">Collected</span>
+            <span className="font-medium">Collected &amp; Intact</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value="collected_damaged" id={`med-dmg-${leg.id}`} />
+            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+            <span className="font-medium">Collected but Damaged / Compromised</span>
           </label>
           <label className="flex items-center gap-2 text-sm">
             <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
             <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
             <span className="font-medium">Expected but Not Provided</span>
           </label>
-          <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
-            <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
-            <span className="font-medium">Not Required</span>
-          </label>
+          {!leg.medicationExpected && (
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
+              <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
+              <span className="font-medium">Not Required</span>
+            </label>
+          )}
         </RadioGroup>
-        {medStatus === "expected_not_provided" && (
+        {exceptionFlagged && (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>An office exception flag will be recorded against this leg.</span>
+            <span>
+              Manager exception flag will be recorded against this leg.
+            </span>
           </div>
         )}
       </div>
