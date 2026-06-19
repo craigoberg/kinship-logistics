@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Save, AlertTriangle, TrendingDown } from "lucide-react";
+import { Save, AlertTriangle, TrendingDown, MapPin, RefreshCw, HeartPulse } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -21,7 +21,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useUpdateEventBooking, useCarersForParticipant } from "@/hooks/use-supabase-data";
+import {
+  useUpdateEventBooking,
+  useCarersForParticipant,
+  useUpdateParticipant,
+  useRefreshBookingSnapshot,
+} from "@/hooks/use-supabase-data";
 import type { EventRosterBooking } from "@/lib/data-store";
 
 interface Props {
