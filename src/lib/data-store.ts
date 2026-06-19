@@ -3041,8 +3041,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     trip_id: trip.id,
     leg_index: i + 1,
     status: "pending" as LegStatus,
+    medication_handover_status: "not_required" as MedicationHandoverStatus,
     ...s,
   }));
+
   const { data: legRows, error: legErr } = await supabase
     .from("trip_legs")
     .insert(legPayload)
