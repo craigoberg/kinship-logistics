@@ -42,12 +42,13 @@ import {
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
-import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance } from "@/lib/data-store";
+import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary } from "@/lib/data-store";
 import {
   listTransportAssets,
   getClearanceForAssetOnDate,
   listCheckpointsForAsset,
   insertAssetClearanceWithItems,
+  getTodayManifestSummary,
   getStaffId,
   STAFF_DIRECTORY,
   DEFAULT_STAFF_UUID,
