@@ -12,6 +12,7 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "../components/app-shell";
+import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 
 function NotFoundComponent() {
   return (
