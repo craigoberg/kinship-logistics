@@ -117,6 +117,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       lastName,
       ndisNumber,
       streetAddress: streetAddress.trim() || null,
+      regularPickupAddress: regularPickupAddress.trim() || null,
       iddsi,
     };
     if (!online) {
