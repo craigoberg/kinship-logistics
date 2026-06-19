@@ -3090,6 +3090,15 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
 }
 
 export async function cancelTrip(tripId: string): Promise<TransportTrip> {
+  // Clear medication exception flags first so ghost alerts don't leak onto
+  // the coordinator's Operations Exception Hub after cancellation.
+  const { error: legResetErr } = await supabase
+    .from("trip_legs")
+    .update({ medication_handover_status: "not_required" })
+    .eq("trip_id", tripId)
+    .in("medication_handover_status", ["collected_damaged", "expected_not_provided"]);
+  if (legResetErr) console.warn("[cancelTrip:legReset]", legResetErr);
+
   const { data, error } = await supabase
     .from("transport_trips")
     .update({
