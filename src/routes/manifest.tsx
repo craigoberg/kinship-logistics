@@ -429,6 +429,21 @@ function WalkaroundChecklist({
         startOdometer: Math.round(startOdometer),
         items,
       });
+
+      // Fire dev-mode notification router for every failed checkpoint.
+      const driverName = staffName(driverStaffId);
+      input.checkpoints.forEach((c) => {
+        const row = items.find((it) => it.checkpointId === c.id);
+        if (!row || row.passed !== false) return;
+        triggerInspectionAlert(
+          asset.name,
+          driverName,
+          c.label,
+          toSeverity(c.impactLevel),
+          row.notes,
+        );
+      });
+
       return { bundle, forceProceed: input.forceProceed };
     },
     onSuccess: ({ bundle, forceProceed }) => {
