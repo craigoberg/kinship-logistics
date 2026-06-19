@@ -368,7 +368,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             type="button"
             disabled={busy}
             onClick={() => runGps("start")}
-            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
+            className="h-14 w-full animate-pulse rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
           >
             🚀 Depart Stop
           </button>
