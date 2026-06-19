@@ -3153,3 +3153,162 @@ export async function cancelTrip(tripId: string): Promise<TransportTrip> {
   if (error) throwPg("[cancelTrip]", error);
   return rowToTrip(data as TripRow);
 }
+
+// ============================================================================
+// TRANSPORT ASSETS REGISTER + DAILY OPERATIONAL CLEARANCE LOG
+// SQL: docs/sql/2026-06-22_transport_assets_and_clearance.sql
+// ============================================================================
+
+export interface TransportAsset {
+  id: string;
+  name: string;
+  makeModel: string;
+  regoPlate: string;
+  passengerCapacity: number;
+  isActive: boolean;
+}
+
+interface TransportAssetRow {
+  id: string;
+  name: string;
+  make_model: string;
+  rego_plate: string;
+  passenger_capacity: number;
+  is_active: boolean;
+}
+
+function rowToAsset(r: TransportAssetRow): TransportAsset {
+  return {
+    id: r.id,
+    name: r.name,
+    makeModel: r.make_model,
+    regoPlate: r.rego_plate,
+    passengerCapacity: Number(r.passenger_capacity),
+    isActive: r.is_active,
+  };
+}
+
+export type ClearanceStatus = "passed" | "failed";
+
+export interface AssetDailyClearance {
+  id: string;
+  assetId: string;
+  clearanceDate: string; // YYYY-MM-DD
+  driverStaffId: string;
+  startOdometer: number;
+  status: ClearanceStatus;
+  notes: string | null;
+  createdAt: string;
+}
+
+interface AssetDailyClearanceRow {
+  id: string;
+  asset_id: string;
+  clearance_date: string;
+  driver_staff_id: string;
+  start_odometer: number | string;
+  status: ClearanceStatus;
+  notes: string | null;
+  created_at: string;
+}
+
+function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
+  return {
+    id: r.id,
+    assetId: r.asset_id,
+    clearanceDate: r.clearance_date,
+    driverStaffId: r.driver_staff_id,
+    startOdometer: Number(r.start_odometer),
+    status: r.status,
+    notes: r.notes,
+    createdAt: r.created_at,
+  };
+}
+
+/** Lists all transport assets, active first then alphabetical by name. */
+export async function listTransportAssets(): Promise<TransportAsset[]> {
+  const { data, error } = await supabase
+    .from("transport_assets")
+    .select("*")
+    .order("is_active", { ascending: false })
+    .order("name", { ascending: true });
+  if (error) {
+    console.error("[listTransportAssets] failed", error);
+    return [];
+  }
+  return ((data ?? []) as TransportAssetRow[]).map(rowToAsset);
+}
+
+/** Lists every clearance log for a given calendar date string (YYYY-MM-DD). */
+export async function listClearancesForDate(
+  dateStr: string,
+): Promise<AssetDailyClearance[]> {
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("clearance_date", dateStr)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("[listClearancesForDate] failed", error);
+    return [];
+  }
+  return ((data ?? []) as AssetDailyClearanceRow[]).map(rowToClearance);
+}
+
+/** Fetches the single clearance for an asset on a date, or null. */
+export async function getClearanceForAssetOnDate(
+  assetId: string,
+  dateStr: string,
+): Promise<AssetDailyClearance | null> {
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("*")
+    .eq("asset_id", assetId)
+    .eq("clearance_date", dateStr)
+    .maybeSingle();
+  if (error) {
+    console.error("[getClearanceForAssetOnDate] failed", error);
+    return null;
+  }
+  return data ? rowToClearance(data as AssetDailyClearanceRow) : null;
+}
+
+export interface NewAssetDailyClearance {
+  assetId: string;
+  clearanceDate: string; // YYYY-MM-DD
+  driverStaffId: string;
+  startOdometer: number;
+  status: ClearanceStatus;
+  notes?: string | null;
+}
+
+/**
+ * Records a daily operational clearance for a vehicle. Enforces the
+ * one-per-asset-per-calendar-date rule both client-side (pre-check) and via
+ * the DB UNIQUE(asset_id, clearance_date) constraint as the authoritative
+ * guard. Throws if a clearance already exists for that asset on that date.
+ */
+export async function insertAssetDailyClearance(
+  input: NewAssetDailyClearance,
+): Promise<AssetDailyClearance> {
+  const existing = await getClearanceForAssetOnDate(input.assetId, input.clearanceDate);
+  if (existing) {
+    throw new Error(
+      `Clearance already recorded for this vehicle on ${input.clearanceDate}.`,
+    );
+  }
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .insert({
+      asset_id: input.assetId,
+      clearance_date: input.clearanceDate,
+      driver_staff_id: input.driverStaffId,
+      start_odometer: input.startOdometer,
+      status: input.status,
+      notes: input.notes ?? null,
+    })
+    .select("*")
+    .single();
+  if (error) throwPg("[insertAssetDailyClearance]", error);
+  return rowToClearance(data as AssetDailyClearanceRow);
+}
