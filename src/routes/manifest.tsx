@@ -262,6 +262,12 @@ function LegRow({ leg }: { leg: TripLeg }) {
         <div className="truncate font-medium">
           {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
         </div>
+        {leg.targetAddress && (
+          <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
+            <MapPin className="h-3 w-3 shrink-0" />
+            <span className="truncate">{leg.targetAddress}</span>
+          </div>
+        )}
       </div>
       {done ? (
         <div className="flex items-center gap-1 text-xs font-semibold text-green-600">
