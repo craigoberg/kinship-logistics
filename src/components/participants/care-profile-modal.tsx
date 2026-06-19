@@ -98,6 +98,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       setLastName(participant.lastName);
       setNdisNumber(participant.ndisNumber);
       setStreetAddress(participant.streetAddress ?? "");
+      setRegularPickupAddress(participant.regularPickupAddress ?? "");
       setIddsi(participant.iddsi);
       setDirty(false);
     }
