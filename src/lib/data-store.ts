@@ -3983,3 +3983,109 @@ export async function rerouteParticipantForDate(
 
   return { bookingsUpdated: targetBookings.length, legsRemoved };
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Operational escalations (Sev 1 driver-side escalation pool).
+// Table + claim_operational_escalation RPC are live in Supabase.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type OperationalEscalationStatus =
+  | "pending"
+  | "claimed"
+  | "resolved_approved"
+  | "resolved_denied";
+
+export interface OperationalEscalation {
+  id: string;
+  clearanceId: string | null;
+  driverName: string;
+  vehicleInfo: string;
+  gateId: string;
+  status: OperationalEscalationStatus;
+  claimedBy: string | null;
+  claimedAt: string | null;
+  resolvedBy: string | null;
+  resolvedAt: string | null;
+  resolutionNotes: string | null;
+  createdAt: string;
+}
+
+interface OperationalEscalationRow {
+  id: string;
+  clearance_id: string | null;
+  driver_name: string;
+  vehicle_info: string;
+  gate_id: string;
+  status: OperationalEscalationStatus;
+  claimed_by: string | null;
+  claimed_at: string | null;
+  resolved_by: string | null;
+  resolved_at: string | null;
+  resolution_notes: string | null;
+  created_at: string;
+}
+
+function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
+  return {
+    id: r.id,
+    clearanceId: r.clearance_id,
+    driverName: r.driver_name,
+    vehicleInfo: r.vehicle_info,
+    gateId: r.gate_id,
+    status: r.status,
+    claimedBy: r.claimed_by,
+    claimedAt: r.claimed_at,
+    resolvedBy: r.resolved_by,
+    resolvedAt: r.resolved_at,
+    resolutionNotes: r.resolution_notes,
+    createdAt: r.created_at,
+  };
+}
+
+export async function raiseOperationalEscalation(input: {
+  clearanceId: string | null;
+  driverName: string;
+  vehicleInfo: string;
+  gateId: string;
+}): Promise<OperationalEscalation> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .insert([
+      {
+        clearance_id: input.clearanceId,
+        driver_name: input.driverName,
+        vehicle_info: input.vehicleInfo,
+        gate_id: input.gateId,
+        status: "pending",
+      },
+    ])
+    .select("*")
+    .single();
+  if (error) throwPg("[raiseOperationalEscalation]", error);
+  return rowToEscalation(data as OperationalEscalationRow);
+}
+
+/** Realtime subscription for a single escalation row. */
+export function subscribeToEscalation(
+  escalationId: string,
+  cb: (next: OperationalEscalation) => void,
+): () => void {
+  const channel = supabase
+    .channel(`escalation-${escalationId}`)
+    .on(
+      "postgres_changes",
+      {
+        event: "UPDATE",
+        schema: "public",
+        table: "operational_escalations",
+        filter: `id=eq.${escalationId}`,
+      },
+      (payload) => {
+        cb(rowToEscalation(payload.new as OperationalEscalationRow));
+      },
+    )
+    .subscribe();
+  return () => {
+    supabase.removeChannel(channel);
+  };
+}

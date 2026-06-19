@@ -43,7 +43,7 @@ import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
-import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary } from "@/lib/data-store";
+import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary, OperationalEscalation } from "@/lib/data-store";
 import {
   listTransportAssets,
   getClearanceForAssetOnDate,
@@ -56,6 +56,9 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
+import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
+import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
+import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -310,26 +313,64 @@ function IssueAccumulatorGate({
   onPassed: () => void;
   onBack: () => void;
 }) {
-  const checkpointsQ = useQuery<AssetCheckpoint[]>({
-    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
-    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
-    staleTime: 5 * 60_000,
-  });
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
+  const [escalation, setEscalation] = useState<OperationalEscalation | null>(null);
+  const [redHandshake, setRedHandshake] = useState<{
+    clearance: AssetDailyClearance;
+    issues: import("@/components/manifest/dynamic-operational-form").DraftIssue[];
+  } | null>(null);
+
+  if (escalation) {
+    return (
+      <RedHandshakeWaitingPanel
+        asset={asset}
+        driverName={driverName}
+        escalationId={escalation.id}
+        onAuthorized={onPassed}
+        onBack={() => {
+          setEscalation(null);
+          onBack();
+        }}
+      />
+    );
+  }
+
+  if (redHandshake) {
+    return (
+      <RedHandshakeWaitingPanel
+        asset={asset}
+        driverName={driverName}
+        clearance={redHandshake.clearance}
+        issues={redHandshake.issues}
+        onAuthorized={onPassed}
+        onBack={() => {
+          setRedHandshake(null);
+          onBack();
+        }}
+      />
+    );
+  }
 
   return (
-    <IssueAccumulatorPanel
+    <DynamicOperationalForm
+      schema={PRE_TRIP_SCHEMA}
       asset={asset}
       startOdometer={startOdometer}
       dateStr={dateStr}
-      checkpoints={checkpointsQ.data ?? []}
       driverName={driverName}
       onCleared={onPassed}
+      onEscalated={(esc) => setEscalation(esc)}
+      onRedHandshake={(clearance, issues) =>
+        setRedHandshake({ clearance, issues })
+      }
       onBack={onBack}
     />
   );
 }
+
+// Keep `IssueAccumulatorPanel` imported (legacy backwards compat).
+void IssueAccumulatorPanel;
 
 function FastPassBanner({
   asset,
