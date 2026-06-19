@@ -3788,7 +3788,7 @@ export async function listFailedClearancesWithItems(
       .from("asset_clearance_items")
       .select("*")
       .in("clearance_id", ids)
-      .eq("passed", false),
+      .eq("is_passed", false),
     supabase
       .from("transport_assets")
       .select("id,name,rego_plate")
