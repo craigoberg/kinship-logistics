@@ -396,10 +396,12 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
 
+  const medSatisfied = medStatus === "collected" || medStatus === "expected_not_provided" || medStatus === "not_required";
   const blocked =
     !loggedKm ||
     Number.isNaN(Number(loggedKm)) ||
-    (leg.medicationExpected && !medConfirmed) ||
+    (leg.medicationExpected && !(medStatus === "collected" || medStatus === "expected_not_provided")) ||
+    (!leg.medicationExpected && !medSatisfied) ||
     (extraMed && extraNotes.trim().length < 3);
 
   const confirm = async () => {
