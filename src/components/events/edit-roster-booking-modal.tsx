@@ -438,7 +438,7 @@ export function EditRosterBookingModal({
 
             <div className="space-y-1">
               <Label htmlFor="permanent-addr" className="text-[11px] font-medium text-muted-foreground">
-                Permanent pickup address
+                Regular pickup address
               </Label>
               <Input
                 id="permanent-addr"
