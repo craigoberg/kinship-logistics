@@ -2940,6 +2940,7 @@ export type LegPatch = Partial<{
   passengerPresent: boolean | null;
   noShowTriggeredAt: string | null;
   medicationHandoverConfirmed: boolean;
+  medicationHandoverStatus: MedicationHandoverStatus | null;
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
