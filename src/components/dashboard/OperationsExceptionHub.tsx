@@ -33,6 +33,7 @@ interface BucketRow {
   title: string;
   detail: string;
   severity: Severity;
+  action?: React.ReactNode;
 }
 
 interface Bucket {
@@ -60,7 +61,16 @@ export function OperationsExceptionHub() {
     title: r.title,
     detail: r.detail,
     severity: r.severity,
+    action: (
+      <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
+        <Link to="/participants" aria-label={`Manage medicals for ${r.participantName}`}>
+          <Stethoscope className="mr-1 h-3.5 w-3.5" />
+          Manage Medicals
+        </Link>
+      </Button>
+    ),
   }));
+
 
   const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
     items.map((r, idx) => ({
