@@ -18,11 +18,23 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog";
+import {
   useActiveTrip,
   useStartTrip,
   usePatchTripLeg,
   useCompleteTrip,
-  useLiveEvents,
+  useCancelTrip,
+  useConfirmedEvents,
   useLastEndOdometer,
 } from "@/hooks/use-supabase-data";
 
@@ -63,7 +75,7 @@ function ManifestPage() {
 /* -------------------- Initialize -------------------- */
 
 function InitializeTripScreen() {
-  const { data: events = [] } = useLiveEvents();
+  const { data: events = [] } = useConfirmedEvents();
   const { data: lastEndOdo = null } = useLastEndOdometer();
   const startTrip = useStartTrip();
   const today = new Date().toISOString().slice(0, 10);
@@ -220,7 +232,7 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
         </div>
       </main>
 
-      <footer className="sticky bottom-0 z-20 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
+      <footer className="sticky bottom-0 z-20 space-y-3 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
         {allLegsComplete ? (
           <FinalizeShiftCard tripId={trip.id} startOdometer={trip.startOdometerKm} />
         ) : (
@@ -228,6 +240,7 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
             Complete each leg in order. Driver: tap from the seat.
           </div>
         )}
+        <CancelTripButton tripId={trip.id} />
       </footer>
     </>
   );
@@ -324,27 +337,29 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
       </div>
 
       <div className="mt-4">
-        {leg.status === "pending" && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => runGps("start")}
-            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
-          >
-            🚀 Start Leg / Set En Route
-          </button>
-        )}
-        {leg.status === "en_route" && (
+        {leg.status === "en_route" ? (
           <button
             type="button"
             disabled={busy}
             onClick={() => runGps("end")}
             className="h-14 w-full animate-pulse rounded-xl bg-amber-500 text-lg font-bold text-black transition hover:bg-amber-400 disabled:opacity-60"
           >
-            🛑 Arrived at Destination
+            🛑 Arrive at Stop
+          </button>
+        ) : leg.status === "arrived" ? (
+          <ArrivedChecklist leg={leg} />
+        ) : leg.status === "completed" ? null : (
+          // Defensive default: any unhandled status (e.g. legacy 'scheduled', null)
+          // is treated as the initial state so the driver always has an action.
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runGps("start")}
+            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
+          >
+            🚀 Depart Stop
           </button>
         )}
-        {leg.status === "arrived" && <ArrivedChecklist leg={leg} />}
       </div>
     </Card>
   );
@@ -540,5 +555,51 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
         🏁 End Shift & Lock Daily Run Logs
       </button>
     </div>
+  );
+}
+
+function CancelTripButton({ tripId }: { tripId: string }) {
+  const cancel = useCancelTrip();
+  const [open, setOpen] = useState(false);
+  return (
+    <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialogTrigger asChild>
+        <button
+          type="button"
+          className="h-11 w-full rounded-xl border-2 border-red-600 bg-transparent text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
+          disabled={cancel.isPending}
+        >
+          ✕ Cancel / Reset Trip
+        </button>
+      </AlertDialogTrigger>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Cancel this run?</AlertDialogTitle>
+          <AlertDialogDescription>
+            Logged kilometres and leg captures will be discarded. This cannot be undone.
+            You'll return to the event selection screen.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Keep Driving</AlertDialogCancel>
+          <AlertDialogAction
+            className="bg-red-600 text-white hover:bg-red-700"
+            onClick={() =>
+              cancel.mutate(
+                { tripId },
+                {
+                  onSuccess: () => {
+                    toast.success("Run cancelled");
+                    setOpen(false);
+                  },
+                },
+              )
+            }
+          >
+            Cancel Trip
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }

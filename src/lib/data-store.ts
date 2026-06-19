@@ -1656,11 +1656,11 @@ export async function listEvents(): Promise<EventManifest[]> {
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
 }
 
-export async function listLiveEvents(): Promise<EventManifest[]> {
+export async function listConfirmedEvents(): Promise<EventManifest[]> {
   const { data, error } = await supabase
     .from("event_manifest")
     .select("*")
-    .in("status", ["Open", "Active"])
+    .eq("status", "Confirmed")
     .order("start_date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
@@ -2587,6 +2587,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const legPayload = seeds.map((s, i) => ({
     trip_id: trip.id,
     leg_index: i + 1,
+    status: "pending" as LegStatus,
     ...s,
   }));
   const { data: legRows, error: legErr } = await supabase
@@ -2658,5 +2659,19 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
     .select("*")
     .single();
   if (error) throwPg("[completeTrip]", error);
+  return rowToTrip(data as TripRow);
+}
+
+export async function cancelTrip(tripId: string): Promise<TransportTrip> {
+  const { data, error } = await supabase
+    .from("transport_trips")
+    .update({
+      status: "cancelled",
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", tripId)
+    .select("*")
+    .single();
+  if (error) throwPg("[cancelTrip]", error);
   return rowToTrip(data as TripRow);
 }

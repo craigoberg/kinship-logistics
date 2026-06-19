@@ -610,7 +610,7 @@ export function useInsertLedgerEntry() {
 // ============================================================================
 import {
   listEvents,
-  listLiveEvents,
+  listConfirmedEvents,
 
   insertEvent,
   updateEvent,
@@ -641,10 +641,10 @@ export function useEvents() {
   });
 }
 
-export function useLiveEvents() {
+export function useConfirmedEvents() {
   return useQuery({
-    queryKey: ["events", "live"],
-    queryFn: listLiveEvents,
+    queryKey: ["events", "confirmed"],
+    queryFn: listConfirmedEvents,
     staleTime: 30_000,
   });
 }
@@ -870,6 +870,7 @@ import {
   startTrip as startTripFn,
   patchTripLeg as patchTripLegFn,
   completeTrip as completeTripFn,
+  cancelTrip as cancelTripFn,
   getStaffId,
   getLastEndOdometer,
   type StartTripInput,
@@ -936,5 +937,18 @@ export function useCompleteTrip() {
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
     },
     onError: (err: Error) => showRedToast("Could not close shift", err),
+  });
+}
+
+export function useCancelTrip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId }: { tripId: string }) => cancelTripFn(tripId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["active-trip"] });
+      qc.invalidateQueries({ queryKey: ["trips"] });
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not cancel trip", err),
   });
 }
