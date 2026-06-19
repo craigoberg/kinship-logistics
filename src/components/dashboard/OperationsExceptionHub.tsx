@@ -51,6 +51,7 @@ interface Bucket {
 export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
+  const { data: dayAnomalyRows } = useStartEndDayAnomalies();
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
