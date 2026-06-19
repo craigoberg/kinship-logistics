@@ -1952,12 +1952,24 @@ export interface NewEventBooking {
   carerId?: string | null;
   carerTransportRequired?: boolean;
   participantTransportRequired?: boolean;
+  tripPickupAddressOverride?: string | null;
+  /** Optional pre-built snapshot. Omit to auto-build from compliance + meds. */
+  dynamicMedicalNotesSnapshot?: string | null;
 }
 
 export async function insertEventBooking(input: NewEventBooking): Promise<void> {
   const amount = input.amountPaid ?? 0;
   const trimmedNotes = (input.notes ?? "").trim();
   const bringsCarer = !!input.bringsCarer;
+  const trimmedOverride = (input.tripPickupAddressOverride ?? "").trim();
+
+  // Auto-snapshot compliance + active meds at the moment of roster inclusion.
+  // If a caller (e.g. cloneEventRoster) precomputes one we accept it as-is.
+  const snapshot =
+    input.dynamicMedicalNotesSnapshot !== undefined
+      ? input.dynamicMedicalNotesSnapshot
+      : await buildMedicalAlertSnapshot(input.participantId);
+
   const { error } = await supabase.from("event_roster_bookings").insert({
     event_id: input.eventId,
     participant_id: input.participantId,
@@ -1969,6 +1981,9 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     carer_id: bringsCarer ? input.carerId ?? null : null,
     carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
     participant_transport_required: !!input.participantTransportRequired,
+    trip_pickup_address_override: trimmedOverride.length > 0 ? trimmedOverride : null,
+    dynamic_medical_notes_snapshot:
+      snapshot && snapshot.trim().length > 0 ? snapshot : null,
   });
   if (error) {
     console.error("[insertEventBooking] failed", error);
@@ -1985,6 +2000,154 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     });
   }
 }
+
+// ---------- Compliance snapshot + event cloning ----------
+
+/** Record types treated as "Medical Alert" inside the
+ * `participant_compliance_and_alerts` table. */
+const MEDICAL_ALERT_RECORD_TYPE = "Medical Alert";
+
+interface ComplianceAlertRow {
+  record_type: string | null;
+  reference_data: string | null;
+  notes: string | null;
+  created_at?: string | null;
+}
+
+/**
+ * Build the frozen "dynamic medical notes" snapshot for a participant.
+ * Pulls 'Medical Alert' rows from participant_compliance_and_alerts and the
+ * participant's currently active medication schedules, formatted into a
+ * compact multi-line string. Returns "" when nothing critical is on file.
+ */
+export async function buildMedicalAlertSnapshot(participantId: string): Promise<string> {
+  const lines: string[] = [];
+
+  const { data: alertRows, error: alertErr } = await supabase
+    .from("participant_compliance_and_alerts")
+    .select("record_type, reference_data, notes, created_at")
+    .eq("participant_id", participantId)
+    .eq("record_type", MEDICAL_ALERT_RECORD_TYPE)
+    .order("created_at", { ascending: false });
+  if (alertErr) {
+    // Non-fatal: snapshot is best-effort. Log + carry on so the booking insert
+    // is not blocked by an unrelated read failure.
+    console.warn("[buildMedicalAlertSnapshot] alerts read failed", alertErr);
+  } else if (alertRows && alertRows.length > 0) {
+    lines.push("⚠️ MEDICAL ALERTS");
+    for (const r of alertRows as ComplianceAlertRow[]) {
+      const ref = (r.reference_data ?? "").trim();
+      const note = (r.notes ?? "").trim();
+      const body = [ref, note].filter(Boolean).join(" — ");
+      if (body.length > 0) lines.push(`• ${body}`);
+    }
+  }
+
+  const { data: medRows, error: medErr } = await supabase
+    .from("participant_medication_schedules")
+    .select("medication_name, dosage, frequency, time_slot")
+    .eq("participant_id", participantId)
+    .eq("active", true);
+  if (medErr) {
+    console.warn("[buildMedicalAlertSnapshot] meds read failed", medErr);
+  } else if (medRows && medRows.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("💊 ACTIVE MEDICATIONS");
+    for (const m of medRows as Array<{
+      medication_name?: string | null;
+      dosage?: string | null;
+      frequency?: string | null;
+      time_slot?: string | null;
+    }>) {
+      const parts = [
+        m.medication_name?.trim(),
+        m.dosage?.trim(),
+        m.frequency?.trim() || m.time_slot?.trim() || null,
+      ].filter((p): p is string => !!p && p.length > 0);
+      if (parts.length > 0) lines.push(`• ${parts.join(" · ")}`);
+    }
+  }
+
+  // Cap at ~2KB so an unusually chatty profile cannot bloat the booking row.
+  const out = lines.join("\n");
+  return out.length > 2000 ? out.slice(0, 1997) + "…" : out;
+}
+
+/** Re-build the snapshot for a single booking and persist it. */
+export async function refreshBookingMedicalSnapshot(
+  bookingId: string,
+  participantId: string,
+): Promise<string> {
+  const snapshot = await buildMedicalAlertSnapshot(participantId);
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update({
+      dynamic_medical_notes_snapshot: snapshot.length > 0 ? snapshot : null,
+    })
+    .eq("id", bookingId);
+  if (error) {
+    console.error("[refreshBookingMedicalSnapshot] update failed", error);
+    throw error;
+  }
+  return snapshot;
+}
+
+/** Look up the most recent event of the given type for the clone engine. */
+export async function findMostRecentEventByType(
+  eventTypeCode: string,
+  excludeEventId?: string | null,
+): Promise<EventManifest | null> {
+  let query = supabase
+    .from("event_manifest")
+    .select("*")
+    .eq("event_type", eventTypeCode)
+    .order("start_date", { ascending: false })
+    .limit(excludeEventId ? 2 : 1);
+  const { data, error } = await query;
+  if (error) {
+    console.error("[findMostRecentEventByType]", error);
+    return null;
+  }
+  const rows = (data ?? []) as EventManifestRow[];
+  const filtered = excludeEventId ? rows.filter((r) => r.id !== excludeEventId) : rows;
+  return filtered.length > 0 ? rowToEvent(filtered[0]) : null;
+}
+
+/**
+ * Clone every roster booking from one event onto another.
+ * - Reuses participant + carer wiring, custom_price, notes.
+ * - Resets payment fields (amount_paid=0, is_fully_paid=false, status=Confirmed).
+ * - Drops any one-off pickup override (those are per-trip).
+ * - Re-snapshots medical alerts at clone time so the new event row reflects
+ *   the participant's current medical state, not the source event's.
+ */
+export async function cloneEventRoster(
+  sourceEventId: string,
+  targetEventId: string,
+): Promise<number> {
+  const source = await listEventBookings(sourceEventId);
+  if (source.length === 0) return 0;
+  for (const b of source) {
+    await insertEventBooking({
+      eventId: targetEventId,
+      participantId: b.participantId,
+      bookingStatus: "Confirmed",
+      amountPaid: 0,
+      ticketPrice: b.customPrice ?? 0,
+      notes: b.notes,
+      bringsCarer: b.bringsCarer,
+      carerId: b.carerId,
+      carerTransportRequired: b.carerTransportRequired,
+      participantTransportRequired: b.participantTransportRequired,
+      tripPickupAddressOverride: null,
+      // Force a fresh snapshot rather than carrying the source row forward.
+      dynamicMedicalNotesSnapshot: undefined,
+    });
+  }
+  return source.length;
+}
+
+
 
 /**
  * Record an incremental payment milestone against an existing roster booking.
