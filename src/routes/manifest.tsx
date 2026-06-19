@@ -355,7 +355,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             type="button"
             disabled={busy}
             onClick={() => runGps("end")}
-            className="h-14 w-full rounded-xl bg-amber-500 text-lg font-bold text-black transition hover:bg-amber-400 disabled:opacity-60"
+            className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
           >
             🛑 Arrive at Stop
           </button>
@@ -368,7 +368,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             type="button"
             disabled={busy}
             onClick={() => runGps("start")}
-            className="h-14 w-full animate-pulse rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
+            className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
           >
             🚀 Depart Stop
           </button>
@@ -399,8 +399,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const medSatisfied =
     medStatus === "collected_intact" ||
     medStatus === "collected_damaged" ||
-    medStatus === "expected_not_provided" ||
-    medStatus === "not_required";
+    medStatus === "expected_not_provided";
   const expectedMedSatisfied =
     medStatus === "collected_intact" ||
     medStatus === "collected_damaged" ||
@@ -524,13 +523,6 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
             <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
             <span className="font-medium">Expected but Not Provided</span>
           </label>
-          {!leg.medicationExpected && (
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
-              <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
-              <span className="font-medium">Not Required</span>
-            </label>
-          )}
         </RadioGroup>
         {exceptionFlagged && (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
