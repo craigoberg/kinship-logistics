@@ -42,7 +42,16 @@ import {
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
-import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus } from "@/lib/data-store";
+import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance } from "@/lib/data-store";
+import {
+  listTransportAssets,
+  getClearanceForAssetOnDate,
+  listCheckpointsForAsset,
+  insertAssetClearanceWithItems,
+  getStaffId,
+  STAFF_DIRECTORY,
+  DEFAULT_STAFF_UUID,
+} from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 
 export const Route = createFileRoute("/manifest")({
