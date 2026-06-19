@@ -2738,20 +2738,20 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         | {
             first_name: string;
             last_name: string;
-            permanent_pickup_address: string | null;
+            regular_pickup_address: string | null;
             street_address: string | null;
           }
         | Array<{
             first_name: string;
             last_name: string;
-            permanent_pickup_address: string | null;
+            regular_pickup_address: string | null;
             street_address: string | null;
           }>
         | null;
     };
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const override = (row.trip_pickup_address_override ?? "").trim();
-    const permanent = (p?.permanent_pickup_address ?? "").trim();
+    const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
     return {
       id: row.participant_id,
@@ -2759,8 +2759,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       address:
         override.length > 0
           ? override
-          : permanent.length > 0
-            ? permanent
+          : regular.length > 0
+            ? regular
             : street.length > 0
               ? street
               : null,
