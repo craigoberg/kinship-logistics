@@ -219,7 +219,7 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     last_name: input.lastName,
     ndis_number: input.ndisNumber,
     street_address: input.streetAddress ?? null,
-    permanent_pickup_address: input.permanentPickupAddress ?? null,
+    regular_pickup_address: input.regularPickupAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
     dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
