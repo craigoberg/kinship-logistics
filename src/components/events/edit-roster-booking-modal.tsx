@@ -128,6 +128,28 @@ export function EditRosterBookingModal({
     if (!canSubmit) return;
     try {
       const willRefund = showRefundPanel && issueRefund && parsedRefund > 0;
+
+      // Persist the participant-profile permanent pickup address change
+      // (if any) BEFORE the booking update so the join read on the booking
+      // refetch reflects the new value.
+      const newPermanent = permanentAddress.trim();
+      const originalPermanent = (booking.participantPermanentPickupAddress ?? "").trim();
+      if (newPermanent !== originalPermanent) {
+        try {
+          await updateParticipant.mutateAsync({
+            id: booking.participantId,
+            patch: { permanentPickupAddress: newPermanent.length > 0 ? newPermanent : null },
+          });
+        } catch (e) {
+          // Surface, but don't block the rest of the save.
+          console.error("[edit-roster-booking-modal] permanent address save failed", e);
+        }
+      }
+
+      const newOverride = tripPickupOverride.trim();
+      const originalOverride = (booking.tripPickupAddressOverride ?? "").trim();
+      const overrideChanged = newOverride !== originalOverride;
+
       const result = await mutation.mutateAsync({
         bookingId: booking.id,
         bookingStatus,
@@ -150,6 +172,11 @@ export function EditRosterBookingModal({
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
         participantTransportRequired: participantTransport,
+        tripPickupAddressOverride: overrideChanged
+          ? newOverride.length > 0
+            ? newOverride
+            : null
+          : undefined,
       });
       toast.success("Booking updated", {
         description: result.refundLedger
