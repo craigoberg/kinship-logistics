@@ -2718,7 +2718,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const { data: bookingRows, error: bookingErr } = await supabase
     .from("event_roster_bookings")
     .select(
-      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, permanent_pickup_address, street_address)",
+      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("event_id", input.eventId)
     .order("created_at", { ascending: true });
