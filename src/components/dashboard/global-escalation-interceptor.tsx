@@ -13,10 +13,9 @@ import {
 import { cn } from "@/lib/utils";
 
 import {
-  DEFAULT_STAFF_UUID,
   claimOperationalEscalation,
-  getStaffId,
   listPendingEscalations,
+  resolveStaffIdWithFallback,
   subscribeToEscalationPool,
   type OperationalEscalation,
 } from "@/lib/data-store";
