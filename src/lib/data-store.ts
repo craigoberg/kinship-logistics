@@ -2592,6 +2592,7 @@ export interface TripLeg {
   noShowTriggeredAt: string | null;
   medicationExpected: boolean;
   medicationHandoverConfirmed: boolean;
+  medicationHandoverStatus: MedicationHandoverStatus | null;
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
@@ -2599,6 +2600,11 @@ export interface TripLeg {
    * the 3-tier fallback override → permanent → street. */
   targetAddress: string | null;
 }
+
+export type MedicationHandoverStatus =
+  | "collected"
+  | "expected_not_provided"
+  | "not_required";
 
 interface LegRow {
   id: string;
@@ -2622,6 +2628,7 @@ interface LegRow {
   no_show_triggered_at: string | null;
   medication_expected: boolean;
   medication_handover_confirmed: boolean;
+  medication_handover_status: MedicationHandoverStatus | null;
   unexpected_medication_logged: boolean;
   unexpected_medication_notes: string | null;
   completed_at: string | null;
@@ -2653,6 +2660,7 @@ function rowToLeg(r: LegRow): TripLeg {
     noShowTriggeredAt: r.no_show_triggered_at,
     medicationExpected: r.medication_expected,
     medicationHandoverConfirmed: r.medication_handover_confirmed,
+    medicationHandoverStatus: r.medication_handover_status ?? null,
     unexpectedMedicationLogged: r.unexpected_medication_logged,
     unexpectedMedicationNotes: r.unexpected_medication_notes,
     completedAt: r.completed_at,
@@ -2663,6 +2671,21 @@ function rowToLeg(r: LegRow): TripLeg {
 export interface ActiveTripBundle {
   trip: TransportTrip;
   legs: TripLeg[];
+  eventTitle: string | null;
+}
+
+async function fetchEventTitle(eventId: string | null): Promise<string | null> {
+  if (!eventId) return null;
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("title")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fetchEventTitle]", error);
+    return null;
+  }
+  return (data?.title as string | undefined) ?? null;
 }
 
 function throwPg(prefix: string, error: { message: string; details?: string | null; hint?: string | null; code?: string | null }): never {
@@ -2696,7 +2719,8 @@ export async function getActiveTripForDriver(
     .eq("trip_id", trip.id)
     .order("leg_index", { ascending: true });
   if (legErr) throwPg("[getActiveTripForDriver:legs]", legErr);
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+  const eventTitle = await fetchEventTitle(trip.eventId);
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
 export interface StartTripInput {
@@ -2899,7 +2923,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .order("leg_index", { ascending: true });
   if (legErr) throwPg("[startTrip:legs]", legErr);
 
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)) };
+  const eventTitle = await fetchEventTitle(trip.eventId);
+  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
 export type LegPatch = Partial<{
@@ -2915,6 +2940,7 @@ export type LegPatch = Partial<{
   passengerPresent: boolean | null;
   noShowTriggeredAt: string | null;
   medicationHandoverConfirmed: boolean;
+  medicationHandoverStatus: MedicationHandoverStatus | null;
   unexpectedMedicationLogged: boolean;
   unexpectedMedicationNotes: string | null;
   completedAt: string | null;
@@ -2934,6 +2960,7 @@ export async function patchTripLeg(legId: string, patch: LegPatch): Promise<Trip
   if (patch.passengerPresent !== undefined) map.passenger_present = patch.passengerPresent;
   if (patch.noShowTriggeredAt !== undefined) map.no_show_triggered_at = patch.noShowTriggeredAt;
   if (patch.medicationHandoverConfirmed !== undefined) map.medication_handover_confirmed = patch.medicationHandoverConfirmed;
+  if (patch.medicationHandoverStatus !== undefined) map.medication_handover_status = patch.medicationHandoverStatus;
   if (patch.unexpectedMedicationLogged !== undefined) map.unexpected_medication_logged = patch.unexpectedMedicationLogged;
   if (patch.unexpectedMedicationNotes !== undefined) map.unexpected_medication_notes = patch.unexpectedMedicationNotes;
   if (patch.completedAt !== undefined) map.completed_at = patch.completedAt;
