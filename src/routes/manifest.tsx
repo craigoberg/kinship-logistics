@@ -413,12 +413,6 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
     (leg.medicationExpected && !expectedMedSatisfied) ||
     (!leg.medicationExpected && !medSatisfied) ||
     (extraMed && extraNotes.trim().length < 3);
-  const blocked =
-    !loggedKm ||
-    Number.isNaN(Number(loggedKm)) ||
-    (leg.medicationExpected && !(medStatus === "collected" || medStatus === "expected_not_provided")) ||
-    (!leg.medicationExpected && !medSatisfied) ||
-    (extraMed && extraNotes.trim().length < 3);
 
   const confirm = async () => {
     try {
