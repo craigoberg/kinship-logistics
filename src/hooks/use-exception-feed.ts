@@ -39,6 +39,10 @@ export interface PlaceholderRow {
 
 export interface MedicationScheduleExceptionRow {
   key: string;
+  participantId: string;
+  participantName: string;
+  medicationName: string;
+  scheduledTime: string; // "HH:MM"
   title: string;
   detail: string;
   severity: Severity;
@@ -86,10 +90,11 @@ export function useMedicationScheduleExceptions() {
     const byId = new Map(participants.map((p) => [p.id, p]));
 
     return schedules
-      .filter((s) => !!s.participantId)
-      .map((s) => {
+      .filter((s): s is MedicationSchedule & { participantId: string } => !!s.participantId)
+      .map((s): MedicationScheduleExceptionRow | null => {
         if (isAdministered(s, logs)) return null;
-        const scheduledMinutes = timeToMinutes(s.expectedTime.slice(0, 5));
+        const scheduledTime = s.expectedTime.slice(0, 5);
+        const scheduledMinutes = timeToMinutes(scheduledTime);
         const delta = scheduledMinutes - nowMinutes;
         let severity: Severity | null = null;
         let stateLabel = "";
@@ -101,20 +106,20 @@ export function useMedicationScheduleExceptions() {
           stateLabel = "Due within 1 hour";
         }
         if (!severity) return null;
-        const name = byId.get(s.participantId!)?.fullName ?? "Unassigned participant";
-        const time = s.expectedTime.slice(0, 5);
+        const participantName = byId.get(s.participantId)?.fullName ?? "Unassigned participant";
         return {
           key: s.id,
-          title: `${name} · ${s.medicationName}`,
-          detail: `${stateLabel} · scheduled ${time}${s.dosage ? ` · ${s.dosage}` : ""}`,
+          participantId: s.participantId,
+          participantName,
+          medicationName: s.medicationName,
+          scheduledTime,
+          title: `${participantName} · ${s.medicationName}`,
+          detail: `${stateLabel} · scheduled ${scheduledTime}${s.dosage ? ` · ${s.dosage}` : ""}`,
           severity,
-        } as MedicationScheduleExceptionRow;
+        };
       })
       .filter((r): r is MedicationScheduleExceptionRow => r !== null)
-      .sort((a, b) => {
-        const order = { critical: 0, warning: 1, info: 2 } as const;
-        return order[a.severity] - order[b.severity];
-      });
+      .sort((a, b) => timeToMinutes(a.scheduledTime) - timeToMinutes(b.scheduledTime));
   }, [schedules, logs, participants]);
 
   return {
@@ -122,6 +127,7 @@ export function useMedicationScheduleExceptions() {
     isLoading: schedulesQ.isLoading || logsQ.isLoading || participantsQ.isLoading,
   };
 }
+
 
 export const DAY_ANOMALY_PLACEHOLDERS: readonly PlaceholderRow[] = [
   {
