@@ -475,23 +475,54 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         </>
       )}
 
-      {leg.medicationExpected && (
-        <div className="rounded-lg border border-amber-500/60 bg-amber-500/10 p-3">
-          <div className="flex items-start gap-2 text-amber-200">
+      <div
+        className={cn(
+          "rounded-lg border p-3",
+          leg.medicationExpected
+            ? "border-amber-500/60 bg-amber-500/10"
+            : "border-slate-700 bg-slate-950/40",
+        )}
+      >
+        {leg.medicationExpected && (
+          <div className="mb-3 flex items-start gap-2 text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div className="text-sm font-semibold">
-              ⚠️ EXPECTED MEDICATION: Verify receipt of client's medication container.
+              ⚠️ EXPECTED MEDICATION: Confirm bag status before departure.
             </div>
           </div>
-          <label className="mt-3 flex items-center gap-2 text-sm">
-            <Checkbox
-              checked={medConfirmed}
-              onCheckedChange={(v) => setMedConfirmed(v === true)}
-            />
-            <span className="font-medium">Medication Bag Handover Confirmed</span>
-          </label>
+        )}
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+          Medication Bag Handover
         </div>
-      )}
+        <RadioGroup
+          value={medStatus ?? ""}
+          onValueChange={(v) => setMedStatus(v as MedicationHandoverStatus)}
+          className="mt-2 grid gap-2"
+        >
+          <label className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value="collected" id={`med-coll-${leg.id}`} />
+            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+            <span className="font-medium">Collected</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
+            <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+            <span className="font-medium">Expected but Not Provided</span>
+          </label>
+          <label className="flex items-center gap-2 text-sm">
+            <RadioGroupItem value="not_required" id={`med-nr-${leg.id}`} />
+            <span className="inline-block h-2 w-2 rounded-full bg-slate-500" />
+            <span className="font-medium">Not Required</span>
+          </label>
+        </RadioGroup>
+        {medStatus === "expected_not_provided" && (
+          <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>An office exception flag will be recorded against this leg.</span>
+          </div>
+        )}
+      </div>
+
 
       <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
         <label className="flex items-center gap-2 text-sm">
