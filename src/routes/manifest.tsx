@@ -1,8 +1,9 @@
 // Force rebuild version 2.0
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, MapPin, Navigation, Pill, AlertTriangle, Loader2 } from "lucide-react";
+import { CheckCircle2, MapPin, Navigation, Pill, AlertTriangle, Loader2, ShieldCheck, ShieldAlert, ClipboardCheck } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
