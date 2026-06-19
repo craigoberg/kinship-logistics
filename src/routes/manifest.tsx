@@ -336,27 +336,29 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
       </div>
 
       <div className="mt-4">
-        {leg.status === "pending" && (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => runGps("start")}
-            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
-          >
-            🚀 Start Leg / Set En Route
-          </button>
-        )}
-        {leg.status === "en_route" && (
+        {leg.status === "en_route" ? (
           <button
             type="button"
             disabled={busy}
             onClick={() => runGps("end")}
             className="h-14 w-full animate-pulse rounded-xl bg-amber-500 text-lg font-bold text-black transition hover:bg-amber-400 disabled:opacity-60"
           >
-            🛑 Arrived at Destination
+            🛑 Arrive at Stop
+          </button>
+        ) : leg.status === "arrived" ? (
+          <ArrivedChecklist leg={leg} />
+        ) : leg.status === "completed" ? null : (
+          // Defensive default: any unhandled status (e.g. legacy 'scheduled', null)
+          // is treated as the initial state so the driver always has an action.
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => runGps("start")}
+            className="h-14 w-full rounded-xl bg-teal-600 text-lg font-bold text-white transition hover:bg-teal-700 disabled:opacity-60"
+          >
+            🚀 Depart Stop
           </button>
         )}
-        {leg.status === "arrived" && <ArrivedChecklist leg={leg} />}
       </div>
     </Card>
   );
