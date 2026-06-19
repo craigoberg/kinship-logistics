@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { format } from "date-fns";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertOctagon,
@@ -23,7 +23,13 @@ import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
-import { rerouteParticipantForDate } from "@/lib/data-store";
+import {
+  listClearancesAwaitingManagerReview,
+  rerouteParticipantForDate,
+  subscribeToPendingReviews,
+  type PendingManagerReviewRow,
+} from "@/lib/data-store";
+import { ManagerJointReviewModal } from "./manager-joint-review-modal";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
