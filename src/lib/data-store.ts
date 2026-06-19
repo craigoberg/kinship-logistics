@@ -3232,7 +3232,9 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
 export async function listTransportAssets(): Promise<TransportAsset[]> {
   const { data, error } = await supabase
     .from("transport_assets")
-    .select("*")
+    .select(
+      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category",
+    )
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
   if (error) {
@@ -3325,34 +3327,32 @@ export interface AssetCheckpoint {
   id: string;
   assetId: string | null;
   vehicleCategory: string | null;
+  /** UI label — sourced from the `checkpoint_text` column. */
   label: string;
+  /** Optional grouping label for UI; falls back to impactLevel. */
   category: string | null;
+  impactLevel: string | null;
   isMandatory: boolean;
-  sortOrder: number;
-  isActive: boolean;
 }
 
 interface AssetCheckpointRow {
   id: string;
-  asset_id: string | null;
+  asset_id?: string | null;
   vehicle_category: string | null;
-  label: string;
-  category: string | null;
+  checkpoint_text: string;
+  impact_level: string | null;
   is_mandatory: boolean;
-  sort_order: number;
-  is_active: boolean;
 }
 
 function rowToCheckpoint(r: AssetCheckpointRow): AssetCheckpoint {
   return {
     id: r.id,
-    assetId: r.asset_id,
-    vehicleCategory: r.vehicle_category,
-    label: r.label,
-    category: r.category,
+    assetId: r.asset_id ?? null,
+    vehicleCategory: r.vehicle_category ?? null,
+    label: r.checkpoint_text,
+    category: r.impact_level ?? null,
+    impactLevel: r.impact_level ?? null,
     isMandatory: r.is_mandatory,
-    sortOrder: Number(r.sort_order),
-    isActive: r.is_active,
   };
 }
 
@@ -3365,16 +3365,13 @@ export async function listCheckpointsForAsset(
   assetId: string,
   vehicleCategory: string | null,
 ): Promise<AssetCheckpoint[]> {
-  // OR filter accepts (asset_id.eq.<id>, vehicle_category.eq.<cat>, vehicle_category.eq.all)
-  const orClauses = [`asset_id.eq.${assetId}`, `vehicle_category.eq.all`];
-  if (vehicleCategory) orClauses.push(`vehicle_category.eq.${vehicleCategory}`);
+  const category = vehicleCategory ?? "all";
   const { data, error } = await supabase
     .from("asset_checkpoints")
-    .select("*")
-    .eq("is_active", true)
-    .or(orClauses.join(","))
-    .order("sort_order", { ascending: true })
-    .order("label", { ascending: true });
+    .select("id, checkpoint_text, vehicle_category, impact_level, is_mandatory")
+    .or(
+      `vehicle_category.eq.${category},vehicle_category.eq.all,asset_id.eq.${assetId}`,
+    );
   if (error) {
     console.error("[listCheckpointsForAsset] failed", error);
     return [];
