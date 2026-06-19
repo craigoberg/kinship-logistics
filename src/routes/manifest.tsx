@@ -387,7 +387,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   );
   const [present, setPresent] = useState<boolean>(leg.passengerPresent ?? true);
   const [medStatus, setMedStatus] = useState<MedicationHandoverStatus | null>(
-    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected" : null),
+    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
   );
   const [extraMed, setExtraMed] = useState(leg.unexpectedMedicationLogged);
   const [extraNotes, setExtraNotes] = useState(leg.unexpectedMedicationNotes ?? "");
@@ -396,7 +396,23 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
 
-  const medSatisfied = medStatus === "collected" || medStatus === "expected_not_provided" || medStatus === "not_required";
+  const medSatisfied =
+    medStatus === "collected_intact" ||
+    medStatus === "collected_damaged" ||
+    medStatus === "expected_not_provided" ||
+    medStatus === "not_required";
+  const expectedMedSatisfied =
+    medStatus === "collected_intact" ||
+    medStatus === "collected_damaged" ||
+    medStatus === "expected_not_provided";
+  const exceptionFlagged =
+    medStatus === "collected_damaged" || medStatus === "expected_not_provided";
+  const blocked =
+    !loggedKm ||
+    Number.isNaN(Number(loggedKm)) ||
+    (leg.medicationExpected && !expectedMedSatisfied) ||
+    (!leg.medicationExpected && !medSatisfied) ||
+    (extraMed && extraNotes.trim().length < 3);
   const blocked =
     !loggedKm ||
     Number.isNaN(Number(loggedKm)) ||
