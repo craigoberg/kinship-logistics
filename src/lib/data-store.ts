@@ -2725,6 +2725,78 @@ export async function getActiveTripForDriver(
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
+export interface MedicationExceptionRow {
+  legId: string;
+  tripId: string;
+  legNumber: number;
+  participantName: string;
+  status: Extract<MedicationHandoverStatus, "collected_damaged" | "expected_not_provided">;
+  exceptionLabel: string;
+}
+
+/** Live feed for the Operations Exception Hub. Returns medication handover
+ * exceptions on legs belonging to currently active trips (status = 'active'
+ * OR completed_at is null). */
+export async function listActiveMedicationExceptions(): Promise<MedicationExceptionRow[]> {
+  // 1) Find currently active trips.
+  const { data: tripRows, error: tripErr } = await supabase
+    .from("transport_trips")
+    .select("id, status, completed_at")
+    .or("status.eq.active,completed_at.is.null");
+  if (tripErr) {
+    console.warn("[listActiveMedicationExceptions:trips]", tripErr);
+    return [];
+  }
+  const activeTripIds = (tripRows ?? []).map((r) => r.id as string);
+  if (activeTripIds.length === 0) return [];
+
+  // 2) Pull legs in those trips with an exception handover status.
+  const { data: legRows, error: legErr } = await supabase
+    .from("trip_legs")
+    .select("id, trip_id, leg_index, to_participant_id, from_participant_id, medication_handover_status")
+    .in("trip_id", activeTripIds)
+    .in("medication_handover_status", ["collected_damaged", "expected_not_provided"]);
+  if (legErr) {
+    console.warn("[listActiveMedicationExceptions:legs]", legErr);
+    return [];
+  }
+  const legs = legRows ?? [];
+  if (legs.length === 0) return [];
+
+  // 3) Resolve participant names.
+  const participantIds = Array.from(
+    new Set(
+      legs
+        .map((l) => (l.to_participant_id as string | null) ?? (l.from_participant_id as string | null))
+        .filter((id): id is string => Boolean(id)),
+    ),
+  );
+  const nameById = new Map<string, string>();
+  if (participantIds.length > 0) {
+    const { data: pRows } = await supabase
+      .from("participants")
+      .select("id, full_name")
+      .in("id", participantIds);
+    for (const p of pRows ?? []) nameById.set(p.id as string, (p.full_name as string) ?? "Unknown");
+  }
+
+  return legs.map((l) => {
+    const pid = (l.to_participant_id as string | null) ?? (l.from_participant_id as string | null);
+    const status = l.medication_handover_status as MedicationExceptionRow["status"];
+    return {
+      legId: l.id as string,
+      tripId: l.trip_id as string,
+      legNumber: (l.leg_index as number) + 1,
+      participantName: pid ? (nameById.get(pid) ?? "Unknown participant") : "Unknown participant",
+      status,
+      exceptionLabel:
+        status === "collected_damaged"
+          ? "Medication bag damaged / compromised"
+          : "Medication expected but not provided",
+    };
+  });
+}
+
 export interface StartTripInput {
   driverStaffId: string;
   eventId: string;
