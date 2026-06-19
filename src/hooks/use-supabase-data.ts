@@ -939,3 +939,16 @@ export function useCompleteTrip() {
     onError: (err: Error) => showRedToast("Could not close shift", err),
   });
 }
+
+export function useCancelTrip() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ tripId }: { tripId: string }) => cancelTripFn(tripId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["active-trip"] });
+      qc.invalidateQueries({ queryKey: ["trips"] });
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not cancel trip", err),
+  });
+}
