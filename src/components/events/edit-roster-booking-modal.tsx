@@ -90,7 +90,7 @@ export function EditRosterBookingModal({
       setCarerId(booking.carerId ?? "");
       setCarerTransport(!!booking.carerTransportRequired);
       setParticipantTransport(!!booking.participantTransportRequired);
-      setPermanentAddress(booking.participantPermanentPickupAddress ?? "");
+      setPermanentAddress(booking.participantRegularPickupAddress ?? "");
       setTripPickupOverride(booking.tripPickupAddressOverride ?? "");
     }
   }, [open, booking, collected, eventTicketPrice]);
