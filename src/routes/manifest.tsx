@@ -375,6 +375,7 @@ function WalkaroundChecklist({
   onBack: () => void;
 }) {
   const qc = useQueryClient();
+  console.log("Selected Vehicle Category:", asset.vehicleCategory);
   const checkpointsQ = useQuery<AssetCheckpoint[]>({
     queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
     queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
