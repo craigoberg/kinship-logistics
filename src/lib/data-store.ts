@@ -1816,6 +1816,18 @@ export interface EventRosterBooking {
   carerTransportRequired: boolean;
   /** Whether the participant themselves needs a physical bus seat. */
   participantTransportRequired: boolean;
+  /** One-off pickup address override for THIS event only. Wins over the
+   * participant's permanent_pickup_address when the manifest is seeded. */
+  tripPickupAddressOverride: string | null;
+  /** Frozen snapshot of critical medical alerts taken at the moment this
+   * participant was added to the roster (or last refreshed by a coordinator). */
+  dynamicMedicalNotesSnapshot: string | null;
+  /** Permanent pickup address read through the participants join — convenience
+   * mirror of participant.permanent_pickup_address so the roster table can
+   * render it without a second fetch. */
+  participantPermanentPickupAddress: string | null;
+  /** Mirror of participant.street_address from the join — last-tier fallback. */
+  participantStreetAddress: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -1833,9 +1845,18 @@ interface BookingRow {
   carer_id: string | null;
   carer_transport_required: boolean | null;
   participant_transport_required: boolean | null;
+  trip_pickup_address_override: string | null;
+  dynamic_medical_notes_snapshot: string | null;
   created_at: string;
   updated_at: string;
-  participants?: { first_name: string; last_name: string } | null;
+  participants?:
+    | {
+        first_name: string;
+        last_name: string;
+        permanent_pickup_address?: string | null;
+        street_address?: string | null;
+      }
+    | null;
 }
 
 function rowToBooking(r: BookingRow): EventRosterBooking {
@@ -1855,10 +1876,15 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     carerId: r.carer_id ?? null,
     carerTransportRequired: r.carer_transport_required ?? false,
     participantTransportRequired: r.participant_transport_required ?? false,
+    tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
+    dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
+    participantPermanentPickupAddress: r.participants?.permanent_pickup_address ?? null,
+    participantStreetAddress: r.participants?.street_address ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
+
 
 export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
   const { data, error } = await supabase
