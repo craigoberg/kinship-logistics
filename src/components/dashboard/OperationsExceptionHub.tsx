@@ -106,8 +106,13 @@ export function OperationsExceptionHub() {
       anchorId: "exception-section-day-anomaly",
       label: "Start/End Day Anomaly",
       icon: AlertTriangle,
-      isLive: false,
-      rows: toRows(DAY_ANOMALY_PLACEHOLDERS, "day"),
+      isLive: true,
+      rows: dayAnomalyRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+      })),
     },
     {
       id: "vehicle",
