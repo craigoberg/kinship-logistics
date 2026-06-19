@@ -132,7 +132,6 @@ export function GlobalEscalationInterceptor() {
       <Dialog open={showModal}>
         {/* Non-dismissible: no onOpenChange handler, escape/outside ignored. */}
         <DialogContent
-          showCloseButton={false}
           onEscapeKeyDown={(e) => e.preventDefault()}
           onPointerDownOutside={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
