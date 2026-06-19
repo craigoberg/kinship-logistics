@@ -59,3 +59,19 @@ export const STAFF_CERT_PLACEHOLDERS: readonly PlaceholderRow[] = [
     detail: "Driver Bill — annual fitness review approaching",
   },
 ] as const;
+
+export const ASSET_LIABILITY_PLACEHOLDERS: readonly PlaceholderRow[] = [
+  {
+    title: "Public Liability policy renewal",
+    detail: "Annual cover expires in 21 days",
+  },
+  {
+    title: "Volunteer accident insurance",
+    detail: "Roster sync pending for 4 new volunteers",
+  },
+  {
+    title: "Building lease review",
+    detail: "Depot lease anniversary in 45 days",
+  },
+] as const;
+
