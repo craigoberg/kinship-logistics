@@ -242,8 +242,8 @@ export async function updateParticipant(
   if (patch.lastName !== undefined) row.last_name = patch.lastName;
   if (patch.ndisNumber !== undefined) row.ndis_number = patch.ndisNumber;
   if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
-  if (patch.permanentPickupAddress !== undefined)
-    row.permanent_pickup_address = patch.permanentPickupAddress;
+  if (patch.regularPickupAddress !== undefined)
+    row.regular_pickup_address = patch.regularPickupAddress;
   if (patch.iddsi !== undefined) {
     row.iddsi_level_liquids = patch.iddsi.liquids;
     row.iddsi_level_solids = patch.iddsi.foods;
