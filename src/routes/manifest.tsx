@@ -232,7 +232,7 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
         </div>
       </main>
 
-      <footer className="sticky bottom-0 z-20 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
+      <footer className="sticky bottom-0 z-20 space-y-3 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
         {allLegsComplete ? (
           <FinalizeShiftCard tripId={trip.id} startOdometer={trip.startOdometerKm} />
         ) : (
@@ -240,6 +240,7 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
             Complete each leg in order. Driver: tap from the seat.
           </div>
         )}
+        <CancelTripButton tripId={trip.id} />
       </footer>
     </>
   );
