@@ -43,7 +43,7 @@ import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
-import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary } from "@/lib/data-store";
+import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary, OperationalEscalation } from "@/lib/data-store";
 import {
   listTransportAssets,
   getClearanceForAssetOnDate,
@@ -56,6 +56,9 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
+import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
+import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
+import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
