@@ -32,7 +32,7 @@ import {
 } from "@/components/ui/table";
 import { ClientTime } from "@/components/ui/client-time";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { getActiveUserProfile } from "@/lib/data-store";
+import { getActiveUserProfile, listStaffRegistry, verifyStaffPin, type StaffMember } from "@/lib/data-store";
 import {
   ACTION_MODULES,
   archiveComplianceAsset,
