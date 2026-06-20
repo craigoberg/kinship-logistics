@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import {
   getActiveUserRole,
   loginWithPin,
+  GuardianPinError,
   type UserRole,
 } from "@/lib/data-store";
 
@@ -68,7 +69,13 @@ function AuthTerminal() {
       navigate({ to: destinationForRole(profile.role), replace: true });
     } catch (e) {
       console.error("[auth] loginWithPin failed", e);
-      setError("Sign-in failed. Check your connection and retry.");
+      if (e instanceof GuardianPinError) {
+        setError(e.message);
+      } else {
+        setError("Sign-in failed. Check your connection and retry.");
+      }
+      setPin("");
+      inputRef.current?.focus();
     } finally {
       setBusy(false);
     }
