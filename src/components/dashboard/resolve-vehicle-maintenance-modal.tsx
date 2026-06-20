@@ -77,6 +77,13 @@ export function ResolveVehicleMaintenanceModal({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const currentExpiry = useMemo<Date | null>(() => {
+    if (!subject || subject.flagKind !== "rego") return null;
+    if (typeof subject.previousValue !== "string") return null;
+    const d = new Date(subject.previousValue);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }, [subject]);
+
   useEffect(() => {
     if (!subject) {
       setNewExpiry(undefined);
@@ -90,7 +97,11 @@ export function ResolveVehicleMaintenanceModal({
     setResType(initialType);
     setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
-  }, [subject, initialType]);
+    // Smart seed: New Expiry = current_expiry + 1 year (or today + 1 year fallback).
+    const base = currentExpiry ?? startOfToday();
+    const seeded = new Date(base.getFullYear() + 1, base.getMonth(), base.getDate());
+    setNewExpiry(seeded);
+  }, [subject, initialType, currentExpiry]);
 
 
   useEffect(() => {
@@ -123,11 +134,14 @@ export function ResolveVehicleMaintenanceModal({
   const actionDateInvalid =
     actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
 
+  const renewedLowerBound = currentExpiry ?? today;
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
   const dateInvalid =
-    (resType === "renewed" && newExpiry && newExpiry.getTime() <= today.getTime()) ||
+    (resType === "renewed" &&
+      newExpiry &&
+      newExpiry.getTime() <= renewedLowerBound.getTime()) ||
     (resType === "deferred" &&
       deferredUntil &&
       (deferredUntil.getTime() <= today.getTime() ||
@@ -271,13 +285,20 @@ export function ResolveVehicleMaintenanceModal({
                     label="New Registration Expiry"
                     value={newExpiry}
                     onChange={setNewExpiry}
-                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                    helper={
+                      currentExpiry
+                        ? `Pre-filled to current expiry + 1 year. Must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}). Editable for 3- or 6-month registrations.`
+                        : "Pre-filled to today + 1 year. Must be after today. Editable for 3- or 6-month registrations."
+                    }
                   />
-                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                    <span className="text-[11px] font-medium text-destructive">
-                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                    </span>
-                  )}
+                  {newExpiry &&
+                    newExpiry.getTime() <= renewedLowerBound.getTime() && (
+                      <span className="text-[11px] font-medium text-destructive">
+                        {currentExpiry
+                          ? `New expiry must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}).`
+                          : "Expiry must be after today — renewals with an already-expired date cannot resolve the flag."}
+                      </span>
+                    )}
                 </div>
               </>
             )}
