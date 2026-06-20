@@ -320,10 +320,44 @@ export async function resolveVehicleMaintenance(
     previousValue,
     evidenceRef,
     justification,
+    auditorStaffId,
+    auditorPin,
+    witnessStaffId,
+    witnessPin,
+    checklistCategory,
+    checklistResponses,
   } = input;
 
+  const isFormalAudit = resolutionType === "formal_audit";
 
-  // 1) Mirror back to transport_assets.
+  // 0) Formal Audit: validate the two PINs server-side before touching anything.
+  if (isFormalAudit) {
+    if (!auditorStaffId || !witnessStaffId) {
+      throw new Error("Auditor and Witness must both be selected.");
+    }
+    if (auditorStaffId === witnessStaffId) {
+      throw new Error("Auditor and Witness must be different staff members.");
+    }
+    if (!auditorPin || !witnessPin) {
+      throw new Error("Both Auditor and Witness PINs are required.");
+    }
+    if (!checklistResponses || checklistResponses.length === 0) {
+      throw new Error("Checklist is empty — cannot submit a formal audit.");
+    }
+    const missing = checklistResponses.filter((r) => !r.status);
+    if (missing.length > 0) {
+      throw new Error("Every checklist item must be marked before submission.");
+    }
+    const [auditorOk, witnessOk] = await Promise.all([
+      verifyStaffPin(auditorStaffId, auditorPin),
+      verifyStaffPin(witnessStaffId, witnessPin),
+    ]);
+    if (!auditorOk) throw new Error("Invalid Auditor PIN.");
+    if (!witnessOk) throw new Error("Invalid Witness PIN.");
+  }
+
+  // 1) Mirror back to transport_assets (skip for formal_audit — periodic review,
+  //    not a flag clear).
   let assetMirrored = false;
   try {
     if (resolutionType === "renewed") {
@@ -338,7 +372,6 @@ export async function resolveVehicleMaintenance(
           actionDate ?? newServiceDate ?? new Date().toISOString().slice(0, 10),
         deferredUntil: null,
       });
-
     } else if (resolutionType === "deferred") {
       await updateFleetAsset(assetId, { deferredUntil: deferredUntil ?? null });
     } else if (resolutionType === "decommissioned") {
@@ -353,55 +386,95 @@ export async function resolveVehicleMaintenance(
   // 2) Append immutable ledger receipt.
   const gps = await tryGetGps();
   const actorId = await resolveStaffIdWithFallback();
-  const severityAfter: LedgerSeverity =
-    resolutionType === "renewed" || resolutionType === "serviced"
+
+  const anyFail =
+    isFormalAudit &&
+    !!checklistResponses?.some((r) => r.status === "fail");
+  const severityAfter: LedgerSeverity = isFormalAudit
+    ? anyFail
+      ? "YELLOW"
+      : "GREEN"
+    : resolutionType === "renewed" || resolutionType === "serviced"
       ? "GREEN"
       : resolutionType === "deferred"
         ? "YELLOW"
         : "INFO";
-  const subjectId = `${assetId}:${flagKind}`;
+
+  const actionType = isFormalAudit
+    ? "VEHICLE_FORMAL_AUDIT"
+    : "VEHICLE_MAINTENANCE_RESOLVED";
+  const subjectId = isFormalAudit
+    ? `${assetId}:formal_audit`
+    : `${assetId}:${flagKind}`;
 
   let ledgerWritten = false;
+  let ledgerId: string | null = null;
   try {
-    const { error } = await supabase.from("operational_ledger").insert({
-      staff_id: actorId,
-      category: "VEHICLE",
-      severity: severityAfter,
-      action_type: "VEHICLE_MAINTENANCE_RESOLVED",
-      gps_lat: gps?.lat ?? null,
-      gps_lng: gps?.lng ?? null,
-      metadata: {
-        subject_type: "transport_asset",
-        subject_id: subjectId,
-        asset_id: assetId,
-        asset_name: assetName,
-        rego_plate: regoPlate,
-        flag_kind: flagKind,
-        resolution_type: resolutionType,
-        previous_value: previousValue ?? null,
-        new_value:
-          resolutionType === "renewed"
-            ? (newRegistrationExpiry ?? null)
-            : resolutionType === "serviced"
-              ? (newServiceOdo ?? null)
-              : null,
-        new_expiry_date:
-          resolutionType === "renewed" ? (newRegistrationExpiry ?? null) : null,
-        action_date: actionDate ?? null,
-        deferred_until: deferredUntil ?? null,
+    const { data, error } = await supabase
+      .from("operational_ledger")
+      .insert({
+        staff_id: actorId,
+        category: "VEHICLE",
+        severity: severityAfter,
+        action_type: actionType,
+        gps_lat: gps?.lat ?? null,
+        gps_lng: gps?.lng ?? null,
+        metadata: {
+          subject_type: "transport_asset",
+          subject_id: subjectId,
+          asset_id: assetId,
+          asset_name: assetName,
+          rego_plate: regoPlate,
+          flag_kind: flagKind,
+          resolution_type: resolutionType,
+          previous_value: previousValue ?? null,
+          new_value:
+            resolutionType === "renewed"
+              ? (newRegistrationExpiry ?? null)
+              : resolutionType === "serviced"
+                ? (newServiceOdo ?? null)
+                : null,
+          new_expiry_date:
+            resolutionType === "renewed" ? (newRegistrationExpiry ?? null) : null,
+          action_date: actionDate ?? null,
+          deferred_until: deferredUntil ?? null,
 
-        evidence_ref: evidenceRef ?? null,
-        justification,
-        gps_attempted: true,
-        gps_captured: !!gps,
-        source: "resolve_vehicle_maintenance_modal",
-      },
-    });
+          evidence_ref: evidenceRef ?? null,
+          justification,
+          gps_attempted: true,
+          gps_captured: !!gps,
+          source: "resolve_vehicle_maintenance_modal",
+
+          // Formal Audit payload (null on non-audit rows).
+          auditor_staff_id: isFormalAudit ? auditorStaffId : null,
+          witness_staff_id: isFormalAudit ? witnessStaffId : null,
+          checklist_category: isFormalAudit ? (checklistCategory ?? null) : null,
+          checklist_responses: isFormalAudit ? (checklistResponses ?? []) : null,
+          checklist_any_fail: isFormalAudit ? anyFail : null,
+        },
+      })
+      .select("id")
+      .single();
     if (error) throw error;
     ledgerWritten = true;
+    ledgerId = (data?.id as string) ?? null;
   } catch (err) {
     console.error("[resolveVehicleMaintenance] ledger write failed", err);
     throw err;
+  }
+
+  // 3) Formal Audit: mirror checklist responses into the normalized table.
+  if (isFormalAudit && ledgerId && checklistResponses?.length) {
+    try {
+      await insertChecklistResponses(ledgerId, checklistResponses);
+    } catch (err) {
+      console.error(
+        "[resolveVehicleMaintenance] checklist_responses insert failed",
+        err,
+      );
+      // Ledger row is the source of truth; don't roll back the audit if the
+      // mirror fails — metadata still contains the full snapshot.
+    }
   }
 
   return { assetId, flagKind, ledgerWritten, assetMirrored };
