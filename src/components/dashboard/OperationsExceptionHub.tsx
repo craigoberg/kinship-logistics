@@ -103,8 +103,7 @@ export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
-  const { data: staffCertRows } = useStaffCertificationExceptions();
-  const { data: vehicleRows } = useVehicleMaintenanceExceptions();
+  const { data: complianceRows } = useComplianceExceptions();
 
   const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
     queryKey: ["pending-manager-reviews"],
@@ -123,10 +122,7 @@ export function OperationsExceptionHub() {
   const grounded = groundedQ.data ?? [];
   const [activeUnground, setActiveUnground] =
     useState<OperationalEscalation | null>(null);
-  const [activeCertResolve, setActiveCertResolve] =
-    useState<ResolveCertSubject | null>(null);
-  const [activeVehicleResolve, setActiveVehicleResolve] =
-    useState<ResolveVehicleSubject | null>(null);
+  const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
   useEffect(() => {
     const off = subscribeToPendingReviews(() => {
@@ -165,15 +161,8 @@ export function OperationsExceptionHub() {
   }));
 
 
-  const toRows = (items: readonly PlaceholderRow[], prefix: string): BucketRow[] =>
-    items.map((r, idx) => ({
-      key: `${prefix}-${idx}`,
-      title: r.title,
-      detail: r.detail,
-      severity: r.severity,
-    }));
-
-  const buckets: Bucket[] = [
+  // Operational tiles (live signals — not driven by the registry).
+  const operationalBuckets: Bucket[] = [
     {
       id: "medication",
       anchorId: "exception-section-medication",
@@ -210,81 +199,52 @@ export function OperationsExceptionHub() {
           ) : undefined,
       })),
     },
-    {
-      id: "vehicle",
-      anchorId: "exception-section-vehicle",
-      label: "Vehicle Compliance",
-      icon: Truck,
-      isLive: true,
-      rows: vehicleRows.map((r) => ({
-        key: r.key,
-        title: r.title,
-        detail: r.detail,
-        severity: r.severity,
-        action:
-          r.severity === "critical" || r.severity === "warning" ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() =>
-                setActiveVehicleResolve({
-                  assetId: r.assetId,
-                  assetName: r.assetName,
-                  regoPlate: r.regoPlate,
-                  flagKind: r.flagKind,
-                  previousValue: r.previousValue,
-                  latestOdo: r.latestOdo,
-                })
-              }
-            >
-              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-              Resolve
-            </Button>
-          ) : undefined,
-      })),
-    },
-    {
-      id: "staff",
-      anchorId: "exception-section-staff",
-      label: "Staff Certifications",
-      icon: UserCheck,
-      isLive: true,
-      rows: staffCertRows.map((r) => ({
-        key: r.key,
-        title: r.title,
-        detail: r.detail,
-        severity: r.severity,
-        action:
-          r.severity === "critical" || r.severity === "warning" ? (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() =>
-                setActiveCertResolve({
-                  staffId: r.staffId,
-                  staffName: r.staffName,
-                  certName: r.certName,
-                  expiry: r.expiry,
-                })
-              }
-            >
-              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-              Resolve
-            </Button>
-          ) : undefined,
-      })),
-    },
-    {
-      id: "asset",
-      anchorId: "exception-section-asset",
-      label: "Asset & Liability Insurance",
-      icon: ShieldCheck,
-      isLive: false,
-      rows: toRows(ASSET_LIABILITY_PLACEHOLDERS, "asset"),
-    },
   ];
+
+  // Registry-driven tiles — one bucket per unique category present in
+  // compliance_assets. Adding a new category in the Governance Hub lights up
+  // a new tile here with no code change.
+  const groupedByCategory = new Map<string, ComplianceExceptionRow[]>();
+  for (const r of complianceRows) {
+    const arr = groupedByCategory.get(r.category) ?? [];
+    arr.push(r);
+    groupedByCategory.set(r.category, arr);
+  }
+  const registryBuckets: Bucket[] = Array.from(groupedByCategory.entries())
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([category, rows]) => {
+      const pres = CATEGORY_PRESENTATION[category] ?? {
+        label: titleCase(category),
+        icon: ShieldCheck,
+      };
+      return {
+        id: `compliance-${category.toLowerCase()}`,
+        anchorId: `exception-section-compliance-${category.toLowerCase()}`,
+        label: pres.label,
+        icon: pres.icon,
+        isLive: true,
+        rows: rows.map((r) => ({
+          key: r.key,
+          title: r.title,
+          detail: r.detail,
+          severity: r.severity,
+          action: (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() => setActiveAsset(r.asset)}
+            >
+              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+              Resolve
+            </Button>
+          ),
+        })),
+      };
+    });
+
+  const buckets: Bucket[] = [...operationalBuckets, ...registryBuckets];
+
 
   const drillBuckets = buckets.filter((b) => b.rows.length > 0);
 
@@ -440,17 +400,13 @@ export function OperationsExceptionHub() {
         onUngrounded={() => qc.invalidateQueries({ queryKey: ["grounded-escalations"] })}
       />
 
-      <ResolveCertificationModal
-        subject={activeCertResolve}
-        onClose={() => setActiveCertResolve(null)}
-        onResolved={() => qc.invalidateQueries({ queryKey: ["staff-registry", "all"] })}
-      />
-
-      <ResolveVehicleMaintenanceModal
-        subject={activeVehicleResolve}
-        onClose={() => setActiveVehicleResolve(null)}
+      <ResolveDispatcher
+        asset={activeAsset}
+        onClose={() => setActiveAsset(null)}
         onResolved={() => {
+          qc.invalidateQueries({ queryKey: ["compliance-assets"] });
           qc.invalidateQueries({ queryKey: ["fleet"] });
+          qc.invalidateQueries({ queryKey: ["staff-registry", "all"] });
         }}
       />
     </Card>
