@@ -377,35 +377,46 @@ export function ResolveVehicleMaintenanceModal({
               />
             )}
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="v-evidence" className="flex items-center gap-1.5 text-sm font-semibold">
-                Evidence Reference
-                <span
-                  className={cn(
-                    "text-[10px] font-medium uppercase tracking-wide",
-                    evidenceRequired ? "text-rose-600" : "text-muted-foreground",
-                  )}
-                >
-                  {evidenceRequired ? "Required" : "Optional"}
-                </span>
-              </Label>
-              <Input
-                id="v-evidence"
-                value={evidenceRef}
-                onChange={(e) => setEvidenceRef(e.target.value)}
-                placeholder={
-                  evidenceRequired
-                    ? "Rego paper #, service invoice #, SharePoint link…"
-                    : "Not required for defer/decommission"
-                }
-                className="text-sm"
+            {isFormalAudit && (
+              <FormalAuditChecklist
+                category={FORMAL_AUDIT_CATEGORY}
+                value={auditState}
+                onChange={setAuditState}
+                onItemsLoaded={setAuditItems}
               />
-              {evidenceRequired && evidenceTooShort && (
-                <span className="text-[11px] text-muted-foreground">
-                  {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
-                </span>
-              )}
-            </div>
+            )}
+
+            {!isFormalAudit && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="v-evidence" className="flex items-center gap-1.5 text-sm font-semibold">
+                  Evidence Reference
+                  <span
+                    className={cn(
+                      "text-[10px] font-medium uppercase tracking-wide",
+                      evidenceRequired ? "text-rose-600" : "text-muted-foreground",
+                    )}
+                  >
+                    {evidenceRequired ? "Required" : "Optional"}
+                  </span>
+                </Label>
+                <Input
+                  id="v-evidence"
+                  value={evidenceRef}
+                  onChange={(e) => setEvidenceRef(e.target.value)}
+                  placeholder={
+                    evidenceRequired
+                      ? "Rego paper #, service invoice #, SharePoint link…"
+                      : "Not required for defer/decommission"
+                  }
+                  className="text-sm"
+                />
+                {evidenceRequired && evidenceTooShort && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-1.5">
               <div className="flex items-baseline justify-between gap-2">
