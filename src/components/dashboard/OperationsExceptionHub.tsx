@@ -38,8 +38,8 @@ import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
+  useStaffCertificationExceptions,
   VEHICLE_COMPLIANCE_PLACEHOLDERS,
-  STAFF_CERT_PLACEHOLDERS,
   ASSET_LIABILITY_PLACEHOLDERS,
   type PlaceholderRow,
   type Severity,
@@ -101,6 +101,7 @@ export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
+  const { data: staffCertRows } = useStaffCertificationExceptions();
 
   const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
     queryKey: ["pending-manager-reviews"],
@@ -215,8 +216,13 @@ export function OperationsExceptionHub() {
       anchorId: "exception-section-staff",
       label: "Staff Certifications",
       icon: UserCheck,
-      isLive: false,
-      rows: toRows(STAFF_CERT_PLACEHOLDERS, "staff"),
+      isLive: true,
+      rows: staffCertRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+      })),
     },
     {
       id: "asset",

@@ -35,7 +35,7 @@ interface Props {
   staff: StaffMember | null;
 }
 
-const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null };
+const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null, deferredUntil: null };
 
 export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const isEdit = !!staff;
@@ -186,7 +186,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             ) : (
               <div className="space-y-2">
                 {certs.map((c, i) => (
-                  <div key={i} className="grid gap-2 rounded-md border border-border bg-card/40 p-3 sm:grid-cols-[1fr_1fr_180px_auto]">
+                  <div key={i} className="grid gap-2 rounded-md border border-border bg-card/40 p-3 sm:grid-cols-[1fr_1fr_180px_180px_auto]">
                     <Input
                       placeholder="Certificate name"
                       value={c.name}
@@ -208,6 +208,19 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                       />
                       <p className="text-[11px] text-muted-foreground/70">
                         Optional. Leave blank if this certification never expires.
+                      </p>
+                    </div>
+                    <div className="grid gap-1">
+                      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Defer Until (Manager)
+                      </Label>
+                      <Input
+                        type="date"
+                        value={c.deferredUntil ?? ""}
+                        onChange={(e) => updateCert(i, { deferredUntil: e.target.value || null })}
+                      />
+                      <p className="text-[11px] text-muted-foreground/70">
+                        Hides this cert from the Red/Critical dashboard list until this date.
                       </p>
                     </div>
                     <Button

@@ -429,7 +429,13 @@ export async function hashPin(pin: string): Promise<string> {
 export interface StaffCertification {
   name: string;
   number: string;
-  expiry: string | null; // ISO yyyy-mm-dd
+  expiry: string | null; // ISO yyyy-mm-dd — renewal_expiry_date
+  /**
+   * Manager "Defer" timestamp. If set to a future ISO date, the certification
+   * is suppressed from the Red/Critical dashboard tile until that date passes.
+   * Persisted inside the staff_registry.certifications JSONB array.
+   */
+  deferredUntil?: string | null;
 }
 
 export interface StaffMember {
@@ -479,6 +485,7 @@ function rowToStaff(r: StaffRow): StaffMember {
       name: c?.name ?? "",
       number: c?.number ?? "",
       expiry: c?.expiry ?? null,
+      deferredUntil: (c as { deferredUntil?: string | null })?.deferredUntil ?? null,
     })),
     createdAt: r.created_at,
   };

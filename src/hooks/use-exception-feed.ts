@@ -7,12 +7,14 @@ import {
   listParticipants,
   listFailedClearancesWithItems,
   getTodayManifestSummary,
+  listStaffRegistry,
   type MedicationExceptionRow,
   type MedicationSchedule,
   type ComplianceLog,
   type Participant,
   type FailedClearanceReport,
   type TodayManifestSummary,
+  type StaffMember,
 } from "@/lib/data-store";
 
 export type Severity = "critical" | "warning" | "info";
@@ -169,23 +171,126 @@ export const VEHICLE_COMPLIANCE_PLACEHOLDERS: readonly PlaceholderRow[] = [
   },
 ] as const;
 
-export const STAFF_CERT_PLACEHOLDERS: readonly PlaceholderRow[] = [
-  {
-    title: "WWCC expiring",
-    detail: "Driver John Doe — renewal required within 14 days",
-    severity: "warning",
-  },
-  {
-    title: "First Aid certificate expired",
-    detail: "Carer Jane Smith — recertification overdue",
-    severity: "critical",
-  },
-  {
-    title: "Driver licence medical due",
-    detail: "Driver Bill — annual fitness review approaching",
-    severity: "info",
-  },
-] as const;
+export const STAFF_CERT_PLACEHOLDERS: readonly PlaceholderRow[] = [] as const;
+
+// ---------------------------------------------------------------------------
+// STAFF CERTIFICATIONS — live scan of staff_registry.certifications JSONB
+// ---------------------------------------------------------------------------
+
+export interface StaffCertExceptionRow {
+  key: string;
+  staffId: string;
+  staffName: string;
+  certName: string;
+  expiry: string; // ISO yyyy-mm-dd
+  daysDelta: number; // negative = expired N days ago, positive = N days until expiry
+  title: string;
+  detail: string;
+  severity: Severity;
+  deferredUntil: string | null;
+}
+
+function parseISODate(iso: string): Date | null {
+  // Parse as a local-midnight date so day math is calendar-accurate.
+  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
+  if (!m) return null;
+  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+}
+
+function startOfToday(): Date {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function formatAusDate(iso: string): string {
+  const d = parseISODate(iso);
+  if (!d) return iso;
+  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
+}
+
+/**
+ * Scans every staff member's certifications JSONB and surfaces any cert
+ * whose renewal_expiry_date is in the past (critical/RED) or within the
+ * next 30 days (warning/YELLOW). Deferred certs (deferred_until in the
+ * future) are suppressed.
+ */
+export function useStaffCertificationExceptions() {
+  const staffQ = useQuery<StaffMember[]>({
+    queryKey: ["staff-registry", "all"],
+    queryFn: () => listStaffRegistry(),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const rows = useMemo<StaffCertExceptionRow[]>(() => {
+    const staff = staffQ.data ?? [];
+    // Hardened query log: prove which columns the dashboard scan reads.
+    // eslint-disable-next-line no-console
+    console.log("[StaffCertScan] columns:", [
+      "staff_registry.id",
+      "staff_registry.full_name",
+      "staff_registry.active",
+      "staff_registry.certifications -> name",
+      "staff_registry.certifications -> number",
+      "staff_registry.certifications -> expiry (renewal_expiry_date)",
+      "staff_registry.certifications -> deferredUntil",
+    ]);
+
+    const today = startOfToday();
+    const todayMs = today.getTime();
+    const out: StaffCertExceptionRow[] = [];
+
+    for (const s of staff) {
+      if (!s.active) continue;
+      for (const c of s.certifications) {
+        if (!c.expiry) continue; // never-expires sentinel
+        const expiryDate = parseISODate(c.expiry);
+        if (!expiryDate) continue;
+
+        // Apply Defer logic: suppress if deferred_until is in the future.
+        if (c.deferredUntil) {
+          const deferUntil = parseISODate(c.deferredUntil);
+          if (deferUntil && deferUntil.getTime() > todayMs) continue;
+        }
+
+        const daysDelta = Math.round(
+          (expiryDate.getTime() - todayMs) / (1000 * 60 * 60 * 24),
+        );
+
+        let severity: Severity | null = null;
+        let stateLabel = "";
+        if (daysDelta < 0) {
+          severity = "critical";
+          stateLabel = `EXPIRED ${Math.abs(daysDelta)}d ago (${formatAusDate(c.expiry)})`;
+        } else if (daysDelta <= 30) {
+          severity = "warning";
+          stateLabel = `Expires in ${daysDelta}d (${formatAusDate(c.expiry)})`;
+        }
+        if (!severity) continue;
+
+        const certLabel = c.name?.trim() || "Certification";
+        out.push({
+          key: `${s.id}:${certLabel}:${c.expiry}`,
+          staffId: s.id,
+          staffName: s.fullName,
+          certName: certLabel,
+          expiry: c.expiry,
+          daysDelta,
+          title: `${s.fullName} · ${certLabel}`,
+          detail: stateLabel,
+          severity,
+          deferredUntil: c.deferredUntil ?? null,
+        });
+      }
+    }
+
+    // Most overdue / soonest-expiring first.
+    out.sort((a, b) => a.daysDelta - b.daysDelta);
+    return out;
+  }, [staffQ.data]);
+
+  return { data: rows, isLoading: staffQ.isLoading };
+}
 
 export const ASSET_LIABILITY_PLACEHOLDERS: readonly PlaceholderRow[] = [
   {
