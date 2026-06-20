@@ -35,9 +35,13 @@ export interface UpdateSystemParameterResult {
 
 async function rpcIsManager(principalId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc("is_manager", {
-    _staff_id: principalId,
+    _user_id: principalId,
   });
   if (!error) return data === true;
+
+  // Fallback for environments deploying the newer arg name.
+  const alt = await supabase.rpc("is_manager", { _staff_id: principalId });
+  if (!alt.error) return alt.data === true;
   throw error;
 }
 
