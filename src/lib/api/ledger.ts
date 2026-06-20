@@ -281,6 +281,19 @@ export interface ResolveVehicleMaintenanceInput {
   evidenceRef: string | null;
   /** Manager justification. Always required, min 20 chars. */
   justification: string;
+
+  // ----- Formal Audit only (resolutionType === 'formal_audit') -----
+  /** Auditor staff id (PIN-verified). */
+  auditorStaffId?: string | null;
+  /** Auditor 4-digit PIN — server-verified via verify_staff_pin RPC. */
+  auditorPin?: string | null;
+  /** Witness staff id (PIN-verified, must differ from auditor). */
+  witnessStaffId?: string | null;
+  /** Witness 4-digit PIN. */
+  witnessPin?: string | null;
+  /** Full checklist snapshot — embedded in ledger metadata + mirrored to checklist_responses. */
+  checklistCategory?: string | null;
+  checklistResponses?: ChecklistResponseRow[];
 }
 
 export interface ResolveVehicleMaintenanceResult {
