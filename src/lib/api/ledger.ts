@@ -3,9 +3,14 @@ import {
   listStaffRegistry,
   resolveStaffIdWithFallback,
   updateStaffMember,
+  verifyStaffPin,
   type StaffCertification,
 } from "@/lib/data-store";
 import { updateFleetAsset } from "@/lib/api/fleet";
+import {
+  insertChecklistResponses,
+  type ChecklistResponseRow,
+} from "@/lib/api/checklists";
 
 export type LedgerCategory = "VEHICLE" | "CENTRE" | "CLIENT" | "TRIP";
 export type LedgerSeverity = "RED" | "YELLOW" | "GREEN" | "INFO";
