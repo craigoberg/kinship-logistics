@@ -4,7 +4,7 @@ import { Loader2, ShieldCheck } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { toast } from "@/components/ui/sonner";
+import { toast } from "sonner";
 import {
   getActiveUserRole,
   loginWithPin,
