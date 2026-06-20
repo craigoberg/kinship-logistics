@@ -315,12 +315,61 @@ export function OperationsExceptionHub() {
         )}
       </section>
 
+      <section className="rounded-md border-2 border-orange-600/40 bg-orange-600/5">
+        <header className="flex items-center justify-between gap-2 border-b border-orange-600/30 px-3 py-2">
+          <div className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
+            <Truck className="h-4 w-4" />
+            <h4 className="text-sm font-semibold">
+              Grounded Vehicles (awaiting manager clearance)
+            </h4>
+          </div>
+          <span className="text-xs text-muted-foreground tabular-nums">
+            {grounded.length} {grounded.length === 1 ? "vehicle" : "vehicles"}
+          </span>
+        </header>
+        {grounded.length === 0 ? (
+          <div className="px-3 py-4 text-xs text-muted-foreground">
+            No vehicles currently grounded.
+          </div>
+        ) : (
+          <ul className="divide-y divide-orange-600/20">
+            {grounded.map((g) => (
+              <li
+                key={g.id}
+                className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
+              >
+                <div className="min-w-0">
+                  <div className="truncate font-semibold">{g.vehicleInfo}</div>
+                  <div className="truncate text-xs text-muted-foreground">
+                    Grounded {g.resolvedAt ? new Date(g.resolvedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—"}
+                    {g.resolutionNotes ? ` · ${g.resolutionNotes}` : ""}
+                  </div>
+                </div>
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => setActiveUnground(g)}
+                >
+                  Unground vehicle
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
       <ManagerJointReviewModal
         open={!!activeReview}
         onOpenChange={(o) => {
           if (!o) setActiveReview(null);
         }}
         row={activeReview}
+      />
+
+      <UngroundVehicleModal
+        escalation={activeUnground}
+        onClose={() => setActiveUnground(null)}
+        onUngrounded={() => qc.invalidateQueries({ queryKey: ["grounded-escalations"] })}
       />
     </Card>
   );
