@@ -403,7 +403,7 @@ function EditAssetModal({
                     <SelectContent>
                       {staff.map((s) => (
                         <SelectItem key={s.id} value={s.id}>
-                          {s.full_name}
+                          {s.fullName}
                         </SelectItem>
                       ))}
                     </SelectContent>
