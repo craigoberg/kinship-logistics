@@ -25,11 +25,15 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { cn } from "@/lib/utils";
 import {
   listClearancesAwaitingManagerReview,
+  listGroundedEscalations,
   rerouteParticipantForDate,
+  subscribeToEscalationPool,
   subscribeToPendingReviews,
+  type OperationalEscalation,
   type PendingManagerReviewRow,
 } from "@/lib/data-store";
 import { ManagerJointReviewModal } from "./manager-joint-review-modal";
+import { UngroundVehicleModal } from "./unground-vehicle-modal";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
