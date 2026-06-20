@@ -8,13 +8,12 @@ import {
 } from "@/components/ui/tabs";
 import { AdminLookupWorkspace } from "@/components/admin/admin-lookup-workspace";
 import { SystemParameterWorkspace } from "@/components/admin/system-parameter-workspace";
-import { GovernanceHubWorkspace } from "@/components/admin/governance-hub-workspace";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "parameters" | "governance";
+type AdminTab = "lookups" | "parameters";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
@@ -25,8 +24,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage lookup parameters, tunable system thresholds, and the
-          Compliance Governance registry powering the dashboard.
+          Manage lookup parameters and tunable system thresholds.
         </p>
       </header>
 
@@ -34,16 +32,12 @@ function AdminPage() {
         <TabsList>
           <TabsTrigger value="lookups">Lookups</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
-          <TabsTrigger value="governance">Governance Hub</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
           <AdminLookupWorkspace />
         </TabsContent>
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
-        </TabsContent>
-        <TabsContent value="governance">
-          <GovernanceHubWorkspace />
         </TabsContent>
       </Tabs>
     </div>
