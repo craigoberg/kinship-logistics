@@ -100,8 +100,8 @@ export interface ResolveCertificationInput {
   newExpiry?: string | null;
   /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30 days. */
   deferredUntil?: string | null;
-  /** Evidence reference (doc id, link, ticket #). Min 6 chars. */
-  evidenceRef: string;
+  /** Evidence reference (doc id, link, ticket #). Required (min 6 chars) only when resolutionType === 'renewed'; null otherwise. */
+  evidenceRef: string | null;
   /** Manager justification notes. Min 20 chars. */
   justification: string;
 }
@@ -210,7 +210,7 @@ export async function resolveCertification(
         resolution_type: resolutionType,
         new_expiry: newExpiry ?? null,
         deferred_until: deferredUntil ?? null,
-        evidence_ref: evidenceRef,
+        evidence_ref: evidenceRef ?? null,
         justification,
         gps_attempted: true,
         gps_captured: !!gps,

@@ -81,6 +81,7 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
   const trimmedNotes = notes.trim();
   const trimmedEvidence = evidenceRef.trim();
   const notesTooShort = trimmedNotes.length < MIN_NOTES;
+  const evidenceRequired = resType === "renewed";
   const evidenceTooShort = trimmedEvidence.length < MIN_EVIDENCE;
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
@@ -93,7 +94,20 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
         deferredUntil.getTime() > maxDefer.getTime()));
 
   const canSubmit =
-    !submitting && !notesTooShort && !evidenceTooShort && !dateMissing && !dateInvalid;
+    !submitting &&
+    !notesTooShort &&
+    !(evidenceRequired && evidenceTooShort) &&
+    !dateMissing &&
+    !dateInvalid;
+
+  // Clear evidence when switching away from "renewed" so stale input isn't
+  // silently carried into a defer/revoke receipt.
+  useEffect(() => {
+    if (resType !== "renewed" && evidenceRef !== "") {
+      setEvidenceRef("");
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [resType]);
 
   const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
 
@@ -110,7 +124,7 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
         newExpiry: resType === "renewed" && newExpiry ? toISODate(newExpiry) : null,
         deferredUntil:
           resType === "deferred" && deferredUntil ? toISODate(deferredUntil) : null,
-        evidenceRef: trimmedEvidence,
+        evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
       });
       toast.success("Certification resolved", {
@@ -210,17 +224,29 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
             )}
 
             <div className="grid gap-1.5">
-              <Label htmlFor="evidence" className="text-sm font-semibold">
+              <Label htmlFor="evidence" className="flex items-center gap-1.5 text-sm font-semibold">
                 Evidence Reference
+                <span
+                  className={cn(
+                    "text-[10px] font-medium uppercase tracking-wide",
+                    evidenceRequired ? "text-rose-600" : "text-muted-foreground",
+                  )}
+                >
+                  {evidenceRequired ? "Required" : "Optional"}
+                </span>
               </Label>
               <Input
                 id="evidence"
                 value={evidenceRef}
                 onChange={(e) => setEvidenceRef(e.target.value)}
-                placeholder="Doc ID, SharePoint link, ticket #…"
+                placeholder={
+                  evidenceRequired
+                    ? "Doc ID, SharePoint link, ticket #…"
+                    : "Not required for defer/revoke"
+                }
                 className="text-sm"
               />
-              {evidenceTooShort && (
+              {evidenceRequired && evidenceTooShort && (
                 <span className="text-[11px] text-muted-foreground">
                   {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
                 </span>
