@@ -323,7 +323,7 @@ function DateField({
   value: Date | undefined;
   onChange: (d: Date | undefined) => void;
   helper: string;
-  disabledFn: (d: Date) => boolean;
+  disabledFn?: (d: Date) => boolean;
 }) {
   return (
     <div className="grid gap-1.5">
