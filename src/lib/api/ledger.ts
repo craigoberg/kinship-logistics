@@ -75,7 +75,11 @@ export function tryGetGps(): Promise<{ lat: number; lng: number } | null> {
     } catch {
       clearTimeout(timer);
       done(null);
+    }
+  });
 }
+
+
 
 // ---------------------------------------------------------------------------
 // Certification resolution — Manager-only "Resolve" action on the dashboard
