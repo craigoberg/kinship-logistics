@@ -106,11 +106,14 @@ export function ResolveVehicleMaintenanceModal({
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
+      setAuditState(emptyFormalAuditState);
+      setAuditItems([]);
       return;
     }
     setResType(initialType);
     setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
+    setAuditState(emptyFormalAuditState);
     // Smart seed: New Expiry = current_expiry + 1 year (or today + 1 year fallback).
     const base = currentExpiry ?? startOfToday();
     const seeded = new Date(base.getFullYear() + 1, base.getMonth(), base.getDate());
