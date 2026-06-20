@@ -184,6 +184,11 @@ function todayDateStr(): string {
   ).padStart(2, "0")}`;
 }
 
+function startOfToday(): Date {
+  const d = new Date();
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
 const HOIST_HINT_RX = /hoist|wheelchair/i;
 
 /**
