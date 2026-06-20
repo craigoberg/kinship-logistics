@@ -1,98 +1,114 @@
-# Schema-Driven Operational Form Engine + Sev 1 Escalation
+# Operational Ledger + Wire into Escalation Release
 
-## 1. New types — `src/lib/operational-forms.ts` (new)
+## Scope note
 
-```ts
-export interface CriticalGate { id: string; label: string; }
-export interface OperationalSchema {
-  id: string;
-  title: string;
-  description: string;
-  infoBannerText: string;
-  criticalGates?: CriticalGate[];
-  primaryActionText: string;
-}
-export const PRE_TRIP_SCHEMA: OperationalSchema = { /* passenger-manifest gate */ };
+There is no `resolveGroundedEscalation` helper yet (last plan to add an Unground action was rejected). The existing release path is the `resolve()` function inside `src/components/dashboard/escalation-consultation-modal.tsx` — when a manager picks **Approve**, that row's `status` flips to `resolved_approved` and the driver is cleared. That is the integration point for `VEHICLE_RELEASED`.
+
+## 1. Migration — `operational_ledger`
+
+New migration creating an append-only ledger:
+
+```sql
+create table public.operational_ledger (
+  id           uuid primary key default gen_random_uuid(),
+  created_at   timestamptz not null default now(),
+  staff_id     uuid not null references public.staff(id) on delete restrict,
+  category     text not null check (category in ('VEHICLE','CENTRE','CLIENT','TRIP')),
+  severity     text not null check (severity in ('RED','YELLOW','GREEN','INFO')),
+  action_type  text not null,
+  gps_lat      numeric,
+  gps_lng      numeric,
+  metadata     jsonb
+);
+
+create index on public.operational_ledger (created_at desc);
+create index on public.operational_ledger (staff_id, created_at desc);
+create index on public.operational_ledger (category, action_type);
+
+grant select, insert on public.operational_ledger to authenticated;
+grant all on public.operational_ledger to service_role;
+
+alter table public.operational_ledger enable row level security;
+
+-- Append-only: anyone authenticated can insert; nobody can update/delete via API.
+create policy "ledger_insert_authenticated"
+  on public.operational_ledger for insert to authenticated with check (true);
+
+create policy "ledger_read_authenticated"
+  on public.operational_ledger for select to authenticated using (true);
+-- No UPDATE / DELETE policies → immutable from the client.
 ```
 
-## 2. Data-store additions — `src/lib/data-store.ts` (append)
+(Foreign-key target confirmed as `public.staff` per existing `data-store.ts` / `clearance.ts` usage.)
 
-- `OperationalEscalation` interface (`id`, `clearanceId`, `driverName`, `vehicleInfo`, `gateId`, `status`, `createdAt`, `resolvedAt`, `resolvedBy`).
-- `rowToEscalation()` snake→camel mapper.
-- `raiseOperationalEscalation({ clearanceId, driverName, vehicleInfo, gateId })` — single insert with `.select().single()`, throws on Postgres error.
-- `subscribeToEscalation(escalationId, cb)` — Realtime UPDATE channel on `operational_escalations` filtered by id, mirrors `subscribeToClearance`.
+## 2. Helper — `src/lib/api/ledger.ts`
 
-## 3. `DynamicOperationalForm` — `src/components/manifest/dynamic-operational-form.tsx` (new)
+```ts
+export type LedgerCategory = 'VEHICLE' | 'CENTRE' | 'CLIENT' | 'TRIP';
+export type LedgerSeverity = 'RED' | 'YELLOW' | 'GREEN' | 'INFO';
 
-Self-contained orchestrator. Layout top→bottom:
+export interface LedgerEntry {
+  id: string;
+  created_at: string;
+  staff_id: string;
+  category: LedgerCategory;
+  severity: LedgerSeverity;
+  action_type: string;
+  gps_lat: number | null;
+  gps_lng: number | null;
+  metadata: Record<string, unknown> | null;
+}
 
-1. Header (`schema.title` + `schema.description`).
-2. Info banner card (`schema.infoBannerText`).
-3. **Critical gate banners** — full-width `h-16 rounded-xl` tap surfaces. Whole banner is the toggle. Unverified: `bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-200`. Verified: `bg-emerald-600 text-white` + `<Check />`. State: `Record<gateId, boolean>`.
-4. Issue accumulator (reused inline — issues list, add-issue drawer with severity chips + textarea + RED warning, identical visuals to current `IssueAccumulatorPanel`).
-5. Footer primary button (`schema.primaryActionText`, h-14, always enabled).
-6. "← Change vehicle" secondary link.
+export async function writeToLedger(
+  payload: Omit<LedgerEntry, 'id' | 'created_at'>
+): Promise<void> { /* supabase insert, swallow + console.error on failure */ }
 
-**Primary button behaviour:**
-- Any gate `false` → open `GuidanceForkSheet`.
-- All gates `true` and no RED issues → open `PinDeclarationModal`.
-- All gates `true` and RED issues exist → existing dual-handshake path: persist clearance via `insertAssetClearanceWithItems`, hand off to `RedHandshakeWaitingPanel`.
+// Best-effort, never throws. Resolves to null if denied/unsupported/timeout (3s).
+export function tryGetGps(): Promise<{ lat: number; lng: number } | null>;
+```
 
-## 4. `GuidanceForkSheet` (inside the same file)
+Behaviour:
+- `writeToLedger` does a single insert. On error: `console.error('[ledger] write failed', err)` and return — never throws, never toasts. Logging failures must not break the user flow.
+- `tryGetGps` wraps `navigator.geolocation.getCurrentPosition` in a Promise with a 3s timeout and `{ enableHighAccuracy: false, maximumAge: 60_000 }`. SSR-safe (returns `null` if `navigator` undefined).
 
-`Sheet side="bottom"` with verbatim copy:
-> "You haven't verified the passenger manifest gate. If you are missing passengers, please raise a Sev 1 for Manager Consultation for Approval to Leave."
+## 3. Integration — escalation release
 
-- Primary: `🚨 RAISE SEV 1 ESCALATION` — `bg-rose-600 hover:bg-rose-700 h-14 w-full`.
-- Below: text link `- Go Back & Verify Manifest -` that dismisses.
-- On primary press → `handleRaiseSev1()`:
-  ```ts
-  try {
-    const esc = await raiseOperationalEscalation({
-      clearanceId, driverName, vehicleInfo,
-      gateId: firstUnverifiedGateId,
-    });
-    onEscalated(esc);
-  } catch {
-    toast.error("Network error. Please contact the office via phone directly.");
-  }
-  ```
-- `clearanceId` is `null` when no clearance row exists yet (escalation pre-dates persistence). Column is nullable in the live table.
+In `escalation-consultation-modal.tsx` `resolve()`, after the successful `operational_escalations` update and **only on the `resolved_approved` branch** (= vehicle released back to service), fire-and-forget:
 
-## 5. `PinDeclarationModal` (inside the same file)
+```ts
+const gps = await tryGetGps();
+void writeToLedger({
+  staff_id: staffId,
+  category: 'VEHICLE',
+  severity: 'GREEN',
+  action_type: 'VEHICLE_RELEASED',
+  gps_lat: gps?.lat ?? null,
+  gps_lng: gps?.lng ?? null,
+  metadata: {
+    escalation_id: escalation.id,
+    vehicle_info: escalation.vehicle_info ?? null,
+    driver_name: escalation.driver_name ?? null,
+    resolution_notes: notes.trim(),
+  },
+});
+```
 
-`Dialog` containing:
-- Comfort declaration text (reused `COMFORT_DECLARATION_TEXT`).
-- Masked PIN input: `type="password"` `inputMode="numeric"` `pattern="[0-9]*"` `maxLength={4}` `autoFocus` `autoComplete="off"`, big centered tracking.
-- Confirm button (disabled until 4 digits). On confirm:
-  1. `insertAssetClearanceWithItems(...)` with current issues + accumulated blob.
-  2. `submitDriverAuthorization(clearanceId, driverStaffId, pin)`.
-  3. `toast.success`, `onCleared()`.
+Wrapped so a ledger failure can never block the toast/close path. `resolved_denied` is intentionally **not** logged as `VEHICLE_RELEASED` (it would be a separate future `VEHICLE_GROUNDED` action).
 
-## 6. Manifest wiring — `src/routes/manifest.tsx`
+## 4. Verification
 
-- Add imports for `DynamicOperationalForm`, `PRE_TRIP_SCHEMA`, `OperationalEscalation`.
-- Replace `IssueAccumulatorGate`'s render body to mount `<DynamicOperationalForm schema={PRE_TRIP_SCHEMA} … />`.
-- Local state `escalation`. When `onEscalated(esc)` fires → render `<RedHandshakeWaitingPanel escalationId={esc.id} … />` directly (no clearance row).
+- `bunx tsc --noEmit` clean.
+- Approve a Sev 1 escalation in the Coordinator modal → confirm one new row in `operational_ledger` with `action_type='VEHICLE_RELEASED'`, `severity='GREEN'`, `metadata.resolution_notes` populated, and `gps_lat/lng` populated if browser geolocation was granted (else null).
+- Deny an escalation → confirm **no** ledger row is written.
+- Revoke geolocation permission and retry approve → confirm the resolve still succeeds with null GPS and no error toast.
 
-## 7. `RedHandshakeWaitingPanel` extension — `src/components/manifest/red-handshake-waiting-panel.tsx`
+## Files touched
 
-- Make `clearance` and `issues` optional. Add optional `escalationId`.
-- When `escalationId` present:
-  - Subscribe via `subscribeToEscalation`.
-  - Local status state `pending | resolved_approved | resolved_denied`.
-  - `resolved_approved` → toast success + `onAuthorized()`.
-  - `resolved_denied` → toast error + `onBack()`.
-  - Hide driver-PIN section (office unlocks remotely); show "Awaiting office authorization for Sev 1 escalation" body.
-- Existing clearance path preserved unchanged when no `escalationId`.
+- `supabase/migrations/<new>.sql` — create `operational_ledger` + grants + RLS.
+- `src/lib/api/ledger.ts` — new helper module (`writeToLedger`, `tryGetGps`, types).
+- `src/components/dashboard/escalation-consultation-modal.tsx` — add ledger write on approved release.
 
-## 8. Verification
+## Out of scope (flag for follow-up)
 
-- `bunx tsc --noEmit` must return zero errors before reporting done.
-- Manual visual sanity: gate banner slate ↔ emerald toggle, Guidance Fork copy verbatim, PIN modal numeric on mobile, escalation path lands on RedHandshakeWaitingPanel with live status.
-
-## Out of scope
-
-- No edits to the existing `IssueAccumulatorPanel` (kept for backwards compatibility / other entry points).
-- No edits to the SQL migration (live in Supabase).
-- Office-side `claim_operational_escalation` RPC consumer (separate dashboard work).
+- No Manager "Unground" UI for already-denied escalations (previous plan rejected). When that lands, its handler should also call `writeToLedger` with `action_type='VEHICLE_RELEASED'`.
+- No reads/reporting UI over `operational_ledger` yet.
