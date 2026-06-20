@@ -15,6 +15,7 @@ import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
+import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
 
 function NotFoundComponent() {
   return (
@@ -135,6 +136,7 @@ function RootComponent() {
       <NotificationSimulator />
       <GlobalEscalationInterceptor />
       <RouteRehydrationGuardian />
+      <GlobalIncidentIntakeDrawer />
     </QueryClientProvider>
   );
 }
