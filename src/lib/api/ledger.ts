@@ -366,7 +366,11 @@ export async function resolveVehicleMaintenance(
             : resolutionType === "serviced"
               ? (newServiceOdo ?? null)
               : null,
+        new_expiry_date:
+          resolutionType === "renewed" ? (newRegistrationExpiry ?? null) : null,
+        action_date: actionDate ?? null,
         deferred_until: deferredUntil ?? null,
+
         evidence_ref: evidenceRef ?? null,
         justification,
         gps_attempted: true,
