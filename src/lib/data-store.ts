@@ -568,18 +568,18 @@ function classifyRole(staffRole: string | null): UserRole | null {
 }
 
 export class GuardianPinError extends Error {
-  constructor() {
-    super(
-      "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
-    );
+  constructor(
+    message = "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
+  ) {
+    super(message);
     this.name = "GuardianPinError";
   }
 }
 
 /**
- * Verifies a 4-digit PIN against every active staff_registry row by calling
- * the `verify_staff_pin` security-definer RPC. Returns the matched staff
- * member plus their resolved RBAC role, or null if no PIN matches.
+ * Verifies a 4-digit PIN through the `verify_operator_pin` security-definer RPC.
+ * Returns the matched staff member plus their resolved RBAC role, or null if no
+ * PIN matches.
  *
  * On success this persists role + identity to localStorage so the route
  * guardian and downstream FK writes can attribute actions correctly.
@@ -589,35 +589,33 @@ export async function loginWithPin(
 ): Promise<ActiveUserProfile | null> {
   if (!/^\d{4}$/.test(pin)) return null;
 
-  const { data, error } = await supabase
-    .from("staff_registry")
-    .select("id, full_name, role, pin_hash, active")
-    .eq("active", true)
-    .not("pin_hash", "is", null);
-  if (error) throwPg("[loginWithPin]", error);
-
-  const candidates = (data ?? []) as Array<{
+  const { data, error } = await supabase.rpc("verify_operator_pin", {
+    entered_pin: pin,
+  });
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
     id: string;
-    full_name: string;
+    full_name?: string | null;
     role: string | null;
-    pin_hash: string | null;
   }>;
-
-  const checks = await Promise.all(
-    candidates.map(async (row) => ({
-      row,
-      ok: await verifyStaffPin(row.id, pin),
-    })),
-  );
-  const match = checks.find((c) => c.ok);
-  if (!match) return null;
-
-  if ((match.row.role ?? "").trim().toLowerCase() === "guardian") {
-    throw new GuardianPinError();
+  if (error || rows.length === 0) {
+    console.error("[data-store] RPC auth failed or returned no rows:", error);
+    return null;
   }
 
-  const role = classifyRole(match.row.role);
-  if (!role) return null;
+  const record = rows[0];
+  const normalizedDbRole = (record.role ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+
+  if (normalizedDbRole === "guardian") {
+    throw new GuardianPinError(
+      "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
+    );
+  }
+
+  const role = classifyRole(record.role);
+  if (!role) {
+    console.error("[data-store] Unmapped role variance detected:", record.role ?? "");
+    return null;
+  }
 
   // Best-effort vehicle lookup for drivers — schema may not expose a
   // default-driver column, so swallow errors.
@@ -640,10 +638,10 @@ export async function loginWithPin(
   }
 
   const profile: ActiveUserProfile = {
-    staffId: match.row.id,
-    fullName: match.row.full_name,
+    staffId: record.id,
+    fullName: record.full_name || "Staff Member",
     role,
-    staffRole: match.row.role,
+    staffRole: record.role,
     vehicleId,
     vehicleName,
   };
@@ -651,7 +649,7 @@ export async function loginWithPin(
   if (typeof localStorage !== "undefined") {
     localStorage.setItem(USER_ROLE_KEY, role);
     localStorage.setItem(WORKFLOW_MODE_KEY, role);
-    localStorage.setItem(STAFF_KEY, match.row.id);
+    localStorage.setItem(STAFF_KEY, record.id);
     localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
   }
 
