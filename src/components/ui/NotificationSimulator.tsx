@@ -96,11 +96,12 @@ export function NotificationSimulator() {
           </div>
 
           <div className="mt-2 text-right text-[10px] text-neutral-400">
-            {new Date(smsModal.dispatchedAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            <ClientTime
+              iso={smsModal.dispatchedAt}
+              options={{ hour: "2-digit", minute: "2-digit" }}
+            />
           </div>
+
         </div>
 
         <button
