@@ -1,17 +1,4 @@
-// Force rebuild version 2.3
-
-import { createFileRoute, redirect } from "@tanstack/react-router";
-import { getActiveEscalation } from "@/lib/api/clearance";
-
-export const Route = createFileRoute("/manifest")({
-  beforeLoad: async () => {
-    // This runs before the component mounts, preventing the "flicker"
-    const escalation = await getActiveEscalation("current-driver-id");
-    return { escalation };
-  },
-  // component: ...
-});
-
+// Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -87,9 +74,15 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
 import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
+import { getActiveEscalation } from "@/lib/api/clearance";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
+  beforeLoad: async () => {
+    // This runs before the component mounts, preventing the "flicker"
+    const escalation = await getActiveEscalation("current-driver-id");
+    return { escalation };
+  },
   head: () => ({
     meta: [
       { title: "Active Driver Manifest — Yada Connect" },
@@ -103,6 +96,7 @@ export const Route = createFileRoute("/manifest")({
 });
 
 function ManifestPage() {
+  const { escalation } = Route.useRouteContext();
   const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
 
   const assetsQ = useQuery({
@@ -123,6 +117,15 @@ function ManifestPage() {
   };
 
   const isLoading = isTripLoading || assetsQ.isLoading;
+
+  // 🛡️ CRITICAL REHYDRATION SHIELD: If escalation exists in loader, block UI immediately
+  if (escalation) {
+    return (
+      <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
+        <RedHandshakeWaitingPanel escalation={escalation} />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
@@ -615,7 +618,6 @@ function WalkaroundChecklist({
   onBack: () => void;
 }) {
   const qc = useQueryClient();
-  console.log("Selected Vehicle Category:", asset.vehicleCategory);
   const checkpointsQ = useQuery<AssetCheckpoint[]>({
     queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
     queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
