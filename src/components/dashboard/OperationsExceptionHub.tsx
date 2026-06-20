@@ -126,7 +126,9 @@ export function OperationsExceptionHub() {
   const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
     queryKey: ["pending-manager-reviews"],
     queryFn: () => listClearancesAwaitingManagerReview(),
-    refetchInterval: 10_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
   const pendingReviews = pendingReviewsQ.data ?? [];
   const [activeReview, setActiveReview] =
@@ -135,7 +137,9 @@ export function OperationsExceptionHub() {
   const groundedQ = useQuery<OperationalEscalation[]>({
     queryKey: ["grounded-escalations"],
     queryFn: () => listGroundedEscalations(),
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
   });
   const grounded = groundedQ.data ?? [];
   const [activeUnground, setActiveUnground] =
