@@ -20,14 +20,6 @@ import { GlobalEscalationInterceptor } from "../components/dashboard/global-esca
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
 
-import appCss from "../styles.css?url";
-import { reportLovableError } from "../lib/lovable-error-reporting";
-import { AppShell } from "../components/app-shell";
-import { NotificationSimulator } from "../components/ui/NotificationSimulator";
-import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
-import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
-import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
-
 function NotFoundComponent() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
