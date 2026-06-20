@@ -216,8 +216,13 @@ export function OperationsExceptionHub() {
       anchorId: "exception-section-staff",
       label: "Staff Certifications",
       icon: UserCheck,
-      isLive: false,
-      rows: toRows(STAFF_CERT_PLACEHOLDERS, "staff"),
+      isLive: true,
+      rows: staffCertRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+      })),
     },
     {
       id: "asset",
