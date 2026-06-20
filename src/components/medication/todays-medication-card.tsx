@@ -193,11 +193,11 @@ function StatusButton({
   onAdminister: () => void;
   onHistory: () => void;
 }) {
+  const administeredAt = useClientFormattedDate(
+    row.administeredLog?.timestamp ?? null,
+    { hour: "2-digit", minute: "2-digit" },
+  );
   if (row.status === "administered" && row.administeredLog) {
-    const label = new Date(row.administeredLog.timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
     return (
       <Button
         size="sm"
@@ -205,10 +205,11 @@ function StatusButton({
         className="gap-1.5 bg-success text-white hover:bg-success/90"
       >
         <CheckCircle2 className="h-3.5 w-3.5" />
-        Administered {label}
+        Administered {administeredAt ?? "…"}
       </Button>
     );
   }
+
   if (row.status === "red") {
     return (
       <Button
