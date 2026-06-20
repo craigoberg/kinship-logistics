@@ -1,13 +1,10 @@
 -- System Parameters — single source of truth for tunable operational thresholds.
 -- Every change is audited via operational_ledger (action_type = 'SYSTEM_PARAMETER_UPDATED').
 --
--- Manager-only UPDATE: this project currently runs in PIN/anon mode, so DB-level
--- gating via auth.uid() is not authoritative. We expose an is_manager(uuid)
--- SECURITY DEFINER helper for when real Supabase Auth is wired up; until then,
--- Manager-only enforcement happens at the app layer (UI hides Edit + ledger row
--- captures staff_id) and is mirrored by the RLS UPDATE policy below, which can
--- be tightened to `USING (public.is_manager(auth.uid()))` in a follow-up
--- migration without touching call sites.
+-- Manager-only UPDATE: public.is_manager(uuid) now accepts either an auth.users.id
+-- linked through staff_registry.auth_user_id or a staff_registry.id from the
+-- current PIN-session profile. This keeps existing PIN logins working while
+-- allowing RLS policies to use auth.uid() once auth-backed staff links exist.
 
 CREATE TABLE IF NOT EXISTS public.system_parameters (
   key          text PRIMARY KEY,
@@ -38,9 +35,31 @@ CREATE POLICY "system_parameters updatable"
   USING (true)
   WITH CHECK (true);
 
--- Forward-compatible helper: returns true when the given staff_registry.id has
--- role = 'manager' (case-insensitive). Safe to call from policies because
--- SECURITY DEFINER bypasses RLS on staff_registry.
+ALTER TABLE public.staff_registry
+  ADD COLUMN IF NOT EXISTS auth_user_id uuid REFERENCES auth.users(id) ON DELETE SET NULL;
+
+CREATE UNIQUE INDEX IF NOT EXISTS staff_registry_auth_user_id_key
+  ON public.staff_registry(auth_user_id)
+  WHERE auth_user_id IS NOT NULL;
+
+-- Backfill the auth link by email when a matching auth user exists. Safe/no-op
+-- for PIN-only rows or duplicate staff emails.
+UPDATE public.staff_registry s
+   SET auth_user_id = u.id
+  FROM auth.users u
+ WHERE s.auth_user_id IS NULL
+   AND s.email IS NOT NULL
+   AND lower(s.email) = lower(u.email)
+   AND NOT EXISTS (
+     SELECT 1
+       FROM public.staff_registry other
+      WHERE other.id <> s.id
+        AND other.email IS NOT NULL
+        AND lower(other.email) = lower(s.email)
+   );
+
+-- Accepts either auth.users.id or staff_registry.id. Safe to call from policies
+-- because SECURITY DEFINER bypasses RLS on staff_registry.
 CREATE OR REPLACE FUNCTION public.is_manager(_staff_id uuid)
 RETURNS boolean
 LANGUAGE sql
@@ -51,7 +70,8 @@ AS $$
   SELECT EXISTS (
     SELECT 1
     FROM public.staff_registry
-    WHERE id = _staff_id
+    WHERE active IS DISTINCT FROM false
+      AND (id = _staff_id OR auth_user_id = _staff_id)
       AND lower(coalesce(role, '')) LIKE '%manager%'
   )
 $$;

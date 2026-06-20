@@ -570,7 +570,7 @@ export interface ActiveUserProfile {
 function classifyRole(staffRole: string | null): UserRole | null {
   const normalized = (staffRole ?? "").trim().toLowerCase().replace(/\s+/g, "_");
   if (normalized === "support_worker") return "driver";
-  if (normalized === "coordinator") return "coordinator";
+  if (normalized === "coordinator" || normalized.includes("manager")) return "coordinator";
   return null;
 }
 

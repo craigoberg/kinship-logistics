@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Pencil } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,11 +24,9 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { SYSTEM_PARAMETERS_QUERY_KEY, useSystemParameters } from "@/hooks/use-system-parameters";
 import {
-  SYSTEM_PARAMETERS_QUERY_KEY,
-  useSystemParameters,
-} from "@/hooks/use-system-parameters";
-import {
+  canManageSystemParameters,
   updateSystemParameter,
   type JsonValue,
   type SystemParameterRow,
@@ -50,23 +48,22 @@ function formatValue(v: JsonValue): string {
 function formatRelative(iso: string): string {
   const t = new Date(iso).getTime();
   if (!Number.isFinite(t)) return iso;
-  const delta = Math.round((Date.now() - t) / 1000);
-  if (delta < 60) return `${delta}s ago`;
-  if (delta < 3600) return `${Math.round(delta / 60)}m ago`;
-  if (delta < 86_400) return `${Math.round(delta / 3600)}h ago`;
-  return `${Math.round(delta / 86_400)}d ago`;
+  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
 }
 
 export function SystemParameterWorkspace() {
   const q = useSystemParameters();
   const profile = useMemo(() => getActiveUserProfile(), []);
-  const canEdit = isManagerRole(profile?.staffRole);
+  const permissionQ = useQuery({
+    queryKey: ["system-parameters", "can-manage", profile?.staffId ?? "auth-user"],
+    queryFn: () => canManageSystemParameters(profile?.staffId),
+    staleTime: 60_000,
+  });
+  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
   const [editing, setEditing] = useState<SystemParameterRow | null>(null);
 
   if (q.isLoading) {
-    return (
-      <div className="text-sm text-muted-foreground">Loading parameters…</div>
-    );
+    return <div className="text-sm text-muted-foreground">Loading parameters…</div>;
   }
   if (q.error) {
     return (
@@ -82,12 +79,10 @@ export function SystemParameterWorkspace() {
     <div className="space-y-4">
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
-          Tunable operational thresholds. Every change is appended to the
-          operational ledger with the Managers justification.
+          Tunable operational thresholds. Every change is appended to the operational ledger with
+          the Managers justification.
         </p>
-        {!canEdit && (
-          <Badge variant="secondary">Read-only · Managers can edit</Badge>
-        )}
+        {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
 
       <div className="rounded-md border">
@@ -113,19 +108,13 @@ export function SystemParameterWorkspace() {
                 <TableRow key={r.key}>
                   <TableCell className="font-mono text-xs">{r.key}</TableCell>
                   <TableCell className="font-mono">{formatValue(r.value)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">
-                    {r.description}
-                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{r.description}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     {formatRelative(r.updated_at)}
                   </TableCell>
                   <TableCell>
                     {canEdit && (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setEditing(r)}
-                      >
+                      <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
                         <Pencil className="mr-1 h-3 w-3" /> Edit
                       </Button>
                     )}
@@ -137,28 +126,15 @@ export function SystemParameterWorkspace() {
         </Table>
       </div>
 
-      {editing && (
-        <EditParameterModal
-          row={editing}
-          onClose={() => setEditing(null)}
-        />
-      )}
+      {editing && <EditParameterModal row={editing} onClose={() => setEditing(null)} />}
     </div>
   );
 }
 
-function EditParameterModal({
-  row,
-  onClose,
-}: {
-  row: SystemParameterRow;
-  onClose: () => void;
-}) {
+function EditParameterModal({ row, onClose }: { row: SystemParameterRow; onClose: () => void }) {
   const queryClient = useQueryClient();
   const [draft, setDraft] = useState<string>(() =>
-    typeof row.value === "object"
-      ? JSON.stringify(row.value, null, 2)
-      : String(row.value ?? ""),
+    typeof row.value === "object" ? JSON.stringify(row.value, null, 2) : String(row.value ?? ""),
   );
   const [boolDraft, setBoolDraft] = useState<boolean>(
     typeof row.value === "boolean" ? row.value : false,
@@ -235,11 +211,7 @@ function EditParameterModal({
             <Label htmlFor="new-value">New value ({valueKind})</Label>
             {valueKind === "boolean" ? (
               <div className="flex items-center gap-2">
-                <Switch
-                  id="new-value"
-                  checked={boolDraft}
-                  onCheckedChange={setBoolDraft}
-                />
+                <Switch id="new-value" checked={boolDraft} onCheckedChange={setBoolDraft} />
                 <span className="text-sm">{boolDraft ? "true" : "false"}</span>
               </div>
             ) : valueKind === "json" ? (

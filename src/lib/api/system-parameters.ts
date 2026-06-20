@@ -1,14 +1,8 @@
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { getActiveUserProfile, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 
-export type JsonValue =
-  | string
-  | number
-  | boolean
-  | null
-  | JsonValue[]
-  | { [k: string]: JsonValue };
+export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
 export interface SystemParameterRow {
   key: string;
@@ -39,6 +33,34 @@ export interface UpdateSystemParameterResult {
   newValue: JsonValue;
 }
 
+async function rpcIsManager(principalId: string): Promise<boolean> {
+  const { data, error } = await supabase.rpc("is_manager", {
+    _staff_id: principalId,
+  });
+  if (!error) return data === true;
+  throw error;
+}
+
+export async function canManageSystemParameters(staffIdOverride?: string | null): Promise<boolean> {
+  const ids = new Set<string>();
+  if (staffIdOverride) ids.add(staffIdOverride);
+  const profile = getActiveUserProfile();
+  if (profile?.staffId) ids.add(profile.staffId);
+
+  const { data } = await supabase.auth.getUser();
+  if (data.user?.id) ids.add(data.user.id);
+
+  for (const id of ids) {
+    try {
+      if (await rpcIsManager(id)) return true;
+    } catch {
+      // Try the next available identity source before denying access.
+    }
+  }
+
+  return false;
+}
+
 /**
  * Update a system parameter and append a SYSTEM_PARAMETER_UPDATED ledger row.
  * Ledger write is best-effort; the parameter write itself must succeed.
@@ -63,8 +85,26 @@ export async function updateSystemParameter(
   const oldValue = current.value as JsonValue;
 
   const staffId = await resolveStaffIdWithFallback();
+  const allowed = await canManageSystemParameters(staffId);
+  if (!allowed) {
+    throw new Error("Only staff with a Manager role can update system parameters.");
+  }
 
-  // 2. Update the row.
+  const rpc = await supabase.rpc("set_system_parameter", {
+    _key: args.key,
+    _value: args.newValue,
+    _staff_id: staffId,
+    _justification: justification,
+  });
+  if (!rpc.error) {
+    return { key: args.key, oldValue, newValue: args.newValue };
+  }
+  const rpcMissing =
+    rpc.error.code === "PGRST202" ||
+    rpc.error.message.toLowerCase().includes("set_system_parameter");
+  if (!rpcMissing) throw rpc.error;
+
+  // 2. Fallback for previews before the DB migration has been applied.
   const { error: updErr } = await supabase
     .from("system_parameters")
     .update({
