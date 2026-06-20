@@ -226,6 +226,3 @@ export async function resolveCertification(
 
   return { staffId, certName, ledgerWritten, staffMirrored };
 }
-
-  });
-}
