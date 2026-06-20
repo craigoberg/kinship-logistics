@@ -77,6 +77,13 @@ export function ResolveVehicleMaintenanceModal({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  const currentExpiry = useMemo<Date | null>(() => {
+    if (!subject || subject.flagKind !== "rego") return null;
+    if (typeof subject.previousValue !== "string") return null;
+    const d = new Date(subject.previousValue);
+    return Number.isFinite(d.getTime()) ? d : null;
+  }, [subject]);
+
   useEffect(() => {
     if (!subject) {
       setNewExpiry(undefined);
@@ -90,7 +97,11 @@ export function ResolveVehicleMaintenanceModal({
     setResType(initialType);
     setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
-  }, [subject, initialType]);
+    // Smart seed: New Expiry = current_expiry + 1 year (or today + 1 year fallback).
+    const base = currentExpiry ?? startOfToday();
+    const seeded = new Date(base.getFullYear() + 1, base.getMonth(), base.getDate());
+    setNewExpiry(seeded);
+  }, [subject, initialType, currentExpiry]);
 
 
   useEffect(() => {
