@@ -5,6 +5,7 @@ import {
   updateStaffMember,
   type StaffCertification,
 } from "@/lib/data-store";
+import { updateFleetAsset } from "@/lib/api/fleet";
 
 export type LedgerCategory = "VEHICLE" | "CENTRE" | "CLIENT" | "TRIP";
 export type LedgerSeverity = "RED" | "YELLOW" | "GREEN" | "INFO";
