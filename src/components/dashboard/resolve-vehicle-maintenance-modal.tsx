@@ -86,6 +86,11 @@ export function ResolveVehicleMaintenanceModal({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Formal Audit state.
+  const [auditState, setAuditState] =
+    useState<FormalAuditState>(emptyFormalAuditState);
+  const [auditItems, setAuditItems] = useState<ChecklistItem[]>([]);
+
   const currentExpiry = useMemo<Date | null>(() => {
     if (!subject || subject.flagKind !== "rego") return null;
     if (typeof subject.previousValue !== "string") return null;
