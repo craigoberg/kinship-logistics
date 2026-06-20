@@ -266,6 +266,9 @@ export interface ResolveVehicleMaintenanceInput {
   newServiceDate?: string | null;
   /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30d. */
   deferredUntil?: string | null;
+  /** When the renewal/service actually occurred — ISO yyyy-mm-dd, past or today. Required for renewed/serviced. */
+  actionDate?: string | null;
+
   /** Previous value for audit. */
   previousValue?: string | number | null;
   /** Evidence reference. Required (min 6 chars) only for renewed/serviced. */
