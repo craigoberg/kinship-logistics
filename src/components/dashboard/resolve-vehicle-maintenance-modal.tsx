@@ -133,6 +133,8 @@ export function ResolveVehicleMaintenanceModal({
     return d;
   }, [today]);
 
+  const isFormalAudit = resType === "formal_audit";
+
   const trimmedNotes = notes.trim();
   const trimmedEvidence = evidenceRef.trim();
   const notesTooShort = trimmedNotes.length < MIN_NOTES;
@@ -161,15 +163,21 @@ export function ResolveVehicleMaintenanceModal({
       (deferredUntil.getTime() <= today.getTime() ||
         deferredUntil.getTime() > maxDefer.getTime()));
 
-  const canSubmit =
-    !submitting &&
-    !notesTooShort &&
-    !(evidenceRequired && evidenceTooShort) &&
-    !dateMissing &&
-    !dateInvalid &&
-    !odoInvalid &&
-    !actionDateMissing &&
-    !actionDateInvalid;
+  const auditPayload = useMemo(
+    () => buildFormalAuditPayload(auditItems, auditState),
+    [auditItems, auditState],
+  );
+
+  const canSubmit = isFormalAudit
+    ? !submitting && !notesTooShort && auditPayload.valid
+    : !submitting &&
+      !notesTooShort &&
+      !(evidenceRequired && evidenceTooShort) &&
+      !dateMissing &&
+      !dateInvalid &&
+      !odoInvalid &&
+      !actionDateMissing &&
+      !actionDateInvalid;
 
 
   const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
@@ -196,6 +204,13 @@ export function ResolveVehicleMaintenanceModal({
         previousValue: subject.previousValue,
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
+
+        auditorStaffId: isFormalAudit ? auditState.auditorStaffId : null,
+        auditorPin: isFormalAudit ? auditState.auditorPin : null,
+        witnessStaffId: isFormalAudit ? auditState.witnessStaffId : null,
+        witnessPin: isFormalAudit ? auditState.witnessPin : null,
+        checklistCategory: isFormalAudit ? FORMAL_AUDIT_CATEGORY : null,
+        checklistResponses: isFormalAudit ? auditPayload.rows : undefined,
       });
       toast.success("Vehicle resolution recorded", {
         description: `${subject.assetName} · ${resType}`,
