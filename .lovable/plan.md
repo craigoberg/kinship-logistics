@@ -1,104 +1,101 @@
-# Formal Safety Audit Module
+# Compliance Governance Engine
 
-A new "Formal Audit" resolution path on `ResolveVehicleMaintenanceModal` that renders a dynamic checklist driven by `public.checklist_items`, captures per-item responses, requires a dual-PIN sign-off (Auditor + Witness), and embeds the full checklist into a `VEHICLE_FORMAL_AUDIT` ledger entry.
+Centralize every "thing that expires" (rego, certs, insurance, equipment audits, council inspections…) into one registry. The dashboard, the admin CRUD UI, and the Resolve modals all read from this one table and dispatch off a per-asset `action_module` key.
 
-## 1. Database (new migration `docs/sql/2026-07-05_formal_safety_audit.sql`)
+## 1. Schema — `docs/sql/2026-07-06_compliance_governance.sql`
 
-```sql
-create table public.checklist_items (
-  id          uuid primary key default gen_random_uuid(),
-  label       text not null,
-  category    text not null,              -- e.g. 'VEHICLE_FORMAL_AUDIT'
-  sort_order  int  not null default 100,
-  is_active   boolean not null default true,
-  created_at  timestamptz not null default now()
-);
-
-create table public.checklist_responses (
-  id          uuid primary key default gen_random_uuid(),
-  ledger_id   uuid not null references public.operational_ledger(id) on delete cascade,
-  item_id     uuid not null references public.checklist_items(id),
-  status      text not null check (status in ('pass','fail','na')),
-  notes       text,
-  created_at  timestamptz not null default now()
-);
-
--- Grants (per project convention)
-grant select on public.checklist_items to anon, authenticated;
-grant all    on public.checklist_items to service_role;
-grant select, insert on public.checklist_responses to anon, authenticated;
-grant all    on public.checklist_responses to service_role;
-
-alter table public.checklist_items     enable row level security;
-alter table public.checklist_responses enable row level security;
-
-create policy "checklist_items_read"      on public.checklist_items
-  for select to anon, authenticated using (true);
-create policy "checklist_responses_read"  on public.checklist_responses
-  for select to anon, authenticated using (true);
-create policy "checklist_responses_write" on public.checklist_responses
-  for insert to anon, authenticated with check (true);
-
--- Seed VEHICLE_FORMAL_AUDIT items (brakes, tyres, lights, seatbelts,
--- first-aid kit, fire extinguisher, wheelchair restraints, fluid levels,
--- body damage, registration sticker, fuel cap, dashboard warnings).
-insert into public.checklist_items (label, category, sort_order) values
-  ('Brakes operating correctly',          'VEHICLE_FORMAL_AUDIT', 10),
-  ('Tyre tread + pressure within spec',   'VEHICLE_FORMAL_AUDIT', 20),
-  ('All exterior lights functional',      'VEHICLE_FORMAL_AUDIT', 30),
-  ('All seatbelts retract and lock',      'VEHICLE_FORMAL_AUDIT', 40),
-  ('Wheelchair restraints serviceable',   'VEHICLE_FORMAL_AUDIT', 50),
-  ('First-aid kit present + in date',     'VEHICLE_FORMAL_AUDIT', 60),
-  ('Fire extinguisher charged + in date', 'VEHICLE_FORMAL_AUDIT', 70),
-  ('Fluid levels checked',                'VEHICLE_FORMAL_AUDIT', 80),
-  ('No new body damage',                  'VEHICLE_FORMAL_AUDIT', 90),
-  ('Registration sticker valid',          'VEHICLE_FORMAL_AUDIT', 100),
-  ('No active dashboard warnings',        'VEHICLE_FORMAL_AUDIT', 110);
+```text
+public.compliance_assets
+  id                uuid pk
+  category          text     -- 'VEHICLE' | 'STAFF' | 'INSURANCE' | 'EQUIPMENT' | 'FACILITY' | …
+  type              text     -- 'rego' | 'service' | 'certification' | 'policy' | 'extinguisher' | …
+  name              text     -- "HiAce Bus 1 — Registration"
+  description       text
+  subject_table     text     -- 'transport_assets' | 'staff_registry' | null
+  subject_id        uuid     -- FK-by-convention to row in subject_table; null for standalone
+  expiry_date       date
+  next_action_at    timestamptz
+  action_module     text     -- dispatch key: 'vehicle_rego' | 'vehicle_service' | 'staff_cert'
+                             --   | 'formal_audit' | 'insurance_renewal' | 'generic_resolve'
+  config            jsonb    -- { yellow_days:30, red_days:7, checklist_category?:'…',
+                             --   handshake?:'single'|'dual', notify_roles?:['manager'] }
+  status            text     -- 'active' | 'archived'
+  created_by        uuid, created_at timestamptz, updated_at timestamptz
 ```
 
-## 2. API layer
+Indexes: `(status, next_action_at)`, `(category)`, `(action_module)`, `(subject_table, subject_id)`.
 
-**`src/lib/api/checklists.ts` (new)** — `listChecklistItems(category)` ordered by `sort_order, label`; `insertChecklistResponses(ledgerId, rows[])`. Both use the browser `supabase` client.
+RLS: `SELECT` for `authenticated`; `INSERT/UPDATE` gated by `has_role(auth.uid(),'manager')`; `service_role` full. GRANTs per house rules.
 
-**`src/lib/api/ledger.ts`** — extend the vehicle resolution flow:
-- Add `"formal_audit"` to `VehicleResolutionType`.
-- Extend `ResolveVehicleMaintenanceInput` with `auditorStaffId`, `witnessStaffId`, `checklistResponses: { itemId, label, status, notes }[]`.
-- New branch in `resolveVehicleMaintenance`:
-  - Verify both PINs via `supabase.rpc('verify_staff_pin', …)` (reuses existing RPC). Both must succeed and the two staff IDs must differ.
-  - Insert ledger row with `action_type = 'VEHICLE_FORMAL_AUDIT'`, `severity = 'GREEN'` (or `'YELLOW'` if any item is `fail`), `metadata` embedding `auditor_staff_id`, `witness_staff_id`, `checklist_category`, and the full `checklist_responses[]` snapshot (id, label, status, notes).
-  - Capture the inserted ledger id (`.select('id').single()`) then insert the per-item rows into `checklist_responses` for relational querying.
-  - Does NOT mirror to `transport_assets` (audit is a periodic review, not a flag clear), but writes `last_audit_at` only if the column exists — out of scope for this iteration; leave a TODO.
+Audit trigger: on `INSERT/UPDATE/DELETE`, append a `COMPLIANCE_ASSET_CHANGE` row to `operational_ledger` with `{op, before, after, actor}` in metadata. (Mirrors the `system_parameters` change-log pattern.)
 
-## 3. UI — `ResolveVehicleMaintenanceModal`
+Seed migration: backfill existing rego/service rows from `transport_assets` and existing cert rows from `staff_registry.certifications` so the dashboard keeps showing them after the cutover.
 
-- Add `"Formal Audit"` as a 5th radio option.
-- When selected:
-  - Hide rego / service / defer / decommission inputs.
-  - Fetch `listChecklistItems('VEHICLE_FORMAL_AUDIT')` on demand (cached in state).
-  - Render each item as a row: label + RadioGroup (`Pass` / `Fail` / `N/A`) + optional notes (required when `status === 'fail'`, min 6 chars).
-  - Two PIN blocks at the bottom: `Auditor` (staff picker + 4-digit PIN) and `Witness` (staff picker + 4-digit PIN). Both required, must be different staff.
-  - `canSubmit` requires: every checklist item has a status, every `fail` has notes, both PINs entered, justification ≥ 20 chars. Evidence ref optional for audits.
-- On submit, call extended `resolveVehicleMaintenance` with `resolutionType: 'formal_audit'` plus checklist + PIN payloads. Toast on success/failure as today.
+## 2. API — `src/lib/api/compliance-assets.ts`
 
-New small component `formal-audit-checklist.tsx` co-located in `src/components/dashboard/` to keep the modal file readable.
+- `listComplianceAssets({ category?, status? })` — ordered by `next_action_at`.
+- `getComplianceAsset(id)`.
+- `upsertComplianceAsset(input, justification)` — manager-only; writes ledger entry server-side via trigger.
+- `archiveComplianceAsset(id, justification)`.
+- `computeRyge(asset, today)` — pure helper returning `'green'|'yellow'|'red'` from `expiry_date` + `config.yellow_days/red_days`.
 
-## 4. Audit guarantees
+## 3. Dashboard dispatch
 
-- Ledger metadata embeds the full checklist snapshot (label + status + notes) so the receipt is self-contained even if `checklist_items` later changes.
-- `checklist_responses` rows provide a normalized, queryable mirror keyed by `ledger_id`.
-- PIN verification happens server-side via `verify_staff_pin`; raw PINs never leave the modal beyond the RPC call.
-- `operational_ledger` remains append-only (existing RLS).
+New hook `useComplianceExceptions()` in `src/hooks/use-exception-feed.ts`:
+- Fetches `compliance_assets` where `status='active'`.
+- Applies `computeRyge` to derive `severity` (`red→critical`, `yellow→warning`, `green→filtered`).
+- Groups by `category` so existing tiles (Vehicle, Staff, Asset & Liability, plus new ones) stay shaped the same.
+- Returns rows carrying `actionModule` + `config` + raw asset for the Resolve button.
 
-## Files
+`OperationsExceptionHub.tsx`:
+- Replaces `useVehicleMaintenanceExceptions`, `useStaffCertificationExceptions`, and the `ASSET_LIABILITY_PLACEHOLDERS` feed with a single `useComplianceExceptions()` consumer that groups by `category`.
+- Tile list is derived from distinct categories present in the registry — so adding a new category in the DB lights up a new tile with no code change. Icon/label resolved via a small `CATEGORY_PRESENTATION` map with a generic fallback.
+- The Resolve button calls a new `dispatchResolveModal(asset)` that maps `action_module` → modal:
+  - `vehicle_rego` / `vehicle_service` → existing `ResolveVehicleMaintenanceModal`
+  - `staff_cert` → existing `ResolveCertificationModal`
+  - `formal_audit` → existing `ResolveVehicleMaintenanceModal` pre-set to Formal Audit (reads `config.checklist_category`)
+  - `insurance_renewal` / `generic_resolve` → new lightweight `ResolveComplianceAssetModal` (date picker + justification + dual/single PIN per `config.handshake`)
+- Existing modals already write `operational_ledger`; the dispatcher passes `compliance_asset_id` through so each resolution is linked back.
 
-- new: `docs/sql/2026-07-05_formal_safety_audit.sql`
-- new: `src/lib/api/checklists.ts`
-- new: `src/components/dashboard/formal-audit-checklist.tsx`
-- edit: `src/lib/api/ledger.ts` (add `formal_audit` branch + input fields)
-- edit: `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx` (new option, checklist + dual-PIN UI, validation, submit wiring)
+## 4. Admin "Governance Hub" tab
 
-## Out of scope
+New component `src/components/admin/governance-hub-workspace.tsx`, surfaced as a second tab next to `SystemParameterWorkspace` inside `src/routes/admin.tsx`.
 
-- Admin UI to CRUD `checklist_items` (seeded via SQL for now; manageable via existing Admin lookup workspace pattern in a follow-up).
-- Scheduling / reminders for periodic audits.
-- Mirroring an `audited_at` column onto `transport_assets`.
+Features:
+- Table of all `compliance_assets` (filter by category/status, sort by `next_action_at`, RYGE pill).
+- "New asset" + "Edit asset" dialog with fields:
+  - Category (free-text combobox seeded from existing categories — typing a new value creates a new tile)
+  - Type, Name, Description
+  - Subject link (optional asset/staff picker)
+  - Expiry date, Next action at
+  - **Action Module** select (drives which Resolve modal the dashboard opens)
+  - **RYGE thresholds** (`yellow_days`, `red_days` numeric inputs writing into `config`)
+  - Optional `checklist_category` (for Formal Audit), handshake mode
+  - Justification textarea (min 10 chars, recorded in ledger via trigger)
+- Archive action with confirm + justification.
+
+## 5. Audit guarantees
+
+- DB trigger writes a `COMPLIANCE_ASSET_CHANGE` ledger row on every `INSERT/UPDATE/DELETE` with full before/after snapshots and actor `auth.uid()`.
+- Every Resolve modal already appends its own `operational_ledger` entry; we extend the metadata to include `compliance_asset_id` so the asset's full lifecycle (created → warned → resolved → renewed) is queryable from one ledger view.
+
+## 6. Files
+
+New:
+- `docs/sql/2026-07-06_compliance_governance.sql`
+- `src/lib/api/compliance-assets.ts`
+- `src/components/admin/governance-hub-workspace.tsx`
+- `src/components/dashboard/resolve-compliance-asset-modal.tsx`
+- `src/lib/dashboard/dispatch-resolve-modal.tsx` (or inline in the Hub)
+
+Edited:
+- `src/hooks/use-exception-feed.ts` — add `useComplianceExceptions`, deprecate the per-source hooks once parity is verified.
+- `src/components/dashboard/OperationsExceptionHub.tsx` — derive buckets from registry, route Resolve via dispatcher.
+- `src/routes/admin.tsx` — add "Governance Hub" tab.
+- `PROJECT_CONTEXT.md` / `ARCHITECTURE.md` — document the registry-driven dashboard pattern.
+
+## 7. Rollout
+
+1. Ship migration + seed (read-only parity with current dashboard).
+2. Ship Governance Hub CRUD (managers can curate without touching the dashboard yet).
+3. Flip dashboard to `useComplianceExceptions()` once seed parity is confirmed; remove the legacy per-source hooks in a follow-up once no callers remain.

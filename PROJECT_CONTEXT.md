@@ -104,7 +104,27 @@ All user-visible dates and times render in the **browser's local timezone** via 
 
 ---
 
-## 10. Reference
+## 10. Compliance Governance Engine (registry-driven dashboard)
+
+Every "thing that expires" — vehicle registrations, staff certifications, insurance policies, equipment audits, council inspections — lives in a single table **`public.compliance_assets`** (SQL: `docs/sql/2026-07-06_compliance_governance.sql`).
+
+Each asset carries:
+- `category` (drives the dashboard tile it appears under)
+- `action_module` (dispatch key — picks the Resolve modal: `vehicle_rego`, `vehicle_service`, `staff_cert`, `formal_audit`, `insurance_renewal`, `generic_resolve`)
+- `config` JSONB — RYGE thresholds (`yellow_days`, `red_days`), handshake mode (`single` / `dual`), optional `checklist_category` for formal audits.
+
+**Rules:**
+- Adding a new compliance category is a **data-only** change — insert a row with a new `category` value and a dashboard tile lights up. No code change required.
+- All CRUD goes through `src/lib/api/compliance-assets.ts` and the Admin → **Governance Hub** tab. Manager-only (`is_manager()`), justification required (min 10 chars).
+- Every `INSERT/UPDATE/DELETE` appends a `COMPLIANCE_ASSET_<OP>` row to `operational_ledger` with full `before` / `after` snapshots via the `log_compliance_asset_change` trigger.
+- Resolve flows must include `compliance_asset_id` in their ledger metadata so an asset's full lifecycle (created → warned → resolved → renewed) is queryable from one ledger view.
+
+Dashboard tiles consume `useComplianceExceptions()` (registry-driven) alongside the legacy per-source hooks during rollout. Legacy hooks are removed once parity is verified.
+
+---
+
+## 11. Reference
 
 - **ARCHITECTURE.md** — Implementation details, table schemas, escalation loops, module patterns, and enforcement rules.
+
 
