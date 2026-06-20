@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 
 import { GiveDoseModal } from "@/components/medication/give-dose-modal";
+import { ClientTime, useClientFormattedDate } from "@/components/ui/client-time";
+
 import {
   useAllActiveSchedules,
   useParticipants,
@@ -165,7 +167,7 @@ export function TodaysMedicationCard() {
           </DialogHeader>
           {historyFor?.administeredLog ? (
             <div className="space-y-2 text-sm">
-              <LogRow label="Administered at" value={new Date(historyFor.administeredLog.timestamp).toLocaleString()} />
+              <LogRow label="Administered at" value={<ClientTime iso={historyFor.administeredLog.timestamp} />} />
               <LogRow label="Witness 1" value={historyFor.administeredLog.witness1 ?? "—"} />
               <LogRow label="Witness 2" value={historyFor.administeredLog.witness2 ?? "—"} />
               <LogRow label="Action" value={historyFor.administeredLog.actionPerformed} />
