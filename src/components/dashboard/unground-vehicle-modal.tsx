@@ -12,9 +12,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Progress } from "@/components/ui/progress";
+import { cn } from "@/lib/utils";
 
 import {
   resolveStaffIdWithFallback,
+  supersedeOlderGroundedForVehicle,
   type OperationalEscalation,
 } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
@@ -37,7 +40,9 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
   }, [escalation]);
 
   const trimmed = notes.trim();
-  const tooShort = trimmed.length < MIN_NOTES;
+  const charCount = trimmed.length;
+  const tooShort = charCount < MIN_NOTES;
+  const progress = Math.min(100, Math.round((charCount / MIN_NOTES) * 100));
 
   const submit = async () => {
     if (!escalation || submitting) return;
@@ -59,6 +64,18 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
         .eq("id", escalation.id);
       if (error) throw error;
 
+      // Clean up earlier denials for the same vehicle so the dashboard
+      // doesn't keep re-surfacing superseded groundings.
+      let supersededCount = 0;
+      try {
+        supersededCount = await supersedeOlderGroundedForVehicle(
+          escalation.vehicleInfo,
+          escalation.id,
+        );
+      } catch (e) {
+        console.warn("[unground] supersede older groundings failed", e);
+      }
+
       // NDIS compliance log — Who/Where/What/Why. Fire-and-forget.
       const gps = await tryGetGps();
       void writeToLedger({
@@ -74,6 +91,7 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
           driver_name: escalation.driverName ?? null,
           previous_status: "resolved_denied",
           clearance_notes: trimmed,
+          superseded_older_count: supersededCount,
           source: "unground_vehicle_modal",
         },
       });
@@ -101,58 +119,70 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
         if (!o && !submitting) onClose();
       }}
     >
-      <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
-            <Truck className="h-5 w-5 text-emerald-600" />
-            Unground Vehicle — Safety Clearance
+      <DialogContent className="sm:max-w-md gap-3 p-5">
+        <DialogHeader className="space-y-1">
+          <DialogTitle className="flex items-center gap-2 text-base">
+            <Truck className="h-4 w-4 text-emerald-600" />
+            Unground Vehicle
           </DialogTitle>
-          <DialogDescription>
-            Return this vehicle to active service. Your clearance notes are
-            permanently logged to the operational ledger for NDIS compliance.
+          <DialogDescription className="text-xs">
+            Clearance notes are permanently logged to the operational ledger
+            for NDIS compliance.
           </DialogDescription>
         </DialogHeader>
 
         {escalation && (
-          <div className="space-y-4">
-            <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+          <div className="space-y-3">
+            <div className="grid gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
               <Row label="Vehicle" value={escalation.vehicleInfo} />
-              <Row label="Grounded by" value={escalation.resolvedBy ?? "—"} />
               {escalation.resolutionNotes && (
                 <Row label="Reason" value={escalation.resolutionNotes} />
               )}
             </div>
 
             <div className="grid gap-1.5">
-              <Label
-                htmlFor="ug-notes"
-                className="text-xs uppercase tracking-wide text-muted-foreground"
-              >
-                Safety Clearance Notes (min {MIN_NOTES} chars)
-              </Label>
+              <div className="flex items-baseline justify-between gap-2">
+                <Label htmlFor="ug-notes" className="text-sm font-semibold">
+                  Safety Clearance Notes
+                </Label>
+                <span
+                  className={cn(
+                    "text-[11px] tabular-nums",
+                    tooShort ? "text-muted-foreground" : "text-emerald-600",
+                  )}
+                >
+                  {tooShort ? `${MIN_NOTES - charCount} more` : "Ready"}
+                </span>
+              </div>
               <Textarea
                 id="ug-notes"
-                rows={5}
+                rows={3}
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
-                placeholder="Describe inspection performed, defect resolution, and who verified roadworthiness."
+                placeholder="Inspection performed, defect resolution, who verified roadworthiness…"
+                className="resize-none text-sm"
               />
-              <div className="flex justify-end text-[11px] text-muted-foreground tabular-nums">
-                {trimmed.length}/{MIN_NOTES}
-              </div>
+              <Progress
+                value={progress}
+                className={cn(
+                  "h-1",
+                  !tooShort && "[&>div]:bg-emerald-600",
+                )}
+                aria-label={`Clearance notes ${charCount} of ${MIN_NOTES} minimum characters`}
+              />
             </div>
 
             <Button
               type="button"
               disabled={submitting || tooShort}
               onClick={submit}
-              className="h-14 w-full bg-emerald-600 text-base font-bold text-white hover:bg-emerald-700"
+              className="h-11 w-full bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700"
             >
               {submitting ? (
-                <Loader2 className="h-5 w-5 animate-spin" />
+                <Loader2 className="h-4 w-4 animate-spin" />
               ) : (
                 <>
-                  <ShieldCheck className="mr-1.5 h-5 w-5" />
+                  <ShieldCheck className="mr-1.5 h-4 w-4" />
                   Release Vehicle Back to Service
                 </>
               )}
@@ -167,10 +197,10 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
 function Row({ label, value }: { label: string; value: string }) {
   return (
     <div className="flex items-start gap-3">
-      <span className="w-24 shrink-0 text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+      <span className="w-16 shrink-0 text-[10px] font-bold uppercase tracking-wide text-muted-foreground">
         {label}
       </span>
-      <span className="text-sm font-medium text-foreground">{value}</span>
+      <span className="text-xs font-medium text-foreground">{value}</span>
     </div>
   );
 }

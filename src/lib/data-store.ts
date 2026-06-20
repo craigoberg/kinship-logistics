@@ -4157,7 +4157,8 @@ export type OperationalEscalationStatus =
   | "pending"
   | "claimed"
   | "resolved_approved"
-  | "resolved_denied";
+  | "resolved_denied"
+  | "resolved_superseded";
 
 export interface OperationalEscalation {
   id: string;
@@ -4266,7 +4267,17 @@ export async function listPendingEscalations(): Promise<OperationalEscalation[]>
   return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
 }
 
-/** Fetch every escalation currently grounded (status = resolved_denied). */
+/**
+ * Fetch grounded vehicles for the coordinator dashboard.
+ *
+ * NDIS double-grounding rule: a single vehicle can accumulate multiple
+ * `resolved_denied` rows over time (e.g. denied at gate-out, denied again
+ * after a partial repair). The dashboard must only surface the LATEST
+ * active denial per vehicle so the manager isn't asked to clear stale
+ * groundings. Older denials are still in the ledger — they're just hidden
+ * from the live queue and marked `resolved_superseded` when the latest
+ * one is released (see {@link supersedeOlderGroundedForVehicle}).
+ */
 export async function listGroundedEscalations(): Promise<OperationalEscalation[]> {
   const { data, error } = await supabase
     .from("operational_escalations")
@@ -4274,7 +4285,38 @@ export async function listGroundedEscalations(): Promise<OperationalEscalation[]
     .eq("status", "resolved_denied")
     .order("resolved_at", { ascending: false });
   if (error) throwPg("[listGroundedEscalations]", error);
-  return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
+  const rows = ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
+  const latestByVehicle = new Map<string, OperationalEscalation>();
+  for (const row of rows) {
+    const key = row.vehicleInfo.trim().toLowerCase();
+    if (!latestByVehicle.has(key)) latestByVehicle.set(key, row);
+  }
+  return Array.from(latestByVehicle.values());
+}
+
+/**
+ * Mark any older `resolved_denied` rows for the same vehicle as
+ * `resolved_superseded`. Called after the manager clears the latest
+ * grounding so the ledger reflects that earlier denials are no longer
+ * the active state of the vehicle. Best-effort: errors are surfaced so
+ * the caller can log but should not block the un-grounding flow.
+ */
+export async function supersedeOlderGroundedForVehicle(
+  vehicleInfo: string,
+  excludeEscalationId: string,
+): Promise<number> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .update({
+      status: "resolved_superseded",
+      resolved_at: new Date().toISOString(),
+    })
+    .eq("vehicle_info", vehicleInfo)
+    .eq("status", "resolved_denied")
+    .neq("id", excludeEscalationId)
+    .select("id");
+  if (error) throwPg("[supersedeOlderGroundedForVehicle]", error);
+  return (data ?? []).length;
 }
 
 /**
