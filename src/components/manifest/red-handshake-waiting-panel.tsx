@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 
 import type {
   AssetDailyClearance,
@@ -55,6 +56,30 @@ export function RedHandshakeWaitingPanel({
   escalationId,
   escalation,
 }: Props) {
+  // Realtime sync: auto-unlock the route-guard shield when the escalation resolves.
+  useEffect(() => {
+    if (!escalation) return;
+    const channel = supabase
+      .channel(`escalation-shield-${escalation.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "UPDATE",
+          schema: "public",
+          table: "operational_escalations",
+          filter: `id=eq.${escalation.id}`,
+        },
+        () => {
+          window.location.reload();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      channel.unsubscribe();
+    };
+  }, [escalation]);
+
   // Route-guard escalation mode: block UI before any trip hooks run.
   if (escalation) {
     return (
@@ -301,14 +326,6 @@ function EscalationWaitingPanel({
   const approved = status === "resolved_approved";
   const denied = status === "resolved_denied";
 
-  useEffect(() => {
-    if (denied) {
-      toast.error("Office denied escalation", {
-        description: "Resolve the underlying gate before attempting again.",
-      });
-      onBack();
-    }
-  }, [denied, onBack]);
 
   const submitDeclaration = async () => {
     if (submitting) return;
@@ -330,6 +347,33 @@ function EscalationWaitingPanel({
       setSubmitting(false);
     }
   };
+
+  if (denied) {
+    return (
+      <Card className="border-2 border-destructive bg-destructive/5 p-5">
+        <div className="flex items-center gap-2 text-destructive">
+          <ShieldAlert className="h-6 w-6" />
+          <h2 className="text-lg font-extrabold">❌ Workaround Denied</h2>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          The office has reviewed and denied this Sev 1 escalation request.
+        </p>
+        {live?.resolutionNotes?.trim() && (
+          <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 p-4">
+            <div className="text-[11px] font-bold uppercase tracking-wide text-destructive">
+              Manager's denial notes
+            </div>
+            <blockquote className="mt-2 border-l-2 border-destructive/60 pl-3 text-sm italic">
+              {live.resolutionNotes}
+            </blockquote>
+          </div>
+        )}
+        <Button className="w-full mt-4" variant="destructive" onClick={onBack}>
+          Acknowledge & Change Vehicle
+        </Button>
+      </Card>
+    );
+  }
 
   if (approved) {
     return (
