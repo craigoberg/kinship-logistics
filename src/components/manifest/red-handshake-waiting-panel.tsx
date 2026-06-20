@@ -23,15 +23,17 @@ import {
 import type { DraftIssue } from "./issue-accumulator-panel";
 
 interface Props {
-  asset: TransportAsset;
-  driverName: string;
-  onAuthorized: () => void;
-  onBack: () => void;
+  asset?: TransportAsset;
+  driverName?: string;
+  onAuthorized?: () => void;
+  onBack?: () => void;
   /** Clearance-based dual-PIN handshake (RED walkaround issue). */
   clearance?: AssetDailyClearance;
   issues?: DraftIssue[];
   /** Office-pool escalation handshake (Sev 1 raised from a missing gate). */
   escalationId?: string;
+  /** Route-guard escalation object rendered directly before hooks. */
+  escalation?: any;
 }
 
 function issueChip(
