@@ -14,6 +14,7 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
+import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 
 function NotFoundComponent() {
   return (
@@ -133,6 +134,7 @@ function RootComponent() {
       </AppShell>
       <NotificationSimulator />
       <GlobalEscalationInterceptor />
+      <RouteRehydrationGuardian />
     </QueryClientProvider>
   );
 }

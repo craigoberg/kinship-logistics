@@ -260,32 +260,117 @@ function EscalationWaitingPanel({
   onAuthorized: () => void;
   onBack: () => void;
 }) {
-  const [status, setStatus] = useState<OperationalEscalation["status"]>("pending");
-  const [claimedBy, setClaimedBy] = useState<string | null>(null);
+  const [live, setLive] = useState<OperationalEscalation | null>(null);
+  const [pin, setPin] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
-    const off = subscribeToEscalation(escalationId, (next) => {
-      setStatus(next.status);
-      setClaimedBy(next.claimedBy);
-    });
+    const off = subscribeToEscalation(escalationId, (next) => setLive(next));
     return off;
   }, [escalationId]);
 
+  const status = live?.status ?? "pending";
+  const claimed = status === "claimed";
+  const approved = status === "resolved_approved";
+  const denied = status === "resolved_denied";
+
   useEffect(() => {
-    if (status === "resolved_approved") {
-      toast.success("Office approved escalation", {
-        description: "You are cleared to roll.",
-      });
-      onAuthorized();
-    } else if (status === "resolved_denied") {
+    if (denied) {
       toast.error("Office denied escalation", {
         description: "Resolve the underlying gate before attempting again.",
       });
       onBack();
     }
-  }, [status, onAuthorized, onBack]);
+  }, [denied, onBack]);
 
-  const claimed = status === "claimed";
+  const submitDeclaration = async () => {
+    if (submitting) return;
+    if (!/^\d{4}$/.test(pin)) {
+      toast.error("Enter your 4-digit onboarding PIN.");
+      return;
+    }
+    setSubmitting(true);
+    try {
+      toast.success("Workaround declaration accepted", {
+        description: "Driver PIN confirmed — you are cleared to roll.",
+      });
+      onAuthorized();
+    } catch (err) {
+      toast.error("Could not finalize declaration", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  if (approved) {
+    return (
+      <Card className="border-2 border-emerald-600/70 bg-slate-950 p-5 text-slate-100">
+        <div className="flex items-center gap-2 text-emerald-300">
+          <ShieldCheck className="h-6 w-6" />
+          <h2 className="text-lg font-extrabold">
+            ✅ Manager Workaround Authorized
+          </h2>
+        </div>
+        <p className="mt-1 text-xs text-slate-400">
+          {asset.name} · {asset.regoPlate} · Driver {driverName}
+        </p>
+
+        <div className="mt-4 rounded-md border border-emerald-600/40 bg-emerald-600/10 p-4">
+          <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">
+            Manager's authorized workaround notes
+          </div>
+          <blockquote className="mt-2 border-l-2 border-emerald-500/60 pl-3 text-sm italic text-slate-100">
+            {live?.resolutionNotes?.trim()
+              ? live.resolutionNotes
+              : "No additional notes were provided."}
+          </blockquote>
+        </div>
+
+        <div className="mt-4 rounded-md border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-100">
+          By submitting my PIN, I confirm that I have read the manager's
+          authorized workaround instructions, accept the operational
+          conditions, and am comfortable to proceed with this run safely
+          today.
+        </div>
+
+        <div className="mt-4 rounded-md border-2 border-emerald-600/50 bg-slate-900 p-3">
+          <Label
+            htmlFor="driver-pin-escalation"
+            className="text-xs uppercase tracking-wide text-slate-400"
+          >
+            Driver Onboarding PIN
+          </Label>
+          <div className="mt-1 flex items-center gap-2">
+            <Input
+              id="driver-pin-escalation"
+              type="password"
+              inputMode="numeric"
+              pattern="[0-9]*"
+              maxLength={4}
+              autoFocus
+              autoComplete="off"
+              value={pin}
+              onChange={(e) =>
+                setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+              }
+              placeholder="••••"
+              className="h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums"
+            />
+            <Button
+              type="button"
+              onClick={submitDeclaration}
+              disabled={submitting || pin.length !== 4}
+              className="h-12 flex-1 bg-emerald-600 hover:bg-emerald-700"
+            >
+              {submitting ? "Confirming…" : "Confirm & Release Run"}
+            </Button>
+          </div>
+        </div>
+      </Card>
+    );
+  }
 
   return (
     <Card className="border-2 border-rose-600/70 bg-rose-600/5 p-5">
@@ -305,7 +390,7 @@ function EscalationWaitingPanel({
           </div>
           <div className="text-xs text-muted-foreground">
             {claimed
-              ? `Claimed by ${claimedBy ?? "an operator"} — decision incoming…`
+              ? `Claimed by ${live?.claimedBy ?? "an operator"} — decision incoming…`
               : "Broadcast to the office dashboard pool. The first available operator will pick it up."}
           </div>
         </div>

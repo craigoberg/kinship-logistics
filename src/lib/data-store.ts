@@ -4123,6 +4123,24 @@ export async function listPendingEscalations(): Promise<OperationalEscalation[]>
   return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
 }
 
+/**
+ * Re-hydration guardian query: returns any escalation that is still in-flight
+ * for the given driver (status pending or claimed). Used on app mount to
+ * snap a returning driver straight back to /manifest.
+ */
+export async function listUnresolvedEscalationsForDriver(
+  driverName: string,
+): Promise<OperationalEscalation[]> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("*")
+    .in("status", ["pending", "claimed"])
+    .eq("driver_name", driverName)
+    .order("created_at", { ascending: true });
+  if (error) throwPg("[listUnresolvedEscalationsForDriver]", error);
+  return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
+}
+
 /** Unfiltered realtime feed for the coordinator escalation pool. */
 export function subscribeToEscalationPool(
   cb: (event: { type: "INSERT" | "UPDATE"; row: OperationalEscalation }) => void,
