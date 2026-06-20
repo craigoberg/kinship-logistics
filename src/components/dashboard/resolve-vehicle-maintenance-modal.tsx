@@ -25,6 +25,15 @@ import {
   type VehicleResolutionType,
   type VehicleFlagKind,
 } from "@/lib/api/ledger";
+import type { ChecklistItem } from "@/lib/api/checklists";
+import {
+  FormalAuditChecklist,
+  buildFormalAuditPayload,
+  emptyFormalAuditState,
+  type FormalAuditState,
+} from "@/components/dashboard/formal-audit-checklist";
+
+const FORMAL_AUDIT_CATEGORY = "VEHICLE_FORMAL_AUDIT";
 
 const MIN_NOTES = 20;
 const MIN_EVIDENCE = 6;
@@ -77,6 +86,11 @@ export function ResolveVehicleMaintenanceModal({
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
+  // Formal Audit state.
+  const [auditState, setAuditState] =
+    useState<FormalAuditState>(emptyFormalAuditState);
+  const [auditItems, setAuditItems] = useState<ChecklistItem[]>([]);
+
   const currentExpiry = useMemo<Date | null>(() => {
     if (!subject || subject.flagKind !== "rego") return null;
     if (typeof subject.previousValue !== "string") return null;
@@ -92,11 +106,14 @@ export function ResolveVehicleMaintenanceModal({
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
+      setAuditState(emptyFormalAuditState);
+      setAuditItems([]);
       return;
     }
     setResType(initialType);
     setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
+    setAuditState(emptyFormalAuditState);
     // Smart seed: New Expiry = current_expiry + 1 year (or today + 1 year fallback).
     const base = currentExpiry ?? startOfToday();
     const seeded = new Date(base.getFullYear() + 1, base.getMonth(), base.getDate());
@@ -118,6 +135,8 @@ export function ResolveVehicleMaintenanceModal({
     d.setDate(d.getDate() + MAX_DEFER_DAYS);
     return d;
   }, [today]);
+
+  const isFormalAudit = resType === "formal_audit";
 
   const trimmedNotes = notes.trim();
   const trimmedEvidence = evidenceRef.trim();
@@ -147,15 +166,21 @@ export function ResolveVehicleMaintenanceModal({
       (deferredUntil.getTime() <= today.getTime() ||
         deferredUntil.getTime() > maxDefer.getTime()));
 
-  const canSubmit =
-    !submitting &&
-    !notesTooShort &&
-    !(evidenceRequired && evidenceTooShort) &&
-    !dateMissing &&
-    !dateInvalid &&
-    !odoInvalid &&
-    !actionDateMissing &&
-    !actionDateInvalid;
+  const auditPayload = useMemo(
+    () => buildFormalAuditPayload(auditItems, auditState),
+    [auditItems, auditState],
+  );
+
+  const canSubmit = isFormalAudit
+    ? !submitting && !notesTooShort && auditPayload.valid
+    : !submitting &&
+      !notesTooShort &&
+      !(evidenceRequired && evidenceTooShort) &&
+      !dateMissing &&
+      !dateInvalid &&
+      !odoInvalid &&
+      !actionDateMissing &&
+      !actionDateInvalid;
 
 
   const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
@@ -182,6 +207,13 @@ export function ResolveVehicleMaintenanceModal({
         previousValue: subject.previousValue,
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
+
+        auditorStaffId: isFormalAudit ? auditState.auditorStaffId : null,
+        auditorPin: isFormalAudit ? auditState.auditorPin : null,
+        witnessStaffId: isFormalAudit ? auditState.witnessStaffId : null,
+        witnessPin: isFormalAudit ? auditState.witnessPin : null,
+        checklistCategory: isFormalAudit ? FORMAL_AUDIT_CATEGORY : null,
+        checklistResponses: isFormalAudit ? auditPayload.rows : undefined,
       });
       toast.success("Vehicle resolution recorded", {
         description: `${subject.assetName} · ${resType}`,
@@ -250,6 +282,7 @@ export function ResolveVehicleMaintenanceModal({
                     { v: "serviced", label: "Serviced" },
                     { v: "deferred", label: "Defer" },
                     { v: "decommissioned", label: "Decommission" },
+                    { v: "formal_audit", label: "Formal Audit" },
                   ] as { v: VehicleResolutionType; label: string }[]
                 ).map((opt) => (
                   <label
@@ -344,35 +377,46 @@ export function ResolveVehicleMaintenanceModal({
               />
             )}
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="v-evidence" className="flex items-center gap-1.5 text-sm font-semibold">
-                Evidence Reference
-                <span
-                  className={cn(
-                    "text-[10px] font-medium uppercase tracking-wide",
-                    evidenceRequired ? "text-rose-600" : "text-muted-foreground",
-                  )}
-                >
-                  {evidenceRequired ? "Required" : "Optional"}
-                </span>
-              </Label>
-              <Input
-                id="v-evidence"
-                value={evidenceRef}
-                onChange={(e) => setEvidenceRef(e.target.value)}
-                placeholder={
-                  evidenceRequired
-                    ? "Rego paper #, service invoice #, SharePoint link…"
-                    : "Not required for defer/decommission"
-                }
-                className="text-sm"
+            {isFormalAudit && (
+              <FormalAuditChecklist
+                category={FORMAL_AUDIT_CATEGORY}
+                value={auditState}
+                onChange={setAuditState}
+                onItemsLoaded={setAuditItems}
               />
-              {evidenceRequired && evidenceTooShort && (
-                <span className="text-[11px] text-muted-foreground">
-                  {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
-                </span>
-              )}
-            </div>
+            )}
+
+            {!isFormalAudit && (
+              <div className="grid gap-1.5">
+                <Label htmlFor="v-evidence" className="flex items-center gap-1.5 text-sm font-semibold">
+                  Evidence Reference
+                  <span
+                    className={cn(
+                      "text-[10px] font-medium uppercase tracking-wide",
+                      evidenceRequired ? "text-rose-600" : "text-muted-foreground",
+                    )}
+                  >
+                    {evidenceRequired ? "Required" : "Optional"}
+                  </span>
+                </Label>
+                <Input
+                  id="v-evidence"
+                  value={evidenceRef}
+                  onChange={(e) => setEvidenceRef(e.target.value)}
+                  placeholder={
+                    evidenceRequired
+                      ? "Rego paper #, service invoice #, SharePoint link…"
+                      : "Not required for defer/decommission"
+                  }
+                  className="text-sm"
+                />
+                {evidenceRequired && evidenceTooShort && (
+                  <span className="text-[11px] text-muted-foreground">
+                    {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
+                  </span>
+                )}
+              </div>
+            )}
 
             <div className="grid gap-1.5">
               <div className="flex items-baseline justify-between gap-2">

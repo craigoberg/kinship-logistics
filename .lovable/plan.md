@@ -1,51 +1,104 @@
-## Problem
+# Formal Safety Audit Module
 
-Two issues on `/admin → System Parameters`:
+A new "Formal Audit" resolution path on `ResolveVehicleMaintenanceModal` that renders a dynamic checklist driven by `public.checklist_items`, captures per-item responses, requires a dual-PIN sign-off (Auditor + Witness), and embeds the full checklist into a `VEHICLE_FORMAL_AUDIT` ledger entry.
 
-1. The "Last updated" stamp shows ~11 hours ago for a change made ~1 hour ago. `formatRelative()` in `src/components/admin/system-parameter-workspace.tsx` uses `new Date(iso).toISOString()`, which always renders in **UTC**. In AEST (UTC+10/+11) this looks ~10–11 hours behind local wall-clock time.
-2. A React hydration warning fires on the same view because any locale-aware date formatting during SSR disagrees with the browser's first render (server has no concept of the user's timezone).
+## 1. Database (new migration `docs/sql/2026-07-05_formal_safety_audit.sql`)
 
-## Fix
+```sql
+create table public.checklist_items (
+  id          uuid primary key default gen_random_uuid(),
+  label       text not null,
+  category    text not null,              -- e.g. 'VEHICLE_FORMAL_AUDIT'
+  sort_order  int  not null default 100,
+  is_active   boolean not null default true,
+  created_at  timestamptz not null default now()
+);
 
-1. **New shared helper** `src/components/ui/client-time.tsx`
-   - `<ClientTime iso fmt? />` component and `useClientFormattedDate(iso, options?)` hook.
-   - Server / first paint: returns a stable placeholder (raw `YYYY-MM-DD HH:mm` slice of the ISO, or `—`).
-   - After mount (`useEffect`): swaps to `new Date(iso).toLocaleString(undefined, options)` — no explicit `timeZone`, so the browser's setting is used automatically.
-   - This guarantees SSR/CSR markup matches, then upgrades to local time.
+create table public.checklist_responses (
+  id          uuid primary key default gen_random_uuid(),
+  ledger_id   uuid not null references public.operational_ledger(id) on delete cascade,
+  item_id     uuid not null references public.checklist_items(id),
+  status      text not null check (status in ('pass','fail','na')),
+  notes       text,
+  created_at  timestamptz not null default now()
+);
 
-2. **Switch the Admin "Last updated" cell** in `src/components/admin/system-parameter-workspace.tsx` from the UTC `formatRelative` to `<ClientTime>` with `{ dateStyle: "short", timeStyle: "short" }`.
+-- Grants (per project convention)
+grant select on public.checklist_items to anon, authenticated;
+grant all    on public.checklist_items to service_role;
+grant select, insert on public.checklist_responses to anon, authenticated;
+grant all    on public.checklist_responses to service_role;
 
-3. **Wrap the other in-render timestamp displays** with the same helper so timezone is uniformly the browser's and no SSR mismatch can occur:
-   - `src/components/dashboard/OperationsExceptionHub.tsx` (clearance time, grounded-at)
-   - `src/components/ui/NotificationSimulator.tsx` (dispatched-at)
-   - `src/components/medication/todays-medication-card.tsx` (administered-at)
+alter table public.checklist_items     enable row level security;
+alter table public.checklist_responses enable row level security;
 
-4. **Write paths are unchanged.** All `new Date().toISOString()` calls that persist to Supabase stay UTC ISO strings — that is the correct storage format. Only *display* changes.
+create policy "checklist_items_read"      on public.checklist_items
+  for select to anon, authenticated using (true);
+create policy "checklist_responses_read"  on public.checklist_responses
+  for select to anon, authenticated using (true);
+create policy "checklist_responses_write" on public.checklist_responses
+  for insert to anon, authenticated with check (true);
 
-5. **No project-level TZ override / no user preference UI.** "Align all Date/Time displays to Browser Time Zone settings" is exactly what `toLocaleString` without an explicit `timeZone` does.
+-- Seed VEHICLE_FORMAL_AUDIT items (brakes, tyres, lights, seatbelts,
+-- first-aid kit, fire extinguisher, wheelchair restraints, fluid levels,
+-- body damage, registration sticker, fuel cap, dashboard warnings).
+insert into public.checklist_items (label, category, sort_order) values
+  ('Brakes operating correctly',          'VEHICLE_FORMAL_AUDIT', 10),
+  ('Tyre tread + pressure within spec',   'VEHICLE_FORMAL_AUDIT', 20),
+  ('All exterior lights functional',      'VEHICLE_FORMAL_AUDIT', 30),
+  ('All seatbelts retract and lock',      'VEHICLE_FORMAL_AUDIT', 40),
+  ('Wheelchair restraints serviceable',   'VEHICLE_FORMAL_AUDIT', 50),
+  ('First-aid kit present + in date',     'VEHICLE_FORMAL_AUDIT', 60),
+  ('Fire extinguisher charged + in date', 'VEHICLE_FORMAL_AUDIT', 70),
+  ('Fluid levels checked',                'VEHICLE_FORMAL_AUDIT', 80),
+  ('No new body damage',                  'VEHICLE_FORMAL_AUDIT', 90),
+  ('Registration sticker valid',          'VEHICLE_FORMAL_AUDIT', 100),
+  ('No active dashboard warnings',        'VEHICLE_FORMAL_AUDIT', 110);
+```
 
-## Persist the convention for future builds
+## 2. API layer
 
-So future tasks don't reintroduce UTC strings in the UI:
+**`src/lib/api/checklists.ts` (new)** — `listChecklistItems(category)` ordered by `sort_order, label`; `insertChecklistResponses(ledgerId, rows[])`. Both use the browser `supabase` client.
 
-- **Append a new section to `PROJECT_CONTEXT.md`** — *"10. UI Conventions: Date & Time Display"* — capturing the rule:
-  > All user-visible dates and times render in the browser's local timezone via `toLocaleString` (no explicit `timeZone` option). Never display raw `toISOString()` strings. Use `<ClientTime>` / `useClientFormattedDate` from `src/components/ui/client-time.tsx` so SSR and client hydration agree. Storage stays UTC ISO — only the display layer is localized.
+**`src/lib/api/ledger.ts`** — extend the vehicle resolution flow:
+- Add `"formal_audit"` to `VehicleResolutionType`.
+- Extend `ResolveVehicleMaintenanceInput` with `auditorStaffId`, `witnessStaffId`, `checklistResponses: { itemId, label, status, notes }[]`.
+- New branch in `resolveVehicleMaintenance`:
+  - Verify both PINs via `supabase.rpc('verify_staff_pin', …)` (reuses existing RPC). Both must succeed and the two staff IDs must differ.
+  - Insert ledger row with `action_type = 'VEHICLE_FORMAL_AUDIT'`, `severity = 'GREEN'` (or `'YELLOW'` if any item is `fail`), `metadata` embedding `auditor_staff_id`, `witness_staff_id`, `checklist_category`, and the full `checklist_responses[]` snapshot (id, label, status, notes).
+  - Capture the inserted ledger id (`.select('id').single()`) then insert the per-item rows into `checklist_responses` for relational querying.
+  - Does NOT mirror to `transport_assets` (audit is a periodic review, not a flag clear), but writes `last_audit_at` only if the column exists — out of scope for this iteration; leave a TODO.
 
-- **Add a matching one-liner to `mem://index.md` → Core** so every future session enforces it without re-reading the doc:
-  > UI date/time displays use browser local TZ via `<ClientTime>` / `useClientFormattedDate` (`src/components/ui/client-time.tsx`). Never render `toISOString()` to users. Storage stays UTC ISO.
+## 3. UI — `ResolveVehicleMaintenanceModal`
 
-## Files touched
+- Add `"Formal Audit"` as a 5th radio option.
+- When selected:
+  - Hide rego / service / defer / decommission inputs.
+  - Fetch `listChecklistItems('VEHICLE_FORMAL_AUDIT')` on demand (cached in state).
+  - Render each item as a row: label + RadioGroup (`Pass` / `Fail` / `N/A`) + optional notes (required when `status === 'fail'`, min 6 chars).
+  - Two PIN blocks at the bottom: `Auditor` (staff picker + 4-digit PIN) and `Witness` (staff picker + 4-digit PIN). Both required, must be different staff.
+  - `canSubmit` requires: every checklist item has a status, every `fail` has notes, both PINs entered, justification ≥ 20 chars. Evidence ref optional for audits.
+- On submit, call extended `resolveVehicleMaintenance` with `resolutionType: 'formal_audit'` plus checklist + PIN payloads. Toast on success/failure as today.
 
-- New: `src/components/ui/client-time.tsx`
-- Edit: `src/components/admin/system-parameter-workspace.tsx`
-- Edit: `src/components/dashboard/OperationsExceptionHub.tsx`
-- Edit: `src/components/ui/NotificationSimulator.tsx`
-- Edit: `src/components/medication/todays-medication-card.tsx`
-- Edit: `PROJECT_CONTEXT.md` (append §10)
-- Edit: `mem://index.md` (append Core rule)
+New small component `formal-audit-checklist.tsx` co-located in `src/components/dashboard/` to keep the modal file readable.
 
-## Verification
+## 4. Audit guarantees
 
-- Edit a System Parameter and confirm "Last updated" now matches the local clock within a minute.
-- Reload `/admin`; the hydration-mismatch console warning is gone.
-- Spot-check the dashboard exception hub and medication card — times render in local TZ without warnings.
+- Ledger metadata embeds the full checklist snapshot (label + status + notes) so the receipt is self-contained even if `checklist_items` later changes.
+- `checklist_responses` rows provide a normalized, queryable mirror keyed by `ledger_id`.
+- PIN verification happens server-side via `verify_staff_pin`; raw PINs never leave the modal beyond the RPC call.
+- `operational_ledger` remains append-only (existing RLS).
+
+## Files
+
+- new: `docs/sql/2026-07-05_formal_safety_audit.sql`
+- new: `src/lib/api/checklists.ts`
+- new: `src/components/dashboard/formal-audit-checklist.tsx`
+- edit: `src/lib/api/ledger.ts` (add `formal_audit` branch + input fields)
+- edit: `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx` (new option, checklist + dual-PIN UI, validation, submit wiring)
+
+## Out of scope
+
+- Admin UI to CRUD `checklist_items` (seeded via SQL for now; manageable via existing Admin lookup workspace pattern in a follow-up).
+- Scheduling / reminders for periodic audits.
+- Mirroring an `audited_at` column onto `transport_assets`.
