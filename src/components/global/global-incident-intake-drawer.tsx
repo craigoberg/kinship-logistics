@@ -142,8 +142,10 @@ export function GlobalIncidentIntakeDrawer() {
 
   // Driver-safe button position: on /manifest, anchor to top so a thumb sweep
   // on the seat checklist never grazes a Sev 1 button by accident.
+  // On /manifest, shift left of the On-Line connection status badge so the two
+  // chips sit side-by-side with no overlap.
   const triggerPos = onManifest
-    ? "fixed right-4 top-3 z-40 md:right-6 md:top-4"
+    ? "fixed right-28 top-3 z-40 md:right-32 md:top-4"
     : "fixed bottom-24 right-4 z-40 md:bottom-8 md:right-6";
 
   return (
