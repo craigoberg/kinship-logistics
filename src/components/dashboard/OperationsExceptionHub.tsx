@@ -98,6 +98,24 @@ interface Bucket {
   rows: BucketRow[];
 }
 
+const CATEGORY_PRESENTATION: Record<string, { label: string; icon: LucideIcon }> = {
+  VEHICLE: { label: "Vehicle Compliance", icon: Truck },
+  STAFF: { label: "Staff Certifications", icon: UserCheck },
+  INSURANCE: { label: "Asset & Liability Insurance", icon: ShieldCheck },
+  EQUIPMENT: { label: "Equipment & Audits", icon: ShieldAlert },
+  FACILITY: { label: "Facility & Lease", icon: ShieldCheck },
+};
+
+function titleCase(s: string): string {
+  return s
+    .toLowerCase()
+    .split(/[\s_-]+/)
+    .map((p) => (p ? p[0].toUpperCase() + p.slice(1) : p))
+    .join(" ");
+}
+
+
+
 export function OperationsExceptionHub() {
   const qc = useQueryClient();
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
