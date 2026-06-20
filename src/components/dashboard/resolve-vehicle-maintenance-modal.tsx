@@ -285,13 +285,20 @@ export function ResolveVehicleMaintenanceModal({
                     label="New Registration Expiry"
                     value={newExpiry}
                     onChange={setNewExpiry}
-                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                    helper={
+                      currentExpiry
+                        ? `Pre-filled to current expiry + 1 year. Must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}). Editable for 3- or 6-month registrations.`
+                        : "Pre-filled to today + 1 year. Must be after today. Editable for 3- or 6-month registrations."
+                    }
                   />
-                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                    <span className="text-[11px] font-medium text-destructive">
-                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                    </span>
-                  )}
+                  {newExpiry &&
+                    newExpiry.getTime() <= renewedLowerBound.getTime() && (
+                      <span className="text-[11px] font-medium text-destructive">
+                        {currentExpiry
+                          ? `New expiry must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}).`
+                          : "Expiry must be after today — renewals with an already-expired date cannot resolve the flag."}
+                      </span>
+                    )}
                 </div>
               </>
             )}
