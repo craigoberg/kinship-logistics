@@ -4,6 +4,8 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
@@ -11,6 +13,7 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { getActiveUserRole } from "../lib/data-store";
 import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
@@ -124,19 +127,58 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function AuthGate() {
+  const navigate = useNavigate();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+
+  useEffect(() => {
+    if (pathname === "/auth") return;
+    const role = getActiveUserRole();
+    if (!role) {
+      navigate({ to: "/auth", replace: true });
+    }
+  }, [navigate, pathname]);
+
+  return null;
+}
+
+function RoleAwareGuardians() {
+  // Read role per render so a sign-in immediately flips the gate set.
+  const role =
+    typeof window !== "undefined" ? getActiveUserRole() : null;
+
+  // Coordinators bypass the driver re-hydration guardian entirely — their
+  // tabs must stay anchored to /dashboard, /admin, etc.
+  return (
+    <>
+      <GlobalEscalationInterceptor />
+      {role === "driver" && <RouteRehydrationGuardian />}
+      <GlobalIncidentIntakeDrawer />
+    </>
+  );
+}
+
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const isAuthRoute = pathname === "/auth";
 
   return (
     <QueryClientProvider client={queryClient}>
-      {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-      <AppShell>
+      <AuthGate />
+      {isAuthRoute ? (
+        // Bare-shell terminal view — no AppShell chrome on the sign-in screen.
         <Outlet />
-      </AppShell>
-      <NotificationSimulator />
-      <GlobalEscalationInterceptor />
-      <RouteRehydrationGuardian />
-      <GlobalIncidentIntakeDrawer />
+      ) : (
+        <>
+          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+          <AppShell>
+            <Outlet />
+          </AppShell>
+          <NotificationSimulator />
+          <RoleAwareGuardians />
+        </>
+      )}
     </QueryClientProvider>
   );
 }
