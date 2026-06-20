@@ -89,8 +89,8 @@ export async function upsertComplianceAsset(
   justification: string,
 ): Promise<ComplianceAsset> {
   const trimmed = justification.trim();
-  if (trimmed.length < 10) {
-    throw new Error("Justification must be at least 10 characters.");
+  if (trimmed.length < 20) {
+    throw new Error("Justification must be at least 20 characters.");
   }
   const allowed = await canManageSystemParameters();
   if (!allowed) {
