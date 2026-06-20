@@ -41,6 +41,58 @@ Only a Manager can resolve a RED state.
 
 ---
 
-## 4. Reference
+## 4. Dashboard Philosophy: "No News is Good News"
+
+The UI is designed around a traffic-light visual language:
+- **Green tiles** mean good — the fleet, staff, and schedule are healthy.
+- **Yellow tiles** demand attention but do not halt operations.
+- **Red tiles** are stop-everything events.
+
+If a dashboard view is entirely green, the Coordinator and Manager can proceed with confidence. Silence is the signal of a well-running day.
+
+---
+
+## 5. Access Model
+
+| View | Purpose | URL / Route |
+|------|---------|-------------|
+| **Manager Dashboard** | Interactive, secure. Escalation resolution, ledger review, roster changes. | `/manager` (auth-gated) |
+| **Wall-View Dashboard** | Read-only, large-format display. For common-area screens. | Separate public route, no auth required. |
+
+No write-capable endpoint is ever exposed on the Wall-View route. It consumes the same data layer but via read-only server functions.
+
+---
+
+## 6. Operational Workflow: Wheelchair Lift Access
+
+Wheelchair lift access follows a **Yellow Flag (Workaround)** model:
+1. Staff reports a lift issue.
+2. System logs a **YELLOW** entry to the ledger and permits a documented workaround (e.g., manual ramp, alternate vehicle).
+3. If the workaround succeeds and the trip completes safely, the entry remains **YELLOW** — no escalation required.
+4. If the workaround **fails**, the flag is promoted to **RED** and the standard Escalation Loop begins (see ARCHITECTURE.md §3).
+
+Workarounds are never silent. Every workaround attempt is receipted.
+
+---
+
+## 7. Integration Preference: Microsoft Graph API
+
+All SharePoint document storage is accessed via the **Microsoft Graph API**.
+- Vehicle maintenance records, incident reports, and compliance documents live in SharePoint.
+- The app uses Graph API read/write endpoints via a workspace connector.
+- No local file storage is used for compliance-critical documents.
+
+---
+
+## 8. General Policy: High-Trust / Competency-Verified
+
+Every action in YADA Connect follows a competency-verified model:
+- Staff actions are tied to authenticated sessions and GPS receipts.
+- Manager overrides are tied to documented justifications in the ledger.
+- The system does not trust UI state alone; it trusts the immutable ledger as the source of truth.
+
+---
+
+## 9. Reference
 
 - **ARCHITECTURE.md** — Implementation details, table schemas, escalation loops, module patterns, and enforcement rules.
