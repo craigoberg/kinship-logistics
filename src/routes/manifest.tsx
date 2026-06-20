@@ -1,4 +1,4 @@
-// Force rebuild version 2.0
+// Force rebuild version 2.1
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -13,6 +13,7 @@ import {
   ShieldCheck,
   ShieldAlert,
   ClipboardCheck,
+  LogOut,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -64,6 +65,7 @@ import {
   insertAssetClearanceWithItems,
   getTodayManifestSummary,
   getStaffId,
+  getActiveUserRole,
   STAFF_DIRECTORY,
   DEFAULT_STAFF_UUID,
 } from "@/lib/data-store";
@@ -89,15 +91,44 @@ export const Route = createFileRoute("/manifest")({
 
 function ManifestPage() {
   const { data: bundle, isLoading } = useActiveTrip();
+  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+  const userRole = typeof window !== "undefined" ? getActiveUserRole() : "driver";
+  const currentDriverName = staffName(driverStaffId);
+
+  const handleGlobalLogout = () => {
+    if (typeof window !== "undefined") {
+      // Complete state purge to ensure an absolutely clean login window environment
+      localStorage.clear();
+      window.location.href = "/auth";
+    }
+  };
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
+      {/* Top Session Identity Banner with Hard Reset Controls */}
+      {!bundle && !isLoading && (
+        <div className="flex items-center justify-between border-b border-border bg-slate-900/60 px-4 py-2.5 text-xs text-white">
+          <div className="flex items-center gap-2">
+            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
+            <span className="text-slate-300">
+              Driver: <b className="text-white font-semibold">{currentDriverName}</b> ({userRole})
+            </span>
+          </div>
+          <button
+            onClick={handleGlobalLogout}
+            className="flex items-center gap-1 font-bold text-red-400 hover:text-red-300 transition hover:underline"
+          >
+            <LogOut className="h-3 w-3" /> Log Out
+          </button>
+        </div>
+      )}
+
       {isLoading ? (
         <div className="flex flex-1 items-center justify-center text-muted-foreground">
           <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading manifest…
         </div>
       ) : bundle ? (
-        <ActiveTripScreen bundle={bundle} />
+        <ActiveTripScreen bundle={bundle} onLogout={handleGlobalLogout} />
       ) : (
         <InitializeTripScreen />
       )}
@@ -122,7 +153,6 @@ function InitializeTripScreen() {
   const today = todayDateStr();
   const { data: lastEndOdo = null } = useLastEndOdometer();
 
-  // Rehydrate setup wizard parameters from localStorage to insulate against mid-setup reloads
   const [step, setStep] = useState<InitStep>(() => {
     if (typeof window !== "undefined") {
       return (localStorage.getItem("yada_init_step") as InitStep) || "vehicle";
@@ -158,7 +188,6 @@ function InitializeTripScreen() {
     }
   }, [lastEndOdo, odo]);
 
-  // Sync initialization selections to state to persist through F5 events
   useEffect(() => {
     localStorage.setItem("yada_init_step", step);
   }, [step]);
@@ -349,11 +378,43 @@ function IssueAccumulatorGate({
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
-  const [escalation, setEscalation] = useState<OperationalEscalation | null>(null);
+
+  // REHYDRATION LOCK: Rehydrate dynamic coordinator handshake states to prevent refresh bypass
+  const [escalation, setEscalation] = useState<OperationalEscalation | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`yada_esc_state_${asset.id}`);
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  });
+
   const [redHandshake, setRedHandshake] = useState<{
     clearance: AssetDailyClearance;
     issues: import("@/components/manifest/dynamic-operational-form").DraftIssue[];
-  } | null>(null);
+  } | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(`yada_handshake_state_${asset.id}`);
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  });
+
+  // Keep localStorage perfectly tailored to the active workflow step
+  useEffect(() => {
+    if (escalation) {
+      localStorage.setItem(`yada_esc_state_${asset.id}`, JSON.stringify(escalation));
+    } else {
+      localStorage.removeItem(`yada_esc_state_${asset.id}`);
+    }
+  }, [escalation, asset.id]);
+
+  useEffect(() => {
+    if (redHandshake) {
+      localStorage.setItem(`yada_handshake_state_${asset.id}`, JSON.stringify(redHandshake));
+    } else {
+      localStorage.removeItem(`yada_handshake_state_${asset.id}`);
+    }
+  }, [redHandshake, asset.id]);
 
   if (escalation) {
     return (
@@ -361,8 +422,12 @@ function IssueAccumulatorGate({
         asset={asset}
         driverName={driverName}
         escalationId={escalation.id}
-        onAuthorized={onPassed}
+        onAuthorized={() => {
+          localStorage.removeItem(`yada_esc_state_${asset.id}`);
+          onPassed();
+        }}
         onBack={() => {
+          localStorage.removeItem(`yada_esc_state_${asset.id}`);
           setEscalation(null);
           onBack();
         }}
@@ -377,8 +442,12 @@ function IssueAccumulatorGate({
         driverName={driverName}
         clearance={redHandshake.clearance}
         issues={redHandshake.issues}
-        onAuthorized={onPassed}
+        onAuthorized={() => {
+          localStorage.removeItem(`yada_handshake_state_${asset.id}`);
+          onPassed();
+        }}
         onBack={() => {
+          localStorage.removeItem(`yada_handshake_state_${asset.id}`);
           setRedHandshake(null);
           onBack();
         }}
@@ -871,7 +940,6 @@ function EventPickAndStart({
       { eventId, startOdometerKm: startOdometer, varianceReason: null },
       {
         onSuccess: () => {
-          // Clear pre-trip wizard values from localStorage upon successful run open
           localStorage.removeItem("yada_init_step");
           localStorage.removeItem("yada_init_assetId");
           localStorage.removeItem("yada_init_odo");
@@ -934,7 +1002,12 @@ function EventPickAndStart({
 
 /* -------------------- Active Trip -------------------- */
 
-function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
+interface ActiveTripScreenProps {
+  bundle: ActiveTripBundle;
+  onLogout: () => void;
+}
+
+function ActiveTripScreen({ bundle, onLogout }: ActiveTripScreenProps) {
   const { trip, legs } = bundle;
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
@@ -968,9 +1041,21 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
               {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
           </div>
-          <div className="text-right">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
-            <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
+          <div className="flex items-center gap-3 text-right">
+            <div>
+              <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
+              <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
+            </div>
+            <button
+              onClick={() => {
+                if (confirm("Log out? Active trip details remain saved securely on the server.")) {
+                  onLogout();
+                }
+              }}
+              className="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-300 hover:bg-slate-700 hover:text-white transition"
+            >
+              Exit
+            </button>
           </div>
         </div>
       </header>
@@ -1142,7 +1227,6 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const patch = usePatchTripLeg();
   const storageKey = `yada_leg_form_${leg.id}`;
 
-  // Encapsulate and restore active checklist input values from localStorage keyed by leg ID
   const [formState, setFormState] = useState(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(storageKey);
@@ -1176,8 +1260,6 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
 
   const exceptionFlagged = medStatus === "collected_damaged" || medStatus === "expected_not_provided";
 
-  // FIXED: Removed the validation condition that locked fields down when no meds were expected.
-  // Validation checks are now correctly isolated exclusively to runs expecting medication handover.
   const blocked =
     !loggedKm ||
     Number.isNaN(Number(loggedKm)) ||
@@ -1203,7 +1285,6 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           completedAt: new Date().toISOString(),
         },
       });
-      // Erase persisted leg state upon successful check-in/completion
       localStorage.removeItem(storageKey);
       toast.success(`Leg ${leg.legIndex} logged`, {
         description: `${leg.fromLabel} → ${leg.toLabel}`,
