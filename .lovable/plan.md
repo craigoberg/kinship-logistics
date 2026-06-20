@@ -1,72 +1,96 @@
 ## Goal
+Stop the dashboard's background polling from re-rendering Admin/Governance forms and modals, and make in-progress forms survivable across refresh/tab-close.
 
-Tighten the Governance Hub editor so it behaves as a high-trust admin surface: dropdowns instead of free text, PIN-gated creation of brand-new taxonomy values, longer justification/description, and a hard-coded Action Module contract.
+## 1. Smart polling (kill mid-typing re-renders)
 
-## Scope (single file change + one API tweak)
+Update every `useQuery` that currently sets `refetchInterval`:
 
-### 1) `src/components/admin/governance-hub-workspace.tsx` — `EditAssetModal`
+- `src/components/dashboard/OperationsExceptionHub.tsx` — `pendingReviewsQ` (10s) and `groundedQ` (15s)
+- `src/hooks/use-supabase-data.ts` line 936 (15s)
+- `src/hooks/use-exception-feed.ts` — medication, clearance and compliance feeds
 
-**Category & Type → type-ahead Combobox**
-- Add a `useQuery(["governance-hub","taxonomy"])` that calls `listComplianceAssets({})` once and derives:
-  - `categories: string[]` — unique sorted `category` values (active + archived, so we don't double-suggest)
-  - `typesByCategory: Record<string, string[]>` — unique `type` per category
-- Render two combobox controls (Radix `Popover` + `Command` from `@/components/ui/command`, matches the pattern already used elsewhere):
-  - **Category**: suggestions from `categories`. Free text allowed but flagged.
-  - **Type**: suggestions from `typesByCategory[category] ?? []`. Free text allowed but flagged.
-- Compute booleans:
-  - `isNewCategory = category.trim() && !categories.includes(category.trim().toUpperCase())`
-  - `isNewType = type.trim() && !(typesByCategory[category.trim().toUpperCase()] ?? []).includes(type.trim())`
-- When either is true, show an inline amber alert: "You are creating a new {Category|Type}. Manager PIN required."
+Apply the same three options to each:
 
-**Manager PIN gate for new taxonomy values**
-- When `isNewCategory || isNewType`, reveal two extra fields inside the modal:
-  - `Manager` — `<LookupSelect>`-style staff picker (or simple `Select` over staff registry — re-use the same pattern as `ResolveComplianceAssetModal`).
-  - `Manager PIN` — masked input.
-- On submit, if a PIN is required:
-  - Verify via `verifyStaffPin(managerStaffId, managerPin)` (already imported in `data-store`).
-  - Reject with toast on failure.
-  - On success, append `taxonomy_pin_verified_by: managerStaffId` to the upsert payload's `config` so the ledger captures who authorised the new vocabulary entry.
-
-**Description min length (20)**
-- Add `required` + character counter under the Description textarea: `{description.trim().length}/20 minimum`.
-- Block submit until ≥20 chars.
-
-**Justification min length (20) + counter**
-- Raise the existing 10-char gate to 20.
-- Add live counter under the textarea.
-- Update the placeholder copy.
-
-**Action Module — already a `Select` over `ACTION_MODULES`; confirm it stays locked**
-- No change needed (it is already a hard-coded `Select`). Add an inline helper text under it: "Locked to modules with a registered Dispatcher modal."
-
-**Updated `canSubmit`**
 ```ts
-const canSubmit =
-  category.trim().length > 0 &&
-  type.trim().length > 0 &&
-  name.trim().length > 0 &&
-  description.trim().length >= 20 &&
-  justification.trim().length >= 20 &&
-  (!(isNewCategory || isNewType) || (managerStaffId && managerPin.length >= 4)) &&
-  !mut.isPending;
+refetchInterval: 30_000,           // back off from 10/15s
+refetchIntervalInBackground: false, // pause when tab hidden
+refetchOnWindowFocus: true,         // catch up on focus
 ```
 
-### 2) `src/components/admin/governance-hub-workspace.tsx` — `ArchiveAssetDialog`
-- Bump the justification gate from 10 → 20 chars and add a counter for parity.
+Rationale: `refetchInterval` always re-renders the consuming component on success even when data is structurally identical, which is what's nuking sibling form state in any component that re-mounts under a parent that uses these hooks.
 
-### 3) `src/lib/api/compliance-assets.ts` — `upsertComplianceAsset`
-- Raise the server-side justification floor from 10 → 20 chars (defence in depth; mirrors the new UI rule).
-- No schema change; the PIN verification stays client-side because the modal already verifies via `verifyStaffPin` before the mutation fires. Existing manager-role check (`canManageSystemParameters`) is unchanged.
+## 2. Isolation — stop dashboard hooks from leaking into Admin
+
+`OperationsExceptionHub` is dashboard-only, but `useComplianceExceptions` (in `use-exception-feed.ts`) shares the `["compliance-assets"]` query key with `GovernanceHubWorkspace`. Today, dashboard polling invalidates/refetches that key and forces the Governance table — and any open `EditAssetModal` mounted as its child — to re-render.
+
+Fix:
+
+- Give the dashboard feed its own key: `["compliance-exceptions"]` (selecting/derived from the same fetch), OR scope the polling to the dashboard only by passing `refetchInterval` from the dashboard consumer rather than baking it into the shared hook.
+- Confirm `EditAssetModal` form state isn't keyed off `asset` identity in a way that resets on refetch. If it is, switch the `useState` initializers to a `useRef` snapshot keyed by `asset.id`, so a refetched-but-identical asset object doesn't reset typed input.
+
+## 3. `usePersistedForm` hook
+
+New file `src/hooks/use-persisted-form.ts`:
+
+```ts
+export function usePersistedForm<T extends object>(
+  key: string,
+  initial: T,
+): {
+  values: T;
+  setValues: (next: Partial<T>) => void;
+  reset: () => void;
+  isDirty: boolean;
+  hasDraft: boolean;
+  resumeDraft: () => void;
+  discardDraft: () => void;
+};
+```
+
+Behaviour:
+
+- On mount, read `sessionStorage[`form:${key}`]`. If present and different from `initial`, expose `hasDraft = true` and DO NOT auto-apply — let the form render a "Resume previous draft?" banner that calls `resumeDraft()`.
+- On every `setValues`, persist the merged object to sessionStorage (debounced ~300 ms).
+- `reset()` and `discardDraft()` clear the storage key. The form's successful-save handler must call `reset()`.
+- `isDirty` = current values differ from `initial`.
+- `beforeunload` listener attached while `isDirty === true`, detached on unmount or reset (this is the "warn before refresh/close" requirement).
+
+## 4. Wire `usePersistedForm` into the two target forms
+
+**`src/components/admin/governance-hub-workspace.tsx` — `EditAssetModal`**
+
+- Storage key: `governance-asset:${asset?.id ?? "new"}`.
+- Replace the individual `useState` calls (category, type, name, description, justification, expiry, action_module, config knobs, etc.) with a single `usePersistedForm` object.
+- On open, if `hasDraft`, show a yellow "Resume unsaved draft from {timestamp}? [Resume] [Discard]" bar above the form fields.
+- On successful `upsertComplianceAsset` mutation, call `reset()`.
+- PIN values (`managerStaffId`, `managerPin`) stay in normal `useState` — never persisted to sessionStorage.
+
+**`src/components/dashboard/formal-audit-checklist.tsx` — Formal Audit Modal**
+
+- Storage key: `formal-audit:${assetId}`.
+- Persist checklist answers, justification text, signatures-in-progress (but again, never PINs).
+- Same "Resume draft" banner pattern.
+- Clear on submit success or on explicit "Discard".
+
+## 5. Verification
+
+- Open Governance Hub → start typing in a new asset → wait 30 s with dashboard tab focused → input must not reset.
+- Same test with tab in background for 2 min → no polling should occur (check Network tab: no requests while hidden).
+- Switch tabs back → exactly one refetch fires per query (focus refetch).
+- Type into form, hit browser refresh → browser shows native "Leave site?" prompt; after reload the form shows a "Resume draft" banner with the prior values.
+- Save successfully → refresh → no resume banner (draft cleared).
+
+## Files touched
+
+- New: `src/hooks/use-persisted-form.ts`
+- Edit: `src/components/dashboard/OperationsExceptionHub.tsx`
+- Edit: `src/hooks/use-exception-feed.ts`
+- Edit: `src/hooks/use-supabase-data.ts` (single polling block at line 936)
+- Edit: `src/components/admin/governance-hub-workspace.tsx`
+- Edit: `src/components/dashboard/formal-audit-checklist.tsx`
 
 ## Out of scope
-- No migration / schema change.
-- No edits to the Dispatcher (`dispatch-resolve-modal.tsx`) — Action Module is already enum-locked and the Dispatcher already routes on it.
-- No changes to dashboard / exception feed.
 
-## Verification
-- Open `/admin → Governance Hub → New asset`:
-  - Category & Type render as comboboxes with existing values; typing a new value surfaces the amber "new taxonomy — PIN required" panel.
-  - Description and Justification show `n/20` counters and block submit until satisfied.
-  - With Manager PIN 1111 (existing test creds), saving a new VEHICLE/rego succeeds; saving with a wrong PIN toasts an error.
-- Edit an existing row — no PIN panel appears (values match registry); save still requires ≥20-char justification.
-- Archive flow requires ≥20-char justification.
+- No DB / migration changes.
+- No changes to `dispatch-resolve-modal.tsx` or other resolve modals (can be added later with the same hook if useful).
+- No global QueryClient defaults change — settings applied per-query to avoid affecting unrelated reads.
