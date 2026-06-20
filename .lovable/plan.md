@@ -1,52 +1,88 @@
-# Plan — Relax Date Picker, Keep Future-Expiry Invariant
+## Goal
+
+Capture **when the action actually happened** (Action Date — can be in the past) separately from **when the document expires next** (Expiry Date — must still be future-dated). Both flow into the operational ledger as distinct metadata fields.
 
 ## Scope
 
-Two files only — no schema, ledger, or API changes:
-
 - `src/components/dashboard/resolve-certification-modal.tsx`
 - `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx`
+- `src/lib/api/ledger.ts` (input types + metadata payload)
 
-## Current behaviour
+No schema changes — metadata is JSONB.
 
-The "New Expiry" date picker on both modals hard-disables every day `<= today` via `disabledFn={(d) => d.getTime() <= today.getTime()}`. The user cannot click past or today's date at all — the picker silently swallows the interaction. This blocks legitimate back-dated data entry (e.g. manager finishing the receipt the day after the renewal certificate was issued, or batching a week of evidence on Monday morning).
+---
 
-## Target behaviour
+## 1. UI — Both modals
 
-Two-layer validation, with the strict check at submit-time rather than in the picker:
+Add a new **"Actual Action Date"** date picker, shown alongside the existing "New Expiry Date" picker, only in the branches where an external transaction took place:
 
-1. **Picker (input layer) — permissive.** Remove the past/today disable on the New Expiry field. All calendar days remain selectable so the manager can pick the actual document date as printed on the evidence.
-2. **Form (submit layer) — strict, unchanged in intent.** `canSubmit` continues to require `newExpiry > today` when `resType === "renewed"`. If the manager selects a past/today date we show an inline error under the field ("Expiry must be after today — renewals with an already-expired date cannot resolve the flag") and keep the Submit button disabled. This is the existing `canSubmit` clause; we just make it visible to the user instead of hiding it behind a disabled calendar.
+| Modal | Resolution Type | Action Date label | Expiry picker shown? |
+|---|---|---|---|
+| Certification | Renewed | "Renewal Date" | Yes (New Expiry Date) |
+| Certification | Defer / Revoke | — (hidden) | No |
+| Vehicle | Renewed Rego | "Payment / Renewal Date" | Yes (New Registration Expiry) |
+| Vehicle | Serviced | "Service Date" | No (odometer instead) |
+| Vehicle | Defer / Decommission | — (hidden) | No |
 
-### What stays unchanged
+**Picker constraints (Action Date):**
+- Permissive past dates allowed (e.g., the rego was paid last Tuesday).
+- Future dates disabled (`disabledFn: d => d.getTime() > today`).
+- Required when shown. Defaults to today.
 
-- **Deferred-Until picker** keeps `today < d <= today + MAX_DEFER_DAYS`. A defer by definition projects into the future and is bounded by policy; back-dating it is meaningless.
-- **Vehicle "Serviced" branch** still stamps `last_service_date = today` server-side (line 151). Service date is the act of recording, not a user-entered field, so no picker change applies.
-- Justification, evidence rules, GPS attempt, manager role gate, and the `operational_ledger` write path are untouched.
+**Expiry picker — unchanged from current behaviour:**
+- Calendar permissive (back-dating selectable).
+- Submit-layer invariant still requires `newExpiry > today` with the existing inline error message.
 
-## Operational-ledger integrity
+**Vehicle "Serviced" branch:** the existing hard-coded `newServiceDate = today` is replaced by the user-supplied Action Date. The helper text "Service date recorded as today" is removed.
 
-`ARCHITECTURE.md` treats the ledger as an append-only receipt of *what the manager asserted and when*. This change strengthens, not weakens, that contract:
+## 2. Validation (`canSubmit`)
 
-- The ledger row's `created_at` / `recorded_by` continue to capture **when the receipt was written** (server clock, immutable).
-- The mirrored business state (`staff_certifications.expiry_date`, `transport_assets.registration_expiry`) is still gated by the future-expiry invariant, so we never persist an asset/cert into an already-expired state via a resolution flow.
-- Allowing the picker to surface past dates does **not** introduce a new code path — submission of a past expiry is rejected by the same `canSubmit` logic that exists today. The system's set of valid persisted states is unchanged.
-- Net effect: the ledger more accurately reflects the historical evidence the manager is holding (the certificate's printed issue date), while the live compliance state remains future-valid.
+Add to both modals:
+- `actionDateMissing = (branchRequiresActionDate && !actionDate)`
+- `actionDateInvalid = actionDate && actionDate.getTime() > today.getTime()`
+- Extend `canSubmit` with `&& !actionDateMissing && !actionDateInvalid`.
 
-## Technical changes
+All existing invariants (justification ≥20, evidence ≥6 when required, expiry > today for renewals, defer ≤30 days, GPS attempt) remain untouched.
 
-`resolve-certification-modal.tsx`
-- Line 209-210: drop `disabledFn` from the New Expiry `DateField`; change `helper` to `"Must result in a future expiry date."`.
-- Add inline error rendering when `resType === "renewed" && newExpiry && newExpiry <= today` (reuses existing `canSubmit` clause; no new state).
+## 3. API — `src/lib/api/ledger.ts`
 
-`resolve-vehicle-maintenance-modal.tsx`
-- Line 249-250: same treatment for the registration-expiry `DateField` (Renewed branch).
-- Same inline error for `resType === "renewed" && newExpiry <= today`.
+**`ResolveCertificationInput`**: add `actionDate?: string | null` (ISO yyyy-mm-dd). Required when `resolutionType === "renewed"`.
 
-Defer pickers (lines 219-221 / 279-281) and all submit-time checks remain byte-identical.
+**`ResolveVehicleMaintenanceInput`**: add `actionDate?: string | null`. Required when `resolutionType === "renewed"` or `"serviced"`. For `serviced`, `actionDate` replaces the current `newServiceDate ?? today` default when mirroring to `transport_assets.last_service_date`.
+
+**Ledger metadata** — add distinct fields, never collapsed:
+
+```jsonc
+// CERTIFICATION_RESOLVED
+{
+  "action_date": "2026-07-05",     // when the renewal actually occurred
+  "new_expiry_date": "2027-07-05", // when the new cert expires (future)
+  ...existing fields unchanged
+}
+
+// VEHICLE_MAINTENANCE_RESOLVED
+{
+  "action_date": "2026-07-05",     // payment / service date
+  "new_expiry_date": "2027-07-05", // null for "serviced"
+  ...existing fields unchanged
+}
+```
+
+For backward compatibility, existing fields (`new_expiry`, `new_value`) are kept exactly as today — no readers break. The new keys (`action_date`, `new_expiry_date`) are additive.
+
+## 4. Mirror behaviour
+
+- Certification mirror to `staff_registry.certifications`: unchanged (uses `newExpiry`, which still represents the future expiry — not the action date).
+- Vehicle "renewed" mirror to `transport_assets.registration_expiry`: unchanged.
+- Vehicle "serviced" mirror to `transport_assets.last_service_date`: now uses the user-supplied `actionDate` instead of today. `last_service_odo` unchanged.
+
+## 5. Audit-trail integrity
+
+- Action Date = **historical fact** (when the transaction occurred). Stored in ledger metadata only; never used as a compliance deadline.
+- Expiry Date = **forward-looking compliance state**. Continues to gate dashboard scans and remains under the future-only invariant.
+- Ledger `created_at` (server clock) is unchanged — it records when the receipt was *appended*, distinct from both action and expiry dates.
+- Result: three independent timestamps per receipt (`created_at`, `metadata.action_date`, `metadata.new_expiry_date`), giving the full chain of custody without breaking deadline monitoring.
 
 ## Out of scope
 
-- Adding a separate "resolution date" / "evidence date" field.
-- Changing `MAX_DEFER_DAYS` or defer semantics.
-- Any ledger schema or `resolveCertification` / `resolveVehicleMaintenance` API change.
+- No schema migrations, no changes to exception-feed scan logic, no changes to defer/revoke/decommission branches beyond hiding the new picker.

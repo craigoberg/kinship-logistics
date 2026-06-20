@@ -101,11 +101,14 @@ export interface ResolveCertificationInput {
   newExpiry?: string | null;
   /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30 days. */
   deferredUntil?: string | null;
+  /** When the renewal actually occurred — ISO yyyy-mm-dd, past or today. Required when resolutionType === 'renewed'. */
+  actionDate?: string | null;
   /** Evidence reference (doc id, link, ticket #). Required (min 6 chars) only when resolutionType === 'renewed'; null otherwise. */
   evidenceRef: string | null;
   /** Manager justification notes. Min 20 chars. */
   justification: string;
 }
+
 
 export interface ResolveCertificationResult {
   staffId: string;
