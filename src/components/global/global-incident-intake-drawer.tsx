@@ -7,7 +7,11 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { raiseOperationalIncident, type OperationalIncident } from "@/lib/incidents";
-import { resolveStaffIdWithFallback, staffName, getStaffId } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, getStaffId, STAFF_DIRECTORY } from "@/lib/data-store";
+
+function staffName(id: string): string {
+  return STAFF_DIRECTORY.find((s) => s.id === id)?.name ?? "Unknown staff";
+}
 
 type Lane = "choose" | "mechanical" | "human";
 type Severity = OperationalIncident["severity"];
