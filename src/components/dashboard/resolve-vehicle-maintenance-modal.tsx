@@ -160,9 +160,11 @@ export function ResolveVehicleMaintenanceModal({
           resType === "renewed" && newExpiry ? toISODate(newExpiry) : null,
         newServiceOdo: resType === "serviced" ? odoNum : null,
         newServiceDate:
-          resType === "serviced" ? toISODate(today) : null,
+          resType === "serviced" && actionDate ? toISODate(actionDate) : null,
         deferredUntil:
           resType === "deferred" && deferredUntil ? toISODate(deferredUntil) : null,
+        actionDate: actionDateRequired && actionDate ? toISODate(actionDate) : null,
+
         previousValue: subject.previousValue,
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
