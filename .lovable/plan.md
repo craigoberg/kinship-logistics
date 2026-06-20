@@ -1,34 +1,51 @@
-## Plan
+## Problem
 
-1. **Fix the immediate RPC mismatch**
-   - Update the client permission check so it calls the currently deployed function shape: `public.is_manager(_user_id)`.
-   - Keep compatibility with the newer planned function shape by trying `_staff_id` only as a fallback if `_user_id` is unavailable/missing.
-   - This directly addresses the observed `PGRST202` error: PostgREST says it found `public.is_manager(_user_id)`, but the UI called `_staff_id`.
+Two issues on `/admin → System Parameters`:
 
-2. **Preserve PIN-based Manager authorization**
-   - Continue deriving the active operator from the PIN session stored by `loginWithPin()`.
-   - Ensure staff with `staff_registry.role = 'Manager'` are classified as an office/coordinator session so PIN `1111` remains a valid Manager/admin login rather than being rejected as an unmapped role.
+1. The "Last updated" stamp shows ~11 hours ago for a change made ~1 hour ago. `formatRelative()` in `src/components/admin/system-parameter-workspace.tsx` uses `new Date(iso).toISOString()`, which always renders in **UTC**. In AEST (UTC+10/+11) this looks ~10–11 hours behind local wall-clock time.
+2. A React hydration warning fires on the same view because any locale-aware date formatting during SSR disagrees with the browser's first render (server has no concept of the user's timezone).
 
-3. **Make the UI permission check resilient**
-   - In `SystemParameterWorkspace`, keep showing the table while permission loads.
-   - Enable Edit when either:
-     - the local PIN profile has `staffRole` containing `Manager`, or
-     - the database `is_manager(...)` RPC returns true.
-   - Avoid hiding Edit due to a transient RPC/schema-cache mismatch when the local PIN profile is already clearly Manager.
+## Fix
 
-4. **Harden the update path**
-   - Before saving, validate Manager status using the same dual-path permission helper.
-   - Prefer the database-backed audited update function if present.
-   - Fall back to the existing update + ledger write only when the audited RPC is genuinely missing, not when it returns a real authorization error.
+1. **New shared helper** `src/components/ui/client-time.tsx`
+   - `<ClientTime iso fmt? />` component and `useClientFormattedDate(iso, options?)` hook.
+   - Server / first paint: returns a stable placeholder (raw `YYYY-MM-DD HH:mm` slice of the ISO, or `—`).
+   - After mount (`useEffect`): swaps to `new Date(iso).toLocaleString(undefined, options)` — no explicit `timeZone`, so the browser's setting is used automatically.
+   - This guarantees SSR/CSR markup matches, then upgrades to local time.
 
-5. **Database migration adjustment**
-   - Add/adjust the migration so `public.is_manager(_user_id uuid)` can resolve both:
-     - a `staff_registry.id` from PIN login, and
-     - an authenticated user id via nullable `staff_registry.auth_user_id`.
-   - Preserve backwards compatibility: no requirement to add emails or change PIN login; `Craig Oberg` with staff id `68a17753-d387-4b53-a466-40cf1d06a384` and role `Manager` should pass.
-   - Keep existing RLS policies safe and avoid breaking modules that already call `is_manager(_user_id)`.
+2. **Switch the Admin "Last updated" cell** in `src/components/admin/system-parameter-workspace.tsx` from the UTC `formatRelative` to `<ClientTime>` with `{ dateStyle: "short", timeStyle: "short" }`.
 
-6. **Verify**
-   - Re-test `/admin` with a Manager-like PIN session and confirm the System Parameters tab renders Edit buttons.
-   - Confirm the network no longer shows `PGRST202` for `rpc/is_manager`.
-   - Run a focused lint check on the touched TypeScript files.
+3. **Wrap the other in-render timestamp displays** with the same helper so timezone is uniformly the browser's and no SSR mismatch can occur:
+   - `src/components/dashboard/OperationsExceptionHub.tsx` (clearance time, grounded-at)
+   - `src/components/ui/NotificationSimulator.tsx` (dispatched-at)
+   - `src/components/medication/todays-medication-card.tsx` (administered-at)
+
+4. **Write paths are unchanged.** All `new Date().toISOString()` calls that persist to Supabase stay UTC ISO strings — that is the correct storage format. Only *display* changes.
+
+5. **No project-level TZ override / no user preference UI.** "Align all Date/Time displays to Browser Time Zone settings" is exactly what `toLocaleString` without an explicit `timeZone` does.
+
+## Persist the convention for future builds
+
+So future tasks don't reintroduce UTC strings in the UI:
+
+- **Append a new section to `PROJECT_CONTEXT.md`** — *"10. UI Conventions: Date & Time Display"* — capturing the rule:
+  > All user-visible dates and times render in the browser's local timezone via `toLocaleString` (no explicit `timeZone` option). Never display raw `toISOString()` strings. Use `<ClientTime>` / `useClientFormattedDate` from `src/components/ui/client-time.tsx` so SSR and client hydration agree. Storage stays UTC ISO — only the display layer is localized.
+
+- **Add a matching one-liner to `mem://index.md` → Core** so every future session enforces it without re-reading the doc:
+  > UI date/time displays use browser local TZ via `<ClientTime>` / `useClientFormattedDate` (`src/components/ui/client-time.tsx`). Never render `toISOString()` to users. Storage stays UTC ISO.
+
+## Files touched
+
+- New: `src/components/ui/client-time.tsx`
+- Edit: `src/components/admin/system-parameter-workspace.tsx`
+- Edit: `src/components/dashboard/OperationsExceptionHub.tsx`
+- Edit: `src/components/ui/NotificationSimulator.tsx`
+- Edit: `src/components/medication/todays-medication-card.tsx`
+- Edit: `PROJECT_CONTEXT.md` (append §10)
+- Edit: `mem://index.md` (append Core rule)
+
+## Verification
+
+- Edit a System Parameter and confirm "Last updated" now matches the local clock within a minute.
+- Reload `/admin`; the hydration-mismatch console warning is gone.
+- Spot-check the dashboard exception hub and medication card — times render in local TZ without warnings.
