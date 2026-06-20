@@ -3925,16 +3925,15 @@ export interface FailedClearanceReport {
 export async function listFailedClearancesWithItems(
   dateStr: string,
 ): Promise<FailedClearanceReport[]> {
-  // NOTE: order by `id` (guaranteed to exist) instead of `created_at` —
-  // some deployed environments are missing the created_at column on
-  // asset_daily_clearance and PostgREST returns 42703, crashing the
-  // Coordinator dashboard. `clearance_date` is already pinned by .eq() above,
-  // so id-order is a stable, deterministic tiebreaker.
+  // Use select("*") so we never 42703 on columns that may have been
+  // dropped/renamed in a later migration (e.g. `notes`). Order by `id`
+  // because `clearance_date` is already pinned and `created_at` is missing
+  // in some deployments.
+  const requestedColumns = ["*"] as const;
+  console.log("[listFailedClearancesWithItems] requesting columns", requestedColumns, "for date", dateStr);
   const { data: clearances, error } = await supabase
     .from("asset_daily_clearance")
-    .select(
-      "id, asset_id, clearance_date, driver_staff_id, start_odometer, status, notes, accumulated_issues, driver_comfort_declared, requires_manager_review, driver_auth_staff_id, driver_auth_pin_verified_at, manager_auth_staff_id, manager_auth_pin_verified_at",
-    )
+    .select("*")
     .eq("clearance_date", dateStr)
     .eq("status", "failed")
     .order("id", { ascending: true });
@@ -4300,8 +4299,13 @@ export async function listUnresolvedEscalationsForDriver(
 export function subscribeToEscalationPool(
   cb: (event: { type: "INSERT" | "UPDATE"; row: OperationalEscalation }) => void,
 ): () => void {
+  // Unique channel name per subscriber — supabase-js caches channels by name,
+  // so reusing "escalation-pool" across multiple components (or under React
+  // StrictMode's double-mount) re-runs `.on()` against an already-subscribed
+  // channel and throws "cannot add postgres_changes callbacks after subscribe()".
+  const channelName = `escalation-pool-${Math.random().toString(36).slice(2, 10)}`;
   const channel = supabase
-    .channel("escalation-pool")
+    .channel(channelName)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "operational_escalations" },
