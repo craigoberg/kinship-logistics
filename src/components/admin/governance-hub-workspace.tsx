@@ -249,6 +249,45 @@ function EditAssetModal({
     (asset?.config?.checklist_category as string) ?? "",
   );
   const [justification, setJustification] = useState("");
+  const [managerStaffId, setManagerStaffId] = useState<string>("");
+  const [managerPin, setManagerPin] = useState("");
+
+  // Taxonomy — fetch existing categories/types from the registry for type-ahead.
+  const taxonomyQ = useQuery({
+    queryKey: ["governance-hub", "taxonomy"],
+    queryFn: () => listComplianceAssets({}),
+    staleTime: 60_000,
+  });
+  const all = taxonomyQ.data ?? [];
+  const categories = useMemo(
+    () => Array.from(new Set(all.map((a) => a.category))).sort(),
+    [all],
+  );
+  const typesByCategory = useMemo(() => {
+    const map: Record<string, Set<string>> = {};
+    for (const a of all) {
+      (map[a.category] ??= new Set()).add(a.type);
+    }
+    const out: Record<string, string[]> = {};
+    for (const k of Object.keys(map)) out[k] = Array.from(map[k]).sort();
+    return out;
+  }, [all]);
+
+  const normCategory = category.trim().toUpperCase();
+  const normType = type.trim();
+  const isNewCategory = normCategory.length > 0 && !categories.includes(normCategory);
+  const isNewType =
+    normType.length > 0 && !(typesByCategory[normCategory] ?? []).includes(normType);
+  const pinRequired = isNewCategory || isNewType;
+
+  // Staff picker for PIN gate.
+  const staffQ = useQuery({
+    queryKey: ["governance-hub", "staff"],
+    queryFn: () => listStaffRegistry(),
+    enabled: pinRequired,
+    staleTime: 60_000,
+  });
+  const staff: StaffMember[] = (staffQ.data ?? []).filter((s) => s.active);
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -258,11 +297,21 @@ function EditAssetModal({
         throw new Error("Yellow and Red thresholds must be numbers.");
       }
       if (r > y) throw new Error("Red threshold must be ≤ Yellow threshold.");
+
+      let pinVerifiedBy: string | null = null;
+      if (pinRequired) {
+        if (!managerStaffId) throw new Error("Manager required to authorise new taxonomy.");
+        if (!managerPin || managerPin.length < 4) throw new Error("Manager PIN required.");
+        const ok = await verifyStaffPin(managerStaffId, managerPin);
+        if (!ok) throw new Error("Invalid Manager PIN.");
+        pinVerifiedBy = managerStaffId;
+      }
+
       return upsertComplianceAsset(
         {
           id: asset?.id,
-          category: category.toUpperCase().trim(),
-          type: type.trim(),
+          category: normCategory,
+          type: normType,
           name: name.trim(),
           description,
           expiry_date: expiry || null,
@@ -271,7 +320,9 @@ function EditAssetModal({
             yellow_days: y,
             red_days: r,
             handshake,
-            checklist_category: actionModule === "formal_audit" ? checklistCategory || null : null,
+            checklist_category:
+              actionModule === "formal_audit" ? checklistCategory || null : null,
+            ...(pinVerifiedBy ? { taxonomy_pin_verified_by: pinVerifiedBy } : {}),
           },
         },
         justification,
@@ -284,16 +335,20 @@ function EditAssetModal({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const descLen = description?.trim().length ?? 0;
+  const justLen = justification.trim().length;
   const canSubmit =
-    category.trim().length > 0 &&
-    type.trim().length > 0 &&
+    normCategory.length > 0 &&
+    normType.length > 0 &&
     name.trim().length > 0 &&
-    justification.trim().length >= 10 &&
+    descLen >= 20 &&
+    justLen >= 20 &&
+    (!pinRequired || (managerStaffId.length > 0 && managerPin.length >= 4)) &&
     !mut.isPending;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{isNew ? "New compliance asset" : asset?.name}</DialogTitle>
           <DialogDescription>
@@ -305,30 +360,86 @@ function EditAssetModal({
           <div className="space-y-1 sm:col-span-1">
             <Label>Category</Label>
             <Input
-              placeholder="VEHICLE / STAFF / INSURANCE / EQUIPMENT / FACILITY / …"
+              list="gov-categories"
+              placeholder="VEHICLE / STAFF / INSURANCE / …"
               value={category}
               onChange={(e) => setCategory(e.target.value)}
             />
+            <datalist id="gov-categories">
+              {categories.map((c) => (
+                <option key={c} value={c} />
+              ))}
+            </datalist>
           </div>
           <div className="space-y-1">
             <Label>Type</Label>
             <Input
+              list="gov-types"
               placeholder="rego / policy / extinguisher / …"
               value={type}
               onChange={(e) => setType(e.target.value)}
             />
+            <datalist id="gov-types">
+              {(typesByCategory[normCategory] ?? []).map((t) => (
+                <option key={t} value={t} />
+              ))}
+            </datalist>
           </div>
+
+          {pinRequired && (
+            <div className="sm:col-span-2 rounded-md border border-yellow-500/40 bg-yellow-500/10 p-3 space-y-2">
+              <div className="text-xs font-medium text-yellow-700 dark:text-yellow-300">
+                You are creating a new {isNewCategory ? "Category" : ""}
+                {isNewCategory && isNewType ? " and " : ""}
+                {isNewType ? "Type" : ""}. Manager PIN required.
+              </div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="space-y-1">
+                  <Label className="text-xs">Manager</Label>
+                  <Select value={managerStaffId} onValueChange={setManagerStaffId}>
+                    <SelectTrigger className="h-9">
+                      <SelectValue placeholder="Select manager" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {staff.map((s) => (
+                        <SelectItem key={s.id} value={s.id}>
+                          {s.full_name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs">Manager PIN</Label>
+                  <Input
+                    type="password"
+                    inputMode="numeric"
+                    autoComplete="off"
+                    value={managerPin}
+                    onChange={(e) => setManagerPin(e.target.value)}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+
           <div className="space-y-1 sm:col-span-2">
             <Label>Name</Label>
             <Input value={name} onChange={(e) => setName(e.target.value)} />
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <Label>Description</Label>
+            <Label>
+              Description <span className="text-destructive">*</span>
+            </Label>
             <Textarea
               rows={2}
+              placeholder="Audit-ready context (min 20 chars)"
               value={description ?? ""}
               onChange={(e) => setDescription(e.target.value)}
             />
+            <div className={`text-xs ${descLen < 20 ? "text-destructive" : "text-muted-foreground"}`}>
+              {descLen}/20 minimum
+            </div>
           </div>
           <div className="space-y-1">
             <Label>Expiry date</Label>
@@ -351,6 +462,9 @@ function EditAssetModal({
                 ))}
               </SelectContent>
             </Select>
+            <div className="text-xs text-muted-foreground">
+              Locked to modules with a registered Dispatcher modal.
+            </div>
           </div>
           <div className="space-y-1">
             <Label>Yellow threshold (days before expiry)</Label>
@@ -398,10 +512,13 @@ function EditAssetModal({
             </Label>
             <Textarea
               rows={2}
-              placeholder="Why is this changing? (min 10 chars, recorded in the ledger)"
+              placeholder="Why is this changing? (min 20 chars, recorded in the ledger)"
               value={justification}
               onChange={(e) => setJustification(e.target.value)}
             />
+            <div className={`text-xs ${justLen < 20 ? "text-destructive" : "text-muted-foreground"}`}>
+              {justLen}/20 minimum
+            </div>
           </div>
         </div>
 
