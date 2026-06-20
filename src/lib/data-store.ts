@@ -4157,7 +4157,8 @@ export type OperationalEscalationStatus =
   | "pending"
   | "claimed"
   | "resolved_approved"
-  | "resolved_denied";
+  | "resolved_denied"
+  | "resolved_superseded";
 
 export interface OperationalEscalation {
   id: string;
