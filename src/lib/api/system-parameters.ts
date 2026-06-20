@@ -46,9 +46,15 @@ async function rpcIsManager(principalId: string): Promise<boolean> {
 }
 
 export async function canManageSystemParameters(staffIdOverride?: string | null): Promise<boolean> {
+  // Fast path: PIN-only sessions carry the role string in the local profile,
+  // even when the staff row is not linked to an auth.users.id yet. Without
+  // this short-circuit, managers logged in via PIN (e.g. PIN 1111) fail the
+  // is_manager RPC and get locked out of the Governance Hub / System Params.
+  const profile = getActiveUserProfile();
+  if ((profile?.staffRole ?? "").toLowerCase().includes("manager")) return true;
+
   const ids = new Set<string>();
   if (staffIdOverride) ids.add(staffIdOverride);
-  const profile = getActiveUserProfile();
   if (profile?.staffId) ids.add(profile.staffId);
 
   const { data } = await supabase.auth.getUser();
