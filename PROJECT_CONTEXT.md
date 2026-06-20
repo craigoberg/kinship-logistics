@@ -1,8 +1,8 @@
-# PROJECT_CONTEXT.md — Immutable Philosophy
+# PROJECT_CONTEXT.md — YADA Connect Operational Philosophy
 
-This document defines the non-negotiable principles of this system. Every task must align with these rules before any implementation detail is considered.
+> For immutable system rules and schema constraints, refer to **ARCHITECTURE.md**.
 
-For implementation specifics (APIs, tables, resolution flows, module patterns), refer to **ARCHITECTURE.md**.
+This document defines the non-negotiable principles of the YADA Connect system. Every task must align with these rules before any implementation detail is considered.
 
 ---
 
