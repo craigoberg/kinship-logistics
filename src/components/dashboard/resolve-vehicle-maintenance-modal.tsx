@@ -282,6 +282,7 @@ export function ResolveVehicleMaintenanceModal({
                     { v: "serviced", label: "Serviced" },
                     { v: "deferred", label: "Defer" },
                     { v: "decommissioned", label: "Decommission" },
+                    { v: "formal_audit", label: "Formal Audit" },
                   ] as { v: VehicleResolutionType; label: string }[]
                 ).map((opt) => (
                   <label
