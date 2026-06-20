@@ -1,88 +1,43 @@
-## Goal
+## Smart Seeding + Relative Validation — Vehicle Rego Renewal
 
-Capture **when the action actually happened** (Action Date — can be in the past) separately from **when the document expires next** (Expiry Date — must still be future-dated). Both flow into the operational ledger as distinct metadata fields.
+Scope: `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx` only. No API/ledger changes.
 
-## Scope
+### 1. Parse current expiry from subject
 
-- `src/components/dashboard/resolve-certification-modal.tsx`
-- `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx`
-- `src/lib/api/ledger.ts` (input types + metadata payload)
+`subject.previousValue` already carries the current rego expiry (ISO string) for `flagKind === "rego"`. Add a memo:
 
-No schema changes — metadata is JSONB.
-
----
-
-## 1. UI — Both modals
-
-Add a new **"Actual Action Date"** date picker, shown alongside the existing "New Expiry Date" picker, only in the branches where an external transaction took place:
-
-| Modal | Resolution Type | Action Date label | Expiry picker shown? |
-|---|---|---|---|
-| Certification | Renewed | "Renewal Date" | Yes (New Expiry Date) |
-| Certification | Defer / Revoke | — (hidden) | No |
-| Vehicle | Renewed Rego | "Payment / Renewal Date" | Yes (New Registration Expiry) |
-| Vehicle | Serviced | "Service Date" | No (odometer instead) |
-| Vehicle | Defer / Decommission | — (hidden) | No |
-
-**Picker constraints (Action Date):**
-- Permissive past dates allowed (e.g., the rego was paid last Tuesday).
-- Future dates disabled (`disabledFn: d => d.getTime() > today`).
-- Required when shown. Defaults to today.
-
-**Expiry picker — unchanged from current behaviour:**
-- Calendar permissive (back-dating selectable).
-- Submit-layer invariant still requires `newExpiry > today` with the existing inline error message.
-
-**Vehicle "Serviced" branch:** the existing hard-coded `newServiceDate = today` is replaced by the user-supplied Action Date. The helper text "Service date recorded as today" is removed.
-
-## 2. Validation (`canSubmit`)
-
-Add to both modals:
-- `actionDateMissing = (branchRequiresActionDate && !actionDate)`
-- `actionDateInvalid = actionDate && actionDate.getTime() > today.getTime()`
-- Extend `canSubmit` with `&& !actionDateMissing && !actionDateInvalid`.
-
-All existing invariants (justification ≥20, evidence ≥6 when required, expiry > today for renewals, defer ≤30 days, GPS attempt) remain untouched.
-
-## 3. API — `src/lib/api/ledger.ts`
-
-**`ResolveCertificationInput`**: add `actionDate?: string | null` (ISO yyyy-mm-dd). Required when `resolutionType === "renewed"`.
-
-**`ResolveVehicleMaintenanceInput`**: add `actionDate?: string | null`. Required when `resolutionType === "renewed"` or `"serviced"`. For `serviced`, `actionDate` replaces the current `newServiceDate ?? today` default when mirroring to `transport_assets.last_service_date`.
-
-**Ledger metadata** — add distinct fields, never collapsed:
-
-```jsonc
-// CERTIFICATION_RESOLVED
-{
-  "action_date": "2026-07-05",     // when the renewal actually occurred
-  "new_expiry_date": "2027-07-05", // when the new cert expires (future)
-  ...existing fields unchanged
-}
-
-// VEHICLE_MAINTENANCE_RESOLVED
-{
-  "action_date": "2026-07-05",     // payment / service date
-  "new_expiry_date": "2027-07-05", // null for "serviced"
-  ...existing fields unchanged
-}
+```ts
+const currentExpiry = useMemo<Date | null>(() => {
+  if (!subject || subject.flagKind !== "rego") return null;
+  if (typeof subject.previousValue !== "string") return null;
+  const d = new Date(subject.previousValue);
+  return Number.isFinite(d.getTime()) ? d : null;
+}, [subject]);
 ```
 
-For backward compatibility, existing fields (`new_expiry`, `new_value`) are kept exactly as today — no readers break. The new keys (`action_date`, `new_expiry_date`) are additive.
+### 2. Smart seed — current_expiry + 1 year
 
-## 4. Mirror behaviour
+In the existing subject-init `useEffect`, pre-fill `newExpiry` for renewals:
 
-- Certification mirror to `staff_registry.certifications`: unchanged (uses `newExpiry`, which still represents the future expiry — not the action date).
-- Vehicle "renewed" mirror to `transport_assets.registration_expiry`: unchanged.
-- Vehicle "serviced" mirror to `transport_assets.last_service_date`: now uses the user-supplied `actionDate` instead of today. `last_service_odo` unchanged.
+- If `currentExpiry` exists → seed `newExpiry = currentExpiry + 1 year`.
+- Else (no current expiry, e.g. brand-new asset) → seed `newExpiry = today + 1 year` as a safe fallback.
 
-## 5. Audit-trail integrity
+Field remains fully editable (Calendar picker untouched) so the Manager can override for 3-month / 6-month registrations.
 
-- Action Date = **historical fact** (when the transaction occurred). Stored in ledger metadata only; never used as a compliance deadline.
-- Expiry Date = **forward-looking compliance state**. Continues to gate dashboard scans and remains under the future-only invariant.
-- Ledger `created_at` (server clock) is unchanged — it records when the receipt was *appended*, distinct from both action and expiry dates.
-- Result: three independent timestamps per receipt (`created_at`, `metadata.action_date`, `metadata.new_expiry_date`), giving the full chain of custody without breaking deadline monitoring.
+### 3. Relative validation — `newExpiry > current_expiry`
 
-## Out of scope
+Replace the "must be after today" rule for the renewed branch:
 
-- No schema migrations, no changes to exception-feed scan logic, no changes to defer/revoke/decommission branches beyond hiding the new picker.
+- `dateInvalid` for renewed becomes: `newExpiry <= (currentExpiry ?? today)`.
+- Inline error message updates to: *"New expiry must be after the current expiry (DD/MM/YYYY)."* — falls back to "after today" wording when there is no current expiry on file.
+- Helper text under the field updates to mention the rule and the 1-year smart default.
+
+`deferred`, `serviced`, and `actionDate` (≤ today) rules are unchanged.
+
+### 4. Audit integrity
+
+No ledger schema change. `action_date`, `new_expiry_date`, and `created_at` continue to be written as three distinct timestamps. The only behavioural shift is *which* lower-bound the expiry must clear — that bound is still strictly monotonic (you can never resolve a flag with an expiry ≤ the one currently on file), so the dashboard's forward-looking compliance scan is preserved.
+
+### Files
+
+- `src/components/dashboard/resolve-vehicle-maintenance-modal.tsx` — add `currentExpiry` memo, seed `newExpiry` in init effect, update `dateInvalid`, update inline error + helper copy.
