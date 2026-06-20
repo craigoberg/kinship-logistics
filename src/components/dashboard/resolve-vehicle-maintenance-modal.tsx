@@ -134,11 +134,14 @@ export function ResolveVehicleMaintenanceModal({
   const actionDateInvalid =
     actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
 
+  const renewedLowerBound = currentExpiry ?? today;
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
   const dateInvalid =
-    (resType === "renewed" && newExpiry && newExpiry.getTime() <= today.getTime()) ||
+    (resType === "renewed" &&
+      newExpiry &&
+      newExpiry.getTime() <= renewedLowerBound.getTime()) ||
     (resType === "deferred" &&
       deferredUntil &&
       (deferredUntil.getTime() <= today.getTime() ||
