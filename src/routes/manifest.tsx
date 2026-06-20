@@ -1,4 +1,17 @@
 // Force rebuild version 2.3
+
+import { createFileRoute, redirect } from "@tanstack/react-router";
+import { getActiveEscalation } from "@/lib/api/clearance";
+
+export const Route = createFileRoute("/manifest")({
+  beforeLoad: async () => {
+    // This runs before the component mounts, preventing the "flicker"
+    const escalation = await getActiveEscalation("current-driver-id");
+    return { escalation };
+  },
+  // component: ...
+});
+
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -91,7 +104,7 @@ export const Route = createFileRoute("/manifest")({
 
 function ManifestPage() {
   const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
-  
+
   const assetsQ = useQuery({
     queryKey: ["transport-assets"],
     queryFn: () => listTransportAssets(),
@@ -116,7 +129,9 @@ function ManifestPage() {
       {/* Permanent Session Identity Header */}
       <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
         <div className="flex items-center gap-2 min-w-0">
-          <span className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")} />
+          <span
+            className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")}
+          />
           <span className="text-slate-300 truncate">
             User: <b className="text-white font-semibold">{currentDriverName}</b>{" "}
             <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 ml-1 uppercase font-mono tracking-wider text-blue-400">
@@ -126,7 +141,11 @@ function ManifestPage() {
         </div>
         <button
           onClick={() => {
-            if (confirm("Are you sure you want to log out? Active server trips remain secure, but local setup memory will clear.")) {
+            if (
+              confirm(
+                "Are you sure you want to log out? Active server trips remain secure, but local setup memory will clear.",
+              )
+            ) {
               handleGlobalLogout();
             }
           }}
@@ -950,7 +969,6 @@ function WalkaroundChecklist({
     </Card>
   );
 }
-
 
 /* -------------------- Event Picker + Start Trip -------------------- */
 
