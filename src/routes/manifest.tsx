@@ -74,7 +74,8 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
 import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
-import { getActiveEscalation } from "@/lib/api/clearance";
+import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -463,10 +464,39 @@ function ClearanceGate({
     staleTime: 30_000,
   });
 
-  if (existingQ.isLoading) {
+  // Grounded lock: if a manager denied an escalation for this vehicle today,
+  // refuse to render the walkaround form until the office clears it.
+  const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
+  const groundedQ = useQuery<boolean>({
+    queryKey: ["asset-grounded", vehicleInfo, dateStr],
+    queryFn: () => getAssetGroundedStatus(vehicleInfo, dateStr),
+    staleTime: 30_000,
+  });
+
+  if (existingQ.isLoading || groundedQ.isLoading) {
     return (
       <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearance…
+      </Card>
+    );
+  }
+
+  if (groundedQ.data === true) {
+    return (
+      <Card className="border-2 border-red-700 bg-red-600/10 p-5 text-red-900 dark:text-red-200">
+        <div className="flex items-center gap-2">
+          <ShieldAlert className="h-6 w-6 text-red-600" />
+          <h2 className="text-lg font-extrabold text-red-700 dark:text-red-400">Vehicle Grounded</h2>
+        </div>
+        <p className="mt-2 text-sm font-medium">
+          A manager has denied a clearance escalation for {asset.name} today. You cannot perform a new walkaround.
+        </p>
+        <p className="mt-2 text-xs opacity-80">
+          This vehicle is locked out of service until the office manually inspects and overrides the status.
+        </p>
+        <Button onClick={onBack} variant="outline" className="w-full mt-5 border-red-700/50 hover:bg-red-700/20">
+          ← Pick a different vehicle
+        </Button>
       </Card>
     );
   }
