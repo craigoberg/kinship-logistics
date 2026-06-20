@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
+import { tryGetGps } from "@/lib/api/ledger";
 
 // ---------------------------------------------------------------------------
 // Compliance Governance Engine — registry of every "thing that expires".
