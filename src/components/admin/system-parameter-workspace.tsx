@@ -32,6 +32,8 @@ import {
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { ClientTime } from "@/components/ui/client-time";
+
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
@@ -45,11 +47,9 @@ function formatValue(v: JsonValue): string {
   return JSON.stringify(v);
 }
 
-function formatRelative(iso: string): string {
-  const t = new Date(iso).getTime();
-  if (!Number.isFinite(t)) return iso;
-  return new Date(t).toISOString().slice(0, 16).replace("T", " ");
-}
+// Browser-local timestamp rendering lives in <ClientTime> — see
+// PROJECT_CONTEXT.md §10. Never display raw toISOString() strings to users.
+
 
 export function SystemParameterWorkspace() {
   const q = useSystemParameters();
@@ -110,8 +110,9 @@ export function SystemParameterWorkspace() {
                   <TableCell className="font-mono">{formatValue(r.value)}</TableCell>
                   <TableCell className="text-sm text-muted-foreground">{r.description}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
-                    {formatRelative(r.updated_at)}
+                    <ClientTime iso={r.updated_at} />
                   </TableCell>
+
                   <TableCell>
                     {canEdit && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>

@@ -17,6 +17,8 @@ import {
   useInspectionAlertListener,
   type InspectionAlertPayload,
 } from "@/hooks/use-notification-router";
+import { ClientTime } from "@/components/ui/client-time";
+
 
 export function NotificationSimulator() {
   const [smsModal, setSmsModal] = useState<InspectionAlertPayload | null>(null);
@@ -96,11 +98,12 @@ export function NotificationSimulator() {
           </div>
 
           <div className="mt-2 text-right text-[10px] text-neutral-400">
-            {new Date(smsModal.dispatchedAt).toLocaleTimeString([], {
-              hour: "2-digit",
-              minute: "2-digit",
-            })}
+            <ClientTime
+              iso={smsModal.dispatchedAt}
+              options={{ hour: "2-digit", minute: "2-digit" }}
+            />
           </div>
+
         </div>
 
         <button

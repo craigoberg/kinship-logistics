@@ -17,6 +17,8 @@ import {
   UserCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
+import { ClientTime } from "@/components/ui/client-time";
+
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -359,12 +361,13 @@ export function OperationsExceptionHub() {
                     <div className="truncate font-semibold">{r.assetName}</div>
                     <div className="truncate text-xs text-muted-foreground">
                       {r.assetRego ?? "—"} · submitted{" "}
-                      {new Date(r.clearance.createdAt).toLocaleTimeString([], {
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      <ClientTime
+                        iso={r.clearance.createdAt}
+                        options={{ hour: "2-digit", minute: "2-digit" }}
+                      />
                     </div>
                   </div>
+
                   <Button
                     size="sm"
                     className="bg-red-600 hover:bg-red-700"
@@ -405,9 +408,18 @@ export function OperationsExceptionHub() {
                 <div className="min-w-0">
                   <div className="truncate font-semibold">{g.vehicleInfo}</div>
                   <div className="truncate text-xs text-muted-foreground">
-                    Grounded {g.resolvedAt ? new Date(g.resolvedAt).toLocaleString([], { dateStyle: "short", timeStyle: "short" }) : "—"}
+                    Grounded{" "}
+                    {g.resolvedAt ? (
+                      <ClientTime
+                        iso={g.resolvedAt}
+                        options={{ dateStyle: "short", timeStyle: "short" }}
+                      />
+                    ) : (
+                      "—"
+                    )}
                     {g.resolutionNotes ? ` · ${g.resolutionNotes}` : ""}
                   </div>
+
                 </div>
                 <Button
                   size="sm"

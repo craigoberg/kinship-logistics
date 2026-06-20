@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Pill, CheckCircle2, Clock, AlertOctagon } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/dialog";
 
 import { GiveDoseModal } from "@/components/medication/give-dose-modal";
+import { ClientTime, useClientFormattedDate } from "@/components/ui/client-time";
+
 import {
   useAllActiveSchedules,
   useParticipants,
@@ -165,7 +167,7 @@ export function TodaysMedicationCard() {
           </DialogHeader>
           {historyFor?.administeredLog ? (
             <div className="space-y-2 text-sm">
-              <LogRow label="Administered at" value={new Date(historyFor.administeredLog.timestamp).toLocaleString()} />
+              <LogRow label="Administered at" value={<ClientTime iso={historyFor.administeredLog.timestamp} />} />
               <LogRow label="Witness 1" value={historyFor.administeredLog.witness1 ?? "—"} />
               <LogRow label="Witness 2" value={historyFor.administeredLog.witness2 ?? "—"} />
               <LogRow label="Action" value={historyFor.administeredLog.actionPerformed} />
@@ -191,11 +193,11 @@ function StatusButton({
   onAdminister: () => void;
   onHistory: () => void;
 }) {
+  const administeredAt = useClientFormattedDate(
+    row.administeredLog?.timestamp ?? null,
+    { hour: "2-digit", minute: "2-digit" },
+  );
   if (row.status === "administered" && row.administeredLog) {
-    const label = new Date(row.administeredLog.timestamp).toLocaleTimeString([], {
-      hour: "2-digit",
-      minute: "2-digit",
-    });
     return (
       <Button
         size="sm"
@@ -203,10 +205,11 @@ function StatusButton({
         className="gap-1.5 bg-success text-white hover:bg-success/90"
       >
         <CheckCircle2 className="h-3.5 w-3.5" />
-        Administered {label}
+        Administered {administeredAt ?? "…"}
       </Button>
     );
   }
+
   if (row.status === "red") {
     return (
       <Button
@@ -239,7 +242,7 @@ function StatusButton({
   );
 }
 
-function LogRow({ label, value }: { label: string; value: string }) {
+function LogRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -249,3 +252,4 @@ function LogRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
