@@ -359,6 +359,7 @@ function EditAssetModal({
     },
     onSuccess: () => {
       toast.success(isNew ? "Compliance asset created" : "Compliance asset updated");
+      form.reset();
       onSaved();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -384,6 +385,26 @@ function EditAssetModal({
             Every change is appended to the operational ledger as an immutable receipt.
           </DialogDescription>
         </DialogHeader>
+
+        {form.hasDraft && (
+          <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 p-2 text-xs flex items-center justify-between gap-2">
+            <span className="text-yellow-800 dark:text-yellow-200">
+              Unsaved draft found
+              {form.draftMeta
+                ? ` from ${new Date(form.draftMeta.savedAt).toLocaleTimeString()}`
+                : ""}
+              . Resume?
+            </span>
+            <div className="flex gap-1">
+              <Button size="sm" variant="outline" onClick={form.discardDraft}>
+                Discard
+              </Button>
+              <Button size="sm" onClick={form.resumeDraft}>
+                Resume
+              </Button>
+            </div>
+          </div>
+        )}
 
         <div className="grid gap-3 py-2 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-1">
