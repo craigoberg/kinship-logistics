@@ -1,4 +1,10 @@
 import { supabase } from "@/integrations/supabase/client";
+import {
+  listStaffRegistry,
+  resolveStaffIdWithFallback,
+  updateStaffMember,
+  type StaffCertification,
+} from "@/lib/data-store";
 
 export type LedgerCategory = "VEHICLE" | "CENTRE" | "CLIENT" | "TRIP";
 export type LedgerSeverity = "RED" | "YELLOW" | "GREEN" | "INFO";
