@@ -3388,7 +3388,7 @@ interface AssetDailyClearanceRow {
   driver_auth_pin_verified_at: string | null;
   manager_auth_staff_id: string | null;
   manager_auth_pin_verified_at: string | null;
-  created_at: string;
+  created_at?: string;
 }
 
 function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
@@ -3407,7 +3407,7 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
     driverAuthPinVerifiedAt: r.driver_auth_pin_verified_at,
     managerAuthStaffId: r.manager_auth_staff_id,
     managerAuthPinVerifiedAt: r.manager_auth_pin_verified_at,
-    createdAt: r.created_at,
+    createdAt: r.created_at ?? "",
   };
 }
 
@@ -3925,12 +3925,19 @@ export interface FailedClearanceReport {
 export async function listFailedClearancesWithItems(
   dateStr: string,
 ): Promise<FailedClearanceReport[]> {
+  // NOTE: order by `id` (guaranteed to exist) instead of `created_at` —
+  // some deployed environments are missing the created_at column on
+  // asset_daily_clearance and PostgREST returns 42703, crashing the
+  // Coordinator dashboard. `clearance_date` is already pinned by .eq() above,
+  // so id-order is a stable, deterministic tiebreaker.
   const { data: clearances, error } = await supabase
     .from("asset_daily_clearance")
-    .select("*")
+    .select(
+      "id, asset_id, clearance_date, driver_staff_id, start_odometer, status, notes, accumulated_issues, driver_comfort_declared, requires_manager_review, driver_auth_staff_id, driver_auth_pin_verified_at, manager_auth_staff_id, manager_auth_pin_verified_at",
+    )
     .eq("clearance_date", dateStr)
     .eq("status", "failed")
-    .order("created_at", { ascending: true });
+    .order("id", { ascending: true });
   if (error) {
     console.error("[listFailedClearancesWithItems:master] failed", error);
     return [];
