@@ -215,6 +215,9 @@ export async function resolveCertification(
         previous_expiry: previousExpiry,
         resolution_type: resolutionType,
         new_expiry: newExpiry ?? null,
+        new_expiry_date: newExpiry ?? null,
+        action_date: actionDate ?? null,
+
         deferred_until: deferredUntil ?? null,
         evidence_ref: evidenceRef ?? null,
         justification,
