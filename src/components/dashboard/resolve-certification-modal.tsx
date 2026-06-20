@@ -134,6 +134,8 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
         newExpiry: resType === "renewed" && newExpiry ? toISODate(newExpiry) : null,
         deferredUntil:
           resType === "deferred" && deferredUntil ? toISODate(deferredUntil) : null,
+        actionDate: resType === "renewed" && actionDate ? toISODate(actionDate) : null,
+
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
       });
