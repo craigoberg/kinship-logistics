@@ -56,6 +56,7 @@ function startOfToday(): Date {
 export function ResolveCertificationModal({ subject, onClose, onResolved }: Props) {
   const [resType, setResType] = useState<CertResolutionType>("renewed");
   const [newExpiry, setNewExpiry] = useState<Date | undefined>(undefined);
+  const [actionDate, setActionDate] = useState<Date | undefined>(() => startOfToday());
   const [deferredUntil, setDeferredUntil] = useState<Date | undefined>(undefined);
   const [evidenceRef, setEvidenceRef] = useState("");
   const [notes, setNotes] = useState("");
@@ -65,11 +66,13 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     if (!subject) {
       setResType("renewed");
       setNewExpiry(undefined);
+      setActionDate(startOfToday());
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
     }
   }, [subject]);
+
 
   const today = startOfToday();
   const maxDefer = useMemo(() => {
