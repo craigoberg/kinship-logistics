@@ -106,12 +106,12 @@ export function RedHandshakeWaitingPanel({
   }
   return (
     <ClearanceWaitingPanel
-      asset={asset}
+      asset={asset!}
       clearance={clearance}
       issues={issues ?? []}
-      driverName={driverName}
-      onAuthorized={onAuthorized}
-      onBack={onBack}
+      driverName={driverName!}
+      onAuthorized={onAuthorized!}
+      onBack={onBack!}
     />
   );
 }
