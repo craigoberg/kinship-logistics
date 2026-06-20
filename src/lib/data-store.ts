@@ -3388,7 +3388,7 @@ interface AssetDailyClearanceRow {
   driver_auth_pin_verified_at: string | null;
   manager_auth_staff_id: string | null;
   manager_auth_pin_verified_at: string | null;
-  created_at: string;
+  created_at?: string;
 }
 
 function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
