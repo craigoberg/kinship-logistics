@@ -231,25 +231,53 @@ function EditAssetModal({
   onSaved: () => void;
 }) {
   const isNew = !asset;
-  const [category, setCategory] = useState(asset?.category ?? "");
-  const [type, setType] = useState(asset?.type ?? "");
-  const [name, setName] = useState(asset?.name ?? "");
-  const [description, setDescription] = useState(asset?.description ?? "");
-  const [expiry, setExpiry] = useState(asset?.expiry_date ?? "");
-  const [actionModule, setActionModule] = useState<ComplianceActionModule>(
-    asset?.action_module ?? "generic_resolve",
+  const draftKey = `governance-asset:${asset?.id ?? "new"}`;
+  const initialValues = useMemo(
+    () => ({
+      category: asset?.category ?? "",
+      type: asset?.type ?? "",
+      name: asset?.name ?? "",
+      description: asset?.description ?? "",
+      expiry: asset?.expiry_date ?? "",
+      actionModule: (asset?.action_module ?? "generic_resolve") as ComplianceActionModule,
+      yellowDays: String(asset?.config?.yellow_days ?? 30),
+      redDays: String(asset?.config?.red_days ?? 7),
+      handshake: (asset?.config?.handshake === "dual" ? "dual" : "single") as
+        | "single"
+        | "dual",
+      checklistCategory: (asset?.config?.checklist_category as string) ?? "",
+      justification: "",
+    }),
+    [asset],
   );
-  const [yellowDays, setYellowDays] = useState<string>(
-    String(asset?.config?.yellow_days ?? 30),
-  );
-  const [redDays, setRedDays] = useState<string>(String(asset?.config?.red_days ?? 7));
-  const [handshake, setHandshake] = useState<"single" | "dual">(
-    asset?.config?.handshake === "dual" ? "dual" : "single",
-  );
-  const [checklistCategory, setChecklistCategory] = useState<string>(
-    (asset?.config?.checklist_category as string) ?? "",
-  );
-  const [justification, setJustification] = useState("");
+  const form = usePersistedForm(draftKey, initialValues);
+  const {
+    category,
+    type,
+    name,
+    description,
+    expiry,
+    actionModule,
+    yellowDays,
+    redDays,
+    handshake,
+    checklistCategory,
+    justification,
+  } = form.values;
+  const setCategory = (v: string) => form.setValues({ category: v });
+  const setType = (v: string) => form.setValues({ type: v });
+  const setName = (v: string) => form.setValues({ name: v });
+  const setDescription = (v: string) => form.setValues({ description: v });
+  const setExpiry = (v: string) => form.setValues({ expiry: v });
+  const setActionModule = (v: ComplianceActionModule) =>
+    form.setValues({ actionModule: v });
+  const setYellowDays = (v: string) => form.setValues({ yellowDays: v });
+  const setRedDays = (v: string) => form.setValues({ redDays: v });
+  const setHandshake = (v: "single" | "dual") => form.setValues({ handshake: v });
+  const setChecklistCategory = (v: string) =>
+    form.setValues({ checklistCategory: v });
+  const setJustification = (v: string) => form.setValues({ justification: v });
+  // PINs stay in plain state — never persisted to sessionStorage.
   const [managerStaffId, setManagerStaffId] = useState<string>("");
   const [managerPin, setManagerPin] = useState("");
 
