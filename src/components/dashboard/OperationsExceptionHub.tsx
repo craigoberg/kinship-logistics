@@ -111,9 +111,25 @@ export function OperationsExceptionHub() {
   const [activeReview, setActiveReview] =
     useState<PendingManagerReviewRow | null>(null);
 
+  const groundedQ = useQuery<OperationalEscalation[]>({
+    queryKey: ["grounded-escalations"],
+    queryFn: () => listGroundedEscalations(),
+    refetchInterval: 15_000,
+  });
+  const grounded = groundedQ.data ?? [];
+  const [activeUnground, setActiveUnground] =
+    useState<OperationalEscalation | null>(null);
+
   useEffect(() => {
     const off = subscribeToPendingReviews(() => {
       qc.invalidateQueries({ queryKey: ["pending-manager-reviews"] });
+    });
+    return off;
+  }, [qc]);
+
+  useEffect(() => {
+    const off = subscribeToEscalationPool(() => {
+      qc.invalidateQueries({ queryKey: ["grounded-escalations"] });
     });
     return off;
   }, [qc]);
