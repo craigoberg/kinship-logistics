@@ -3332,6 +3332,13 @@ export interface TransportAsset {
   passengerCapacity: number;
   isActive: boolean;
   vehicleCategory: string | null;
+  /** Fleet compliance fields — see docs/sql/2026-07-01_fleet_compliance_fields.sql */
+  vin: string | null;
+  registrationExpiry: string | null; // ISO yyyy-mm-dd
+  serviceIntervalKm: number | null;
+  lastServiceOdo: number | null;
+  lastServiceDate: string | null; // ISO yyyy-mm-dd
+  deferredUntil: string | null; // ISO yyyy-mm-dd
 }
 
 interface TransportAssetRow {
@@ -3342,6 +3349,12 @@ interface TransportAssetRow {
   passenger_capacity: number;
   is_active: boolean;
   vehicle_category: string | null;
+  vin: string | null;
+  registration_expiry: string | null;
+  service_interval_km: number | null;
+  last_service_odo: number | null;
+  last_service_date: string | null;
+  deferred_until: string | null;
 }
 
 function rowToAsset(r: TransportAssetRow): TransportAsset {
@@ -3353,6 +3366,13 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
     passengerCapacity: Number(r.passenger_capacity),
     isActive: r.is_active,
     vehicleCategory: r.vehicle_category ?? null,
+    vin: r.vin ?? null,
+    registrationExpiry: r.registration_expiry ?? null,
+    serviceIntervalKm:
+      r.service_interval_km == null ? null : Number(r.service_interval_km),
+    lastServiceOdo: r.last_service_odo == null ? null : Number(r.last_service_odo),
+    lastServiceDate: r.last_service_date ?? null,
+    deferredUntil: r.deferred_until ?? null,
   };
 }
 
@@ -3423,7 +3443,7 @@ export async function listTransportAssets(): Promise<TransportAsset[]> {
   const { data, error } = await supabase
     .from("transport_assets")
     .select(
-      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category",
+      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until",
     )
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
