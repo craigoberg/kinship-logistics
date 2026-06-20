@@ -560,10 +560,19 @@ export interface ActiveUserProfile {
   vehicleName?: string | null;
 }
 
-function classifyRole(staffRole: string | null): UserRole {
-  const r = (staffRole ?? "").toLowerCase();
-  if (r.includes("driver") || r.includes("transport")) return "driver";
-  return "coordinator";
+function classifyRole(staffRole: string | null): UserRole | null {
+  if (staffRole === "support_worker") return "driver";
+  if (staffRole === "coordinator") return "coordinator";
+  return null;
+}
+
+export class GuardianPinError extends Error {
+  constructor() {
+    super(
+      "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
+    );
+    this.name = "GuardianPinError";
+  }
 }
 
 /**
@@ -602,7 +611,12 @@ export async function loginWithPin(
   const match = checks.find((c) => c.ok);
   if (!match) return null;
 
+  if (match.row.role === "guardian") {
+    throw new GuardianPinError();
+  }
+
   const role = classifyRole(match.row.role);
+  if (!role) return null;
 
   // Best-effort vehicle lookup for drivers — schema may not expose a
   // default-driver column, so swallow errors.
