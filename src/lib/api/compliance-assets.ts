@@ -184,3 +184,102 @@ export const ACTION_MODULES: { value: ComplianceActionModule; label: string }[] 
   { value: "insurance_renewal", label: "Insurance Renewal" },
   { value: "generic_resolve", label: "Generic Resolve (date + justification)" },
 ];
+
+// ---------------------------------------------------------------------------
+// Generic resolve — updates expiry_date on a compliance asset and appends a
+// COMPLIANCE_ASSET_RESOLVED row to operational_ledger. Used by
+// ResolveComplianceAssetModal for insurance_renewal / generic_resolve.
+// ---------------------------------------------------------------------------
+
+export interface ResolveComplianceAssetInput {
+  assetId: string;
+  newExpiry: string;
+  actionDate: string;
+  evidenceRef: string;
+  justification: string;
+  managerStaffId: string;
+  managerPin: string;
+  witnessStaffId?: string | null;
+  witnessPin?: string | null;
+}
+
+export async function resolveComplianceAsset(
+  input: ResolveComplianceAssetInput,
+): Promise<{ assetId: string; ledgerId: string | null }> {
+  if (input.justification.trim().length < 20) {
+    throw new Error("Justification must be at least 20 characters.");
+  }
+  if (input.evidenceRef.trim().length < 6) {
+    throw new Error("Evidence reference must be at least 6 characters.");
+  }
+
+  const { data: current, error: readErr } = await supabase
+    .from("compliance_assets")
+    .select("*")
+    .eq("id", input.assetId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!current) throw new Error("Compliance asset not found.");
+  const asset = current as ComplianceAsset;
+
+  if (!input.managerStaffId || !input.managerPin) {
+    throw new Error("Manager PIN is required.");
+  }
+  const handshake = asset.config?.handshake === "dual" ? "dual" : "single";
+  if (handshake === "dual") {
+    if (!input.witnessStaffId || !input.witnessPin) {
+      throw new Error("Witness PIN is required for dual handshake.");
+    }
+    if (input.witnessStaffId === input.managerStaffId) {
+      throw new Error("Manager and Witness must be different staff members.");
+    }
+  }
+  const checks: Promise<boolean>[] = [verifyStaffPin(input.managerStaffId, input.managerPin)];
+  if (handshake === "dual") {
+    checks.push(verifyStaffPin(input.witnessStaffId!, input.witnessPin!));
+  }
+  const results = await Promise.all(checks);
+  if (!results[0]) throw new Error("Invalid Manager PIN.");
+  if (handshake === "dual" && !results[1]) throw new Error("Invalid Witness PIN.");
+
+  const { error: updErr } = await supabase
+    .from("compliance_assets")
+    .update({ expiry_date: input.newExpiry, next_action_at: null })
+    .eq("id", input.assetId);
+  if (updErr) throw updErr;
+
+  const gps = await tryGetGps();
+  const actor = await resolveStaffIdWithFallback();
+  const { data: ledger, error: ledgerErr } = await supabase
+    .from("operational_ledger")
+    .insert({
+      staff_id: actor,
+      category: "CENTRE",
+      severity: "GREEN",
+      action_type: "COMPLIANCE_ASSET_RESOLVED",
+      gps_lat: gps?.lat ?? null,
+      gps_lng: gps?.lng ?? null,
+      metadata: {
+        compliance_asset_id: asset.id,
+        asset_name: asset.name,
+        category: asset.category,
+        type: asset.type,
+        action_module: asset.action_module,
+        previous_expiry: asset.expiry_date,
+        new_expiry: input.newExpiry,
+        action_date: input.actionDate,
+        evidence_ref: input.evidenceRef,
+        justification: input.justification,
+        handshake,
+        manager_staff_id: input.managerStaffId,
+        witness_staff_id: handshake === "dual" ? input.witnessStaffId : null,
+        gps_captured: !!gps,
+        source: "resolve_compliance_asset_modal",
+      },
+    })
+    .select("id")
+    .single();
+  if (ledgerErr) throw ledgerErr;
+
+  return { assetId: asset.id, ledgerId: (ledger?.id as string) ?? null };
+}
