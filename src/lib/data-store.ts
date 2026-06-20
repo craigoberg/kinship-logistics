@@ -4299,8 +4299,13 @@ export async function listUnresolvedEscalationsForDriver(
 export function subscribeToEscalationPool(
   cb: (event: { type: "INSERT" | "UPDATE"; row: OperationalEscalation }) => void,
 ): () => void {
+  // Unique channel name per subscriber — supabase-js caches channels by name,
+  // so reusing "escalation-pool" across multiple components (or under React
+  // StrictMode's double-mount) re-runs `.on()` against an already-subscribed
+  // channel and throws "cannot add postgres_changes callbacks after subscribe()".
+  const channelName = `escalation-pool-${Math.random().toString(36).slice(2, 10)}`;
   const channel = supabase
-    .channel("escalation-pool")
+    .channel(channelName)
     .on(
       "postgres_changes",
       { event: "INSERT", schema: "public", table: "operational_escalations" },
