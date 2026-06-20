@@ -485,6 +485,7 @@ function rowToStaff(r: StaffRow): StaffMember {
       name: c?.name ?? "",
       number: c?.number ?? "",
       expiry: c?.expiry ?? null,
+      deferredUntil: (c as { deferredUntil?: string | null })?.deferredUntil ?? null,
     })),
     createdAt: r.created_at,
   };
