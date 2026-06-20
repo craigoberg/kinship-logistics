@@ -134,6 +134,7 @@ function RootComponent() {
       </AppShell>
       <NotificationSimulator />
       <GlobalEscalationInterceptor />
+      <RouteRehydrationGuardian />
     </QueryClientProvider>
   );
 }
