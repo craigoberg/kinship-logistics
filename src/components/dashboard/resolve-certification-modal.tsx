@@ -56,6 +56,7 @@ function startOfToday(): Date {
 export function ResolveCertificationModal({ subject, onClose, onResolved }: Props) {
   const [resType, setResType] = useState<CertResolutionType>("renewed");
   const [newExpiry, setNewExpiry] = useState<Date | undefined>(undefined);
+  const [actionDate, setActionDate] = useState<Date | undefined>(() => startOfToday());
   const [deferredUntil, setDeferredUntil] = useState<Date | undefined>(undefined);
   const [evidenceRef, setEvidenceRef] = useState("");
   const [notes, setNotes] = useState("");
@@ -65,11 +66,13 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     if (!subject) {
       setResType("renewed");
       setNewExpiry(undefined);
+      setActionDate(startOfToday());
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
     }
   }, [subject]);
+
 
   const today = startOfToday();
   const maxDefer = useMemo(() => {
@@ -83,6 +86,10 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
   const notesTooShort = trimmedNotes.length < MIN_NOTES;
   const evidenceRequired = resType === "renewed";
   const evidenceTooShort = trimmedEvidence.length < MIN_EVIDENCE;
+  const actionDateRequired = resType === "renewed";
+  const actionDateMissing = actionDateRequired && !actionDate;
+  const actionDateInvalid =
+    actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
@@ -98,7 +105,10 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     !notesTooShort &&
     !(evidenceRequired && evidenceTooShort) &&
     !dateMissing &&
-    !dateInvalid;
+    !dateInvalid &&
+    !actionDateMissing &&
+    !actionDateInvalid;
+
 
   // Clear evidence when switching away from "renewed" so stale input isn't
   // silently carried into a defer/revoke receipt.
@@ -124,6 +134,8 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
         newExpiry: resType === "renewed" && newExpiry ? toISODate(newExpiry) : null,
         deferredUntil:
           resType === "deferred" && deferredUntil ? toISODate(deferredUntil) : null,
+        actionDate: resType === "renewed" && actionDate ? toISODate(actionDate) : null,
+
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
       });
@@ -202,20 +214,32 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
             </div>
 
             {resType === "renewed" && (
-              <div className="grid gap-1">
-                <DateField
-                  label="New Expiry Date"
-                  value={newExpiry}
-                  onChange={setNewExpiry}
-                  helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
-                />
-                {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                  <span className="text-[11px] font-medium text-destructive">
-                    Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                  </span>
-                )}
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Renewal Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the renewal actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <DateField
+                    label="New Expiry Date"
+                    value={newExpiry}
+                    onChange={setNewExpiry}
+                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                  />
+                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
+                    <span className="text-[11px] font-medium text-destructive">
+                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
+                    </span>
+                  )}
+                </div>
+              </>
             )}
+
 
             {resType === "deferred" && (
               <DateField

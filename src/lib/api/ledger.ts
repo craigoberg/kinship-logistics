@@ -101,11 +101,14 @@ export interface ResolveCertificationInput {
   newExpiry?: string | null;
   /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30 days. */
   deferredUntil?: string | null;
+  /** When the renewal actually occurred — ISO yyyy-mm-dd, past or today. Required when resolutionType === 'renewed'. */
+  actionDate?: string | null;
   /** Evidence reference (doc id, link, ticket #). Required (min 6 chars) only when resolutionType === 'renewed'; null otherwise. */
   evidenceRef: string | null;
   /** Manager justification notes. Min 20 chars. */
   justification: string;
 }
+
 
 export interface ResolveCertificationResult {
   staffId: string;
@@ -132,9 +135,11 @@ export async function resolveCertification(
     resolutionType,
     newExpiry,
     deferredUntil,
+    actionDate,
     evidenceRef,
     justification,
   } = input;
+
 
   // 1) Mirror back to staff_registry JSONB so the dashboard reflects it.
   let staffMirrored = false;
@@ -210,6 +215,9 @@ export async function resolveCertification(
         previous_expiry: previousExpiry,
         resolution_type: resolutionType,
         new_expiry: newExpiry ?? null,
+        new_expiry_date: newExpiry ?? null,
+        action_date: actionDate ?? null,
+
         deferred_until: deferredUntil ?? null,
         evidence_ref: evidenceRef ?? null,
         justification,
@@ -258,6 +266,9 @@ export interface ResolveVehicleMaintenanceInput {
   newServiceDate?: string | null;
   /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30d. */
   deferredUntil?: string | null;
+  /** When the renewal/service actually occurred — ISO yyyy-mm-dd, past or today. Required for renewed/serviced. */
+  actionDate?: string | null;
+
   /** Previous value for audit. */
   previousValue?: string | number | null;
   /** Evidence reference. Required (min 6 chars) only for renewed/serviced. */
@@ -286,10 +297,12 @@ export async function resolveVehicleMaintenance(
     newServiceOdo,
     newServiceDate,
     deferredUntil,
+    actionDate,
     previousValue,
     evidenceRef,
     justification,
   } = input;
+
 
   // 1) Mirror back to transport_assets.
   let assetMirrored = false;
@@ -303,9 +316,10 @@ export async function resolveVehicleMaintenance(
       await updateFleetAsset(assetId, {
         lastServiceOdo: newServiceOdo ?? null,
         lastServiceDate:
-          newServiceDate ?? new Date().toISOString().slice(0, 10),
+          actionDate ?? newServiceDate ?? new Date().toISOString().slice(0, 10),
         deferredUntil: null,
       });
+
     } else if (resolutionType === "deferred") {
       await updateFleetAsset(assetId, { deferredUntil: deferredUntil ?? null });
     } else if (resolutionType === "decommissioned") {
@@ -352,7 +366,11 @@ export async function resolveVehicleMaintenance(
             : resolutionType === "serviced"
               ? (newServiceOdo ?? null)
               : null,
+        new_expiry_date:
+          resolutionType === "renewed" ? (newRegistrationExpiry ?? null) : null,
+        action_date: actionDate ?? null,
         deferred_until: deferredUntil ?? null,
+
         evidence_ref: evidenceRef ?? null,
         justification,
         gps_attempted: true,

@@ -71,6 +71,7 @@ export function ResolveVehicleMaintenanceModal({
   const [resType, setResType] = useState<VehicleResolutionType>(initialType);
   const [newExpiry, setNewExpiry] = useState<Date | undefined>(undefined);
   const [serviceOdo, setServiceOdo] = useState<string>("");
+  const [actionDate, setActionDate] = useState<Date | undefined>(() => startOfToday());
   const [deferredUntil, setDeferredUntil] = useState<Date | undefined>(undefined);
   const [evidenceRef, setEvidenceRef] = useState("");
   const [notes, setNotes] = useState("");
@@ -80,14 +81,17 @@ export function ResolveVehicleMaintenanceModal({
     if (!subject) {
       setNewExpiry(undefined);
       setServiceOdo("");
+      setActionDate(startOfToday());
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
       return;
     }
     setResType(initialType);
+    setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
   }, [subject, initialType]);
+
 
   useEffect(() => {
     // Clear evidence when switching to a resolution that doesn't require it.
@@ -114,6 +118,11 @@ export function ResolveVehicleMaintenanceModal({
   const odoInvalid =
     resType === "serviced" && (!Number.isFinite(odoNum) || odoNum < 0);
 
+  const actionDateRequired = resType === "renewed" || resType === "serviced";
+  const actionDateMissing = actionDateRequired && !actionDate;
+  const actionDateInvalid =
+    actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
+
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
@@ -130,7 +139,10 @@ export function ResolveVehicleMaintenanceModal({
     !(evidenceRequired && evidenceTooShort) &&
     !dateMissing &&
     !dateInvalid &&
-    !odoInvalid;
+    !odoInvalid &&
+    !actionDateMissing &&
+    !actionDateInvalid;
+
 
   const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
 
@@ -148,9 +160,11 @@ export function ResolveVehicleMaintenanceModal({
           resType === "renewed" && newExpiry ? toISODate(newExpiry) : null,
         newServiceOdo: resType === "serviced" ? odoNum : null,
         newServiceDate:
-          resType === "serviced" ? toISODate(today) : null,
+          resType === "serviced" && actionDate ? toISODate(actionDate) : null,
         deferredUntil:
           resType === "deferred" && deferredUntil ? toISODate(deferredUntil) : null,
+        actionDate: actionDateRequired && actionDate ? toISODate(actionDate) : null,
+
         previousValue: subject.previousValue,
         evidenceRef: evidenceRequired ? trimmedEvidence : null,
         justification: trimmedNotes,
@@ -242,40 +256,60 @@ export function ResolveVehicleMaintenanceModal({
             </div>
 
             {resType === "renewed" && (
-              <div className="grid gap-1">
-                <DateField
-                  label="New Registration Expiry"
-                  value={newExpiry}
-                  onChange={setNewExpiry}
-                  helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
-                />
-                {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                  <span className="text-[11px] font-medium text-destructive">
-                    Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                  </span>
-                )}
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Payment / Renewal Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the rego payment actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <DateField
+                    label="New Registration Expiry"
+                    value={newExpiry}
+                    onChange={setNewExpiry}
+                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                  />
+                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
+                    <span className="text-[11px] font-medium text-destructive">
+                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
+                    </span>
+                  )}
+                </div>
+              </>
             )}
 
             {resType === "serviced" && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="service-odo" className="text-sm font-semibold">
-                  Odometer at Service (km)
-                </Label>
-                <Input
-                  id="service-odo"
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={serviceOdo}
-                  onChange={(e) => setServiceOdo(e.target.value)}
-                  className="text-sm"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  Service date recorded as today.
-                </span>
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Service Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the service actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="service-odo" className="text-sm font-semibold">
+                    Odometer at Service (km)
+                  </Label>
+                  <Input
+                    id="service-odo"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={serviceOdo}
+                    onChange={(e) => setServiceOdo(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              </>
             )}
+
 
             {resType === "deferred" && (
               <DateField
