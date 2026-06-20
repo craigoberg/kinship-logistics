@@ -53,6 +53,7 @@ export function RedHandshakeWaitingPanel({
   onAuthorized,
   onBack,
   escalationId,
+  escalation,
 }: Props) {
   // Route-guard escalation mode: block UI before any trip hooks run.
   if (escalation) {
