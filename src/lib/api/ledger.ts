@@ -297,10 +297,12 @@ export async function resolveVehicleMaintenance(
     newServiceOdo,
     newServiceDate,
     deferredUntil,
+    actionDate,
     previousValue,
     evidenceRef,
     justification,
   } = input;
+
 
   // 1) Mirror back to transport_assets.
   let assetMirrored = false;
