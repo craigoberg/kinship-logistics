@@ -97,6 +97,16 @@ export const Route = createFileRoute("/manifest")({
 
 function ManifestPage() {
   const { escalation } = Route.useRouteContext();
+
+  // 🛡️ CRITICAL REHYDRATION SHIELD: Block before any hooks if escalation is active
+  if (escalation) {
+    return (
+      <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
+        <RedHandshakeWaitingPanel escalation={escalation} />
+      </div>
+    );
+  }
+
   const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
 
   const assetsQ = useQuery({
@@ -117,15 +127,6 @@ function ManifestPage() {
   };
 
   const isLoading = isTripLoading || assetsQ.isLoading;
-
-  // 🛡️ CRITICAL REHYDRATION SHIELD: If escalation exists in loader, block UI immediately
-  if (escalation) {
-    return (
-      <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
-        <RedHandshakeWaitingPanel escalation={escalation} />
-      </div>
-    );
-  }
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">

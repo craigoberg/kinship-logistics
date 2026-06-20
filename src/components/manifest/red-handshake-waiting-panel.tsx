@@ -23,15 +23,17 @@ import {
 import type { DraftIssue } from "./issue-accumulator-panel";
 
 interface Props {
-  asset: TransportAsset;
-  driverName: string;
-  onAuthorized: () => void;
-  onBack: () => void;
+  asset?: TransportAsset;
+  driverName?: string;
+  onAuthorized?: () => void;
+  onBack?: () => void;
   /** Clearance-based dual-PIN handshake (RED walkaround issue). */
   clearance?: AssetDailyClearance;
   issues?: DraftIssue[];
   /** Office-pool escalation handshake (Sev 1 raised from a missing gate). */
   escalationId?: string;
+  /** Route-guard escalation object rendered directly before hooks. */
+  escalation?: any;
 }
 
 function issueChip(
@@ -51,17 +53,42 @@ export function RedHandshakeWaitingPanel({
   onAuthorized,
   onBack,
   escalationId,
+  escalation,
 }: Props) {
+  // Route-guard escalation mode: block UI before any trip hooks run.
+  if (escalation) {
+    return (
+      <Card className="border-2 border-rose-600/70 bg-rose-600/5 p-5">
+        <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
+          <ShieldAlert className="h-6 w-6" />
+          <h2 className="text-lg font-extrabold">Sev 1 Escalation — Office Review</h2>
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Active escalation in progress. Please wait for office authorization before proceeding.
+        </p>
+        <div className="mt-4 flex items-center gap-3 rounded-md border border-border bg-background/60 p-3">
+          <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
+          <div className="text-sm">
+            <div className="font-semibold">Awaiting office authorization</div>
+            <div className="text-xs text-muted-foreground">
+              Do not roll until the office returns a decision.
+            </div>
+          </div>
+        </div>
+      </Card>
+    );
+  }
+
   // Branch by mode. Escalation mode (Sev 1) is purely office-resolved; the
   // clearance mode is the original dual-PIN walkaround handshake.
   if (escalationId) {
     return (
       <EscalationWaitingPanel
-        asset={asset}
-        driverName={driverName}
+        asset={asset!}
+        driverName={driverName!}
         escalationId={escalationId}
-        onAuthorized={onAuthorized}
-        onBack={onBack}
+        onAuthorized={onAuthorized!}
+        onBack={onBack!}
       />
     );
   }
@@ -79,12 +106,12 @@ export function RedHandshakeWaitingPanel({
   }
   return (
     <ClearanceWaitingPanel
-      asset={asset}
+      asset={asset!}
       clearance={clearance}
       issues={issues ?? []}
-      driverName={driverName}
-      onAuthorized={onAuthorized}
-      onBack={onBack}
+      driverName={driverName!}
+      onAuthorized={onAuthorized!}
+      onBack={onBack!}
     />
   );
 }
