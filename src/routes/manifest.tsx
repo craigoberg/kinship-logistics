@@ -1,4 +1,4 @@
-// Force rebuild version 2.2
+// Force rebuild version 2.3
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -113,7 +113,7 @@ function ManifestPage() {
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
-      {/* Permanent Unified Identity Session Header */}
+      {/* Permanent Session Identity Header */}
       <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
         <div className="flex items-center gap-2 min-w-0">
           <span className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")} />
@@ -126,7 +126,7 @@ function ManifestPage() {
         </div>
         <button
           onClick={() => {
-            if (confirm("Are you sure you want to log out? Active logs remain safe, but local form progress will clear.")) {
+            if (confirm("Are you sure you want to log out? Active server trips remain secure, but local setup memory will clear.")) {
               handleGlobalLogout();
             }
           }}
@@ -166,7 +166,40 @@ function staffName(staffId: string): string {
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
   const today = todayDateStr();
   const { data: lastEndOdo = null } = useLastEndOdometer();
+  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+  const driverName = staffName(driverStaffId);
 
+  /* ------------------------------------------------------------------
+     🔒 GLOBAL SYSTEM LOCKS: Hoisted directly out of the wizard loop 
+     ------------------------------------------------------------------ */
+  const [globalEscalation, setGlobalEscalation] = useState<OperationalEscalation | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("yada_global_escalation");
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  });
+
+  const [globalHandshake, setGlobalHandshake] = useState<{
+    clearance: AssetDailyClearance;
+    issues: any[];
+  } | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("yada_global_handshake");
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  });
+
+  const escalatedAsset = useMemo<TransportAsset | null>(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem("yada_global_escalation_asset");
+      return saved ? JSON.parse(saved) : null;
+    }
+    return null;
+  }, [globalEscalation, globalHandshake]);
+
+  // Standard setup configuration states
   const [step, setStep] = useState<InitStep>(() => {
     if (typeof window !== "undefined") {
       return (localStorage.getItem("yada_init_step") as InitStep) || "vehicle";
@@ -226,6 +259,60 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
     if (!selectedAsset || !odoReasonable) return;
     setStep("clearance");
   };
+
+  /* ------------------------------------------------------------------
+     🛡️ CRITICAL REHYDRATION SHIELD: Short circuit layout if locked
+     ------------------------------------------------------------------ */
+  if (globalEscalation && escalatedAsset) {
+    return (
+      <div className="flex-1 overflow-y-auto p-4">
+        <RedHandshakeWaitingPanel
+          asset={escalatedAsset}
+          driverName={driverName}
+          escalationId={globalEscalation.id}
+          onAuthorized={() => {
+            localStorage.removeItem("yada_global_escalation");
+            localStorage.removeItem("yada_global_escalation_asset");
+            setGlobalEscalation(null);
+            setClearanceOk(true);
+            setStep("event");
+          }}
+          onBack={() => {
+            localStorage.removeItem("yada_global_escalation");
+            localStorage.removeItem("yada_global_escalation_asset");
+            setGlobalEscalation(null);
+            setStep("vehicle");
+          }}
+        />
+      </div>
+    );
+  }
+
+  if (globalHandshake && escalatedAsset) {
+    return (
+      <div className="flex-1 overflow-y-auto p-4">
+        <RedHandshakeWaitingPanel
+          asset={escalatedAsset}
+          driverName={driverName}
+          clearance={globalHandshake.clearance}
+          issues={globalHandshake.issues}
+          onAuthorized={() => {
+            localStorage.removeItem("yada_global_handshake");
+            localStorage.removeItem("yada_global_escalation_asset");
+            setGlobalHandshake(null);
+            setClearanceOk(true);
+            setStep("event");
+          }}
+          onBack={() => {
+            localStorage.removeItem("yada_global_handshake");
+            localStorage.removeItem("yada_global_escalation_asset");
+            setGlobalHandshake(null);
+            setStep("vehicle");
+          }}
+        />
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -294,6 +381,17 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
             setStep("event");
           }}
           onBack={() => setStep("vehicle")}
+          onEscalated={(esc) => {
+            localStorage.setItem("yada_global_escalation", JSON.stringify(esc));
+            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
+            setGlobalEscalation(esc);
+          }}
+          onRedHandshake={(clearance, issues) => {
+            const bundleState = { clearance, issues };
+            localStorage.setItem("yada_global_handshake", JSON.stringify(bundleState));
+            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
+            setGlobalHandshake(bundleState);
+          }}
         />
       )}
 
@@ -306,19 +404,25 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
 
 /* -------------------- Clearance Gate -------------------- */
 
+interface ClearanceGateProps {
+  asset: TransportAsset;
+  startOdometer: number;
+  dateStr: string;
+  onCleared: () => void;
+  onBack: () => void;
+  onEscalated: (esc: OperationalEscalation) => void;
+  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
+}
+
 function ClearanceGate({
   asset,
   startOdometer,
   dateStr,
   onCleared,
   onBack,
-}: {
-  asset: TransportAsset;
-  startOdometer: number;
-  dateStr: string;
-  onCleared: () => void;
-  onBack: () => void;
-}) {
+  onEscalated,
+  onRedHandshake,
+}: ClearanceGateProps) {
   const existingQ = useQuery<AssetDailyClearance | null>({
     queryKey: ["asset-clearance", asset.id, dateStr],
     queryFn: () => getClearanceForAssetOnDate(asset.id, dateStr),
@@ -368,6 +472,8 @@ function ClearanceGate({
       dateStr={dateStr}
       onPassed={onCleared}
       onBack={onBack}
+      onEscalated={onEscalated}
+      onRedHandshake={onRedHandshake}
     />
   );
 }
@@ -378,96 +484,19 @@ function IssueAccumulatorGate({
   dateStr,
   onPassed,
   onBack,
+  onEscalated,
+  onRedHandshake,
 }: {
   asset: TransportAsset;
   startOdometer: number;
   dateStr: string;
   onPassed: () => void;
   onBack: () => void;
+  onEscalated: (esc: OperationalEscalation) => void;
+  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
-
-  // Synchronous initial rehydration from localStorage
-  const [escalation, setEscalation] = useState<OperationalEscalation | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`yada_esc_state_${asset.id}`);
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  const [redHandshake, setRedHandshake] = useState<{
-    clearance: AssetDailyClearance;
-    issues: import("@/components/manifest/dynamic-operational-form").DraftIssue[];
-  } | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem(`yada_handshake_state_${asset.id}`);
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  // Explicit handlers that safely inject state directly into localStorage to lock it during reloads
-  const handleEscalated = (esc: OperationalEscalation) => {
-    localStorage.setItem(`yada_esc_state_${asset.id}`, JSON.stringify(esc));
-    setEscalation(esc);
-  };
-
-  const handleRedHandshake = (clearance: AssetDailyClearance, issues: any[]) => {
-    const bundleState = { clearance, issues };
-    localStorage.setItem(`yada_handshake_state_${asset.id}`, JSON.stringify(bundleState));
-    setRedHandshake(bundleState);
-  };
-
-  const clearEscalationAndProceed = () => {
-    localStorage.removeItem(`yada_esc_state_${asset.id}`);
-    setEscalation(null);
-    onPassed();
-  };
-
-  const clearEscalationAndBack = () => {
-    localStorage.removeItem(`yada_esc_state_${asset.id}`);
-    setEscalation(null);
-    onBack();
-  };
-
-  const clearHandshakeAndProceed = () => {
-    localStorage.removeItem(`yada_handshake_state_${asset.id}`);
-    setRedHandshake(null);
-    onPassed();
-  };
-
-  const clearHandshakeAndBack = () => {
-    localStorage.removeItem(`yada_handshake_state_${asset.id}`);
-    setRedHandshake(null);
-    onBack();
-  };
-
-  if (escalation) {
-    return (
-      <RedHandshakeWaitingPanel
-        asset={asset}
-        driverName={driverName}
-        escalationId={escalation.id}
-        onAuthorized={clearEscalationAndProceed}
-        onBack={clearEscalationAndBack}
-      />
-    );
-  }
-
-  if (redHandshake) {
-    return (
-      <RedHandshakeWaitingPanel
-        asset={asset}
-        driverName={driverName}
-        clearance={redHandshake.clearance}
-        issues={redHandshake.issues}
-        onAuthorized={clearHandshakeAndProceed}
-        onBack={clearHandshakeAndBack}
-      />
-    );
-  }
 
   return (
     <DynamicOperationalForm
@@ -477,8 +506,8 @@ function IssueAccumulatorGate({
       dateStr={dateStr}
       driverName={driverName}
       onCleared={onPassed}
-      onEscalated={handleEscalated}
-      onRedHandshake={handleRedHandshake}
+      onEscalated={onEscalated}
+      onRedHandshake={onRedHandshake}
       onBack={onBack}
     />
   );
