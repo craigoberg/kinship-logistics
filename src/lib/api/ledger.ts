@@ -75,6 +75,153 @@ export function tryGetGps(): Promise<{ lat: number; lng: number } | null> {
     } catch {
       clearTimeout(timer);
       done(null);
+}
+
+// ---------------------------------------------------------------------------
+// Certification resolution — Manager-only "Resolve" action on the dashboard
+// Staff Certifications tile. Appends an immutable receipt to operational_ledger
+// AND mirrors the resolution back to staff_registry.certifications JSONB so
+// the next dashboard scan reflects the new state.
+// ---------------------------------------------------------------------------
+
+export type CertResolutionType = "renewed" | "deferred" | "revoked";
+
+export interface ResolveCertificationInput {
+  staffId: string;
+  staffName: string;
+  certName: string;
+  previousExpiry: string | null;
+  resolutionType: CertResolutionType;
+  /** Required when resolutionType === 'renewed' — ISO yyyy-mm-dd, future-dated. */
+  newExpiry?: string | null;
+  /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30 days. */
+  deferredUntil?: string | null;
+  /** Evidence reference (doc id, link, ticket #). Min 6 chars. */
+  evidenceRef: string;
+  /** Manager justification notes. Min 20 chars. */
+  justification: string;
+}
+
+export interface ResolveCertificationResult {
+  staffId: string;
+  certName: string;
+  ledgerWritten: boolean;
+  staffMirrored: boolean;
+}
+
+/**
+ * Append a CERTIFICATION_RESOLVED receipt to operational_ledger and mirror
+ * the new cert state back to staff_registry. Append-only: no UPDATE/DELETE
+ * on prior ledger rows. Double-flag collapse is implicit — the next dashboard
+ * scan reads the mirrored JSONB and the previous RED row disappears from view,
+ * while the ledger preserves the full history.
+ */
+export async function resolveCertification(
+  input: ResolveCertificationInput,
+): Promise<ResolveCertificationResult> {
+  const {
+    staffId,
+    staffName,
+    certName,
+    previousExpiry,
+    resolutionType,
+    newExpiry,
+    deferredUntil,
+    evidenceRef,
+    justification,
+  } = input;
+
+  // 1) Mirror back to staff_registry JSONB so the dashboard reflects it.
+  let staffMirrored = false;
+  try {
+    const all = await listStaffRegistry();
+    const target = all.find((s) => s.id === staffId);
+    if (!target) throw new Error(`Staff ${staffId} not found`);
+
+    const nameKey = certName.trim().toLowerCase();
+    const matchIdx = target.certifications.findIndex(
+      (c) => (c.name ?? "").trim().toLowerCase() === nameKey,
+    );
+
+    let nextCerts: StaffCertification[];
+    if (matchIdx === -1) {
+      nextCerts = target.certifications.slice();
+    } else if (resolutionType === "revoked") {
+      nextCerts = target.certifications.filter((_, i) => i !== matchIdx);
+    } else {
+      nextCerts = target.certifications.map((c, i) => {
+        if (i !== matchIdx) return c;
+        if (resolutionType === "renewed") {
+          return { ...c, expiry: newExpiry ?? c.expiry, deferredUntil: null };
+        }
+        // deferred
+        return { ...c, deferredUntil: deferredUntil ?? null };
+      });
     }
+
+    await updateStaffMember(staffId, {
+      fullName: target.fullName,
+      role: target.role,
+      personnelType: target.personnelType,
+      phone: target.phone,
+      email: target.email,
+      streetAddress: target.streetAddress,
+      active: target.active,
+      notes: target.notes,
+      certifications: nextCerts,
+    });
+    staffMirrored = true;
+  } catch (err) {
+    console.error("[resolveCertification] mirror to staff_registry failed", err);
+    throw err;
+  }
+
+  // 2) Append immutable ledger receipt.
+  const gps = await tryGetGps();
+  const actorId = await resolveStaffIdWithFallback();
+  const severityAfter =
+    resolutionType === "renewed"
+      ? "GREEN"
+      : resolutionType === "deferred"
+        ? "YELLOW"
+        : "INFO";
+  const subjectId = `${staffId}:${certName.trim()}`;
+
+  let ledgerWritten = false;
+  try {
+    const { error } = await supabase.from("operational_ledger").insert({
+      staff_id: actorId,
+      category: "CENTRE",
+      severity: severityAfter,
+      action_type: "CERTIFICATION_RESOLVED",
+      gps_lat: gps?.lat ?? null,
+      gps_lng: gps?.lng ?? null,
+      metadata: {
+        subject_type: "staff_certification",
+        subject_id: subjectId,
+        staff_id: staffId,
+        staff_name: staffName,
+        cert_name: certName,
+        previous_expiry: previousExpiry,
+        resolution_type: resolutionType,
+        new_expiry: newExpiry ?? null,
+        deferred_until: deferredUntil ?? null,
+        evidence_ref: evidenceRef,
+        justification,
+        gps_attempted: true,
+        gps_captured: !!gps,
+        source: "resolve_certification_modal",
+      },
+    });
+    if (error) throw error;
+    ledgerWritten = true;
+  } catch (err) {
+    console.error("[resolveCertification] ledger write failed", err);
+    throw err;
+  }
+
+  return { staffId, certName, ledgerWritten, staffMirrored };
+}
+
   });
 }
