@@ -36,22 +36,14 @@ import {
 } from "@/lib/data-store";
 import { ManagerJointReviewModal } from "./manager-joint-review-modal";
 import { UngroundVehicleModal } from "./unground-vehicle-modal";
-import {
-  ResolveCertificationModal,
-  type ResolveCertSubject,
-} from "./resolve-certification-modal";
-import {
-  ResolveVehicleMaintenanceModal,
-  type ResolveVehicleSubject,
-} from "./resolve-vehicle-maintenance-modal";
+import { ResolveDispatcher } from "./dispatch-resolve-modal";
+import type { ComplianceAsset } from "@/lib/api/compliance-assets";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
-  useStaffCertificationExceptions,
-  useVehicleMaintenanceExceptions,
-  ASSET_LIABILITY_PLACEHOLDERS,
-  type PlaceholderRow,
+  useComplianceExceptions,
+  type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
 
