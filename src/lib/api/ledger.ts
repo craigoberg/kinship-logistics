@@ -135,9 +135,11 @@ export async function resolveCertification(
     resolutionType,
     newExpiry,
     deferredUntil,
+    actionDate,
     evidenceRef,
     justification,
   } = input;
+
 
   // 1) Mirror back to staff_registry JSONB so the dashboard reflects it.
   let staffMirrored = false;
