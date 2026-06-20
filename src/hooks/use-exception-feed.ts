@@ -7,12 +7,14 @@ import {
   listParticipants,
   listFailedClearancesWithItems,
   getTodayManifestSummary,
+  listStaffRegistry,
   type MedicationExceptionRow,
   type MedicationSchedule,
   type ComplianceLog,
   type Participant,
   type FailedClearanceReport,
   type TodayManifestSummary,
+  type StaffMember,
 } from "@/lib/data-store";
 
 export type Severity = "critical" | "warning" | "info";
