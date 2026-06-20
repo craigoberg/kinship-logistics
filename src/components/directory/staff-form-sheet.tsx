@@ -35,7 +35,7 @@ interface Props {
   staff: StaffMember | null;
 }
 
-const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null };
+const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null, deferredUntil: null };
 
 export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const isEdit = !!staff;
