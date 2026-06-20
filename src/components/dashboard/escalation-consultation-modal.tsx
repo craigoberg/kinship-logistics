@@ -20,6 +20,7 @@ import {
 } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
+import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 interface Props {
   escalation: OperationalEscalation | null;
@@ -55,6 +56,25 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
         })
         .eq("id", escalation.id);
       if (error) throw error;
+      if (status === "resolved_approved") {
+        // Compliance log: vehicle released back to service. Fire-and-forget;
+        // ledger failures must never block the manager's resolution flow.
+        const gps = await tryGetGps();
+        void writeToLedger({
+          staff_id: staffId,
+          category: "VEHICLE",
+          severity: "GREEN",
+          action_type: "VEHICLE_RELEASED",
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
+          metadata: {
+            escalation_id: escalation.id,
+            vehicle_info: escalation.vehicleInfo ?? null,
+            driver_name: escalation.driverName ?? null,
+            resolution_notes: notes.trim(),
+          },
+        });
+      }
       toast.success(
         status === "resolved_approved"
           ? "Workaround sent — driver cleared to roll."
