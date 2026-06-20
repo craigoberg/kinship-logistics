@@ -48,3 +48,35 @@ export const getActiveEscalation = async (driverId: string) => {
 
   return data;
 };
+
+/**
+ * Returns true when the most recent escalation for this vehicle on `dateStr`
+ * was resolved as `resolved_denied` — i.e. a manager has officially grounded
+ * the bus. Used by `ClearanceGate` to block a new walkaround on a grounded
+ * vehicle until the office overrides the status.
+ *
+ * The `operational_escalations` table does not store an `asset_id`; vehicles
+ * are identified by the free-text `vehicle_info` column written by
+ * `raiseOperationalEscalation` as `"${asset.name} · ${asset.regoPlate}"`.
+ * Callers must pass the same composed string.
+ */
+export const getAssetGroundedStatus = async (
+  vehicleInfo: string,
+  dateStr: string,
+): Promise<boolean> => {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("status")
+    .eq("vehicle_info", vehicleInfo)
+    .gte("created_at", dateStr)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (error) {
+    console.error("[getAssetGroundedStatus] query failed:", error);
+    return false;
+  }
+
+  return data?.status === "resolved_denied";
+};
