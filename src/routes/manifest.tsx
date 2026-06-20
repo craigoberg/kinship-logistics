@@ -79,9 +79,19 @@ import { getActiveEscalation } from "@/lib/api/clearance";
 export const Route = createFileRoute("/manifest")({
   ssr: false,
   beforeLoad: async () => {
-    // This runs before the component mounts, preventing the "flicker"
-    const escalation = await getActiveEscalation("current-driver-id");
-    return { escalation };
+    // This runs before the component mounts, preventing the "flicker".
+    // Resolve the active driver from local session; fall back to the
+    // shared default UUID when no staff member is signed in locally.
+    const driverId = getStaffId() || DEFAULT_STAFF_UUID;
+    try {
+      const escalation = await getActiveEscalation(driverId);
+      return { escalation };
+    } catch (error) {
+      console.error("[manifest.beforeLoad] getActiveEscalation failed:", error);
+      // Never hard-crash the route on a database anomaly — degrade to
+      // "no active escalation" and let the page render normally.
+      return { escalation: null };
+    }
   },
   head: () => ({
     meta: [
