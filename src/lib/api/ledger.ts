@@ -316,9 +316,10 @@ export async function resolveVehicleMaintenance(
       await updateFleetAsset(assetId, {
         lastServiceOdo: newServiceOdo ?? null,
         lastServiceDate:
-          newServiceDate ?? new Date().toISOString().slice(0, 10),
+          actionDate ?? newServiceDate ?? new Date().toISOString().slice(0, 10),
         deferredUntil: null,
       });
+
     } else if (resolutionType === "deferred") {
       await updateFleetAsset(assetId, { deferredUntil: deferredUntil ?? null });
     } else if (resolutionType === "decommissioned") {
