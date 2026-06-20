@@ -256,40 +256,60 @@ export function ResolveVehicleMaintenanceModal({
             </div>
 
             {resType === "renewed" && (
-              <div className="grid gap-1">
-                <DateField
-                  label="New Registration Expiry"
-                  value={newExpiry}
-                  onChange={setNewExpiry}
-                  helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
-                />
-                {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                  <span className="text-[11px] font-medium text-destructive">
-                    Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                  </span>
-                )}
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Payment / Renewal Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the rego payment actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <DateField
+                    label="New Registration Expiry"
+                    value={newExpiry}
+                    onChange={setNewExpiry}
+                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                  />
+                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
+                    <span className="text-[11px] font-medium text-destructive">
+                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
+                    </span>
+                  )}
+                </div>
+              </>
             )}
 
             {resType === "serviced" && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="service-odo" className="text-sm font-semibold">
-                  Odometer at Service (km)
-                </Label>
-                <Input
-                  id="service-odo"
-                  type="number"
-                  inputMode="numeric"
-                  min={0}
-                  value={serviceOdo}
-                  onChange={(e) => setServiceOdo(e.target.value)}
-                  className="text-sm"
-                />
-                <span className="text-[11px] text-muted-foreground">
-                  Service date recorded as today.
-                </span>
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Service Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the service actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1.5">
+                  <Label htmlFor="service-odo" className="text-sm font-semibold">
+                    Odometer at Service (km)
+                  </Label>
+                  <Input
+                    id="service-odo"
+                    type="number"
+                    inputMode="numeric"
+                    min={0}
+                    value={serviceOdo}
+                    onChange={(e) => setServiceOdo(e.target.value)}
+                    className="text-sm"
+                  />
+                </div>
+              </>
             )}
+
 
             {resType === "deferred" && (
               <DateField
