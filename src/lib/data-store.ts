@@ -612,7 +612,7 @@ export async function loginWithPin(
   const match = checks.find((c) => c.ok);
   if (!match) return null;
 
-  if (match.row.role === "guardian") {
+  if ((match.row.role ?? "").trim().toLowerCase() === "guardian") {
     throw new GuardianPinError();
   }
 
