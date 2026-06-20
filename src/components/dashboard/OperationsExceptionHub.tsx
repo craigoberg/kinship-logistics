@@ -35,6 +35,10 @@ import {
 import { ManagerJointReviewModal } from "./manager-joint-review-modal";
 import { UngroundVehicleModal } from "./unground-vehicle-modal";
 import {
+  ResolveCertificationModal,
+  type ResolveCertSubject,
+} from "./resolve-certification-modal";
+import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
@@ -120,6 +124,8 @@ export function OperationsExceptionHub() {
   const grounded = groundedQ.data ?? [];
   const [activeUnground, setActiveUnground] =
     useState<OperationalEscalation | null>(null);
+  const [activeCertResolve, setActiveCertResolve] =
+    useState<ResolveCertSubject | null>(null);
 
   useEffect(() => {
     const off = subscribeToPendingReviews(() => {
@@ -222,6 +228,25 @@ export function OperationsExceptionHub() {
         title: r.title,
         detail: r.detail,
         severity: r.severity,
+        action:
+          r.severity === "critical" || r.severity === "warning" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() =>
+                setActiveCertResolve({
+                  staffId: r.staffId,
+                  staffName: r.staffName,
+                  certName: r.certName,
+                  expiry: r.expiry,
+                })
+              }
+            >
+              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+              Resolve
+            </Button>
+          ) : undefined,
       })),
     },
     {
@@ -376,6 +401,12 @@ export function OperationsExceptionHub() {
         escalation={activeUnground}
         onClose={() => setActiveUnground(null)}
         onUngrounded={() => qc.invalidateQueries({ queryKey: ["grounded-escalations"] })}
+      />
+
+      <ResolveCertificationModal
+        subject={activeCertResolve}
+        onClose={() => setActiveCertResolve(null)}
+        onResolved={() => qc.invalidateQueries({ queryKey: ["staff-registry", "all"] })}
       />
     </Card>
   );
