@@ -241,7 +241,7 @@ function StatusButton({
   );
 }
 
-function LogRow({ label, value }: { label: string; value: string }) {
+function LogRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -251,3 +251,4 @@ function LogRow({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+
