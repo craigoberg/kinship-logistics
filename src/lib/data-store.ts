@@ -3728,20 +3728,27 @@ export async function insertAssetClearanceWithItems(input: {
 // SQL: docs/sql/2026-06-24_dual_pin_handshake.sql
 // ============================================================================
 
-/** Verifies a 4-digit onboarding PIN against staff_registry.pin_hash. */
+/**
+ * Verifies a 4-digit onboarding PIN against staff_registry via the
+ * `verify_operator_pin` security-definer RPC, and confirms the matched
+ * staff row equals the expected `staffId`.
+ */
 export async function verifyStaffPin(
   staffId: string,
   pin: string,
 ): Promise<boolean> {
-  const { data, error } = await supabase.rpc("verify_staff_pin", {
-    _staff_id: staffId,
-    _pin: pin,
+  if (!/^\d{4,}$/.test(pin)) return false;
+  const { data, error } = await supabase.rpc("verify_operator_pin", {
+    entered_pin: pin,
   });
   if (error) {
     console.error("[verifyStaffPin] failed", error);
     return false;
   }
-  return data === true;
+  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
+    id: string;
+  }>;
+  return rows.some((r) => r.id === staffId);
 }
 
 /** Manager side of the dual-PIN handshake — must run BEFORE the driver PIN. */
