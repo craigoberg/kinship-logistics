@@ -37,6 +37,7 @@ export function useMedicationExceptions() {
     queryFn: () => listActiveMedicationExceptions(),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
     select: (rows) => rows.map((r) => ({ ...r, severity: severityForMedStatus(r.status) })),
   });
 }
@@ -204,6 +205,7 @@ export function useStartEndDayAnomalies() {
     queryFn: () => listFailedClearancesWithItems(date),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
   const summaryQ = useQuery<TodayManifestSummary>({
     queryKey: ["today-manifest-summary", date],
@@ -302,6 +304,7 @@ export function useComplianceExceptions() {
     queryFn: () => listComplianceAssets({ status: "active" }),
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
 
   const rows = useMemo<ComplianceExceptionRow[]>(() => {

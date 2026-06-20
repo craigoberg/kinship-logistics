@@ -138,6 +138,27 @@ export function ResolveVehicleMaintenanceModal({
 
   const isFormalAudit = resType === "formal_audit";
 
+  // beforeunload warning whenever the user has unsaved input. Keeps the
+  // form working as a regular controlled form, but blocks accidental
+  // refresh / tab close.
+  const isDirty =
+    !!subject &&
+    (notes.trim().length > 0 ||
+      evidenceRef.trim().length > 0 ||
+      Object.keys(auditState.responses).length > 0 ||
+      auditState.auditorStaffId.length > 0 ||
+      auditState.witnessStaffId.length > 0);
+  useEffect(() => {
+    if (!isDirty) return;
+    const handler = (e: BeforeUnloadEvent) => {
+      e.preventDefault();
+      e.returnValue = "";
+    };
+    window.addEventListener("beforeunload", handler);
+    return () => window.removeEventListener("beforeunload", handler);
+  }, [isDirty]);
+
+
   const trimmedNotes = notes.trim();
   const trimmedEvidence = evidenceRef.trim();
   const notesTooShort = trimmedNotes.length < MIN_NOTES;

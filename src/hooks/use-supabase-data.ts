@@ -933,7 +933,8 @@ export function useActiveTrip() {
     queryKey: [...ACTIVE_TRIP_KEY, driverId],
     queryFn: () => getActiveTripForDriver(driverId),
     staleTime: 5_000,
-    refetchInterval: 15_000,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
   });
 }
