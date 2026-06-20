@@ -565,10 +565,15 @@ function ArchiveAssetDialog({
         </DialogHeader>
         <Textarea
           rows={3}
-          placeholder="Justification (min 10 chars)"
+          placeholder="Justification (min 20 chars)"
           value={justification}
           onChange={(e) => setJustification(e.target.value)}
         />
+        <div
+          className={`text-xs ${justification.trim().length < 20 ? "text-destructive" : "text-muted-foreground"}`}
+        >
+          {justification.trim().length}/20 minimum
+        </div>
         <DialogFooter>
           <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
             Cancel
@@ -576,7 +581,7 @@ function ArchiveAssetDialog({
           <Button
             variant="destructive"
             onClick={() => mut.mutate()}
-            disabled={justification.trim().length < 10 || mut.isPending}
+            disabled={justification.trim().length < 20 || mut.isPending}
           >
             {mut.isPending ? "Archiving…" : "Archive"}
           </Button>
