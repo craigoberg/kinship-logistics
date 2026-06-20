@@ -3407,7 +3407,7 @@ function rowToClearance(r: AssetDailyClearanceRow): AssetDailyClearance {
     driverAuthPinVerifiedAt: r.driver_auth_pin_verified_at,
     managerAuthStaffId: r.manager_auth_staff_id,
     managerAuthPinVerifiedAt: r.manager_auth_pin_verified_at,
-    createdAt: r.created_at,
+    createdAt: r.created_at ?? "",
   };
 }
 
