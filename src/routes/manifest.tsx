@@ -1,4 +1,4 @@
-// Force rebuild version 2.1
+// Force rebuild version 2.2
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -90,47 +90,61 @@ export const Route = createFileRoute("/manifest")({
 });
 
 function ManifestPage() {
-  const { data: bundle, isLoading } = useActiveTrip();
+  const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
+  
+  const assetsQ = useQuery({
+    queryKey: ["transport-assets"],
+    queryFn: () => listTransportAssets(),
+    staleTime: 5 * 60_000,
+  });
+
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const userRole = typeof window !== "undefined" ? getActiveUserRole() : "driver";
   const currentDriverName = staffName(driverStaffId);
 
   const handleGlobalLogout = () => {
     if (typeof window !== "undefined") {
-      // Complete state purge to ensure an absolutely clean login window environment
       localStorage.clear();
       window.location.href = "/auth";
     }
   };
 
+  const isLoading = isTripLoading || assetsQ.isLoading;
+
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
-      {/* Top Session Identity Banner with Hard Reset Controls */}
-      {!bundle && !isLoading && (
-        <div className="flex items-center justify-between border-b border-border bg-slate-900/60 px-4 py-2.5 text-xs text-white">
-          <div className="flex items-center gap-2">
-            <span className="h-2 w-2 rounded-full bg-blue-500 animate-pulse" />
-            <span className="text-slate-300">
-              Driver: <b className="text-white font-semibold">{currentDriverName}</b> ({userRole})
+      {/* Permanent Unified Identity Session Header */}
+      <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
+        <div className="flex items-center gap-2 min-w-0">
+          <span className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")} />
+          <span className="text-slate-300 truncate">
+            User: <b className="text-white font-semibold">{currentDriverName}</b>{" "}
+            <span className="text-[10px] bg-slate-800 px-1.5 py-0.5 rounded border border-slate-700 ml-1 uppercase font-mono tracking-wider text-blue-400">
+              {userRole}
             </span>
-          </div>
-          <button
-            onClick={handleGlobalLogout}
-            className="flex items-center gap-1 font-bold text-red-400 hover:text-red-300 transition hover:underline"
-          >
-            <LogOut className="h-3 w-3" /> Log Out
-          </button>
+          </span>
         </div>
-      )}
+        <button
+          onClick={() => {
+            if (confirm("Are you sure you want to log out? Active logs remain safe, but local form progress will clear.")) {
+              handleGlobalLogout();
+            }
+          }}
+          className="flex items-center gap-1 font-bold text-red-400 hover:text-red-300 transition shrink-0 ml-2"
+        >
+          <LogOut className="h-3.5 w-3.5" /> Log Out
+        </button>
+      </div>
 
       {isLoading ? (
-        <div className="flex flex-1 items-center justify-center text-muted-foreground">
-          <Loader2 className="mr-2 h-5 w-5 animate-spin" /> Loading manifest…
+        <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">
+          <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+          <span className="text-sm font-medium tracking-wide">Synchronizing system manifest…</span>
         </div>
       ) : bundle ? (
-        <ActiveTripScreen bundle={bundle} onLogout={handleGlobalLogout} />
+        <ActiveTripScreen bundle={bundle} />
       ) : (
-        <InitializeTripScreen />
+        <InitializeTripScreen fleetAssets={assetsQ.data ?? []} />
       )}
     </div>
   );
@@ -149,7 +163,7 @@ function staffName(staffId: string): string {
   return STAFF_DIRECTORY.find((s) => s.id === staffId)?.name ?? "Driver";
 }
 
-function InitializeTripScreen() {
+function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
   const today = todayDateStr();
   const { data: lastEndOdo = null } = useLastEndOdometer();
 
@@ -201,12 +215,7 @@ function InitializeTripScreen() {
     localStorage.setItem("yada_init_clearanceOk", String(clearanceOk));
   }, [clearanceOk]);
 
-  const assetsQ = useQuery({
-    queryKey: ["transport-assets"],
-    queryFn: () => listTransportAssets(),
-    staleTime: 5 * 60_000,
-  });
-  const activeAssets = useMemo(() => (assetsQ.data ?? []).filter((a) => a.isActive), [assetsQ.data]);
+  const activeAssets = useMemo(() => fleetAssets.filter((a) => a.isActive), [fleetAssets]);
   const selectedAsset = useMemo(() => activeAssets.find((a) => a.id === assetId) ?? null, [activeAssets, assetId]);
 
   const odoNum = odo === "" ? NaN : Number(odo);
@@ -231,7 +240,7 @@ function InitializeTripScreen() {
               <Label htmlFor="asset">Select Vehicle</Label>
               <Select value={assetId} onValueChange={setAssetId}>
                 <SelectTrigger id="asset" className="h-12">
-                  <SelectValue placeholder={assetsQ.isLoading ? "Loading fleet…" : "Today's vehicle…"} />
+                  <SelectValue placeholder="Today's vehicle…" />
                 </SelectTrigger>
                 <SelectContent>
                   {activeAssets.map((a) => (
@@ -379,7 +388,7 @@ function IssueAccumulatorGate({
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
 
-  // REHYDRATION LOCK: Rehydrate dynamic coordinator handshake states to prevent refresh bypass
+  // Synchronous initial rehydration from localStorage
   const [escalation, setEscalation] = useState<OperationalEscalation | null>(() => {
     if (typeof window !== "undefined") {
       const saved = localStorage.getItem(`yada_esc_state_${asset.id}`);
@@ -399,22 +408,41 @@ function IssueAccumulatorGate({
     return null;
   });
 
-  // Keep localStorage perfectly tailored to the active workflow step
-  useEffect(() => {
-    if (escalation) {
-      localStorage.setItem(`yada_esc_state_${asset.id}`, JSON.stringify(escalation));
-    } else {
-      localStorage.removeItem(`yada_esc_state_${asset.id}`);
-    }
-  }, [escalation, asset.id]);
+  // Explicit handlers that safely inject state directly into localStorage to lock it during reloads
+  const handleEscalated = (esc: OperationalEscalation) => {
+    localStorage.setItem(`yada_esc_state_${asset.id}`, JSON.stringify(esc));
+    setEscalation(esc);
+  };
 
-  useEffect(() => {
-    if (redHandshake) {
-      localStorage.setItem(`yada_handshake_state_${asset.id}`, JSON.stringify(redHandshake));
-    } else {
-      localStorage.removeItem(`yada_handshake_state_${asset.id}`);
-    }
-  }, [redHandshake, asset.id]);
+  const handleRedHandshake = (clearance: AssetDailyClearance, issues: any[]) => {
+    const bundleState = { clearance, issues };
+    localStorage.setItem(`yada_handshake_state_${asset.id}`, JSON.stringify(bundleState));
+    setRedHandshake(bundleState);
+  };
+
+  const clearEscalationAndProceed = () => {
+    localStorage.removeItem(`yada_esc_state_${asset.id}`);
+    setEscalation(null);
+    onPassed();
+  };
+
+  const clearEscalationAndBack = () => {
+    localStorage.removeItem(`yada_esc_state_${asset.id}`);
+    setEscalation(null);
+    onBack();
+  };
+
+  const clearHandshakeAndProceed = () => {
+    localStorage.removeItem(`yada_handshake_state_${asset.id}`);
+    setRedHandshake(null);
+    onPassed();
+  };
+
+  const clearHandshakeAndBack = () => {
+    localStorage.removeItem(`yada_handshake_state_${asset.id}`);
+    setRedHandshake(null);
+    onBack();
+  };
 
   if (escalation) {
     return (
@@ -422,15 +450,8 @@ function IssueAccumulatorGate({
         asset={asset}
         driverName={driverName}
         escalationId={escalation.id}
-        onAuthorized={() => {
-          localStorage.removeItem(`yada_esc_state_${asset.id}`);
-          onPassed();
-        }}
-        onBack={() => {
-          localStorage.removeItem(`yada_esc_state_${asset.id}`);
-          setEscalation(null);
-          onBack();
-        }}
+        onAuthorized={clearEscalationAndProceed}
+        onBack={clearEscalationAndBack}
       />
     );
   }
@@ -442,15 +463,8 @@ function IssueAccumulatorGate({
         driverName={driverName}
         clearance={redHandshake.clearance}
         issues={redHandshake.issues}
-        onAuthorized={() => {
-          localStorage.removeItem(`yada_handshake_state_${asset.id}`);
-          onPassed();
-        }}
-        onBack={() => {
-          localStorage.removeItem(`yada_handshake_state_${asset.id}`);
-          setRedHandshake(null);
-          onBack();
-        }}
+        onAuthorized={clearHandshakeAndProceed}
+        onBack={clearHandshakeAndBack}
       />
     );
   }
@@ -463,8 +477,8 @@ function IssueAccumulatorGate({
       dateStr={dateStr}
       driverName={driverName}
       onCleared={onPassed}
-      onEscalated={(esc) => setEscalation(esc)}
-      onRedHandshake={(clearance, issues) => setRedHandshake({ clearance, issues })}
+      onEscalated={handleEscalated}
+      onRedHandshake={handleRedHandshake}
       onBack={onBack}
     />
   );
@@ -908,6 +922,7 @@ function WalkaroundChecklist({
   );
 }
 
+
 /* -------------------- Event Picker + Start Trip -------------------- */
 
 function EventPickAndStart({
@@ -1004,10 +1019,9 @@ function EventPickAndStart({
 
 interface ActiveTripScreenProps {
   bundle: ActiveTripBundle;
-  onLogout: () => void;
 }
 
-function ActiveTripScreen({ bundle, onLogout }: ActiveTripScreenProps) {
+function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const { trip, legs } = bundle;
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
@@ -1025,7 +1039,7 @@ function ActiveTripScreen({ bundle, onLogout }: ActiveTripScreenProps) {
     const dropped = prevLegIdsRef.current.filter((id) => !currentIds.has(id));
     if (dropped.length > 0) {
       toast.info("Coordinator updated your manifest", {
-        description: `${dropped.length} stop${dropped.length === 1 ? "" : "s"} rerouted to alternative transport.`,
+        description: `${dropped.length} stop${dropped.length === 1 ? "" : "s"} rerouted to alternative transport Simon.`,
       });
     }
     prevLegIdsRef.current = legs.map((l) => l.id);
@@ -1041,21 +1055,9 @@ function ActiveTripScreen({ bundle, onLogout }: ActiveTripScreenProps) {
               {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
           </div>
-          <div className="flex items-center gap-3 text-right">
-            <div>
-              <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
-              <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
-            </div>
-            <button
-              onClick={() => {
-                if (confirm("Log out? Active trip details remain saved securely on the server.")) {
-                  onLogout();
-                }
-              }}
-              className="rounded border border-slate-700 bg-slate-800 px-2.5 py-1 text-[11px] font-bold uppercase tracking-wider text-slate-300 hover:bg-slate-700 hover:text-white transition"
-            >
-              Exit
-            </button>
+          <div className="text-right">
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
+            <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
           </div>
         </div>
       </header>
