@@ -74,7 +74,8 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
 import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
-import { getActiveEscalation } from "@/lib/api/clearance";
+import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
+import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
