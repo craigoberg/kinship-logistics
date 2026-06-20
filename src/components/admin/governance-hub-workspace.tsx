@@ -359,31 +359,71 @@ function EditAssetModal({
         <div className="grid gap-3 py-2 sm:grid-cols-2">
           <div className="space-y-1 sm:col-span-1">
             <Label>Category</Label>
-            <Input
-              list="gov-categories"
-              placeholder="VEHICLE / STAFF / INSURANCE / …"
-              value={category}
-              onChange={(e) => setCategory(e.target.value)}
-            />
-            <datalist id="gov-categories">
-              {categories.map((c) => (
-                <option key={c} value={c} />
-              ))}
-            </datalist>
+            <Select
+              value={isNewCategory || !category ? "__NEW__" : normCategory}
+              onValueChange={(v) => {
+                if (v === "__NEW__") {
+                  setCategory("");
+                } else {
+                  setCategory(v);
+                  // Reset type when category changes so the dropdown options refresh.
+                  if (!(typesByCategory[v] ?? []).includes(type)) setType("");
+                }
+              }}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Select category…" />
+              </SelectTrigger>
+              <SelectContent>
+                {categories.map((c) => (
+                  <SelectItem key={c} value={c}>
+                    {c}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__NEW__">+ Add new category…</SelectItem>
+              </SelectContent>
+            </Select>
+            {isNewCategory || !categories.includes(normCategory) ? (
+              <Input
+                className="mt-1"
+                placeholder="New category (e.g. INSURANCE)"
+                value={category}
+                onChange={(e) => setCategory(e.target.value.toUpperCase())}
+              />
+            ) : null}
           </div>
           <div className="space-y-1">
             <Label>Type</Label>
-            <Input
-              list="gov-types"
-              placeholder="rego / policy / extinguisher / …"
-              value={type}
-              onChange={(e) => setType(e.target.value)}
-            />
-            <datalist id="gov-types">
-              {(typesByCategory[normCategory] ?? []).map((t) => (
-                <option key={t} value={t} />
-              ))}
-            </datalist>
+            <Select
+              value={isNewType || !type ? "__NEW__" : normType}
+              onValueChange={(v) => {
+                if (v === "__NEW__") setType("");
+                else setType(v);
+              }}
+              disabled={!normCategory}
+            >
+              <SelectTrigger>
+                <SelectValue
+                  placeholder={normCategory ? "Select type…" : "Pick category first"}
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {(typesByCategory[normCategory] ?? []).map((t) => (
+                  <SelectItem key={t} value={t}>
+                    {t}
+                  </SelectItem>
+                ))}
+                <SelectItem value="__NEW__">+ Add new type…</SelectItem>
+              </SelectContent>
+            </Select>
+            {normCategory && (isNewType || !(typesByCategory[normCategory] ?? []).includes(normType)) ? (
+              <Input
+                className="mt-1"
+                placeholder="New type (e.g. rego / policy)"
+                value={type}
+                onChange={(e) => setType(e.target.value)}
+              />
+            ) : null}
           </div>
 
           {pinRequired && (
