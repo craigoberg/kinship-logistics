@@ -205,6 +205,7 @@ export function useStartEndDayAnomalies() {
     queryFn: () => listFailedClearancesWithItems(date),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
   const summaryQ = useQuery<TodayManifestSummary>({
     queryKey: ["today-manifest-summary", date],
