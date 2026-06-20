@@ -93,6 +93,18 @@ Every action in YADA Connect follows a competency-verified model:
 
 ---
 
-## 9. Reference
+## 9. UI Conventions: Date & Time Display
+
+All user-visible dates and times render in the **browser's local timezone** via `toLocaleString` (no explicit `timeZone` option) — the browser is the source of truth for timezone.
+
+- Use `<ClientTime iso={...} />` or the `useClientFormattedDate(iso, options)` hook from `src/components/ui/client-time.tsx` for every user-visible timestamp. These render an SSR-safe placeholder on the server / first paint, then swap to the locale-formatted string after mount, eliminating React hydration mismatches.
+- **Never** render raw `toISOString()` strings to users — that always reads in UTC and skews the wall-clock display (e.g. AEST appears ~10–11 hours behind).
+- Storage stays UTC ISO. All `new Date().toISOString()` writes to Supabase (`updated_at`, `timestamp`, ledger entries, etc.) are correct and unchanged. Only the **display** layer is localized.
+- Do not introduce a project-level timezone override or per-user TZ preference unless explicitly requested.
+
+---
+
+## 10. Reference
 
 - **ARCHITECTURE.md** — Implementation details, table schemas, escalation loops, module patterns, and enforcement rules.
+
