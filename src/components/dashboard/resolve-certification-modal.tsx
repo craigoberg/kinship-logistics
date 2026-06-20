@@ -202,13 +202,19 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
             </div>
 
             {resType === "renewed" && (
-              <DateField
-                label="New Expiry Date"
-                value={newExpiry}
-                onChange={setNewExpiry}
-                helper="Must be future-dated."
-                disabledFn={(d) => d.getTime() <= today.getTime()}
-              />
+              <div className="grid gap-1">
+                <DateField
+                  label="New Expiry Date"
+                  value={newExpiry}
+                  onChange={setNewExpiry}
+                  helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                />
+                {newExpiry && newExpiry.getTime() <= today.getTime() && (
+                  <span className="text-[11px] font-medium text-destructive">
+                    Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
+                  </span>
+                )}
+              </div>
             )}
 
             {resType === "deferred" && (
@@ -317,7 +323,7 @@ function DateField({
   value: Date | undefined;
   onChange: (d: Date | undefined) => void;
   helper: string;
-  disabledFn: (d: Date) => boolean;
+  disabledFn?: (d: Date) => boolean;
 }) {
   return (
     <div className="grid gap-1.5">
