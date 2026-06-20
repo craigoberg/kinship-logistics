@@ -304,6 +304,7 @@ export function useComplianceExceptions() {
     queryFn: () => listComplianceAssets({ status: "active" }),
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
   });
 
   const rows = useMemo<ComplianceExceptionRow[]>(() => {
