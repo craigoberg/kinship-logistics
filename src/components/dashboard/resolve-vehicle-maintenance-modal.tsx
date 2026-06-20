@@ -25,6 +25,15 @@ import {
   type VehicleResolutionType,
   type VehicleFlagKind,
 } from "@/lib/api/ledger";
+import type { ChecklistItem } from "@/lib/api/checklists";
+import {
+  FormalAuditChecklist,
+  buildFormalAuditPayload,
+  emptyFormalAuditState,
+  type FormalAuditState,
+} from "@/components/dashboard/formal-audit-checklist";
+
+const FORMAL_AUDIT_CATEGORY = "VEHICLE_FORMAL_AUDIT";
 
 const MIN_NOTES = 20;
 const MIN_EVIDENCE = 6;
