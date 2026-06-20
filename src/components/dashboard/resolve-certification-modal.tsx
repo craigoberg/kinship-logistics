@@ -86,6 +86,10 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
   const notesTooShort = trimmedNotes.length < MIN_NOTES;
   const evidenceRequired = resType === "renewed";
   const evidenceTooShort = trimmedEvidence.length < MIN_EVIDENCE;
+  const actionDateRequired = resType === "renewed";
+  const actionDateMissing = actionDateRequired && !actionDate;
+  const actionDateInvalid =
+    actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
@@ -101,7 +105,10 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     !notesTooShort &&
     !(evidenceRequired && evidenceTooShort) &&
     !dateMissing &&
-    !dateInvalid;
+    !dateInvalid &&
+    !actionDateMissing &&
+    !actionDateInvalid;
+
 
   // Clear evidence when switching away from "renewed" so stale input isn't
   // silently carried into a defer/revoke receipt.
