@@ -4,10 +4,21 @@ import {
   Link,
   createRootRouteWithContext,
   useRouter,
+  useRouterState,
+  useNavigate,
   HeadContent,
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
+
+import appCss from "../styles.css?url";
+import { reportLovableError } from "../lib/lovable-error-reporting";
+import { getActiveUserRole } from "../lib/data-store";
+import { AppShell } from "../components/app-shell";
+import { NotificationSimulator } from "../components/ui/NotificationSimulator";
+import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
+import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
+import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
