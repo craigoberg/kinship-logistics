@@ -543,6 +543,130 @@ export async function updateStaffMember(id: string, p: StaffPayload): Promise<St
   return rowToStaff(data as StaffRow);
 }
 
+// ---------- PIN-based terminal login (RBAC) ----------
+
+export type UserRole = "driver" | "coordinator";
+
+export const USER_ROLE_KEY = "yada_user_role";
+export const USER_PROFILE_KEY = "yada_user_profile";
+export const WORKFLOW_MODE_KEY = "current_workflow_mode";
+
+export interface ActiveUserProfile {
+  staffId: string;
+  fullName: string;
+  role: UserRole;
+  staffRole: string | null;
+  vehicleId?: string | null;
+  vehicleName?: string | null;
+}
+
+function classifyRole(staffRole: string | null): UserRole {
+  const r = (staffRole ?? "").toLowerCase();
+  if (r.includes("driver") || r.includes("transport")) return "driver";
+  return "coordinator";
+}
+
+/**
+ * Verifies a 4-digit PIN against every active staff_registry row by calling
+ * the `verify_staff_pin` security-definer RPC. Returns the matched staff
+ * member plus their resolved RBAC role, or null if no PIN matches.
+ *
+ * On success this persists role + identity to localStorage so the route
+ * guardian and downstream FK writes can attribute actions correctly.
+ */
+export async function loginWithPin(
+  pin: string,
+): Promise<ActiveUserProfile | null> {
+  if (!/^\d{4}$/.test(pin)) return null;
+
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id, full_name, role, pin_hash, active")
+    .eq("active", true)
+    .not("pin_hash", "is", null);
+  if (error) throwPg("[loginWithPin]", error);
+
+  const candidates = (data ?? []) as Array<{
+    id: string;
+    full_name: string;
+    role: string | null;
+    pin_hash: string | null;
+  }>;
+
+  const checks = await Promise.all(
+    candidates.map(async (row) => ({
+      row,
+      ok: await verifyStaffPin(row.id, pin),
+    })),
+  );
+  const match = checks.find((c) => c.ok);
+  if (!match) return null;
+
+  const role = classifyRole(match.row.role);
+
+  // Best-effort vehicle lookup for drivers — schema may not expose a
+  // default-driver column, so swallow errors.
+  let vehicleId: string | null = null;
+  let vehicleName: string | null = null;
+  if (role === "driver") {
+    try {
+      const { data: asset } = await supabase
+        .from("transport_assets")
+        .select("id, vehicle_name")
+        .limit(1)
+        .maybeSingle();
+      if (asset) {
+        vehicleId = (asset as { id: string }).id;
+        vehicleName = (asset as { vehicle_name: string | null }).vehicle_name ?? null;
+      }
+    } catch {
+      /* non-fatal */
+    }
+  }
+
+  const profile: ActiveUserProfile = {
+    staffId: match.row.id,
+    fullName: match.row.full_name,
+    role,
+    staffRole: match.row.role,
+    vehicleId,
+    vehicleName,
+  };
+
+  if (typeof localStorage !== "undefined") {
+    localStorage.setItem(USER_ROLE_KEY, role);
+    localStorage.setItem(WORKFLOW_MODE_KEY, role);
+    localStorage.setItem(STAFF_KEY, match.row.id);
+    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+  }
+
+  return profile;
+}
+
+export function getActiveUserRole(): UserRole | null {
+  if (typeof localStorage === "undefined") return null;
+  const v = localStorage.getItem(USER_ROLE_KEY);
+  return v === "driver" || v === "coordinator" ? v : null;
+}
+
+export function getActiveUserProfile(): ActiveUserProfile | null {
+  if (typeof localStorage === "undefined") return null;
+  const raw = localStorage.getItem(USER_PROFILE_KEY);
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as ActiveUserProfile;
+  } catch {
+    return null;
+  }
+}
+
+export function clearActiveUserSession(): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.removeItem(USER_ROLE_KEY);
+  localStorage.removeItem(USER_PROFILE_KEY);
+  localStorage.removeItem(WORKFLOW_MODE_KEY);
+}
+
 // ---------- carers_registry ----------
 
 export interface Carer {
