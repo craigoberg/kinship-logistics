@@ -5,6 +5,7 @@ import {
   updateStaffMember,
   type StaffCertification,
 } from "@/lib/data-store";
+import { updateFleetAsset } from "@/lib/api/fleet";
 
 export type LedgerCategory = "VEHICLE" | "CENTRE" | "CLIENT" | "TRIP";
 export type LedgerSeverity = "RED" | "YELLOW" | "GREEN" | "INFO";
@@ -225,4 +226,146 @@ export async function resolveCertification(
   }
 
   return { staffId, certName, ledgerWritten, staffMirrored };
+}
+
+// ---------------------------------------------------------------------------
+// Vehicle maintenance resolution — Manager-only "Resolve" action on the
+// dashboard Vehicle Compliance tile. Mirrors the certification pattern:
+// appends an immutable receipt to operational_ledger AND mirrors the new
+// state back to transport_assets (registration_expiry / last_service_* /
+// deferred_until) so the next dashboard scan reflects it.
+// ---------------------------------------------------------------------------
+
+export type VehicleResolutionType =
+  | "renewed" // rego renewed → new registration_expiry
+  | "serviced" // vehicle serviced → new last_service_odo + last_service_date
+  | "deferred" // snooze the YELLOW flag → deferred_until (max +30 days, UI-enforced)
+  | "decommissioned"; // retire from fleet → is_active=false
+
+export type VehicleFlagKind = "rego" | "service" | "vin_missing";
+
+export interface ResolveVehicleMaintenanceInput {
+  assetId: string;
+  assetName: string;
+  regoPlate: string;
+  flagKind: VehicleFlagKind;
+  resolutionType: VehicleResolutionType;
+  /** Required when resolutionType === 'renewed' — ISO yyyy-mm-dd. */
+  newRegistrationExpiry?: string | null;
+  /** Required when resolutionType === 'serviced' — odometer at service. */
+  newServiceOdo?: number | null;
+  /** Defaults to today when resolutionType === 'serviced'. */
+  newServiceDate?: string | null;
+  /** Required when resolutionType === 'deferred' — ISO yyyy-mm-dd, max +30d. */
+  deferredUntil?: string | null;
+  /** Previous value for audit. */
+  previousValue?: string | number | null;
+  /** Evidence reference. Required (min 6 chars) only for renewed/serviced. */
+  evidenceRef: string | null;
+  /** Manager justification. Always required, min 20 chars. */
+  justification: string;
+}
+
+export interface ResolveVehicleMaintenanceResult {
+  assetId: string;
+  flagKind: VehicleFlagKind;
+  ledgerWritten: boolean;
+  assetMirrored: boolean;
+}
+
+export async function resolveVehicleMaintenance(
+  input: ResolveVehicleMaintenanceInput,
+): Promise<ResolveVehicleMaintenanceResult> {
+  const {
+    assetId,
+    assetName,
+    regoPlate,
+    flagKind,
+    resolutionType,
+    newRegistrationExpiry,
+    newServiceOdo,
+    newServiceDate,
+    deferredUntil,
+    previousValue,
+    evidenceRef,
+    justification,
+  } = input;
+
+  // 1) Mirror back to transport_assets.
+  let assetMirrored = false;
+  try {
+    if (resolutionType === "renewed") {
+      await updateFleetAsset(assetId, {
+        registrationExpiry: newRegistrationExpiry ?? null,
+        deferredUntil: null,
+      });
+    } else if (resolutionType === "serviced") {
+      await updateFleetAsset(assetId, {
+        lastServiceOdo: newServiceOdo ?? null,
+        lastServiceDate:
+          newServiceDate ?? new Date().toISOString().slice(0, 10),
+        deferredUntil: null,
+      });
+    } else if (resolutionType === "deferred") {
+      await updateFleetAsset(assetId, { deferredUntil: deferredUntil ?? null });
+    } else if (resolutionType === "decommissioned") {
+      await updateFleetAsset(assetId, { isActive: false });
+    }
+    assetMirrored = true;
+  } catch (err) {
+    console.error("[resolveVehicleMaintenance] mirror to transport_assets failed", err);
+    throw err;
+  }
+
+  // 2) Append immutable ledger receipt.
+  const gps = await tryGetGps();
+  const actorId = await resolveStaffIdWithFallback();
+  const severityAfter: LedgerSeverity =
+    resolutionType === "renewed" || resolutionType === "serviced"
+      ? "GREEN"
+      : resolutionType === "deferred"
+        ? "YELLOW"
+        : "INFO";
+  const subjectId = `${assetId}:${flagKind}`;
+
+  let ledgerWritten = false;
+  try {
+    const { error } = await supabase.from("operational_ledger").insert({
+      staff_id: actorId,
+      category: "VEHICLE",
+      severity: severityAfter,
+      action_type: "VEHICLE_MAINTENANCE_RESOLVED",
+      gps_lat: gps?.lat ?? null,
+      gps_lng: gps?.lng ?? null,
+      metadata: {
+        subject_type: "transport_asset",
+        subject_id: subjectId,
+        asset_id: assetId,
+        asset_name: assetName,
+        rego_plate: regoPlate,
+        flag_kind: flagKind,
+        resolution_type: resolutionType,
+        previous_value: previousValue ?? null,
+        new_value:
+          resolutionType === "renewed"
+            ? (newRegistrationExpiry ?? null)
+            : resolutionType === "serviced"
+              ? (newServiceOdo ?? null)
+              : null,
+        deferred_until: deferredUntil ?? null,
+        evidence_ref: evidenceRef ?? null,
+        justification,
+        gps_attempted: true,
+        gps_captured: !!gps,
+        source: "resolve_vehicle_maintenance_modal",
+      },
+    });
+    if (error) throw error;
+    ledgerWritten = true;
+  } catch (err) {
+    console.error("[resolveVehicleMaintenance] ledger write failed", err);
+    throw err;
+  }
+
+  return { assetId, flagKind, ledgerWritten, assetMirrored };
 }

@@ -16,6 +16,8 @@ import {
   type TodayManifestSummary,
   type StaffMember,
 } from "@/lib/data-store";
+import { listFleet, getLatestOdometers, type TransportAsset } from "@/lib/api/fleet";
+import type { VehicleFlagKind } from "@/lib/api/ledger";
 
 export type Severity = "critical" | "warning" | "info";
 
@@ -402,4 +404,140 @@ export function useStartEndDayAnomalies() {
   }, [q.data, summaryQ.data]);
 
   return { data: rows, isLoading: q.isLoading };
+}
+
+// ---------------------------------------------------------------------------
+// VEHICLE MAINTENANCE — live scan of transport_assets compliance fields.
+// SQL: docs/sql/2026-07-01_fleet_compliance_fields.sql
+// ---------------------------------------------------------------------------
+
+export interface VehicleMaintenanceExceptionRow {
+  key: string;
+  assetId: string;
+  assetName: string;
+  regoPlate: string;
+  flagKind: VehicleFlagKind;
+  title: string;
+  detail: string;
+  severity: Severity;
+  previousValue: string | number | null;
+  latestOdo: number | null;
+  daysDelta: number;
+}
+
+const SERVICE_DUE_WARN_KM = 500;
+
+export function useVehicleMaintenanceExceptions() {
+  const fleetQ = useQuery<TransportAsset[]>({
+    queryKey: ["fleet", "active"],
+    queryFn: () => listFleet(),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+
+  const ids = (fleetQ.data ?? []).map((a) => a.id);
+  const odoQ = useQuery<Record<string, number | null>>({
+    queryKey: ["fleet", "latest-odometers", ids.slice().sort().join(",")],
+    queryFn: () => getLatestOdometers(ids),
+    enabled: ids.length > 0,
+    staleTime: 60_000,
+  });
+
+  const rows = useMemo<VehicleMaintenanceExceptionRow[]>(() => {
+    const fleet = fleetQ.data ?? [];
+    const odos = odoQ.data ?? {};
+    const today = startOfToday();
+    const todayMs = today.getTime();
+    const out: VehicleMaintenanceExceptionRow[] = [];
+
+    for (const a of fleet) {
+      const latestOdo = odos[a.id] ?? null;
+      const deferActive = (() => {
+        if (!a.deferredUntil) return false;
+        const d = parseISODate(a.deferredUntil);
+        return !!d && d.getTime() > todayMs;
+      })();
+
+      if (a.registrationExpiry) {
+        const expiry = parseISODate(a.registrationExpiry);
+        if (expiry) {
+          const days = Math.round((expiry.getTime() - todayMs) / 86_400_000);
+          let severity: Severity | null = null;
+          let stateLabel = "";
+          if (days < 0) {
+            severity = "critical";
+            stateLabel = `Rego EXPIRED ${Math.abs(days)}d ago (${formatAusDate(a.registrationExpiry)})`;
+          } else if (days <= 30 && !deferActive) {
+            severity = "warning";
+            stateLabel = `Rego due in ${days}d (${formatAusDate(a.registrationExpiry)})`;
+          }
+          if (severity) {
+            out.push({
+              key: `veh:${a.id}:rego`,
+              assetId: a.id,
+              assetName: a.name,
+              regoPlate: a.regoPlate,
+              flagKind: "rego",
+              title: `${a.name} (${a.regoPlate})`,
+              detail: stateLabel,
+              severity,
+              previousValue: a.registrationExpiry,
+              latestOdo,
+              daysDelta: days,
+            });
+          }
+        }
+      }
+
+      if (
+        a.serviceIntervalKm &&
+        a.lastServiceOdo != null &&
+        latestOdo != null &&
+        !deferActive
+      ) {
+        const nextDue = a.lastServiceOdo + a.serviceIntervalKm;
+        const kmRemaining = nextDue - latestOdo;
+        if (kmRemaining <= SERVICE_DUE_WARN_KM) {
+          const stateLabel =
+            kmRemaining <= 0
+              ? `Service OVERDUE by ${Math.abs(kmRemaining)} km (odo ${latestOdo} ≥ due ${nextDue})`
+              : `Service due in ${kmRemaining} km (odo ${latestOdo} of ${nextDue})`;
+          out.push({
+            key: `veh:${a.id}:service`,
+            assetId: a.id,
+            assetName: a.name,
+            regoPlate: a.regoPlate,
+            flagKind: "service",
+            title: `${a.name} (${a.regoPlate})`,
+            detail: stateLabel,
+            severity: "warning",
+            previousValue: a.lastServiceOdo,
+            latestOdo,
+            daysDelta: Math.max(-9999, Math.min(9999, kmRemaining)),
+          });
+        }
+      }
+
+      if (!a.vin) {
+        out.push({
+          key: `veh:${a.id}:vin_missing`,
+          assetId: a.id,
+          assetName: a.name,
+          regoPlate: a.regoPlate,
+          flagKind: "vin_missing",
+          title: `${a.name} (${a.regoPlate})`,
+          detail: "VIN / chassis number missing from fleet register.",
+          severity: "info",
+          previousValue: null,
+          latestOdo,
+          daysDelta: 9999,
+        });
+      }
+    }
+
+    out.sort((a, b) => a.daysDelta - b.daysDelta);
+    return out;
+  }, [fleetQ.data, odoQ.data]);
+
+  return { data: rows, isLoading: fleetQ.isLoading || odoQ.isLoading };
 }
