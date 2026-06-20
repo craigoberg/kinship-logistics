@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { Pill, CheckCircle2, Clock, AlertOctagon } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -241,7 +241,7 @@ function StatusButton({
   );
 }
 
-function LogRow({ label, value }: { label: string; value: React.ReactNode }) {
+function LogRow({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
