@@ -118,6 +118,11 @@ export function ResolveVehicleMaintenanceModal({
   const odoInvalid =
     resType === "serviced" && (!Number.isFinite(odoNum) || odoNum < 0);
 
+  const actionDateRequired = resType === "renewed" || resType === "serviced";
+  const actionDateMissing = actionDateRequired && !actionDate;
+  const actionDateInvalid =
+    actionDateRequired && !!actionDate && actionDate.getTime() > today.getTime();
+
   const dateMissing =
     (resType === "renewed" && !newExpiry) ||
     (resType === "deferred" && !deferredUntil);
@@ -134,7 +139,10 @@ export function ResolveVehicleMaintenanceModal({
     !(evidenceRequired && evidenceTooShort) &&
     !dateMissing &&
     !dateInvalid &&
-    !odoInvalid;
+    !odoInvalid &&
+    !actionDateMissing &&
+    !actionDateInvalid;
+
 
   const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
 
