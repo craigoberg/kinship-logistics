@@ -25,6 +25,29 @@ export function RouteRehydrationGuardian() {
     if (ranRef.current) return;
     ranRef.current = true;
 
+    // Office / coordinator / admin surfaces must NEVER be hijacked into the
+    // driver manifest — even when the same Supabase user has an open
+    // escalation. The guardian is strictly a driver-terminal aid.
+    const OFFICE_PREFIXES = [
+      "/dashboard",
+      "/admin",
+      "/events",
+      "/participants",
+      "/staff",
+      "/transport",
+      "/finance",
+      "/sync",
+    ];
+    if (OFFICE_PREFIXES.some((p) => pathname.startsWith(p))) return;
+
+    // Opt-in driver mode flag. Without it we assume an office profile and
+    // bail, so shared dev accounts on a manager tab stay put.
+    const workflowMode =
+      typeof window !== "undefined"
+        ? window.localStorage.getItem("current_workflow_mode")
+        : null;
+    if (workflowMode !== "driver") return;
+
     const staffId = getStaffId() || DEFAULT_STAFF_UUID;
     const driverName =
       STAFF_DIRECTORY.find((s) => s.id === staffId)?.name ?? "Driver";
