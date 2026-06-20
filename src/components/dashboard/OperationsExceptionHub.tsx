@@ -39,11 +39,15 @@ import {
   type ResolveCertSubject,
 } from "./resolve-certification-modal";
 import {
+  ResolveVehicleMaintenanceModal,
+  type ResolveVehicleSubject,
+} from "./resolve-vehicle-maintenance-modal";
+import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
   useStaffCertificationExceptions,
-  VEHICLE_COMPLIANCE_PLACEHOLDERS,
+  useVehicleMaintenanceExceptions,
   ASSET_LIABILITY_PLACEHOLDERS,
   type PlaceholderRow,
   type Severity,
@@ -106,6 +110,7 @@ export function OperationsExceptionHub() {
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
   const { data: staffCertRows } = useStaffCertificationExceptions();
+  const { data: vehicleRows } = useVehicleMaintenanceExceptions();
 
   const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
     queryKey: ["pending-manager-reviews"],
@@ -126,6 +131,8 @@ export function OperationsExceptionHub() {
     useState<OperationalEscalation | null>(null);
   const [activeCertResolve, setActiveCertResolve] =
     useState<ResolveCertSubject | null>(null);
+  const [activeVehicleResolve, setActiveVehicleResolve] =
+    useState<ResolveVehicleSubject | null>(null);
 
   useEffect(() => {
     const off = subscribeToPendingReviews(() => {
@@ -214,8 +221,34 @@ export function OperationsExceptionHub() {
       anchorId: "exception-section-vehicle",
       label: "Vehicle Compliance",
       icon: Truck,
-      isLive: false,
-      rows: toRows(VEHICLE_COMPLIANCE_PLACEHOLDERS, "veh"),
+      isLive: true,
+      rows: vehicleRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action:
+          r.severity === "critical" || r.severity === "warning" ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              onClick={() =>
+                setActiveVehicleResolve({
+                  assetId: r.assetId,
+                  assetName: r.assetName,
+                  regoPlate: r.regoPlate,
+                  flagKind: r.flagKind,
+                  previousValue: r.previousValue,
+                  latestOdo: r.latestOdo,
+                })
+              }
+            >
+              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+              Resolve
+            </Button>
+          ) : undefined,
+      })),
     },
     {
       id: "staff",
@@ -407,6 +440,14 @@ export function OperationsExceptionHub() {
         subject={activeCertResolve}
         onClose={() => setActiveCertResolve(null)}
         onResolved={() => qc.invalidateQueries({ queryKey: ["staff-registry", "all"] })}
+      />
+
+      <ResolveVehicleMaintenanceModal
+        subject={activeVehicleResolve}
+        onClose={() => setActiveVehicleResolve(null)}
+        onResolved={() => {
+          qc.invalidateQueries({ queryKey: ["fleet"] });
+        }}
       />
     </Card>
   );

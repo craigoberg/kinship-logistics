@@ -16,6 +16,8 @@ import {
   type TodayManifestSummary,
   type StaffMember,
 } from "@/lib/data-store";
+import { listFleet, getLatestOdometers, type TransportAsset } from "@/lib/api/fleet";
+import type { VehicleFlagKind } from "@/lib/api/ledger";
 
 export type Severity = "critical" | "warning" | "info";
 
