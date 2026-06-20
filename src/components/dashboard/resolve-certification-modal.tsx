@@ -214,20 +214,32 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
             </div>
 
             {resType === "renewed" && (
-              <div className="grid gap-1">
-                <DateField
-                  label="New Expiry Date"
-                  value={newExpiry}
-                  onChange={setNewExpiry}
-                  helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
-                />
-                {newExpiry && newExpiry.getTime() <= today.getTime() && (
-                  <span className="text-[11px] font-medium text-destructive">
-                    Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
-                  </span>
-                )}
-              </div>
+              <>
+                <div className="grid gap-1">
+                  <DateField
+                    label="Renewal Date"
+                    value={actionDate}
+                    onChange={setActionDate}
+                    helper="When the renewal actually occurred. Past dates allowed; future dates are not."
+                    disabledFn={(d) => d.getTime() > today.getTime()}
+                  />
+                </div>
+                <div className="grid gap-1">
+                  <DateField
+                    label="New Expiry Date"
+                    value={newExpiry}
+                    onChange={setNewExpiry}
+                    helper="Back-dating allowed for evidence entry, but the resulting expiry must be after today."
+                  />
+                  {newExpiry && newExpiry.getTime() <= today.getTime() && (
+                    <span className="text-[11px] font-medium text-destructive">
+                      Expiry must be after today — renewals with an already-expired date cannot resolve the flag.
+                    </span>
+                  )}
+                </div>
+              </>
             )}
+
 
             {resType === "deferred" && (
               <DateField
