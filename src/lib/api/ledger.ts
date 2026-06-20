@@ -253,7 +253,8 @@ export type VehicleResolutionType =
   | "renewed" // rego renewed → new registration_expiry
   | "serviced" // vehicle serviced → new last_service_odo + last_service_date
   | "deferred" // snooze the YELLOW flag → deferred_until (max +30 days, UI-enforced)
-  | "decommissioned"; // retire from fleet → is_active=false
+  | "decommissioned" // retire from fleet → is_active=false
+  | "formal_audit"; // Two-Man formal safety audit (checklist + dual-PIN)
 
 export type VehicleFlagKind = "rego" | "service" | "vin_missing";
 
