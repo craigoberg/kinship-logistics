@@ -4260,6 +4260,17 @@ export async function listPendingEscalations(): Promise<OperationalEscalation[]>
   return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
 }
 
+/** Fetch every escalation currently grounded (status = resolved_denied). */
+export async function listGroundedEscalations(): Promise<OperationalEscalation[]> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("*")
+    .eq("status", "resolved_denied")
+    .order("resolved_at", { ascending: false });
+  if (error) throwPg("[listGroundedEscalations]", error);
+  return ((data ?? []) as OperationalEscalationRow[]).map(rowToEscalation);
+}
+
 /**
  * Re-hydration guardian query: returns any escalation that is still in-flight
  * for the given driver (status pending or claimed). Used on app mount to
