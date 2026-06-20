@@ -3,7 +3,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { CheckCircle2, MapPin, Navigation, Pill, AlertTriangle, Loader2, ShieldCheck, ShieldAlert, ClipboardCheck } from "lucide-react";
+import {
+  CheckCircle2,
+  MapPin,
+  Navigation,
+  Pill,
+  AlertTriangle,
+  Loader2,
+  ShieldCheck,
+  ShieldAlert,
+  ClipboardCheck,
+} from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
@@ -11,13 +21,7 @@ import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -43,7 +47,16 @@ import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn } from "@/lib/utils";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
-import type { TripLeg, ActiveTripBundle, MedicationHandoverStatus, TransportAsset, AssetCheckpoint, AssetDailyClearance, TodayManifestSummary, OperationalEscalation } from "@/lib/data-store";
+import type {
+  TripLeg,
+  ActiveTripBundle,
+  MedicationHandoverStatus,
+  TransportAsset,
+  AssetCheckpoint,
+  AssetDailyClearance,
+  TodayManifestSummary,
+  OperationalEscalation,
+} from "@/lib/data-store";
 import {
   listTransportAssets,
   getClearanceForAssetOnDate,
@@ -65,7 +78,10 @@ export const Route = createFileRoute("/manifest")({
   head: () => ({
     meta: [
       { title: "Active Driver Manifest — Yada Connect" },
-      { name: "description", content: "Sequential leg-by-leg trip workflow with GPS, passenger boarding, and medication bag handover." },
+      {
+        name: "description",
+        content: "Sequential leg-by-leg trip workflow with GPS, passenger boarding, and medication bag handover.",
+      },
     ],
   }),
   component: ManifestPage,
@@ -106,10 +122,32 @@ function InitializeTripScreen() {
   const today = todayDateStr();
   const { data: lastEndOdo = null } = useLastEndOdometer();
 
-  const [step, setStep] = useState<InitStep>("vehicle");
-  const [assetId, setAssetId] = useState("");
-  const [odo, setOdo] = useState("");
-  const [clearanceOk, setClearanceOk] = useState(false);
+  // Rehydrate setup wizard parameters from localStorage to insulate against mid-setup reloads
+  const [step, setStep] = useState<InitStep>(() => {
+    if (typeof window !== "undefined") {
+      return (localStorage.getItem("yada_init_step") as InitStep) || "vehicle";
+    }
+    return "vehicle";
+  });
+  const [assetId, setAssetId] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("yada_init_assetId") || "";
+    }
+    return "";
+  });
+  const [odo, setOdo] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("yada_init_odo") || "";
+    }
+    return "";
+  });
+  const [clearanceOk, setClearanceOk] = useState(() => {
+    if (typeof window !== "undefined") {
+      return localStorage.getItem("yada_init_clearanceOk") === "true";
+    }
+    return false;
+  });
+
   const hasHydratedOdoRef = useRef(false);
 
   useEffect(() => {
@@ -120,19 +158,27 @@ function InitializeTripScreen() {
     }
   }, [lastEndOdo, odo]);
 
+  // Sync initialization selections to state to persist through F5 events
+  useEffect(() => {
+    localStorage.setItem("yada_init_step", step);
+  }, [step]);
+  useEffect(() => {
+    localStorage.setItem("yada_init_assetId", assetId);
+  }, [assetId]);
+  useEffect(() => {
+    localStorage.setItem("yada_init_odo", odo);
+  }, [odo]);
+  useEffect(() => {
+    localStorage.setItem("yada_init_clearanceOk", String(clearanceOk));
+  }, [clearanceOk]);
+
   const assetsQ = useQuery({
     queryKey: ["transport-assets"],
     queryFn: () => listTransportAssets(),
     staleTime: 5 * 60_000,
   });
-  const activeAssets = useMemo(
-    () => (assetsQ.data ?? []).filter((a) => a.isActive),
-    [assetsQ.data],
-  );
-  const selectedAsset = useMemo(
-    () => activeAssets.find((a) => a.id === assetId) ?? null,
-    [activeAssets, assetId],
-  );
+  const activeAssets = useMemo(() => (assetsQ.data ?? []).filter((a) => a.isActive), [assetsQ.data]);
+  const selectedAsset = useMemo(() => activeAssets.find((a) => a.id === assetId) ?? null, [activeAssets, assetId]);
 
   const odoNum = odo === "" ? NaN : Number(odo);
   const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
@@ -179,8 +225,7 @@ function InitializeTripScreen() {
               />
               {lastEndOdo != null && (
                 <p className="text-[11px] text-muted-foreground">
-                  Last recorded closing odometer:{" "}
-                  <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
+                  Last recorded closing odometer: <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
                   {odoNum === lastEndOdo && " · pre-filled"}
                 </p>
               )}
@@ -215,11 +260,7 @@ function InitializeTripScreen() {
       )}
 
       {step === "event" && selectedAsset && clearanceOk && (
-        <EventPickAndStart
-          asset={selectedAsset}
-          startOdometer={odoNum}
-          onBack={() => setStep("clearance")}
-        />
+        <EventPickAndStart asset={selectedAsset} startOdometer={odoNum} onBack={() => setStep("clearance")} />
       )}
     </div>
   );
@@ -257,14 +298,7 @@ function ClearanceGate({
   const existing = existingQ.data ?? null;
 
   if (existing && existing.status === "passed") {
-    return (
-      <FastPassBanner
-        asset={asset}
-        clearance={existing}
-        onConfirm={onCleared}
-        onBack={onBack}
-      />
-    );
+    return <FastPassBanner asset={asset} clearance={existing} onConfirm={onCleared} onBack={onBack} />;
   }
 
   if (existing && existing.status === "failed") {
@@ -275,8 +309,8 @@ function ClearanceGate({
           <h2 className="text-lg font-extrabold">Vehicle NOT cleared today</h2>
         </div>
         <p className="mt-2 text-sm text-muted-foreground">
-          {asset.name} ({asset.regoPlate}) failed today's walkaround. The coordinator must
-          resolve the flagged checkpoints before this vehicle can be dispatched.
+          {asset.name} ({asset.regoPlate}) failed today's walkaround. The coordinator must resolve the flagged
+          checkpoints before this vehicle can be dispatched.
         </p>
         <button
           type="button"
@@ -361,9 +395,7 @@ function IssueAccumulatorGate({
       driverName={driverName}
       onCleared={onPassed}
       onEscalated={(esc) => setEscalation(esc)}
-      onRedHandshake={(clearance, issues) =>
-        setRedHandshake({ clearance, issues })
-      }
+      onRedHandshake={(clearance, issues) => setRedHandshake({ clearance, issues })}
       onBack={onBack}
     />
   );
@@ -384,9 +416,10 @@ function FastPassBanner({
   onBack: () => void;
 }) {
   const parsed = clearance.createdAt ? new Date(clearance.createdAt) : null;
-  const time = parsed && !isNaN(parsed.getTime())
-    ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const time =
+    parsed && !isNaN(parsed.getTime())
+      ? parsed.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+      : new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   const driver = staffName(clearance.driverStaffId);
 
   return (
@@ -396,9 +429,8 @@ function FastPassBanner({
         <h2 className="text-lg font-extrabold">Fast-Pass · Vehicle Cleared</h2>
       </div>
       <p className="mt-3 text-sm">
-        <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared
-        for service at <span className="font-mono font-semibold">{time}</span> by{" "}
-        <span className="font-semibold">{driver}</span>.
+        <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared for service at{" "}
+        <span className="font-mono font-semibold">{time}</span> by <span className="font-semibold">{driver}</span>.
       </p>
       <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
         Please inspect for obvious new damage before departing.
@@ -421,7 +453,7 @@ function FastPassBanner({
   );
 }
 
-/* -------------------- Walkaround Checklist -------------------- */
+/* -------------------- Walkaround Checklist (Legacy Backwards Compat) -------------------- */
 
 interface ChecklistAnswer {
   passed: boolean;
@@ -476,9 +508,7 @@ function WalkaroundChecklist({
   const [pinInput, setPinInput] = useState("");
 
   const submitMut = useMutation({
-    mutationFn: async (
-      input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean },
-    ) => {
+    mutationFn: async (input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean }) => {
       const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       const items = input.checkpoints.map((c) => {
         const a = answers[c.id] ?? { passed: false, notes: "" };
@@ -506,18 +536,11 @@ function WalkaroundChecklist({
         items,
       });
 
-      // Fire dev-mode notification router for every failed checkpoint.
       const driverName = staffName(driverStaffId);
       input.checkpoints.forEach((c) => {
         const row = items.find((it) => it.checkpointId === c.id);
         if (!row || row.passed !== false) return;
-        triggerInspectionAlert(
-          asset.name,
-          driverName,
-          c.label,
-          toSeverity(c.impactLevel),
-          row.notes,
-        );
+        triggerInspectionAlert(asset.name, driverName, c.label, toSeverity(c.impactLevel), row.notes);
       });
 
       return { bundle, forceProceed: input.forceProceed };
@@ -561,24 +584,15 @@ function WalkaroundChecklist({
   const setNotes = (id: string, notes: string) =>
     setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { passed: false }), notes } }));
 
-  // Derived seatbelt + hoist state.
-  const seatbeltFailedCp = checkpoints.find(
-    (c) => isSeatbeltCheckpoint(c) && answers[c.id]?.passed === false,
-  );
-  const hoistFailedCp = checkpoints.find(
-    (c) => isHoistCheckpoint(c) && answers[c.id]?.passed === false,
-  );
+  const seatbeltFailedCp = checkpoints.find((c) => isSeatbeltCheckpoint(c) && answers[c.id]?.passed === false);
+  const hoistFailedCp = checkpoints.find((c) => isHoistCheckpoint(c) && answers[c.id]?.passed === false);
   const brokenBeltCount = Math.max(0, Math.floor(Number(brokenBelts) || 0));
   const baselineCapacity = asset.passengerCapacity;
   const effectiveCapacity = Math.max(0, baselineCapacity - brokenBeltCount);
-  const capacityMismatch =
-    !!seatbeltFailedCp && brokenBeltCount > 0 && totalPassengers > effectiveCapacity;
-  const seatbeltSoftPass =
-    !!seatbeltFailedCp && brokenBeltCount > 0 && !capacityMismatch;
-  const hoistSoftPass = !!hoistFailedCp; // hoist fail never hard-locks driver
+  const capacityMismatch = !!seatbeltFailedCp && brokenBeltCount > 0 && totalPassengers > effectiveCapacity;
+  const seatbeltSoftPass = !!seatbeltFailedCp && brokenBeltCount > 0 && !capacityMismatch;
+  const hoistSoftPass = !!hoistFailedCp;
 
-  // Determine other mandatory hard failures (i.e. mandatory fails that are
-  // NOT seatbelt-with-capacity-ok and NOT hoist).
   const otherMandatoryHardFail = checkpoints.some((c) => {
     const a = answers[c.id];
     if (!a || a.passed !== false || !c.isMandatory) return false;
@@ -593,7 +607,7 @@ function WalkaroundChecklist({
     submitMut.isPending ||
     (capacityMismatch && !overrideUnlocked) ||
     (!!seatbeltFailedCp && brokenBeltCount <= 0) ||
-    otherMandatoryHardFail && !forceProceed;
+    (otherMandatoryHardFail && !forceProceed);
 
   const handleOverrideSubmit = () => {
     if (pinInput.trim() === "0000") {
@@ -696,18 +710,16 @@ function WalkaroundChecklist({
                   />
                   {brokenBeltCount > 0 && (
                     <div className="text-[11px] text-muted-foreground">
-                      Effective capacity:{" "}
-                      <span className="font-bold tabular-nums">{effectiveCapacity}</span>{" "}
-                      seats · Booked today:{" "}
-                      <span className="font-bold tabular-nums">{totalPassengers}</span>
+                      Effective capacity: <span className="font-bold tabular-nums">{effectiveCapacity}</span> seats ·
+                      Booked today: <span className="font-bold tabular-nums">{totalPassengers}</span>
                     </div>
                   )}
                   {capacityMismatch && !overrideUnlocked && (
                     <div className="rounded-md border-2 border-destructive bg-destructive/10 p-2 text-xs text-destructive">
                       <div className="font-bold uppercase">Capacity Mismatch Emergency</div>
                       <div className="mt-1">
-                        {totalPassengers} passengers cannot fit in {effectiveCapacity}{" "}
-                        usable seats. Manager override required to dispatch.
+                        {totalPassengers} passengers cannot fit in {effectiveCapacity} usable seats. Manager override
+                        required to dispatch.
                       </div>
                       <button
                         type="button"
@@ -747,17 +759,15 @@ function WalkaroundChecklist({
                     <>
                       <div className="font-bold uppercase">Hoist fault recorded</div>
                       <div className="mt-1">
-                        Manifest contains <b>{hoistRequiredCount}</b> hoist-dependent passenger(s).
-                        Proceeding with mobile passengers only. Coordinator has been alerted to
-                        reroute affected clients.
+                        Manifest contains <b>{hoistRequiredCount}</b> hoist-dependent passenger(s). Proceeding with
+                        mobile passengers only. Coordinator has been alerted to reroute affected clients.
                       </div>
                     </>
                   ) : (
                     <>
                       <div className="font-bold uppercase">Minor maintenance flagged</div>
                       <div className="mt-1">
-                        No hoist-dependent passengers on today's manifest — logged silently as a
-                        maintenance follow-up.
+                        No hoist-dependent passengers on today's manifest — logged silently as a maintenance follow-up.
                       </div>
                     </>
                   )}
@@ -829,7 +839,6 @@ function WalkaroundChecklist({
   );
 }
 
-
 /* -------------------- Event Picker + Start Trip -------------------- */
 
 function EventPickAndStart({
@@ -861,7 +870,14 @@ function EventPickAndStart({
     startTrip.mutate(
       { eventId, startOdometerKm: startOdometer, varianceReason: null },
       {
-        onSuccess: () => toast.success("Daily run started", { description: "Manifest is now open." }),
+        onSuccess: () => {
+          // Clear pre-trip wizard values from localStorage upon successful run open
+          localStorage.removeItem("yada_init_step");
+          localStorage.removeItem("yada_init_assetId");
+          localStorage.removeItem("yada_init_odo");
+          localStorage.removeItem("yada_init_clearanceOk");
+          toast.success("Daily run started", { description: "Manifest is now open." });
+        },
         onSettled: () => {
           inFlightRef.current = false;
         },
@@ -930,7 +946,6 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
     if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeLeg?.id]);
 
-  // Detect coordinator reroutes — when legs disappear between polls, notify the driver.
   const prevLegIdsRef = useRef<string[]>(legs.map((l) => l.id));
   useEffect(() => {
     const currentIds = new Set(legs.map((l) => l.id));
@@ -943,15 +958,12 @@ function ActiveTripScreen({ bundle }: { bundle: ActiveTripBundle }) {
     prevLegIdsRef.current = legs.map((l) => l.id);
   }, [legs]);
 
-
   return (
     <>
       <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0 flex-1 pr-3">
-            <div className="truncate text-base font-bold leading-tight">
-              {bundle.eventTitle ?? "Daily Run"}
-            </div>
+            <div className="truncate text-base font-bold leading-tight">{bundle.eventTitle ?? "Daily Run"}</div>
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
@@ -1009,9 +1021,7 @@ function LegRow({ leg }: { leg: TripLeg }) {
       )}
     >
       <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">
-          Leg {leg.legIndex}
-        </div>
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Leg {leg.legIndex}</div>
         <div className="truncate font-medium">
           {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
         </div>
@@ -1056,9 +1066,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
         });
       } else {
         const km =
-          leg.startLat != null && leg.startLng != null
-            ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos)
-            : 0;
+          leg.startLat != null && leg.startLng != null ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos) : 0;
         await patch.mutateAsync({
           legId: leg.id,
           patch: {
@@ -1114,8 +1122,6 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
         ) : leg.status === "arrived" ? (
           <ArrivedChecklist leg={leg} />
         ) : leg.status === "completed" ? null : (
-          // Defensive default: any unhandled status (e.g. legacy 'scheduled', null)
-          // is treated as the initial state so the driver always has an action.
           <button
             type="button"
             disabled={busy}
@@ -1134,36 +1140,53 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
 
 function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   const patch = usePatchTripLeg();
-  const [loggedKm, setLoggedKm] = useState(
-    String(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0),
-  );
-  const [present, setPresent] = useState<boolean>(leg.passengerPresent ?? true);
-  const [medStatus, setMedStatus] = useState<MedicationHandoverStatus | null>(
-    leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
-  );
-  const [extraMed, setExtraMed] = useState(leg.unexpectedMedicationLogged);
-  const [extraNotes, setExtraNotes] = useState(leg.unexpectedMedicationNotes ?? "");
+  const storageKey = `yada_leg_form_${leg.id}`;
+
+  // Encapsulate and restore active checklist input values from localStorage keyed by leg ID
+  const [formState, setFormState] = useState(() => {
+    if (typeof window !== "undefined") {
+      const saved = localStorage.getItem(storageKey);
+      if (saved) {
+        try {
+          return JSON.parse(saved);
+        } catch (_) {}
+      }
+    }
+    return {
+      loggedKm: String(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0),
+      present: leg.passengerPresent ?? true,
+      medStatus: leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
+      extraMed: leg.unexpectedMedicationLogged ?? false,
+      extraNotes: leg.unexpectedMedicationNotes ?? "",
+    };
+  });
+
+  useEffect(() => {
+    localStorage.setItem(storageKey, JSON.stringify(formState));
+  }, [formState, storageKey]);
+
+  const { loggedKm, present, medStatus, extraMed, extraNotes } = formState;
   const [showNoShow, setShowNoShow] = useState(false);
 
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
 
-  const medSatisfied =
-    medStatus === "collected_intact" ||
-    medStatus === "collected_damaged" ||
-    medStatus === "expected_not_provided";
   const expectedMedSatisfied =
-    medStatus === "collected_intact" ||
-    medStatus === "collected_damaged" ||
-    medStatus === "expected_not_provided";
-  const exceptionFlagged =
-    medStatus === "collected_damaged" || medStatus === "expected_not_provided";
+    medStatus === "collected_intact" || medStatus === "collected_damaged" || medStatus === "expected_not_provided";
+
+  const exceptionFlagged = medStatus === "collected_damaged" || medStatus === "expected_not_provided";
+
+  // FIXED: Removed the validation condition that locked fields down when no meds were expected.
+  // Validation checks are now correctly isolated exclusively to runs expecting medication handover.
   const blocked =
     !loggedKm ||
     Number.isNaN(Number(loggedKm)) ||
     (leg.medicationExpected && !expectedMedSatisfied) ||
-    (!leg.medicationExpected && !medSatisfied) ||
     (extraMed && extraNotes.trim().length < 3);
+
+  const updateField = (field: string, value: any) => {
+    setFormState((prev: any) => ({ ...prev, [field]: value }));
+  };
 
   const confirm = async () => {
     try {
@@ -1180,6 +1203,8 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           completedAt: new Date().toISOString(),
         },
       });
+      // Erase persisted leg state upon successful check-in/completion
+      localStorage.removeItem(storageKey);
       toast.success(`Leg ${leg.legIndex} logged`, {
         description: `${leg.fromLabel} → ${leg.toLabel}`,
       });
@@ -1191,14 +1216,16 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
   return (
     <div className="space-y-4 rounded-lg bg-slate-800/60 p-3 text-white">
       <div className="grid gap-2">
-        <Label htmlFor="kmlog" className="text-slate-200">Logged Leg Kilometers (GPS)</Label>
+        <Label htmlFor="kmlog" className="text-slate-200">
+          Logged Leg Kilometers (GPS)
+        </Label>
         <Input
           id="kmlog"
           type="number"
           inputMode="decimal"
           className="h-12 bg-slate-950 text-base tabular-nums text-white"
           value={loggedKm}
-          onChange={(e) => setLoggedKm(e.target.value)}
+          onChange={(e) => updateField("loggedKm", e.target.value)}
         />
       </div>
 
@@ -1207,7 +1234,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           <div className="text-sm font-semibold">Passenger Present &amp; Boarded</div>
           <div className="text-xs text-slate-400">Toggle off to escalate as no-show.</div>
         </div>
-        <Switch checked={present} onCheckedChange={setPresent} />
+        <Switch checked={present} onCheckedChange={(v) => updateField("present", v)} />
       </div>
 
       {!present && participantId && (
@@ -1239,25 +1266,19 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
       <div
         className={cn(
           "rounded-lg border p-3",
-          leg.medicationExpected
-            ? "border-amber-500/60 bg-amber-500/10"
-            : "border-slate-700 bg-slate-950/40",
+          leg.medicationExpected ? "border-amber-500/60 bg-amber-500/10" : "border-slate-700 bg-slate-950/40",
         )}
       >
         {leg.medicationExpected && (
           <div className="mb-3 flex items-start gap-2 text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="text-sm font-semibold">
-              ⚠️ EXPECTED MEDICATION: Confirm bag status before departure.
-            </div>
+            <div className="text-sm font-semibold">⚠️ EXPECTED MEDICATION: Confirm bag status before departure.</div>
           </div>
         )}
-        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-          Medication Bag Handover
-        </div>
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">Medication Bag Handover</div>
         <RadioGroup
           value={medStatus ?? ""}
-          onValueChange={(v) => setMedStatus(v as MedicationHandoverStatus)}
+          onValueChange={(v) => updateField("medStatus", v as MedicationHandoverStatus)}
           className="mt-2 grid gap-2"
         >
           <label className="flex items-center gap-2 text-sm">
@@ -1279,20 +1300,16 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         {exceptionFlagged && (
           <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
             <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>
-              Manager exception flag will be recorded against this leg.
-            </span>
+            <span>Manager exception flag will be recorded against this leg.</span>
           </div>
         )}
       </div>
 
-
       <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
         <label className="flex items-center gap-2 text-sm">
-          <Checkbox checked={extraMed} onCheckedChange={(v) => setExtraMed(v === true)} />
+          <Checkbox checked={extraMed} onCheckedChange={(v) => updateField("extraMed", v === true)} />
           <span className="font-medium">
-            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />
-            ➕ Log Unexpected Medication Bag Received
+            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />➕ Log Unexpected Medication Bag Received
           </span>
         </label>
         {extraMed && (
@@ -1304,7 +1321,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
               id="xnotes"
               rows={2}
               value={extraNotes}
-              onChange={(e) => setExtraNotes(e.target.value)}
+              onChange={(e) => updateField("extraNotes", e.target.value)}
               className="bg-slate-950 text-white"
               placeholder="e.g. small white pouch · 2 inhalers labelled JS"
             />
@@ -1338,10 +1355,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
       });
       return;
     }
-    complete.mutate(
-      { tripId, endOdometerKm: Number(odo) },
-      { onSuccess: () => toast.success("Daily run locked.") },
-    );
+    complete.mutate({ tripId, endOdometerKm: Number(odo) }, { onSuccess: () => toast.success("Daily run locked.") });
   };
 
   return (
@@ -1370,6 +1384,8 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
   );
 }
 
+/* -------------------- Cancel/Reset Trip -------------------- */
+
 function CancelTripButton({ tripId }: { tripId: string }) {
   const cancel = useCancelTrip();
   const [open, setOpen] = useState(false);
@@ -1388,8 +1404,8 @@ function CancelTripButton({ tripId }: { tripId: string }) {
         <AlertDialogHeader>
           <AlertDialogTitle>Cancel this run?</AlertDialogTitle>
           <AlertDialogDescription>
-            Logged kilometres and leg captures will be discarded. This cannot be undone.
-            You'll return to the event selection screen.
+            Logged kilometres and leg captures will be discarded. This cannot be undone. You'll return to the event
+            selection screen.
           </AlertDialogDescription>
         </AlertDialogHeader>
         <AlertDialogFooter>
