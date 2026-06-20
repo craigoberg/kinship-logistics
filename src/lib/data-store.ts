@@ -561,8 +561,9 @@ export interface ActiveUserProfile {
 }
 
 function classifyRole(staffRole: string | null): UserRole | null {
-  if (staffRole === "support_worker") return "driver";
-  if (staffRole === "coordinator") return "coordinator";
+  const normalized = (staffRole ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  if (normalized === "support_worker") return "driver";
+  if (normalized === "coordinator") return "coordinator";
   return null;
 }
 
@@ -611,7 +612,7 @@ export async function loginWithPin(
   const match = checks.find((c) => c.ok);
   if (!match) return null;
 
-  if (match.row.role === "guardian") {
+  if ((match.row.role ?? "").trim().toLowerCase() === "guardian") {
     throw new GuardianPinError();
   }
 
