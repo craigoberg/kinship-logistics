@@ -18,6 +18,7 @@ import {
 } from "@/lib/data-store";
 import { listFleet, getLatestOdometers, type TransportAsset } from "@/lib/api/fleet";
 import type { VehicleFlagKind } from "@/lib/api/ledger";
+import { useSystemParameter } from "@/hooks/use-system-parameters";
 
 export type Severity = "critical" | "warning" | "info";
 
@@ -224,6 +225,8 @@ export function useStaffCertificationExceptions() {
     refetchOnWindowFocus: true,
   });
 
+  const certThresholdDays = useSystemParameter<number>("cert_threshold_days", 30);
+
   const rows = useMemo<StaffCertExceptionRow[]>(() => {
     const staff = staffQ.data ?? [];
     // Hardened query log: prove which columns the dashboard scan reads.
@@ -264,7 +267,7 @@ export function useStaffCertificationExceptions() {
         if (daysDelta < 0) {
           severity = "critical";
           stateLabel = `EXPIRED ${Math.abs(daysDelta)}d ago (${formatAusDate(c.expiry)})`;
-        } else if (daysDelta <= 30) {
+        } else if (daysDelta <= certThresholdDays) {
           severity = "warning";
           stateLabel = `Expires in ${daysDelta}d (${formatAusDate(c.expiry)})`;
         }
@@ -289,7 +292,7 @@ export function useStaffCertificationExceptions() {
     // Most overdue / soonest-expiring first.
     out.sort((a, b) => a.daysDelta - b.daysDelta);
     return out;
-  }, [staffQ.data]);
+  }, [staffQ.data, certThresholdDays]);
 
   return { data: rows, isLoading: staffQ.isLoading };
 }
@@ -425,7 +428,9 @@ export interface VehicleMaintenanceExceptionRow {
   daysDelta: number;
 }
 
-const SERVICE_DUE_WARN_KM = 500;
+// Default tolerance; live value pulled from system_parameters via useSystemParameter.
+const SERVICE_DUE_WARN_KM_DEFAULT = 500;
+const REGO_THRESHOLD_DAYS_DEFAULT = 30;
 
 export function useVehicleMaintenanceExceptions() {
   const fleetQ = useQuery<TransportAsset[]>({
@@ -442,6 +447,16 @@ export function useVehicleMaintenanceExceptions() {
     enabled: ids.length > 0,
     staleTime: 60_000,
   });
+
+  const regoThresholdDays = useSystemParameter<number>(
+    "rego_threshold_days",
+    REGO_THRESHOLD_DAYS_DEFAULT,
+  );
+  const serviceWarnKm = useSystemParameter<number>(
+    "service_km_tolerance_km",
+    SERVICE_DUE_WARN_KM_DEFAULT,
+  );
+
 
   const rows = useMemo<VehicleMaintenanceExceptionRow[]>(() => {
     const fleet = fleetQ.data ?? [];
@@ -467,7 +482,7 @@ export function useVehicleMaintenanceExceptions() {
           if (days < 0) {
             severity = "critical";
             stateLabel = `Rego EXPIRED ${Math.abs(days)}d ago (${formatAusDate(a.registrationExpiry)})`;
-          } else if (days <= 30 && !deferActive) {
+          } else if (days <= regoThresholdDays && !deferActive) {
             severity = "warning";
             stateLabel = `Rego due in ${days}d (${formatAusDate(a.registrationExpiry)})`;
           }
@@ -497,7 +512,7 @@ export function useVehicleMaintenanceExceptions() {
       ) {
         const nextDue = a.lastServiceOdo + a.serviceIntervalKm;
         const kmRemaining = nextDue - latestOdo;
-        if (kmRemaining <= SERVICE_DUE_WARN_KM) {
+        if (kmRemaining <= serviceWarnKm) {
           const stateLabel =
             kmRemaining <= 0
               ? `Service OVERDUE by ${Math.abs(kmRemaining)} km (odo ${latestOdo} ≥ due ${nextDue})`
@@ -537,7 +552,7 @@ export function useVehicleMaintenanceExceptions() {
 
     out.sort((a, b) => a.daysDelta - b.daysDelta);
     return out;
-  }, [fleetQ.data, odoQ.data]);
+  }, [fleetQ.data, odoQ.data, regoThresholdDays, serviceWarnKm]);
 
   return { data: rows, isLoading: fleetQ.isLoading || odoQ.isLoading };
 }
