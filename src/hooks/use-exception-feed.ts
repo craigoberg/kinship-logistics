@@ -7,18 +7,19 @@ import {
   listParticipants,
   listFailedClearancesWithItems,
   getTodayManifestSummary,
-  listStaffRegistry,
   type MedicationExceptionRow,
   type MedicationSchedule,
   type ComplianceLog,
   type Participant,
   type FailedClearanceReport,
   type TodayManifestSummary,
-  type StaffMember,
 } from "@/lib/data-store";
-import { listFleet, getLatestOdometers, type TransportAsset } from "@/lib/api/fleet";
-import type { VehicleFlagKind } from "@/lib/api/ledger";
-import { useSystemParameter } from "@/hooks/use-system-parameters";
+import {
+  listComplianceAssets,
+  computeRyge,
+  type ComplianceAsset,
+  type ComplianceActionModule,
+} from "@/lib/api/compliance-assets";
 
 export type Severity = "critical" | "warning" | "info";
 
@@ -156,164 +157,11 @@ export const DAY_ANOMALY_PLACEHOLDERS: readonly PlaceholderRow[] = [
   },
 ] as const;
 
-export const VEHICLE_COMPLIANCE_PLACEHOLDERS: readonly PlaceholderRow[] = [
-  {
-    title: "Rego renewal due",
-    detail: "HiAce Bus 1 — expires in 8 days",
-    severity: "warning",
-  },
-  {
-    title: "Scheduled maintenance overdue",
-    detail: "HiAce Bus 3 — service window passed 6 days ago",
-    severity: "critical",
-  },
-  {
-    title: "Tyre inspection due",
-    detail: "Toyota Coaster — booked check not yet completed",
-    severity: "info",
-  },
-] as const;
 
-export const STAFF_CERT_PLACEHOLDERS: readonly PlaceholderRow[] = [] as const;
+// Legacy useStaffCertificationExceptions / useVehicleMaintenanceExceptions
+// have been decommissioned — both are now served by useComplianceExceptions()
+// reading from the public.compliance_assets registry. See PROJECT_CONTEXT.md §10.
 
-// ---------------------------------------------------------------------------
-// STAFF CERTIFICATIONS — live scan of staff_registry.certifications JSONB
-// ---------------------------------------------------------------------------
-
-export interface StaffCertExceptionRow {
-  key: string;
-  staffId: string;
-  staffName: string;
-  certName: string;
-  expiry: string; // ISO yyyy-mm-dd
-  daysDelta: number; // negative = expired N days ago, positive = N days until expiry
-  title: string;
-  detail: string;
-  severity: Severity;
-  deferredUntil: string | null;
-}
-
-function parseISODate(iso: string): Date | null {
-  // Parse as a local-midnight date so day math is calendar-accurate.
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso);
-  if (!m) return null;
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
-}
-
-function startOfToday(): Date {
-  const d = new Date();
-  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-}
-
-function formatAusDate(iso: string): string {
-  const d = parseISODate(iso);
-  if (!d) return iso;
-  return `${String(d.getDate()).padStart(2, "0")}/${String(d.getMonth() + 1).padStart(2, "0")}/${d.getFullYear()}`;
-}
-
-/**
- * Scans every staff member's certifications JSONB and surfaces any cert
- * whose renewal_expiry_date is in the past (critical/RED) or within the
- * next 30 days (warning/YELLOW). Deferred certs (deferred_until in the
- * future) are suppressed.
- */
-export function useStaffCertificationExceptions() {
-  const staffQ = useQuery<StaffMember[]>({
-    queryKey: ["staff-registry", "all"],
-    queryFn: () => listStaffRegistry(),
-    staleTime: 60_000,
-    refetchOnWindowFocus: true,
-  });
-
-  const certThresholdDays = useSystemParameter<number>("cert_threshold_days", 30);
-
-  const rows = useMemo<StaffCertExceptionRow[]>(() => {
-    const staff = staffQ.data ?? [];
-    // Hardened query log: prove which columns the dashboard scan reads.
-    // eslint-disable-next-line no-console
-    console.log("[StaffCertScan] columns:", [
-      "staff_registry.id",
-      "staff_registry.full_name",
-      "staff_registry.active",
-      "staff_registry.certifications -> name",
-      "staff_registry.certifications -> number",
-      "staff_registry.certifications -> expiry (renewal_expiry_date)",
-      "staff_registry.certifications -> deferredUntil",
-    ]);
-
-    const today = startOfToday();
-    const todayMs = today.getTime();
-    const out: StaffCertExceptionRow[] = [];
-
-    for (const s of staff) {
-      if (!s.active) continue;
-      for (const c of s.certifications) {
-        if (!c.expiry) continue; // never-expires sentinel
-        const expiryDate = parseISODate(c.expiry);
-        if (!expiryDate) continue;
-
-        // Apply Defer logic: suppress if deferred_until is in the future.
-        if (c.deferredUntil) {
-          const deferUntil = parseISODate(c.deferredUntil);
-          if (deferUntil && deferUntil.getTime() > todayMs) continue;
-        }
-
-        const daysDelta = Math.round(
-          (expiryDate.getTime() - todayMs) / (1000 * 60 * 60 * 24),
-        );
-
-        let severity: Severity | null = null;
-        let stateLabel = "";
-        if (daysDelta < 0) {
-          severity = "critical";
-          stateLabel = `EXPIRED ${Math.abs(daysDelta)}d ago (${formatAusDate(c.expiry)})`;
-        } else if (daysDelta <= certThresholdDays) {
-          severity = "warning";
-          stateLabel = `Expires in ${daysDelta}d (${formatAusDate(c.expiry)})`;
-        }
-        if (!severity) continue;
-
-        const certLabel = c.name?.trim() || "Certification";
-        out.push({
-          key: `${s.id}:${certLabel}:${c.expiry}`,
-          staffId: s.id,
-          staffName: s.fullName,
-          certName: certLabel,
-          expiry: c.expiry,
-          daysDelta,
-          title: `${s.fullName} · ${certLabel}`,
-          detail: stateLabel,
-          severity,
-          deferredUntil: c.deferredUntil ?? null,
-        });
-      }
-    }
-
-    // Most overdue / soonest-expiring first.
-    out.sort((a, b) => a.daysDelta - b.daysDelta);
-    return out;
-  }, [staffQ.data, certThresholdDays]);
-
-  return { data: rows, isLoading: staffQ.isLoading };
-}
-
-export const ASSET_LIABILITY_PLACEHOLDERS: readonly PlaceholderRow[] = [
-  {
-    title: "Public Liability policy renewal",
-    detail: "Annual cover expires in 21 days",
-    severity: "warning",
-  },
-  {
-    title: "Volunteer accident insurance",
-    detail: "Roster sync pending for 4 new volunteers",
-    severity: "info",
-  },
-  {
-    title: "Building lease review",
-    detail: "Depot lease anniversary in 45 days",
-    severity: "info",
-  },
-] as const;
 
 // ---------------------------------------------------------------------------
 // START / END DAY ANOMALY — live vehicle clearance failures for today
@@ -410,149 +258,81 @@ export function useStartEndDayAnomalies() {
 }
 
 // ---------------------------------------------------------------------------
-// VEHICLE MAINTENANCE — live scan of transport_assets compliance fields.
-// SQL: docs/sql/2026-07-01_fleet_compliance_fields.sql
+// COMPLIANCE GOVERNANCE — registry-driven feed for all expiring items.
+// SQL: docs/sql/2026-07-06_compliance_governance.sql + backfill 2026-07-07.
 // ---------------------------------------------------------------------------
 
-export interface VehicleMaintenanceExceptionRow {
+export interface ComplianceExceptionRow {
   key: string;
   assetId: string;
-  assetName: string;
-  regoPlate: string;
-  flagKind: VehicleFlagKind;
+  category: string;
+  actionModule: ComplianceActionModule;
   title: string;
   detail: string;
   severity: Severity;
-  previousValue: string | number | null;
-  latestOdo: number | null;
   daysDelta: number;
+  asset: ComplianceAsset;
 }
 
-// Default tolerance; live value pulled from system_parameters via useSystemParameter.
-const SERVICE_DUE_WARN_KM_DEFAULT = 500;
-const REGO_THRESHOLD_DAYS_DEFAULT = 30;
+function rygeToSeverity(r: "red" | "yellow" | "green"): Severity | null {
+  if (r === "red") return "critical";
+  if (r === "yellow") return "warning";
+  return null;
+}
 
-export function useVehicleMaintenanceExceptions() {
-  const fleetQ = useQuery<TransportAsset[]>({
-    queryKey: ["fleet", "active"],
-    queryFn: () => listFleet(),
+function complianceDetail(asset: ComplianceAsset, daysDelta: number): string {
+  if (!asset.expiry_date) return asset.description ?? "Action required.";
+  const human =
+    daysDelta < 0
+      ? `EXPIRED ${Math.abs(daysDelta)}d ago`
+      : daysDelta === 0
+        ? "Expires today"
+        : `Expires in ${daysDelta}d`;
+  return `${human} (${asset.expiry_date})`;
+}
+
+export function useComplianceExceptions() {
+  const q = useQuery<ComplianceAsset[]>({
+    queryKey: ["compliance-assets", "active"],
+    queryFn: () => listComplianceAssets({ status: "active" }),
     staleTime: 60_000,
     refetchOnWindowFocus: true,
   });
 
-  const ids = (fleetQ.data ?? []).map((a) => a.id);
-  const odoQ = useQuery<Record<string, number | null>>({
-    queryKey: ["fleet", "latest-odometers", ids.slice().sort().join(",")],
-    queryFn: () => getLatestOdometers(ids),
-    enabled: ids.length > 0,
-    staleTime: 60_000,
-  });
-
-  const regoThresholdDays = useSystemParameter<number>(
-    "rego_threshold_days",
-    REGO_THRESHOLD_DAYS_DEFAULT,
-  );
-  const serviceWarnKm = useSystemParameter<number>(
-    "service_km_tolerance_km",
-    SERVICE_DUE_WARN_KM_DEFAULT,
-  );
-
-
-  const rows = useMemo<VehicleMaintenanceExceptionRow[]>(() => {
-    const fleet = fleetQ.data ?? [];
-    const odos = odoQ.data ?? {};
+  const rows = useMemo<ComplianceExceptionRow[]>(() => {
+    const assets = q.data ?? [];
     const today = startOfToday();
     const todayMs = today.getTime();
-    const out: VehicleMaintenanceExceptionRow[] = [];
+    const out: ComplianceExceptionRow[] = [];
 
-    for (const a of fleet) {
-      const latestOdo = odos[a.id] ?? null;
-      const deferActive = (() => {
-        if (!a.deferredUntil) return false;
-        const d = parseISODate(a.deferredUntil);
-        return !!d && d.getTime() > todayMs;
-      })();
-
-      if (a.registrationExpiry) {
-        const expiry = parseISODate(a.registrationExpiry);
-        if (expiry) {
-          const days = Math.round((expiry.getTime() - todayMs) / 86_400_000);
-          let severity: Severity | null = null;
-          let stateLabel = "";
-          if (days < 0) {
-            severity = "critical";
-            stateLabel = `Rego EXPIRED ${Math.abs(days)}d ago (${formatAusDate(a.registrationExpiry)})`;
-          } else if (days <= regoThresholdDays && !deferActive) {
-            severity = "warning";
-            stateLabel = `Rego due in ${days}d (${formatAusDate(a.registrationExpiry)})`;
-          }
-          if (severity) {
-            out.push({
-              key: `veh:${a.id}:rego`,
-              assetId: a.id,
-              assetName: a.name,
-              regoPlate: a.regoPlate,
-              flagKind: "rego",
-              title: `${a.name} (${a.regoPlate})`,
-              detail: stateLabel,
-              severity,
-              previousValue: a.registrationExpiry,
-              latestOdo,
-              daysDelta: days,
-            });
-          }
-        }
+    for (const a of assets) {
+      const severity = rygeToSeverity(computeRyge(a, today));
+      if (!severity) continue;
+      let daysDelta = 9999;
+      if (a.expiry_date) {
+        const expiry = (() => {
+          const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(a.expiry_date);
+          if (!m) return null;
+          return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+        })();
+        if (expiry) daysDelta = Math.round((expiry.getTime() - todayMs) / 86_400_000);
       }
-
-      if (
-        a.serviceIntervalKm &&
-        a.lastServiceOdo != null &&
-        latestOdo != null &&
-        !deferActive
-      ) {
-        const nextDue = a.lastServiceOdo + a.serviceIntervalKm;
-        const kmRemaining = nextDue - latestOdo;
-        if (kmRemaining <= serviceWarnKm) {
-          const stateLabel =
-            kmRemaining <= 0
-              ? `Service OVERDUE by ${Math.abs(kmRemaining)} km (odo ${latestOdo} ≥ due ${nextDue})`
-              : `Service due in ${kmRemaining} km (odo ${latestOdo} of ${nextDue})`;
-          out.push({
-            key: `veh:${a.id}:service`,
-            assetId: a.id,
-            assetName: a.name,
-            regoPlate: a.regoPlate,
-            flagKind: "service",
-            title: `${a.name} (${a.regoPlate})`,
-            detail: stateLabel,
-            severity: "warning",
-            previousValue: a.lastServiceOdo,
-            latestOdo,
-            daysDelta: Math.max(-9999, Math.min(9999, kmRemaining)),
-          });
-        }
-      }
-
-      if (!a.vin) {
-        out.push({
-          key: `veh:${a.id}:vin_missing`,
-          assetId: a.id,
-          assetName: a.name,
-          regoPlate: a.regoPlate,
-          flagKind: "vin_missing",
-          title: `${a.name} (${a.regoPlate})`,
-          detail: "VIN / chassis number missing from fleet register.",
-          severity: "info",
-          previousValue: null,
-          latestOdo,
-          daysDelta: 9999,
-        });
-      }
+      out.push({
+        key: `compliance:${a.id}`,
+        assetId: a.id,
+        category: a.category,
+        actionModule: a.action_module,
+        title: a.name,
+        detail: complianceDetail(a, daysDelta),
+        severity,
+        daysDelta,
+        asset: a,
+      });
     }
-
-    out.sort((a, b) => a.daysDelta - b.daysDelta);
+    out.sort((x, y) => x.daysDelta - y.daysDelta);
     return out;
-  }, [fleetQ.data, odoQ.data, regoThresholdDays, serviceWarnKm]);
+  }, [q.data]);
 
-  return { data: rows, isLoading: fleetQ.isLoading || odoQ.isLoading };
+  return { data: rows, isLoading: q.isLoading };
 }
+
