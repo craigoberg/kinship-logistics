@@ -101,6 +101,7 @@ export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
+  const { data: staffCertRows } = useStaffCertificationExceptions();
 
   const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
     queryKey: ["pending-manager-reviews"],
