@@ -71,6 +71,7 @@ export function ResolveVehicleMaintenanceModal({
   const [resType, setResType] = useState<VehicleResolutionType>(initialType);
   const [newExpiry, setNewExpiry] = useState<Date | undefined>(undefined);
   const [serviceOdo, setServiceOdo] = useState<string>("");
+  const [actionDate, setActionDate] = useState<Date | undefined>(() => startOfToday());
   const [deferredUntil, setDeferredUntil] = useState<Date | undefined>(undefined);
   const [evidenceRef, setEvidenceRef] = useState("");
   const [notes, setNotes] = useState("");
@@ -80,14 +81,17 @@ export function ResolveVehicleMaintenanceModal({
     if (!subject) {
       setNewExpiry(undefined);
       setServiceOdo("");
+      setActionDate(startOfToday());
       setDeferredUntil(undefined);
       setEvidenceRef("");
       setNotes("");
       return;
     }
     setResType(initialType);
+    setActionDate(startOfToday());
     setServiceOdo(subject.latestOdo != null ? String(subject.latestOdo) : "");
   }, [subject, initialType]);
+
 
   useEffect(() => {
     // Clear evidence when switching to a resolution that doesn't require it.
