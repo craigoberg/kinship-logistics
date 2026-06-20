@@ -85,6 +85,7 @@ export const Route = createFileRoute("/manifest")({
     const driverId = getStaffId() || DEFAULT_STAFF_UUID;
     try {
       const escalation = await getActiveEscalation(driverId);
+      console.log("Guard check result:", escalation);
       return { escalation };
     } catch (error) {
       console.error("[manifest.beforeLoad] getActiveEscalation failed:", error);
