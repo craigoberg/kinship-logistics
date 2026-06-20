@@ -37,6 +37,7 @@ export function useMedicationExceptions() {
     queryFn: () => listActiveMedicationExceptions(),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
     select: (rows) => rows.map((r) => ({ ...r, severity: severityForMedStatus(r.status) })),
   });
 }
