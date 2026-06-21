@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
@@ -27,9 +27,11 @@ interface Props {
 
 export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
+  const reauthRetryRef = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
   const allChecked =
@@ -38,6 +40,8 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const openMut = useMutation({
     mutationFn: () => openSession(""),
     onSuccess: (next: SiteDaySession) => {
+      reauthRetryRef.current = false;
+      setAuthRecoveryMessage(null);
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       toast.success("Day Centre opened", {
         description: "Site declared safe & compliant.",
@@ -47,8 +51,20 @@ export function StartOfDayPanel({ sessionId }: Props) {
     onError: (e: Error) => {
       if (isAuthError(e)) {
         setConfirmOpen(false);
+        if (reauthRetryRef.current) {
+          reauthRetryRef.current = false;
+          setReauthOpen(false);
+          setAuthRecoveryMessage(
+            "Your PIN was accepted, but the Day Centre open request is still being rejected. Use Retry now for an immediate retry, or re-enter PIN again if a different authorised Check Leader needs to take over.",
+          );
+          toast.error("Open still blocked after PIN re-entry", {
+            description: "Retry now, or re-enter an authorised PIN and try again.",
+          });
+          return;
+        }
+        setAuthRecoveryMessage(null);
         setReauthOpen(true);
-        toast.message("Session expired — please re-enter your PIN.");
+        toast.message("Authorisation check required — please re-enter your PIN.");
         return;
       }
       toast.error("Could not open the day", { description: e.message });
@@ -84,6 +100,41 @@ export function StartOfDayPanel({ sessionId }: Props) {
             below, select <span className="font-semibold">Red severity</span>,
             and a Manager will be paged for the Dual-PIN review.
           </p>
+        </div>
+      )}
+
+      {authRecoveryMessage && (
+        <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div className="space-y-2">
+            <p className="font-semibold">Authorisation still required</p>
+            <p>{authRecoveryMessage}</p>
+            <div className="flex flex-wrap gap-2">
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  setAuthRecoveryMessage(null);
+                  openMut.mutate();
+                }}
+                disabled={openMut.isPending}
+              >
+                Retry now
+              </Button>
+              <Button
+                type="button"
+                size="sm"
+                onClick={() => {
+                  setAuthRecoveryMessage(null);
+                  setReauthOpen(true);
+                }}
+                disabled={openMut.isPending}
+              >
+                Re-enter PIN
+              </Button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -165,6 +216,8 @@ export function StartOfDayPanel({ sessionId }: Props) {
         onOpenChange={setReauthOpen}
         reason="Re-authenticate to open the Day Centre."
         onAuthenticated={() => {
+          reauthRetryRef.current = true;
+          setAuthRecoveryMessage(null);
           setReauthOpen(false);
           openMut.mutate();
         }}

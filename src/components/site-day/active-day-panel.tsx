@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ClipboardCheck, Loader2, PlusCircle } from "lucide-react";
@@ -34,9 +34,11 @@ interface Props {
 export function ActiveDayPanel({ session }: Props) {
   const queryClient = useQueryClient();
   const issuesQ = useSiteIssues(session.id);
+  const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
 
   const profile = useMemo(() => getActiveUserProfile(), []);
   const permissionQ = useQuery({
@@ -56,6 +58,8 @@ export function ActiveDayPanel({ session }: Props) {
       return { next, finalized };
     },
     onSuccess: ({ next, finalized }) => {
+      reauthRetryRef.current = false;
+      setAuthRecoveryMessage(null);
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       toast.success("Day closed orderly.", {
         description: `${finalized} attendance row${finalized === 1 ? "" : "s"} flipped to billing-ready.`,
@@ -65,8 +69,20 @@ export function ActiveDayPanel({ session }: Props) {
     onError: (e: Error) => {
       if (isAuthError(e)) {
         setCloseOpen(false);
+        if (reauthRetryRef.current) {
+          reauthRetryRef.current = false;
+          setReauthOpen(false);
+          setAuthRecoveryMessage(
+            "Your PIN was accepted, but the Day Centre close request is still being rejected. Use Retry now for an immediate retry, or re-enter PIN again if a different authorised operator needs to take over.",
+          );
+          toast.error("Close still blocked after PIN re-entry", {
+            description: "Retry now, or re-enter an authorised PIN and try again.",
+          });
+          return;
+        }
+        setAuthRecoveryMessage(null);
         setReauthOpen(true);
-        toast.message("Session expired — please re-enter your PIN.");
+        toast.message("Authorisation check required — please re-enter your PIN.");
         return;
       }
       toast.error("Could not close the day", { description: e.message });
@@ -107,6 +123,43 @@ export function ActiveDayPanel({ session }: Props) {
           </Button>
         </div>
       </div>
+
+      {authRecoveryMessage && (
+        <Card className="border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            <div className="space-y-2">
+              <p className="font-semibold">Authorisation still required</p>
+              <p>{authRecoveryMessage}</p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setAuthRecoveryMessage(null);
+                    closeMut.mutate();
+                  }}
+                  disabled={closeMut.isPending}
+                >
+                  Retry now
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => {
+                    setAuthRecoveryMessage(null);
+                    setReauthOpen(true);
+                  }}
+                  disabled={closeMut.isPending}
+                >
+                  Re-enter PIN
+                </Button>
+              </div>
+            </div>
+          </div>
+        </Card>
+      )}
 
       <div className="space-y-3">
         <div className="flex items-center justify-between">
@@ -187,6 +240,8 @@ export function ActiveDayPanel({ session }: Props) {
         onOpenChange={setReauthOpen}
         reason="Re-authenticate to close the Day Centre."
         onAuthenticated={() => {
+          reauthRetryRef.current = true;
+          setAuthRecoveryMessage(null);
           setReauthOpen(false);
           closeMut.mutate();
         }}
