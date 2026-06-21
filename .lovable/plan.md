@@ -1,28 +1,24 @@
-## Fix: Defer `reportedBy` validation to submit time in `LogAnomalyModal`
+## Fix Supabase Realtime subscription lifecycle in `use-site-session.ts`
 
-The render-time `throw new Error("LogAnomalyModal requires a non-empty reportedBy")` is what crashes the route boundary when the modal mounts before `user` hydrates. We will move that check to submission, so the parent page keeps rendering and the user has time to finish hydrating before they ever click the submit button.
+### Problem
+The realtime `useEffect` in `use-site-session.ts` is firing before `sessionId` is fully populated, causing the error:
+`cannot add postgres_changes callbacks for realtime:... after subscribe()`.
+Additionally, the cleanup path delegates channel removal to `subscribeToSiteSession`, making it harder to verify that a dirty channel is fully torn down before a new one is created.
 
-### Change in `src/components/site-day/log-anomaly-modal.tsx`
+### Plan
+1. **Modify `src/hooks/use-site-session.ts`**
+   - Import the browser `supabase` client.
+   - Replace the delegated `subscribeToSiteSession(...)` call with inline Realtime subscription logic.
+   - Set the top-of-effect guard to exactly: `if (!sessionId) return;` — this blocks initialization until a valid session UUID exists, independent of auth-ready state.
+   - In the cleanup function, explicitly call `supabase.removeChannel(channel)` before returning, ensuring the previous channel is fully destroyed before any re-subscription.
+   - Keep `queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next)` as the payload handler.
 
-1. Remove the render-time guard at lines 103–105:
-   ```ts
-   if (!reportedBy) {
-     throw new Error("LogAnomalyModal requires a non-empty reportedBy");
-   }
-   ```
-2. Keep the `sessionId` guard (line 100–102) as-is — `sessionId` is always available by the time this renders.
-3. In the submit handler / mutation trigger path (the `onClick` that calls `mutation.mutate()` and/or at the top of `mutationFn`), add:
-   ```ts
-   if (!reportedBy) {
-     toast.error("User session not ready", {
-       description: "Please wait a moment and try again.",
-     });
-     return;
-   }
-   ```
-   so an empty `reportedBy` blocks submission gracefully instead of crashing.
-4. No changes to `StartOfDayPanel`, `DayCentrePage`, or the auth hook. The parent keeps passing `reportedBy={user?.id ?? ""}` and the modal tolerates the empty string at render time.
+2. **No changes required** in `src/lib/api/site-day-sessions.ts` or other consumers; `subscribeToSiteSession` can remain as an exported helper for other callers.
 
-### Scope
-- One file: `src/components/site-day/log-anomaly-modal.tsx`.
-- Pure runtime-validation relaxation: no UI redesign, no query changes, no new gates on the parent.
+### Files changed
+- `src/hooks/use-site-session.ts`
+
+### Acceptance
+- No more `cannot add postgres_changes callbacks ... after subscribe()` crashes.
+- Effect stays dormant until `sessionId` is truthy.
+- Cleanup always invokes `supabase.removeChannel(channel)` on unmount or `sessionId` change.
