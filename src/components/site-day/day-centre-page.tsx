@@ -40,7 +40,7 @@ export function DayCentrePage() {
     bootstrapMut.mutate();
   }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
 
-  const [managerModalOpen, setManagerModalOpen] = useState(true);
+  
 
   console.log("Current Session State:", {
     session: sessionQ.data,
