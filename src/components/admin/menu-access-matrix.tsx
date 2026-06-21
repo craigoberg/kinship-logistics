@@ -21,14 +21,10 @@ import { isActiveUserManager } from "@/lib/data-store";
  * finalised. Manager-only by gate.
  */
 
-const ROLES = [
-  { key: "manager", label: "Manager" },
-  { key: "assistant_manager", label: "Assistant Manager" },
-  { key: "guardian", label: "Guardian" },
-  { key: "support_worker", label: "Support Worker" },
-  { key: "driver", label: "Driver" },
-  { key: "dashboard", label: "Dashboard (Display Only)" },
-] as const;
+import { ACCESS_ROLES } from "@/lib/access-roles";
+
+const ROLES = ACCESS_ROLES;
+
 
 const MENUS: { key: string; label: string; description: string }[] = [
   { key: "dashboard", label: "Operations Dashboard", description: "Live exception hub and escalation pool" },
