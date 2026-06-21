@@ -1427,21 +1427,30 @@ export interface NewAttendanceLog {
   expectedService: string;
   actualStatus: AttendanceStatus;
   driverNotes?: string | null;
+  /** NDIS short-notice cancellation reason — required at the UI layer when
+   *  actualStatus === 'No-Show'. Column assumed to exist per architecture spec. */
+  ndisCancellationReason?: string | null;
 }
 
 export async function insertAttendanceLog(
   input: NewAttendanceLog,
 ): Promise<AttendanceLog> {
+  const insertPayload: Record<string, unknown> = {
+    participant_id: input.participantId,
+    schedule_id: input.scheduleId ?? null,
+    roster_date: input.rosterDate,
+    expected_service: input.expectedService,
+    actual_status: input.actualStatus,
+    driver_notes: input.driverNotes ?? null,
+  };
+  // Only include the NDIS reason column when set, so legacy installs without
+  // the column still accept the insert.
+  if (input.ndisCancellationReason !== undefined && input.ndisCancellationReason !== null) {
+    insertPayload.ndis_cancellation_reason = input.ndisCancellationReason;
+  }
   const { data, error } = await supabase
     .from("attendance_roster_logs")
-    .insert({
-      participant_id: input.participantId,
-      schedule_id: input.scheduleId ?? null,
-      roster_date: input.rosterDate,
-      expected_service: input.expectedService,
-      actual_status: input.actualStatus,
-      driver_notes: input.driverNotes ?? null,
-    })
+    .insert(insertPayload)
     .select("*")
     .single();
   if (error) throw error;
