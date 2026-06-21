@@ -84,7 +84,7 @@ export function DayCentrePage() {
     );
   }
 
-  if (!session || !user) {
+  if (!session) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading today's session…
@@ -97,37 +97,47 @@ export function DayCentrePage() {
       (i) => i.severity === "red" && i.status !== "resolved",
     ) ?? null;
 
-  return (
-    <div className="space-y-6">
-      {session.phase === "open_pending" && (
-        <StartOfDayPanel sessionId={session.id} reportedBy={user.id} />
-      )}
+  const renderPhase = () => {
+    switch (session.phase) {
+      case "open_pending":
+        return (
+          <StartOfDayPanel
+            sessionId={session.id}
+            reportedBy={user?.id ?? ""}
+          />
+        );
+      case "escalated_lock":
+        return (
+          <div className="space-y-4">
+            <EscalationLockBanner session={session} />
+            <SiteLeaderHandshakePanel session={session} />
+            {isManager && (
+              <SiteManagerHandshakeModal
+                open={managerModalOpen}
+                onOpenChange={setManagerModalOpen}
+                session={session}
+                context={{
+                  kind: "site_session",
+                  sessionId: session.id,
+                  issue: redIssue,
+                }}
+              />
+            )}
+          </div>
+        );
+      case "active_day":
+        return <ActiveDayPanel session={session} />;
+      case "closed_orderly":
+      case "closed_no_go":
+        return <DayClosedPanel session={session} />;
+      default:
+        return (
+          <Card className="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
+            Unknown session phase: {String(session.phase)}
+          </Card>
+        );
+    }
+  };
 
-      {session.phase === "escalated_lock" && (
-        <div className="space-y-4">
-          <EscalationLockBanner session={session} />
-          <SiteLeaderHandshakePanel session={session} />
-          {isManager && (
-            <SiteManagerHandshakeModal
-              open={managerModalOpen}
-              onOpenChange={setManagerModalOpen}
-              session={session}
-              context={{
-                kind: "site_session",
-                sessionId: session.id,
-                issue: redIssue,
-              }}
-            />
-          )}
-        </div>
-      )}
-
-      {session.phase === "active_day" && <ActiveDayPanel session={session} />}
-
-      {(session.phase === "closed_orderly" ||
-        session.phase === "closed_no_go") && (
-        <DayClosedPanel session={session} />
-      )}
-    </div>
-  );
+  return <div className="space-y-6">{renderPhase()}</div>;
 }
