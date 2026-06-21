@@ -164,11 +164,6 @@ export function ActiveDayPanel({ session }: Props) {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Issues Register {openIssues.length > 0 && `(${openIssues.length} open)`}
-            {issues.length > 0 && (
-              <span className="ml-2 text-[10px] normal-case font-normal text-muted-foreground/70">
-                Including notes
-              </span>
-            )}
           </h3>
           {issuesQ.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
