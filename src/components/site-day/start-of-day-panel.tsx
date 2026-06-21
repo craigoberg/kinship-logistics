@@ -120,7 +120,22 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       )}
 
+      {hasOpenRed && (
+        <div className="flex items-start gap-2 rounded-md border border-red-600/60 bg-red-600/10 p-3 text-sm text-red-800 dark:text-red-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+          <p>
+            <span className="font-semibold">
+              {openRedIssues.length} unresolved RED issue
+              {openRedIssues.length === 1 ? "" : "s"}
+            </span>{" "}
+            in the register. The centre cannot be declared safe until every RED
+            is resolved in the Governance Hub.
+          </p>
+        </div>
+      )}
+
       {errorMessage && (
+
         <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-2">
