@@ -281,7 +281,6 @@ export function StartOfDayPanel({ sessionId, reportedBy }: Props) {
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
         sessionId={sessionId}
-        reportedBy={reportedBy}
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
