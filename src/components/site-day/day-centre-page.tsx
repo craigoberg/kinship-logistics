@@ -38,6 +38,7 @@ export function DayCentrePage() {
     mutationFn: () => ensureTodaySession(),
     onSuccess: (row) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, row);
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
     },
   });
 
@@ -52,10 +53,7 @@ export function DayCentrePage() {
 
   const [managerModalOpen, setManagerModalOpen] = useState(true);
 
-  if (
-    sessionQ.isLoading ||
-    (!session && !sessionQ.isError && (bootstrapMut.isPending || !bootstrappedRef.current))
-  ) {
+  if (sessionQ.isLoading || bootstrapMut.isPending) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading today's session…
