@@ -26,6 +26,7 @@ import { IssuesRegisterCard } from "./issues-register-card";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 interface Props {
   session: SiteDaySession;
@@ -33,6 +34,7 @@ interface Props {
 
 export function ActiveDayPanel({ session }: Props) {
   const queryClient = useQueryClient();
+  const { user } = useAuthReady();
   const issuesQ = useSiteIssues(session.id);
   const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
@@ -50,10 +52,7 @@ export function ActiveDayPanel({ session }: Props) {
 
   const closeMut = useMutation({
     mutationFn: async () => {
-      const finalized = await finalizeTodaysBilling().catch((err) => {
-        console.error("[ActiveDayPanel] billing finalize failed", err);
-        return 0;
-      });
+      const finalized = await finalizeTodaysBilling().catch(() => 0);
       const next = await closeSession("");
       return { next, finalized };
     },
@@ -165,11 +164,6 @@ export function ActiveDayPanel({ session }: Props) {
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Issues Register {openIssues.length > 0 && `(${openIssues.length} open)`}
-            {issues.length > 0 && (
-              <span className="ml-2 text-[10px] normal-case font-normal text-muted-foreground/70">
-                Including notes
-              </span>
-            )}
           </h3>
           {issuesQ.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -234,11 +228,14 @@ export function ActiveDayPanel({ session }: Props) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <LogAnomalyModal
-        open={anomalyOpen}
-        onOpenChange={setAnomalyOpen}
-        sessionId={session.id}
-      />
+      {user && (
+        <LogAnomalyModal
+          open={anomalyOpen}
+          onOpenChange={setAnomalyOpen}
+          sessionId={session.id}
+          reportedBy={user.id}
+        />
+      )}
 
       <PinReauthDialog
         open={reauthOpen}

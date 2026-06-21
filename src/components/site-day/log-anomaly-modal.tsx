@@ -13,10 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  RadioGroup,
-  RadioGroupItem,
-} from "@/components/ui/radio-group";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { usePersistedForm } from "@/hooks/use-persisted-form";
 import {
@@ -26,16 +23,14 @@ import {
   type RygeSeverity,
 } from "@/lib/api/site-issues";
 import { siteIssuesKey } from "@/hooks/use-site-issues";
-import { setPhase, ensureTodaySession } from "@/lib/api/site-day-sessions";
+import { setPhase } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
-  /** Phase 2 will wire this through createIssue. Accepted now to keep the
-   *  parent prop contract stable while Phase 1 ships. */
-  reportedBy?: string;
+  reportedBy: string;
   defaultSeverity?: RygeSeverity;
 }
 
@@ -78,12 +73,6 @@ const SEVERITY_CHIPS: Array<{
   },
 ];
 
-/**
- * Best-effort manager escalation notification. Frontend-only — the global
- * escalation interceptor + realtime channel on site_day_sessions handles
- * delivery. Kept as a small hook so we can swap to a notification router
- * later without touching the modal.
- */
 function triggerEscalation(payload: {
   kind: "site_session";
   sessionId: string;
@@ -96,7 +85,7 @@ function triggerEscalation(payload: {
         new CustomEvent("yada:escalation", { detail: payload }),
       );
     } catch {
-      // ignore — informational broadcast only
+      // informational broadcast only
     }
   }
 }
@@ -105,11 +94,19 @@ export function LogAnomalyModal({
   open,
   onOpenChange,
   sessionId,
+  reportedBy,
   defaultSeverity,
 }: Props) {
+  if (!sessionId) {
+    throw new Error("LogAnomalyModal requires a non-empty sessionId");
+  }
+  if (!reportedBy) {
+    throw new Error("LogAnomalyModal requires a non-empty reportedBy");
+  }
+
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
-    `site-day-anomaly:${sessionId || "bootstrap"}`,
+    `site-day-anomaly:${sessionId}`,
     makeInitial(defaultSeverity ?? "yellow"),
   );
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
@@ -118,7 +115,8 @@ export function LogAnomalyModal({
   const requiresWorkaround =
     values.severity === "yellow" || values.severity === "red";
   const descriptionOk = values.description.trim().length > 0;
-  const workaroundOk = !requiresWorkaround || values.workaround.trim().length > 0;
+  const workaroundOk =
+    !requiresWorkaround || values.workaround.trim().length > 0;
 
   const blockingErrors = useMemo(() => {
     const errs: string[] = [];
@@ -132,58 +130,30 @@ export function LogAnomalyModal({
 
   const mutation = useMutation({
     mutationFn: async () => {
-      // Bootstrap: if no session row exists yet, provision today's row in
-      // `open_pending` so the issue + escalation have a real id to bind to.
-      let effectiveSessionId = sessionId;
-      console.info("[LogAnomaly] submit → prop sessionId =", sessionId || "(empty)");
-      if (!effectiveSessionId) {
-        const bootstrapped = await ensureTodaySession();
-        effectiveSessionId = bootstrapped.id;
-        console.info(
-          "[LogAnomaly] bootstrap ensureTodaySession → effectiveSessionId =",
-          effectiveSessionId,
-        );
-        queryClient.setQueryData(SITE_SESSION_QUERY_KEY, bootstrapped);
-      }
-
-      // Green = informational note; workaround is optional. Default to a
-      // benign placeholder so any non-null DB constraint or downstream
-      // consumer expecting a string still accepts the row.
-      const trimmedWorkaround = values.workaround.trim();
-      const resolvedWorkaround =
-        values.severity === "green"
-          ? trimmedWorkaround || "N/A - Info Only"
-          : trimmedWorkaround || null;
+      const workaroundPlan =
+        values.severity === "green" ? null : values.workaround.trim();
       const payload: NewSiteIssue = {
-        sessionId: effectiveSessionId,
+        sessionId,
         severity: values.severity,
         issueDescription: values.description.trim(),
-        workaroundPlan: resolvedWorkaround,
+        workaroundPlan,
         owner: values.owner,
       };
-      console.info("[LogAnomaly] createIssue payload session_id =", payload.sessionId);
       const issue = await createIssue(payload);
       if (values.severity === "red") {
-        const next = await setPhase(effectiveSessionId, "escalated_lock");
+        const next = await setPhase(sessionId, "escalated_lock");
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
         triggerEscalation({
           kind: "site_session",
-          sessionId: effectiveSessionId,
+          sessionId,
           issueId: issue.id,
           description: issue.issueDescription,
         });
       }
-      return { issue, effectiveSessionId };
+      return issue;
     },
-    onSuccess: ({ issue, effectiveSessionId }) => {
-      console.info(
-        "[LogAnomaly] success → invalidating siteIssuesKey for",
-        effectiveSessionId,
-        "(inserted issue.sessionId =",
-        issue.sessionId,
-        ")",
-      );
-      queryClient.invalidateQueries({ queryKey: siteIssuesKey(effectiveSessionId) });
+    onSuccess: (issue) => {
+      queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
       reset();
       onOpenChange(false);
       if (issue.severity === "red") {
@@ -204,8 +174,7 @@ export function LogAnomalyModal({
     },
   });
 
-  const canSubmit =
-    descriptionOk && workaroundOk && !mutation.isPending;
+  const canSubmit = descriptionOk && workaroundOk && !mutation.isPending;
 
   const handleClose = (next: boolean) => {
     if (mutation.isPending) return;
@@ -306,7 +275,8 @@ export function LogAnomalyModal({
                 value={values.workaround}
                 onChange={(e) => setValues({ workaround: e.target.value })}
                 className={cn(
-                  !workaroundOk && "border-destructive focus-visible:ring-destructive",
+                  !workaroundOk &&
+                    "border-destructive focus-visible:ring-destructive",
                 )}
               />
               {!workaroundOk && (
