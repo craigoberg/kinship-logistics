@@ -139,13 +139,11 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   const existing = await getTodaySession();
   if (existing) return existing;
   const date = todayIso();
-  const staffId = await resolveStaffIdWithFallback();
   const { data, error } = await supabase
     .from("site_day_sessions")
     .insert({
       session_date: date,
       phase: "open_pending",
-      opened_by_id: staffId,
     })
     .select("*")
     .single();
@@ -165,41 +163,24 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
  * existing pending row.
  */
 export async function openSession(notes: string): Promise<SiteDaySession> {
-  const date = todayIso();
   const staffId = await resolveStaffIdWithFallback();
   const nowIso = new Date().toISOString();
-  const today = await getTodaySession();
+  const today = (await getTodaySession()) ?? (await ensureTodaySession());
 
   let row: SiteDaySessionRow;
-  if (!today) {
-    const { data, error } = await supabase
-      .from("site_day_sessions")
-      .insert({
-        session_date: date,
-        phase: "active_day",
-        opened_by_id: staffId,
-        open_declared_at: nowIso,
-        open_leader_notes: notes || null,
-      })
-      .select("*")
-      .single();
-    if (error) throw error;
-    row = data as SiteDaySessionRow;
-  } else {
-    const { data, error } = await supabase
-      .from("site_day_sessions")
-      .update({
-        phase: "active_day",
-        opened_by_id: staffId,
-        open_declared_at: nowIso,
-        open_leader_notes: notes || null,
-      })
-      .eq("id", today.id)
-      .select("*")
-      .single();
-    if (error) throw error;
-    row = data as SiteDaySessionRow;
-  }
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      phase: "active_day",
+      opened_by_id: staffId,
+      open_declared_at: nowIso,
+      open_leader_notes: notes || null,
+    })
+    .eq("id", today.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  row = data as SiteDaySessionRow;
 
   const next = rowToSession(row);
   await siteLedger(
