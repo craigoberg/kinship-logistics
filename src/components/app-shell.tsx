@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { LogOut, ShieldOff } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
@@ -7,6 +7,17 @@ import { SyncIndicator } from "./sync-indicator";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
+import { getActiveUserProfile } from "@/lib/data-store";
+
+/** Human-readable label for the active user's role. */
+function roleLabel(role: string | null | undefined): string {
+  if (!role) return "";
+  if (role === "coordinator") return "Manager";
+  if (role === "driver") return "Driver";
+  // Future roles: assistant_manager, guardian, support_worker, dashboard
+  return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 
 function handleLogout() {
   try {
@@ -66,13 +77,31 @@ export function AppShell({ children }: { children: ReactNode }) {
   );
   const title = current?.label ?? "Yada Connect";
 
+  // Read profile on the client only — avoids SSR/CSR hydration mismatch
+  // because localStorage isn't available on the server.
+  const [identity, setIdentity] = useState<{ name: string; role: string } | null>(null);
+  useEffect(() => {
+    const p = getActiveUserProfile();
+    if (p) setIdentity({ name: p.fullName, role: roleLabel(p.role) });
+  }, []);
+
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur md:h-16 md:px-6">
           <h1 className="truncate text-base font-semibold tracking-tight md:text-lg">
-            {title}
+            <span>{title}</span>
+            {identity && (
+              <span className="ml-2 font-normal text-muted-foreground">
+                — {identity.name}
+                {identity.role && (
+                  <span className="ml-1 text-xs uppercase tracking-wide">
+                    ({identity.role})
+                  </span>
+                )}
+              </span>
+            )}
           </h1>
           <div className="flex items-center gap-2">
             <SyncIndicator compact />
@@ -86,6 +115,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               Log Out
             </Button>
           </div>
+
         </header>
         <SiteNoGoBanner />
         <main className="flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6">

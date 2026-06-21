@@ -8,7 +8,7 @@ import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { TodaysMedicationCard } from "@/components/medication/todays-medication-card";
-import type { TransportPayload } from "@/lib/data-store";
+import { type TransportPayload, getActiveUserProfile } from "@/lib/data-store";
 import { formatDate, formatTime } from "@/lib/utils";
 import { OperationsExceptionHub } from "@/components/dashboard/OperationsExceptionHub";
 
@@ -46,7 +46,7 @@ function Dashboard() {
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground tabular-nums">
             {formatDate(new Date())}
           </p>
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, {getActiveUserProfile()?.fullName ?? "there"}</h2>
           <p className="text-sm text-muted-foreground">
             Here's where things stand across Yada Connect right now.
           </p>
