@@ -146,6 +146,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
         sessionId={sessionId}
+        defaultSeverity={
+          mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
+        }
       />
     </section>
   );
