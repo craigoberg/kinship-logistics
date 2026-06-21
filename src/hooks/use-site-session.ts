@@ -60,6 +60,7 @@ export function useSiteSession() {
   const queryClient = useQueryClient();
   const { isReady } = useAuthReady();
   const canQuery = isReady;
+  const channelRef = useRef<RealtimeChannel | null>(null);
   const q = useQuery<SiteDaySession | null>({
     queryKey: SITE_SESSION_QUERY_KEY,
     queryFn: getTodaySession,
@@ -73,9 +74,10 @@ export function useSiteSession() {
   const sessionId = q.data?.id;
   useEffect(() => {
     if (!sessionId) return;
+    if (channelRef.current) return;
 
     const channel = supabase
-      .channel(`site-day-session-${sessionId}`)
+      .channel(`realtime:site-day-session-${sessionId}`)
       .on(
         "postgres_changes",
         {
@@ -93,8 +95,13 @@ export function useSiteSession() {
       )
       .subscribe();
 
+    channelRef.current = channel;
+
     return () => {
-      void supabase.removeChannel(channel);
+      if (channelRef.current) {
+        void supabase.removeChannel(channelRef.current);
+        channelRef.current = null;
+      }
     };
   }, [sessionId, queryClient]);
 
