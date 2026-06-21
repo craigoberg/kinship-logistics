@@ -228,12 +228,14 @@ export function ActiveDayPanel({ session }: Props) {
         </AlertDialogContent>
       </AlertDialog>
 
-      <LogAnomalyModal
-        open={anomalyOpen}
-        onOpenChange={setAnomalyOpen}
-        sessionId={session.id}
-        reportedBy={user?.id ?? ""}
-      />
+      {user && (
+        <LogAnomalyModal
+          open={anomalyOpen}
+          onOpenChange={setAnomalyOpen}
+          sessionId={session.id}
+          reportedBy={user.id}
+        />
+      )}
 
       <PinReauthDialog
         open={reauthOpen}
