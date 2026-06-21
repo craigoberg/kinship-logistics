@@ -65,6 +65,19 @@ export function StartOfDayPanel({ sessionId }: Props) {
         <MandatedChecksList ticked={ticked} onTickedChange={setTicked} />
       </div>
 
+      {mandatedItems.length > 0 && !allChecked && (
+        <div className="flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+          <p>
+            One or more mandated checks remain unticked — the site cannot be
+            declared compliant. If a check has failed, tap{" "}
+            <span className="font-semibold">Log Anomalies / Action Needed</span>{" "}
+            below, select <span className="font-semibold">Red severity</span>,
+            and a Manager will be paged for the Dual-PIN review.
+          </p>
+        </div>
+      )}
+
       <div className="grid gap-3 md:grid-cols-2">
         <Button
           size="lg"
