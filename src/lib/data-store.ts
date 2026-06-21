@@ -4366,7 +4366,9 @@ export async function isOperationalEscalationClaimable(
   escalation: OperationalEscalation,
 ): Promise<boolean> {
   if (escalation.status !== "pending") return false;
-  if (escalation.sourceKind !== "site_day_red") return true;
+  const isSiteDayRed =
+    escalation.sourceKind === "site_day_red" || escalation.gateId === "site_day_red";
+  if (!isSiteDayRed) return true;
   if (!escalation.sourceIssueId) return false;
 
   const issueRes = await supabase
