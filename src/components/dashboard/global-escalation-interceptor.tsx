@@ -241,7 +241,8 @@ export function GlobalEscalationInterceptor() {
                 {visibleQueue.length > 1 && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                     {visibleQueue.length - 1} more pending escalation
-                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind this one.
+                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind
+                    this one.
                   </div>
                 )}
 
@@ -254,9 +255,7 @@ export function GlobalEscalationInterceptor() {
                     claiming && "cursor-not-allowed opacity-60",
                   )}
                 >
-                  {claiming
-                    ? "Claiming…"
-                    : "👉 CLAIM INCIDENT & OPEN CONSULTATION"}
+                  {claiming ? "Claiming…" : "👉 CLAIM INCIDENT & OPEN CONSULTATION"}
                 </button>
               </div>
             </>
@@ -286,9 +285,7 @@ function ContextRow({
       <span className="w-28 shrink-0 text-[11px] font-bold uppercase tracking-wide text-slate-400">
         {label}
       </span>
-      <span className={cn("text-sm font-medium text-slate-100", valueClass)}>
-        {value}
-      </span>
+      <span className={cn("text-sm font-medium text-slate-100", valueClass)}>{value}</span>
     </div>
   );
 }
