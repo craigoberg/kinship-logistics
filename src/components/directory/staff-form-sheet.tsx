@@ -156,7 +156,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
             </Field>
 
-            <Field label="Personnel type">
+            <Field label="SYSTEM ACCESS LEVEL">
               <Select value={personnelType || undefined} onValueChange={setPersonnelType}>
                 <SelectTrigger><SelectValue placeholder="Select personnel type" /></SelectTrigger>
                 <SelectContent>
