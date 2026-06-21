@@ -138,11 +138,19 @@ export function LogAnomalyModal({
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, bootstrapped);
       }
 
+      // Green = informational note; workaround is optional. Default to a
+      // benign placeholder so any non-null DB constraint or downstream
+      // consumer expecting a string still accepts the row.
+      const trimmedWorkaround = values.workaround.trim();
+      const resolvedWorkaround =
+        values.severity === "green"
+          ? trimmedWorkaround || "N/A - Info Only"
+          : trimmedWorkaround || null;
       const payload: NewSiteIssue = {
         sessionId: effectiveSessionId,
         severity: values.severity,
         issueDescription: values.description.trim(),
-        workaroundPlan: values.workaround.trim() || null,
+        workaroundPlan: resolvedWorkaround,
         owner: values.owner,
       };
       const issue = await createIssue(payload);
