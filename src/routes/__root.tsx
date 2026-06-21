@@ -151,7 +151,7 @@ function RoleAwareGuardians() {
   // tabs must stay anchored to /dashboard, /admin, etc.
   return (
     <>
-      <GlobalEscalationInterceptor />
+      {role === "coordinator" && <GlobalEscalationInterceptor />}
       {role === "driver" && <RouteRehydrationGuardian />}
       <GlobalIncidentIntakeDrawer />
     </>
