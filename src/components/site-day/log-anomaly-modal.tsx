@@ -98,11 +98,16 @@ function triggerEscalation(payload: {
   }
 }
 
-export function LogAnomalyModal({ open, onOpenChange, sessionId }: Props) {
+export function LogAnomalyModal({
+  open,
+  onOpenChange,
+  sessionId,
+  defaultSeverity,
+}: Props) {
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
-    `site-day-anomaly:${sessionId}`,
-    INITIAL,
+    `site-day-anomaly:${sessionId || "bootstrap"}`,
+    makeInitial(defaultSeverity ?? "yellow"),
   );
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
     form;
