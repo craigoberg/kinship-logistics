@@ -14,7 +14,6 @@ import {
   getStaffId,
   isOperationalEscalationClaimable,
   listClaimableEscalations,
-  resolveStaffIdWithFallback,
   subscribeToEscalationPool,
   type OperationalEscalation,
 } from "@/lib/data-store";
