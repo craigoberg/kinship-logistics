@@ -1,9 +1,6 @@
 import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import {
-  getTodaySession,
-  type SiteDaySession,
-} from "@/lib/api/site-day-sessions";
+import { getTodaySession, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { supabase } from "@/integrations/supabase/client";
 
