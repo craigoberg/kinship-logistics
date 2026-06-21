@@ -48,12 +48,25 @@ export function GlobalEscalationInterceptor() {
     useState<OperationalEscalation | null>(null);
   const [tick, setTick] = useState(0);
 
+  // Current staff id — used to suppress the Claim popup for the user who
+  // actually raised the incident (no self-claim).
+  const currentStaffQ = useQuery({
+    queryKey: ["current-staff-id"],
+    queryFn: resolveStaffIdWithFallback,
+    staleTime: 5 * 60_000,
+  });
+  const currentStaffId = currentStaffQ.data ?? null;
+
+  const isOwnEscalation = (e: OperationalEscalation): boolean =>
+    !!currentStaffId && e.raisedBy === currentStaffId;
+
   // Baseline post-login fetch.
   const baseline = useQuery({
     queryKey: ["pending-escalations"],
     queryFn: listPendingEscalations,
     staleTime: 30_000,
   });
+
 
   useEffect(() => {
     if (baseline.data) {
