@@ -8,7 +8,7 @@ import { useParticipants, useSyncLogs } from "@/hooks/use-supabase-data";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { TodaysMedicationCard } from "@/components/medication/todays-medication-card";
-import type { TransportPayload } from "@/lib/data-store";
+import { type TransportPayload, getActiveUserProfile } from "@/lib/data-store";
 import { formatDate, formatTime } from "@/lib/utils";
 import { OperationsExceptionHub } from "@/components/dashboard/OperationsExceptionHub";
 
