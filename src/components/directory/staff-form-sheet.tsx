@@ -44,7 +44,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const isEdit = !!staff;
   const [fullName, setFullName] = useState("");
   const [role, setRole] = useState("");
-  const [personnelType, setPersonnelType] = useState("Staff");
+  const [personnelType, setPersonnelType] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
   const [streetAddress, setStreetAddress] = useState("");
@@ -157,7 +157,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             </Field>
 
             <Field label="SYSTEM ACCESS LEVEL">
-              <Select value={personnelType || undefined} onValueChange={setPersonnelType}>
+              <Select value={personnelType} onValueChange={setPersonnelType}>
                 <SelectTrigger><SelectValue placeholder="Select personnel type" /></SelectTrigger>
                 <SelectContent>
                   {ACCESS_ROLES.map((r) => (
