@@ -158,8 +158,8 @@ export function LogAnomalyModal({
       }
       return { issue, effectiveSessionId };
     },
-    onSuccess: (issue) => {
-      queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
+    onSuccess: ({ issue, effectiveSessionId }) => {
+      queryClient.invalidateQueries({ queryKey: siteIssuesKey(effectiveSessionId) });
       reset();
       onOpenChange(false);
       if (issue.severity === "red") {
