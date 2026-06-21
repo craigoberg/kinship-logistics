@@ -115,19 +115,7 @@ export function DayCentrePage() {
         return (
           <div className="space-y-4">
             <EscalationLockBanner session={session} />
-            <SiteLeaderHandshakePanel session={session} />
-            {isManager && (
-              <SiteManagerHandshakeModal
-                open={managerModalOpen}
-                onOpenChange={setManagerModalOpen}
-                session={session}
-                context={{
-                  kind: "site_session",
-                  sessionId: session.id,
-                  issue: redIssue,
-                }}
-              />
-            )}
+            <EscalationResolutionPanel session={session} redIssue={redIssue} />
           </div>
         );
       case "active_day":
