@@ -44,7 +44,7 @@ BEGIN
   END IF;
 
   SELECT e.id,
-         e.status,
+         e.status::text,
          e.claimed_by,
          e.claimed_at
     INTO v_escalation_id,
@@ -74,7 +74,7 @@ BEGIN
    WHERE e.id = v_escalation_id;
 
   SELECT s.id,
-         s.phase
+         s.phase::text
     INTO v_session_id,
          v_previous_session_phase
     FROM public.site_day_sessions s
