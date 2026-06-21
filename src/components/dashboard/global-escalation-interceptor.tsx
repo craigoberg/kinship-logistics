@@ -4,12 +4,7 @@ import { useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { AlertOctagon } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 import {
@@ -45,8 +40,7 @@ export function GlobalEscalationInterceptor() {
 
   const [queue, setQueue] = useState<OperationalEscalation[]>([]);
   const [claiming, setClaiming] = useState(false);
-  const [consultTarget, setConsultTarget] =
-    useState<OperationalEscalation | null>(null);
+  const [consultTarget, setConsultTarget] = useState<OperationalEscalation | null>(null);
   const [tick, setTick] = useState(0);
 
   // Current staff id — used to suppress the Claim popup for the user who
@@ -69,14 +63,11 @@ export function GlobalEscalationInterceptor() {
     staleTime: 30_000,
   });
 
-
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
         const seen = new Set(prev.map((e) => e.id));
-        const additions = baseline.data.filter(
-          (e) => !seen.has(e.id) && !isOwnEscalation(e),
-        );
+        const additions = baseline.data.filter((e) => !seen.has(e.id) && !isOwnEscalation(e));
         return additions.length ? [...prev, ...additions] : prev;
       });
     }
@@ -98,9 +89,7 @@ export function GlobalEscalationInterceptor() {
         if (isOwnEscalation(row)) return;
         void isOperationalEscalationClaimable(row).then((claimable) => {
           if (!claimable) return;
-          setQueue((prev) =>
-            prev.some((e) => e.id === row.id) ? prev : [...prev, row],
-          );
+          setQueue((prev) => (prev.some((e) => e.id === row.id) ? prev : [...prev, row]));
         });
       } else if (type === "UPDATE") {
         if (row.status !== "pending") {
@@ -125,13 +114,9 @@ export function GlobalEscalationInterceptor() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStaffId]);
 
-
   // Tick to refresh "12s ago" label every second while modal is open.
   const visibleQueue = useMemo(
-    () =>
-      currentStaffQ.isSuccess
-        ? queue.filter((e) => !isOwnEscalation(e))
-        : [],
+    () => (currentStaffQ.isSuccess ? queue.filter((e) => !isOwnEscalation(e)) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [queue, currentStaffId, currentStaffQ.isSuccess],
   );
@@ -190,9 +175,7 @@ export function GlobalEscalationInterceptor() {
       }
     } catch (err) {
       // Re-queue on outright failure so we don't lose the alert.
-      setQueue((prev) =>
-        prev.some((e) => e.id === target.id) ? prev : [target, ...prev],
-      );
+      setQueue((prev) => (prev.some((e) => e.id === target.id) ? prev : [target, ...prev]));
       toast.error("Could not claim escalation", {
         description: (err as Error).message,
       });
