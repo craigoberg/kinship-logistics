@@ -64,13 +64,22 @@ function rowToIssue(r: SiteIssueRow): SiteIssue {
 }
 
 export async function listIssues(sessionId: string): Promise<SiteIssue[]> {
+  console.info("[SiteIssues] listIssues → querying session_id", sessionId);
   const { data, error } = await supabase
     .from("site_issues_register")
     .select("*")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  const rows = (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  console.info(
+    "[SiteIssues] listIssues ← returned",
+    rows.length,
+    "rows for session_id",
+    sessionId,
+    rows.map((r) => ({ id: r.id, severity: r.severity, sessionId: r.sessionId })),
+  );
+  return rows;
 }
 
 export interface NewSiteIssue {
@@ -83,6 +92,11 @@ export interface NewSiteIssue {
 
 export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  console.info("[SiteIssues] createIssue → inserting", {
+    session_id: payload.sessionId,
+    severity: payload.severity,
+    owner: payload.owner,
+  });
   const { data, error } = await supabase
     .from("site_issues_register")
     .insert({
@@ -98,6 +112,11 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     .single();
   if (error) throw error;
   const next = rowToIssue(data as SiteIssueRow);
+  console.info("[SiteIssues] createIssue ← inserted row", {
+    id: next.id,
+    session_id: next.sessionId,
+    severity: next.severity,
+  });
 
   // Ledger receipt — site_day.issue_logged
   try {

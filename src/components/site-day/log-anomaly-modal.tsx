@@ -132,9 +132,14 @@ export function LogAnomalyModal({
       // Bootstrap: if no session row exists yet, provision today's row in
       // `open_pending` so the issue + escalation have a real id to bind to.
       let effectiveSessionId = sessionId;
+      console.info("[LogAnomaly] submit → prop sessionId =", sessionId || "(empty)");
       if (!effectiveSessionId) {
         const bootstrapped = await ensureTodaySession();
         effectiveSessionId = bootstrapped.id;
+        console.info(
+          "[LogAnomaly] bootstrap ensureTodaySession → effectiveSessionId =",
+          effectiveSessionId,
+        );
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, bootstrapped);
       }
 
@@ -153,6 +158,7 @@ export function LogAnomalyModal({
         workaroundPlan: resolvedWorkaround,
         owner: values.owner,
       };
+      console.info("[LogAnomaly] createIssue payload session_id =", payload.sessionId);
       const issue = await createIssue(payload);
       if (values.severity === "red") {
         const next = await setPhase(effectiveSessionId, "escalated_lock");
@@ -167,6 +173,13 @@ export function LogAnomalyModal({
       return { issue, effectiveSessionId };
     },
     onSuccess: ({ issue, effectiveSessionId }) => {
+      console.info(
+        "[LogAnomaly] success → invalidating siteIssuesKey for",
+        effectiveSessionId,
+        "(inserted issue.sessionId =",
+        issue.sessionId,
+        ")",
+      );
       queryClient.invalidateQueries({ queryKey: siteIssuesKey(effectiveSessionId) });
       reset();
       onOpenChange(false);
