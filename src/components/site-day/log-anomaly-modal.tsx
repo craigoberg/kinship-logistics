@@ -26,13 +26,14 @@ import {
   type RygeSeverity,
 } from "@/lib/api/site-issues";
 import { siteIssuesKey } from "@/hooks/use-site-issues";
-import { setPhase } from "@/lib/api/site-day-sessions";
+import { setPhase, ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
+  defaultSeverity?: RygeSeverity;
 }
 
 interface AnomalyDraft {
@@ -42,12 +43,12 @@ interface AnomalyDraft {
   owner: ResponsibilityOwner;
 }
 
-const INITIAL: AnomalyDraft = {
-  severity: "yellow",
+const makeInitial = (severity: RygeSeverity): AnomalyDraft => ({
+  severity,
   description: "",
   workaround: "",
   owner: "internal",
-};
+});
 
 const SEVERITY_CHIPS: Array<{
   value: RygeSeverity;
