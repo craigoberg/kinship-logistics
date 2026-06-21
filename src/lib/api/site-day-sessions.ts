@@ -142,11 +142,13 @@ async function siteLedger(
  */
 export async function getTodaySession(): Promise<SiteDaySession | null> {
   const date = todayIso();
-  const { data, error } = await supabase
+  console.log("[site_day_sessions] session_date query parameter:", date);
+  const { data, error, status } = await supabase
     .from("site_day_sessions")
     .select("*")
     .eq("session_date", date)
     .maybeSingle();
+  console.log("[site_day_sessions] query result:", { data, error, status });
   if (error) throw error;
   return data ? rowToSession(data as SiteDaySessionRow) : null;
 }
