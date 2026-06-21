@@ -56,6 +56,17 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const allChecked =
     mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
 
+  const issuesQ = useSiteIssues(sessionId);
+  const issues = issuesQ.data ?? [];
+  const openIssues = issues.filter((i) => i.status !== "resolved");
+  const profile = useMemo(() => getActiveUserProfile(), []);
+  const permissionQ = useQuery({
+    queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
+    queryFn: () => canManageSystemParameters(profile?.staffId),
+    staleTime: 60_000,
+  });
+  const canManage = permissionQ.data === true;
+
   const openMut = useMutation({
     mutationFn: async () => {
       console.info("[StartOfDay] click → ensureTodaySession");
