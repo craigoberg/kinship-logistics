@@ -4,6 +4,7 @@ import { AlertTriangle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
 import { StartOfDayPanel } from "./start-of-day-panel";
@@ -14,6 +15,7 @@ import { SiteManagerHandshakeModal } from "./site-manager-handshake-modal";
 import { DayClosedPanel } from "./day-closed-panel";
 
 export function DayCentrePage() {
+  const { user, isReady } = useAuthReady();
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
@@ -22,6 +24,7 @@ export function DayCentrePage() {
   const permissionQ = useQuery({
     queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
     queryFn: () => canManageSystemParameters(profile?.staffId),
+    enabled: isReady && !!user,
     staleTime: 60_000,
   });
   const isManager = permissionQ.data === true;

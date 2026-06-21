@@ -1,6 +1,7 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 /**
  * Counts today's `attendance_roster_logs` rows that are still 'Pending'
@@ -9,6 +10,7 @@ import { useSystemParameter } from "@/hooks/use-system-parameters";
  * pre-seeding pending rows.
  */
 export function useNoShowWatch(): { count: number; thresholdMinutes: number } {
+  const { user, isReady } = useAuthReady();
   const threshold = useSystemParameter<number>(
     "site_management.no_show_threshold_minutes",
     60,
@@ -37,6 +39,7 @@ export function useNoShowWatch(): { count: number; thresholdMinutes: number } {
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
     staleTime: 10_000,
+    enabled: isReady && !!user,
   });
 
   return { count: q.data ?? 0, thresholdMinutes: threshold };

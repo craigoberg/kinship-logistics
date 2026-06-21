@@ -5,6 +5,7 @@ import {
   subscribeToSiteSession,
   type SiteDaySession,
 } from "@/lib/api/site-day-sessions";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 export const SITE_SESSION_QUERY_KEY = ["site-day-session", "today"] as const;
 
@@ -15,9 +16,12 @@ export const SITE_SESSION_QUERY_KEY = ["site-day-session", "today"] as const;
  */
 export function useSiteSession() {
   const queryClient = useQueryClient();
+  const { user, isReady } = useAuthReady();
+  const canQuery = isReady && !!user;
   const q = useQuery<SiteDaySession | null>({
     queryKey: SITE_SESSION_QUERY_KEY,
     queryFn: getTodaySession,
+    enabled: canQuery,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
@@ -26,12 +30,12 @@ export function useSiteSession() {
 
   const sessionId = q.data?.id;
   useEffect(() => {
-    if (!sessionId) return;
+    if (!canQuery || !sessionId) return;
     const off = subscribeToSiteSession(sessionId, (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
     });
     return off;
-  }, [sessionId, queryClient]);
+  }, [canQuery, sessionId, queryClient]);
 
   return q;
 }

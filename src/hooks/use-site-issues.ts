@@ -5,6 +5,7 @@ import {
   subscribeToSiteIssues,
   type SiteIssue,
 } from "@/lib/api/site-issues";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 export function siteIssuesKey(sessionId: string | null | undefined) {
   return ["site-issues", sessionId ?? "none"] as const;
@@ -12,10 +13,12 @@ export function siteIssuesKey(sessionId: string | null | undefined) {
 
 export function useSiteIssues(sessionId: string | null | undefined) {
   const queryClient = useQueryClient();
+  const { user, isReady } = useAuthReady();
+  const canQuery = isReady && !!user && !!sessionId;
   const q = useQuery<SiteIssue[]>({
     queryKey: siteIssuesKey(sessionId),
     queryFn: () => (sessionId ? listIssues(sessionId) : Promise.resolve([])),
-    enabled: !!sessionId,
+    enabled: canQuery,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
@@ -23,12 +26,12 @@ export function useSiteIssues(sessionId: string | null | undefined) {
   });
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!canQuery || !sessionId) return;
     const off = subscribeToSiteIssues(sessionId, () => {
       queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
     });
     return off;
-  }, [sessionId, queryClient]);
+  }, [canQuery, sessionId, queryClient]);
 
   return q;
 }
