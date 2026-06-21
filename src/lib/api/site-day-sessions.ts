@@ -139,13 +139,13 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   const existing = await getTodaySession();
   if (existing) return existing;
   const date = todayIso();
-  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const staffId = await resolveStaffIdWithFallback();
   const { data, error } = await supabase
     .from("site_day_sessions")
     .insert({
       session_date: date,
       phase: "open_pending",
-      opened_by_id: userId,
+      opened_by_id: staffId,
     })
     .select("*")
     .single();
@@ -166,7 +166,7 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
  */
 export async function openSession(notes: string): Promise<SiteDaySession> {
   const date = todayIso();
-  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const staffId = await resolveStaffIdWithFallback();
   const nowIso = new Date().toISOString();
   const today = await getTodaySession();
 
@@ -177,7 +177,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
       .insert({
         session_date: date,
         phase: "active_day",
-        opened_by_id: userId,
+        opened_by_id: staffId,
         open_declared_at: nowIso,
         open_leader_notes: notes || null,
       })
@@ -190,7 +190,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
       .from("site_day_sessions")
       .update({
         phase: "active_day",
-        opened_by_id: userId,
+        opened_by_id: staffId,
         open_declared_at: nowIso,
         open_leader_notes: notes || null,
       })
@@ -213,7 +213,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
 export async function closeSession(notes: string): Promise<SiteDaySession> {
   const today = await getTodaySession();
   if (!today) throw new Error("No session row to close.");
-  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const userId = await resolveStaffIdWithFallback();
   const { data, error } = await supabase
     .from("site_day_sessions")
     .update({
