@@ -27,6 +27,10 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [ticked, setTicked] = useState<Set<number>>(new Set());
+  const mandatedItems = useMandatedChecks();
+  const allChecked =
+    mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
 
   const openMut = useMutation({
     mutationFn: () => openSession(""),
