@@ -84,6 +84,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         });
         return;
       }
+      if (!isEdit && !role.trim()) {
+        toast.error("Role / title is required", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
+      if (!isEdit && !personnelType) {
+        toast.error("System access level is required", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
       const trimmedPin = pin.trim();
       if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
         toast.error("A 4-digit PIN is required for new personnel", {
@@ -142,9 +154,11 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const trimmedPinLive = pin.trim();
   const pinValidLive = /^\d{4}$/.test(trimmedPinLive);
   const nameMissing = !trimmedName;
+  const roleMissing = !isEdit && !role.trim();
+  const personnelTypeMissing = !isEdit && !personnelType;
   const pinMissing = !isEdit && !pinValidLive;
   const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
-  const canSave = !busy && !nameMissing && !pinMissing && !pinBadFormat;
+  const canSave = !busy && !nameMissing && !roleMissing && !personnelTypeMissing && !pinMissing && !pinBadFormat;
 
   return (
 
@@ -175,19 +189,33 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               )}
             </Field>
 
-            <Field label="Role / title">
-              <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
+            <Field label="Role / title" required={!isEdit}>
+              <Input
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                placeholder="e.g. Registered Nurse"
+                aria-invalid={roleMissing}
+                className={roleMissing ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {roleMissing && (
+                <p className="text-[11px] text-destructive">Role / title is required.</p>
+              )}
             </Field>
 
-            <Field label="SYSTEM ACCESS LEVEL">
+            <Field label="SYSTEM ACCESS LEVEL" required={!isEdit}>
               <Select value={personnelType} onValueChange={setPersonnelType}>
-                <SelectTrigger><SelectValue placeholder="Select personnel type" /></SelectTrigger>
+                <SelectTrigger aria-invalid={personnelTypeMissing} className={personnelTypeMissing ? "border-destructive focus-visible:ring-destructive" : undefined}>
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
                 <SelectContent>
                   {ACCESS_ROLES.map((r) => (
                     <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {personnelTypeMissing && (
+                <p className="text-[11px] text-destructive">System access level is required.</p>
+              )}
             </Field>
             <Field label="Phone">
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
@@ -324,13 +352,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         <SheetFooter className="flex-col items-stretch gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-end">
           {!canSave && !busy && (
             <p className="text-[11px] text-destructive sm:mr-auto">
-              {nameMissing && pinMissing
-                ? "Full name and 4-digit PIN are required."
-                : nameMissing
-                  ? "Full name is required."
-                  : pinMissing
-                    ? "A 4-digit PIN is required."
-                    : "PIN must be exactly 4 digits."}
+              {[
+                nameMissing && "Full name",
+                roleMissing && "Role / title",
+                personnelTypeMissing && "System access level",
+                pinMissing && "4-digit PIN",
+                pinBadFormat && "PIN must be exactly 4 digits",
+              ]
+                .filter(Boolean)
+                .join(", ")}
+              {" "}is required.
             </p>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
