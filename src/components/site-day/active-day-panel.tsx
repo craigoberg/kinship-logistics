@@ -15,7 +15,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { ClientTime } from "@/components/ui/client-time";
-import { useSiteIssues } from "@/hooks/use-site-issues";
+import { useActiveSiteIssues } from "@/hooks/use-site-issues";
 import { closeSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
@@ -32,7 +32,7 @@ interface Props {
 export function ActiveDayPanel({ session }: Props) {
   const queryClient = useQueryClient();
   const { user } = useAuthReady();
-  const issuesQ = useSiteIssues(session.id);
+  const issuesQ = useActiveSiteIssues(session.id);
   const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
@@ -178,8 +178,9 @@ export function ActiveDayPanel({ session }: Props) {
 
         {!issuesQ.isError && issues.length === 0 && (
           <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-            No issues or notes logged today. Use <span className="font-semibold">Log anomaly</span>{" "}
-            above when something needs flagging.
+            No active issues. Use <span className="font-semibold">Log anomaly</span>{" "}
+            above when something needs flagging. This list also surfaces any
+            unresolved issues carried over from prior days.
           </Card>
         )}
 

@@ -82,6 +82,30 @@ export async function listIssues(sessionId: string): Promise<SiteIssue[]> {
   return rows;
 }
 
+/**
+ * Unified active-issue feed for the post-declaration ActiveDayPanel.
+ * Returns, in one round trip:
+ *   - every row for today's session (any status), plus
+ *   - every still-`open` row from prior sessions.
+ * Resolved rows from prior days are excluded.
+ */
+export async function listActiveIssues(sessionId: string): Promise<SiteIssue[]> {
+  console.info("[SiteIssues] listActiveIssues → session_id", sessionId);
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("*")
+    .or(`session_id.eq.${sessionId},status.eq.open`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  const rows = (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  console.info(
+    "[SiteIssues] listActiveIssues ← returned",
+    rows.length,
+    "rows (today + carried-over open)",
+  );
+  return rows;
+}
+
 export interface NewSiteIssue {
   sessionId: string;
   severity: RygeSeverity;
