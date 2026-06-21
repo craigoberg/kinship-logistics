@@ -64,13 +64,22 @@ function rowToIssue(r: SiteIssueRow): SiteIssue {
 }
 
 export async function listIssues(sessionId: string): Promise<SiteIssue[]> {
+  console.info("[SiteIssues] listIssues → querying session_id", sessionId);
   const { data, error } = await supabase
     .from("site_issues_register")
     .select("*")
     .eq("session_id", sessionId)
     .order("created_at", { ascending: false });
   if (error) throw error;
-  return (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  const rows = (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  console.info(
+    "[SiteIssues] listIssues ← returned",
+    rows.length,
+    "rows for session_id",
+    sessionId,
+    rows.map((r) => ({ id: r.id, severity: r.severity, sessionId: r.sessionId })),
+  );
+  return rows;
 }
 
 export interface NewSiteIssue {
