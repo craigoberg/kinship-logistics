@@ -27,6 +27,8 @@ import {
 } from "@/hooks/use-supabase-data";
 import { hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
+import { ACCESS_ROLES } from "@/lib/access-roles";
+
 
 const PERSONNEL_TYPES = ["Staff", "Volunteer", "Coordinator", "Contractor"];
 
@@ -151,8 +153,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoFocus />
             </Field>
             <Field label="Role / title">
-              <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Support Worker" />
+              <Select value={role || undefined} onValueChange={setRole}>
+                <SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger>
+                <SelectContent>
+                  {ACCESS_ROLES.map((r) => (
+                    <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </Field>
+
             <Field label="Personnel type">
               <Select value={personnelType} onValueChange={setPersonnelType}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
