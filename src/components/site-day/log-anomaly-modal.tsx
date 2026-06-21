@@ -22,7 +22,7 @@ import {
   type ResponsibilityOwner,
   type RygeSeverity,
 } from "@/lib/api/site-issues";
-import { siteIssuesKey } from "@/hooks/use-site-issues";
+import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
 import { setPhase } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
@@ -152,8 +152,10 @@ export function LogAnomalyModal({
     onSuccess: (issue) => {
       // Targeted invalidations (exact keys used by the parent panel/register)
       queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
+      queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(sessionId) });
       queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
       queryClient.invalidateQueries({ queryKey: ["site-issues"] });
+      queryClient.invalidateQueries({ queryKey: ["site-issues-active"] });
       queryClient.invalidateQueries({ queryKey: ["site-day-anomalies"] });
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       // Broad sweep — catches any query whose key starts with "site-issues"

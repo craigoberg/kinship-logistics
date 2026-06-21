@@ -2,7 +2,7 @@ import { useEffect } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   listIssues,
-  subscribeToSiteIssues,
+  listActiveIssues,
   type SiteIssue,
 } from "@/lib/api/site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
@@ -11,14 +11,13 @@ export function siteIssuesKey(sessionId: string | null | undefined) {
   return ["site-issues", sessionId ?? "none"] as const;
 }
 
+export function activeSiteIssuesKey(sessionId: string | null | undefined) {
+  return ["site-issues-active", sessionId ?? "none"] as const;
+}
+
 export function useSiteIssues(sessionId: string | null | undefined) {
   const queryClient = useQueryClient();
   const { isReady } = useAuthReady();
-  // Gate only on auth-ready + sessionId. Do NOT require a signed-in user —
-  // the publishable (anon) key is sufficient to read site_issues_register
-  // under current RLS, and gating on `user` silently disables the query
-  // and renders the "No issues logged yet" empty state forever when the
-  // session hasn't been hydrated.
   const canQuery = isReady && !!sessionId;
   const q = useQuery<SiteIssue[]>({
     queryKey: siteIssuesKey(sessionId),
@@ -30,10 +29,34 @@ export function useSiteIssues(sessionId: string | null | undefined) {
     staleTime: 5_000,
   });
 
-  // Realtime subscription intentionally disabled — programmatic cache
-  // invalidation on mutation success + polling refetchInterval cover updates,
-  // and re-subscribing on the same channel caused
-  // "cannot add postgres_changes callbacks after subscribe()" crashes.
+  useEffect(() => {
+    return () => {};
+  }, [canQuery, sessionId, queryClient]);
+
+  return q;
+}
+
+/**
+ * Unified active-issues hook for the post-declaration ActiveDayPanel.
+ * Returns today's issues for `sessionId` PLUS any still-open issues
+ * carried over from prior sessions.
+ */
+export function useActiveSiteIssues(sessionId: string | null | undefined) {
+  const queryClient = useQueryClient();
+  const { isReady } = useAuthReady();
+  const canQuery = isReady && !!sessionId;
+  const q = useQuery<SiteIssue[]>({
+    queryKey: activeSiteIssuesKey(sessionId),
+    queryFn: () =>
+      sessionId ? listActiveIssues(sessionId) : Promise.resolve([]),
+    enabled: canQuery,
+    refetchInterval: 30_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: true,
+    staleTime: 5_000,
+  });
+
+  // Realtime intentionally disabled — see useSiteIssues note.
   useEffect(() => {
     return () => {};
   }, [canQuery, sessionId, queryClient]);
