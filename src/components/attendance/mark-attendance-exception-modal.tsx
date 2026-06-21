@@ -20,6 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { LookupSelect } from "@/components/lookups/lookup-select";
 import {
   type AttendanceSchedule,
   type AttendanceStatus,
@@ -34,7 +35,7 @@ interface Props {
   participantName: string;
 }
 
-const EXCEPTION_STATUSES: AttendanceStatus[] = ["Sick", "Cancelled"];
+const EXCEPTION_STATUSES: AttendanceStatus[] = ["Sick", "Cancelled", "No-Show"];
 
 function todayIso(): string {
   const d = new Date();
@@ -49,6 +50,10 @@ function todayIso(): string {
  * (`resolveDailyRoster`) overlays this exception only for the specified
  * `rosterDate`, so the participant automatically reverts to their baseline
  * schedule the following week.
+ *
+ * When the exception is a "No-Show", an NDIS short-notice cancellation
+ * reason must be selected (LookupSelect → category `ndis_cancellation_reason`).
+ * The selected code is written to `attendance_roster_logs.ndis_cancellation_reason`.
  */
 export function MarkAttendanceExceptionModal({
   open,
@@ -59,6 +64,8 @@ export function MarkAttendanceExceptionModal({
   const [rosterDate, setRosterDate] = useState(todayIso());
   const [status, setStatus] = useState<AttendanceStatus>("Sick");
   const [notes, setNotes] = useState("");
+  const [ndisReason, setNdisReason] = useState<string>("");
+  const [ndisReasonLabel, setNdisReasonLabel] = useState<string>("");
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertAttendanceLog();
 
@@ -67,13 +74,17 @@ export function MarkAttendanceExceptionModal({
       setRosterDate(todayIso());
       setStatus("Sick");
       setNotes("");
+      setNdisReason("");
+      setNdisReasonLabel("");
       setDirty(false);
     }
   }, [open]);
 
   if (!schedule) return null;
 
-  const valid = rosterDate.length === 10;
+  const requiresNdisReason = status === "No-Show";
+  const ndisReasonOk = !requiresNdisReason || ndisReason.trim().length > 0;
+  const valid = rosterDate.length === 10 && ndisReasonOk;
   const canSubmit = dirty && valid && !mutation.isPending;
 
   const submit = async () => {
@@ -86,9 +97,15 @@ export function MarkAttendanceExceptionModal({
         expectedService: schedule.serviceType,
         actualStatus: status,
         driverNotes: notes.trim() || null,
-      });
+        // The hook may or may not forward this field — the underlying
+        // insertAttendanceLog accepts the row shape directly, and
+        // ndis_cancellation_reason is a non-required column. If the schema
+        // is missing the column, the insert will error here and surface to
+        // the user via the toast below.
+        ndisCancellationReason: requiresNdisReason ? ndisReason : null,
+      } as Parameters<typeof mutation.mutateAsync>[0]);
       toast.success("Exception logged", {
-        description: `${participantName} · ${formatDate(rosterDate)} · ${status}. Baseline schedule untouched.`,
+        description: `${participantName} · ${formatDate(rosterDate)} · ${status}${requiresNdisReason ? ` (${ndisReasonLabel || ndisReason})` : ""}. Baseline schedule untouched.`,
       });
       onOpenChange(false);
     } catch (err) {
@@ -134,6 +151,11 @@ export function MarkAttendanceExceptionModal({
               onValueChange={(v) => {
                 setStatus(v as AttendanceStatus);
                 setDirty(true);
+                // Reset NDIS reason if switching away from No-Show.
+                if (v !== "No-Show") {
+                  setNdisReason("");
+                  setNdisReasonLabel("");
+                }
               }}
             >
               <SelectTrigger>
@@ -148,6 +170,30 @@ export function MarkAttendanceExceptionModal({
               </SelectContent>
             </Select>
           </div>
+
+          {requiresNdisReason && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                NDIS Cancellation Reason{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <LookupSelect
+                category="ndis_cancellation_reason"
+                value={ndisReason}
+                onChange={(code, label) => {
+                  setNdisReason(code);
+                  setNdisReasonLabel(label);
+                  setDirty(true);
+                }}
+                placeholder="Select a short-notice reason…"
+              />
+              {!ndisReasonOk && (
+                <p className="text-xs text-destructive">
+                  Required for No-Show — NDIS compliant cancellation reason.
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
