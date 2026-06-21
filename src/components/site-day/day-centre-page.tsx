@@ -1,18 +1,15 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useRef } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
-import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { getActiveUserProfile } from "@/lib/data-store";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
-import { SiteLeaderHandshakePanel } from "./site-leader-handshake-panel";
-import { SiteManagerHandshakeModal } from "./site-manager-handshake-modal";
+import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 
 export function DayCentrePage() {
@@ -22,14 +19,6 @@ export function DayCentrePage() {
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
 
-  const profile = useMemo(() => getActiveUserProfile(), []);
-  const permissionQ = useQuery({
-    queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
-    queryFn: () => canManageSystemParameters(profile?.staffId),
-    enabled: isReady && !!user,
-    staleTime: 60_000,
-  });
-  const isManager = permissionQ.data === true;
 
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.
@@ -51,7 +40,7 @@ export function DayCentrePage() {
     bootstrapMut.mutate();
   }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
 
-  const [managerModalOpen, setManagerModalOpen] = useState(true);
+  
 
   console.log("Current Session State:", {
     session: sessionQ.data,
@@ -116,19 +105,7 @@ export function DayCentrePage() {
         return (
           <div className="space-y-4">
             <EscalationLockBanner session={session} />
-            <SiteLeaderHandshakePanel session={session} />
-            {isManager && (
-              <SiteManagerHandshakeModal
-                open={managerModalOpen}
-                onOpenChange={setManagerModalOpen}
-                session={session}
-                context={{
-                  kind: "site_session",
-                  sessionId: session.id,
-                  issue: redIssue,
-                }}
-              />
-            )}
+            <EscalationResolutionPanel session={session} redIssue={redIssue} />
           </div>
         );
       case "active_day":
