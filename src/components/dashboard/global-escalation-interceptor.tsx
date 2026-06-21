@@ -72,17 +72,28 @@ export function GlobalEscalationInterceptor() {
     if (baseline.data) {
       setQueue((prev) => {
         const seen = new Set(prev.map((e) => e.id));
-        const additions = baseline.data.filter((e) => !seen.has(e.id));
+        const additions = baseline.data.filter(
+          (e) => !seen.has(e.id) && !isOwnEscalation(e),
+        );
         return additions.length ? [...prev, ...additions] : prev;
       });
     }
-  }, [baseline.data]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseline.data, currentStaffId]);
+
+  // If the current user is identified after the queue was seeded, drop any
+  // already-queued escalations that they raised themselves.
+  useEffect(() => {
+    if (!currentStaffId) return;
+    setQueue((prev) => prev.filter((e) => e.raisedBy !== currentStaffId));
+  }, [currentStaffId]);
 
   // Realtime escalation pool.
   useEffect(() => {
     const off = subscribeToEscalationPool(({ type, row }) => {
       if (type === "INSERT") {
         if (row.status !== "pending") return;
+        if (isOwnEscalation(row)) return;
         setQueue((prev) =>
           prev.some((e) => e.id === row.id) ? prev : [...prev, row],
         );
@@ -93,7 +104,9 @@ export function GlobalEscalationInterceptor() {
       }
     });
     return off;
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentStaffId]);
+
 
   // Tick to refresh "12s ago" label every second while modal is open.
   const active = queue[0] ?? null;
