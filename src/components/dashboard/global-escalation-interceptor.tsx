@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 
 import {
   claimOperationalEscalation,
+  isOperationalEscalationClaimable,
+  listClaimableEscalations,
   listPendingEscalations,
   resolveStaffIdWithFallback,
   subscribeToEscalationPool,
@@ -62,8 +64,8 @@ export function GlobalEscalationInterceptor() {
 
   // Baseline post-login fetch.
   const baseline = useQuery({
-    queryKey: ["pending-escalations"],
-    queryFn: listPendingEscalations,
+    queryKey: ["claimable-escalations"],
+    queryFn: listClaimableEscalations,
     staleTime: 30_000,
   });
 
@@ -94,13 +96,29 @@ export function GlobalEscalationInterceptor() {
       if (type === "INSERT") {
         if (row.status !== "pending") return;
         if (isOwnEscalation(row)) return;
-        setQueue((prev) =>
-          prev.some((e) => e.id === row.id) ? prev : [...prev, row],
-        );
+        void isOperationalEscalationClaimable(row).then((claimable) => {
+          if (!claimable) return;
+          setQueue((prev) =>
+            prev.some((e) => e.id === row.id) ? prev : [...prev, row],
+          );
+        });
       } else if (type === "UPDATE") {
         if (row.status !== "pending") {
           setQueue((prev) => prev.filter((e) => e.id !== row.id));
+          return;
         }
+
+        if (isOwnEscalation(row)) {
+          setQueue((prev) => prev.filter((e) => e.id !== row.id));
+          return;
+        }
+
+        void isOperationalEscalationClaimable(row).then((claimable) => {
+          setQueue((prev) => {
+            const without = prev.filter((e) => e.id !== row.id);
+            return claimable ? [...without, row] : without;
+          });
+        });
       }
     });
     return off;
