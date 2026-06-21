@@ -107,19 +107,21 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       )}
 
-      {authRecoveryMessage && (
+      {errorMessage && (
         <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-2">
-            <p className="font-semibold">Authorisation still required</p>
-            <p>{authRecoveryMessage}</p>
+            <p className="font-semibold">Could not open the day</p>
+            <p className="whitespace-pre-wrap break-words font-mono text-xs">
+              {errorMessage}
+            </p>
             <div className="flex flex-wrap gap-2">
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
                 onClick={() => {
-                  setAuthRecoveryMessage(null);
+                  setErrorMessage(null);
                   openMut.mutate();
                 }}
                 disabled={openMut.isPending}
@@ -129,18 +131,17 @@ export function StartOfDayPanel({ sessionId }: Props) {
               <Button
                 type="button"
                 size="sm"
-                onClick={() => {
-                  setAuthRecoveryMessage(null);
-                  setReauthOpen(true);
-                }}
+                variant="ghost"
+                onClick={() => setErrorMessage(null)}
                 disabled={openMut.isPending}
               >
-                Re-enter PIN
+                Dismiss
               </Button>
             </div>
           </div>
         </div>
       )}
+
 
       <div className="grid gap-3 md:grid-cols-2">
         <Button
