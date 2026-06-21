@@ -213,6 +213,7 @@ export function GovernanceHubWorkspace() {
           </TableBody>
         </Table>
       </div>
+      </TabsContent>
 
       {editing && (
         <EditAssetModal
@@ -235,7 +236,7 @@ export function GovernanceHubWorkspace() {
           }}
         />
       )}
-    </div>
+    </Tabs>
   );
 }
 
