@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -24,8 +24,6 @@ import {
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
 import { useSiteIssues } from "@/hooks/use-site-issues";
-import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
@@ -65,13 +63,6 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
 
-  const profile = useMemo(() => getActiveUserProfile(), []);
-  const permissionQ = useQuery({
-    queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
-    queryFn: () => canManageSystemParameters(profile?.staffId),
-    staleTime: 60_000,
-  });
-  const canManage = permissionQ.data === true;
 
   const openMut = useMutation({
     mutationFn: () => openSession(""),
@@ -206,7 +197,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
         <div className="space-y-2">
           {issues.map((i) => (
-            <IssuesRegisterCard key={i.id} issue={i} canManage={canManage} />
+            <IssuesRegisterCard key={i.id} issue={i} />
           ))}
         </div>
       </div>
