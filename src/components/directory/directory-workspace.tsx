@@ -183,17 +183,21 @@ export function DirectoryWorkspace() {
                           <CertBadges certs={s.certifications} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditStaff(s);
-                              setStaffOpen(true);
-                            }}
-                            aria-label={`Edit ${s.fullName}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                          {isManager ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditStaff(s);
+                                setStaffOpen(true);
+                              }}
+                              aria-label={`Edit ${s.fullName}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Lock className="ml-auto h-4 w-4 text-muted-foreground" aria-label="Manager-only" />
+                          )}
                         </TableCell>
                       </TableRow>
                     );
