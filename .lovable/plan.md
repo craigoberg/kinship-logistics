@@ -1,84 +1,93 @@
 ## Goal
-Add a **Unified Open Issues** panel to the Governance Hub that pulls open items from every operational source the system already has, tagged by origin, with a Resolve action that captures a mandatory resolution note into the `operational_ledger` (NDIS receipt) and flips the source row to resolved/pending=false so the Day Centre's Active Day register drops it automatically.
+When a Red anomaly is logged in the Day Centre, fire it through the exact same operational-escalation rail that the Bus Walkaround already uses: insert a pending `operational_escalations` row, let the existing `GlobalEscalationInterceptor` pop a non-dismissible Claim modal on every coordinator/manager session, claim it atomically via the existing RPC, and append a `governance.escalation_claimed` ledger receipt with checker name + issue id + manager id.
 
-The existing Hub stays a Compliance Asset registry; the new panel sits above it as a separate tab/section.
+No new realtime channel and no parallel modal — we reuse the bus-walkaround pipeline (`raiseOperationalEscalation` → `subscribeToEscalationPool` → `claim_operational_escalation` RPC) so the two flows are literally the same code path.
 
-## Sources unioned
+## Schema — `operational_escalations` (additive)
 
-| Source table | Category | Sub-category | Open filter | Resolve target |
-|---|---|---|---|---|
-| `site_issues_register` | Day Centre | severity (Red/Yellow/Green) | `status='open'` | `status='resolved'`, `resolved_at=now()` |
-| `operational_incidents` | Incident | `incident_type` (mechanical / human_operational) | `status='pending'` | `status='resolved'` |
-| `operational_escalations` | Escalation | `gate_id` (with `eventName`/event link when `event_id` set) | `status IN ('pending','claimed')` | `status='resolved_approved'`, `resolved_at=now()`, `resolution_notes=<note>` |
-| `compliance_assets` (RED/YELLOW only) | Renewal | `category` (with type as sub) | `status='active'` AND `computeRyge(asset) !== 'green'` | Read-only here — link to existing Compliance Asset editor |
+New migration `docs/sql/2026-07-08_escalations_source_link.sql`:
+- `ALTER TABLE public.operational_escalations ADD COLUMN source_kind text NULL;`
+  Values: `'bus_walkaround'` (default for existing rows via backfill) or `'site_day_red'`.
+- `ALTER TABLE public.operational_escalations ADD COLUMN source_issue_id uuid NULL;`
+  FK soft-link to `site_issues_register.id`. Nullable so the existing bus rows stay valid.
+- Backfill: `UPDATE public.operational_escalations SET source_kind='bus_walkaround' WHERE source_kind IS NULL;`
+- Idempotent index: `CREATE INDEX IF NOT EXISTS idx_op_escalations_source ON public.operational_escalations (source_kind, source_issue_id);`
 
-`compliance_assets` is included for visibility but Resolve for it stays in the existing renewal/audit flow; the panel surfaces a "Manage" link that opens the existing `EditAssetModal`. The other three are resolvable inline.
+No RLS changes (existing policies already cover `authenticated`).
 
 ## Data layer
 
-### New file: `src/lib/api/unified-issues.ts`
-- `UnifiedIssue` type:
-  ```ts
-  {
-    key: string;            // `${source}:${id}` — stable React key + dedupe
-    source: 'day_centre' | 'incident' | 'escalation' | 'renewal';
-    sourceLabel: string;    // "Day Centre" | "Incident" | "Escalation" | "Renewal"
-    category: string;       // e.g. severity for Day Centre, incident_type for Incident
-    subCategory: string | null; // event name for escalations etc.
-    severity: 'red' | 'yellow' | 'green' | null;
-    title: string;          // short summary
-    description: string;
-    status: string;         // raw source status
-    createdAt: string;
-    sourceRowId: string;    // for Resolve dispatch
-    eventId?: string | null;
-    raw: unknown;           // original row for edit/manage links
-  }
-  ```
-- `listOpenUnifiedIssues()` — runs the four `select` queries in parallel via `Promise.all`, normalizes rows to `UnifiedIssue`, and returns them sorted by `createdAt DESC`. Compliance assets are filtered client-side via the existing `computeRyge` helper.
-- `resolveUnifiedIssue(issue: UnifiedIssue, resolutionNote: string, resolvedByStaffId: string)`:
-  - Validates `resolutionNote.trim().length >= 10`.
-  - Dispatches the right UPDATE per `source`.
-  - **Always** writes an `operational_ledger` receipt via `writeToLedger` with `action_type='governance.issue_resolved'`, `severity` mapped from the source severity, and metadata `{ source, sourceRowId, category, subCategory, resolutionNote, resolvedByStaffId }` — this is the NDIS-reportable receipt.
-  - Throws on `compliance_assets` so the UI never calls it for renewals (the button is hidden for that source anyway).
+### `src/lib/data-store.ts`
+- Extend `OperationalEscalationRow` and `OperationalEscalation` types with `sourceKind: 'bus_walkaround' | 'site_day_red' | null` and `sourceIssueId: string | null`.
+- Update `rowToEscalation` mapper.
+- Extend `raiseOperationalEscalation` to accept optional `sourceKind` and `sourceIssueId`, persist them on insert. Default `sourceKind='bus_walkaround'` so existing callers (the dynamic operational form) keep their semantics unchanged with zero edit.
 
-### New file: `src/hooks/use-unified-issues.ts`
-- `unifiedIssuesKey = ['governance-unified-issues']`.
-- `useUnifiedIssues()` — `useQuery` wrapping `listOpenUnifiedIssues`, 30s `refetchInterval`, 5s `staleTime`. Auth-ready gated like `useSiteIssues`.
+### `src/lib/operational-forms.ts`
+- Add `site_day_red → "Day Centre — Red Anomaly"` to `prettyGateLabel`.
 
-## UI layer
+## Trigger — `src/components/site-day/log-anomaly-modal.tsx`
+In the existing mutation, after `createIssue(payload)` succeeds AND `values.severity === 'red'`:
+1. Resolve checker name from `getActiveUserProfile()?.fullName ?? "Day Centre Checker"`.
+2. Call `raiseOperationalEscalation({ clearanceId: null, driverName: <checkerName>, vehicleInfo: \`Day Centre · ${issue.issueDescription.slice(0,80)}\`, gateId: "site_day_red", sourceKind: "site_day_red", sourceIssueId: issue.id })`.
+3. Wrap in try/catch — if escalation insert fails, surface a toast but DO NOT undo the issue insert. The lock-phase + window CustomEvent path stays unchanged so existing UX (escalation lock banner) still triggers.
+4. Remove the now-redundant `window.dispatchEvent("yada:escalation", ...)` only if nothing else listens for it (verify with `rg yada:escalation`); otherwise leave as-is.
 
-### Update `src/components/admin/governance-hub-workspace.tsx`
-Wrap the existing content in a `Tabs` component with two tabs: **Open Issues** (new, default) and **Compliance Assets** (existing content moved verbatim). No behavior change to the existing tab.
+The postgres_changes INSERT into `operational_escalations` is what notifies every manager session — no extra broadcast plumbing required.
 
-### New file: `src/components/admin/unified-issues-panel.tsx`
-Renders the unified list:
-- Filter bar: `Source` (All / Day Centre / Incident / Escalation / Renewal), `Severity` (All / Red / Yellow / Green), text search.
-- Table columns: Source (Badge — colour per source), Category / Sub-category, Severity (RYG badge when present), Title + description (truncated), Created, Action.
-- Action column:
-  - Day Centre / Incident / Escalation → **Resolve** button → opens `ResolveIssueDialog`.
-  - Renewal → **Manage** button → triggers the existing `EditAssetModal` via a callback prop (kept in the parent so we don't duplicate the modal).
-- Empty state when no open issues across all sources.
-- Loading + error states with the standard pattern.
+## Role-gated manager pop-up
 
-### New file: `src/components/admin/resolve-issue-dialog.tsx`
-- Shows the issue summary (source, category, severity, description).
-- `Textarea` for resolution notes — required, min 10 chars, copy: "This text becomes part of the NDIS-reportable operational ledger receipt."
-- Confirm button runs `useMutation(resolveUnifiedIssue)`.
-- `onSuccess`: toast, invalidate `['governance-unified-issues']`, `['site-issues']`, `['site-issues-active']`, and the existing `SITE_SESSION_QUERY_KEY` so the Active Day register refetches and drops the row. Close dialog.
+Already exists as `GlobalEscalationInterceptor` mounted in `src/routes/__root.tsx` via `RoleAwareGuardians`. Two minimal changes:
 
-## Cross-cutting wiring
-- `LogAnomalyModal` invalidations already broad-sweep `site-issues*` and `site-day*`. Add `['governance-unified-issues']` to its `onSuccess` so newly logged Day Centre issues appear in the Hub immediately.
-- No schema or RLS changes — every table already grants `authenticated` SELECT/UPDATE per existing migrations.
+### `src/routes/__root.tsx`
+In `RoleAwareGuardians`, mount the interceptor only when `role === "coordinator"` (the role normaliser in `data-store.ts` already maps `"manager"` and `"coordinator"` to `"coordinator"`). Drivers no longer see the modal — they never could action it anyway.
 
-## Out of scope (call out for follow-up)
-- Bulk resolve.
-- Editing severity / category on a unified row (resolve only).
-- Pulling event-based sub-categories beyond the `event_id` column already on escalations/incidents (we'll display the raw event id; a future pass can join to `events` for the name).
-- Compliance asset resolve from inside the unified panel.
+### `src/components/dashboard/global-escalation-interceptor.tsx`
+- ContextRow labels become source-aware:
+  - `sourceKind === 'site_day_red'` → labels: **Reported by / Site / Trigger / Raised**.
+  - default → existing **Driver / Vehicle / Failed Gate / Raised**.
+- Button copy stays the same ("CLAIM INCIDENT & OPEN CONSULTATION") — the consultation modal already accepts any escalation row.
+
+## Claim audit — `GlobalEscalationInterceptor.handleClaim`
+Inside the `if (result.success)` branch, before opening the consultation modal, append a ledger receipt:
+
+```ts
+await writeToLedger({
+  staff_id: staffId,                                  // manager who claimed
+  category: target.sourceKind === 'site_day_red' ? 'CENTRE' : 'VEHICLE',
+  severity: 'RED',
+  action_type: 'governance.escalation_claimed',
+  gps_lat: gps?.lat ?? null,
+  gps_lng: gps?.lng ?? null,
+  metadata: {
+    escalation_id: target.id,
+    source_kind: target.sourceKind ?? 'bus_walkaround',
+    source_issue_id: target.sourceIssueId,
+    checker_name: target.driverName,                  // reporter for site_day, driver for bus
+    gate_id: target.gateId,
+    manager_staff_id: staffId,
+  },
+});
+```
+
+`tryGetGps()` is already imported via the ledger module; pull it in here as well. Failure is swallowed by `writeToLedger`, so it cannot break the claim flow.
+
+## State synchronisation across manager sessions
+
+Already handled by the existing rail:
+- INSERT visible to every subscriber via `subscribeToEscalationPool`.
+- RPC `claim_operational_escalation` flips `status='claimed'` + `claimed_by`/`claimed_at` atomically.
+- The UPDATE replays through the same channel; `GlobalEscalationInterceptor`'s `useEffect` removes the row from its local queue when `status !== 'pending'`. Other managers' modals disappear automatically.
+- The `Exception Hub` and any dashboard listing pending escalations re-render off the same postgres_changes feed.
+
+## Out of scope
+
+- Replacing the existing `EscalationConsultationModal` UI — it already works for any escalation kind.
+- Showing the originating Red issue details inside the consultation modal (future polish: deep-link to `site_issues_register` row via `sourceIssueId`).
+- Mirroring this for Yellow severities — explicit requirement is Red only.
 
 ## Why this shape
-- No new tables; everything is composed client-side from existing sources, so we don't fork the source of truth.
-- Resolution always writes the ledger receipt **before** flipping the source row, in a single mutation, so an NDIS audit trail exists for every Hub-driven resolution.
-- Day Centre drop-off is automatic because the Active Day register already filters resolved rows out and the mutation invalidates its query keys.
-- Tabs keep the existing Compliance Asset workflow untouched.
+
+- One escalation table = one realtime feed = one Claim modal = one ledger event family. No divergent rails to keep in sync.
+- Reuses the proven atomic RPC, so two managers tapping Claim simultaneously cannot double-claim.
+- The new `source_kind` / `source_issue_id` columns are additive and default-friendly, so existing bus-walkaround inserts and queries keep working with no edits to callers besides the new optional args.
+- Role gate is a one-line conditional in the existing `RoleAwareGuardians`, not a new RBAC layer.
