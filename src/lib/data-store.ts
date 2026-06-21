@@ -4216,6 +4216,8 @@ export interface OperationalEscalation {
   resolvedAt: string | null;
   resolutionNotes: string | null;
   createdAt: string;
+  sourceKind: "bus_walkaround" | "site_day_red" | null;
+  sourceIssueId: string | null;
 }
 
 interface OperationalEscalationRow {
@@ -4231,6 +4233,8 @@ interface OperationalEscalationRow {
   resolved_at: string | null;
   resolution_notes: string | null;
   created_at: string;
+  source_kind: "bus_walkaround" | "site_day_red" | null;
+  source_issue_id: string | null;
 }
 
 function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
@@ -4247,6 +4251,8 @@ function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
     resolvedAt: r.resolved_at,
     resolutionNotes: r.resolution_notes,
     createdAt: r.created_at,
+    sourceKind: r.source_kind ?? null,
+    sourceIssueId: r.source_issue_id ?? null,
   };
 }
 
@@ -4256,6 +4262,8 @@ export async function raiseOperationalEscalation(input: {
   driverName: string;
   vehicleInfo: string;
   gateId: string;
+  sourceKind?: "bus_walkaround" | "site_day_red";
+  sourceIssueId?: string | null;
 }): Promise<OperationalEscalation> {
   const { data, error } = await supabase
     .from("operational_escalations")
@@ -4266,6 +4274,8 @@ export async function raiseOperationalEscalation(input: {
         vehicle_info: input.vehicleInfo,
         gate_id: input.gateId,
         status: "pending",
+        source_kind: input.sourceKind ?? "bus_walkaround",
+        source_issue_id: input.sourceIssueId ?? null,
       },
     ])
     .select("*")
@@ -4273,6 +4283,7 @@ export async function raiseOperationalEscalation(input: {
   if (error) throwPg("[raiseOperationalEscalation]", error);
   return rowToEscalation(data as OperationalEscalationRow);
 }
+
 
 /** Realtime subscription for a single escalation row. */
 export function subscribeToEscalation(

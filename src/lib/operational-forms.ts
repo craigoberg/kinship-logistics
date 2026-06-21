@@ -50,6 +50,7 @@ export function prettyGateLabel(gateId: string): string {
       "Passenger Manifest Audit Failure — Missing Passengers",
     "manifest_accounting":
       "Passenger Manifest Audit Failure — Missing Passengers",
+    "site_day_red": "Day Centre — Red Anomaly",
   };
   if (map[gateId]) return map[gateId];
   return gateId
