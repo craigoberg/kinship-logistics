@@ -63,8 +63,9 @@ export function GlobalEscalationInterceptor() {
 
   // Baseline post-login fetch.
   const baseline = useQuery({
-    queryKey: ["claimable-escalations"],
+    queryKey: ["claimable-escalations", currentStaffId ?? "unknown"],
     queryFn: listClaimableEscalations,
+    enabled: currentStaffQ.isSuccess,
     staleTime: 30_000,
   });
 
@@ -192,7 +193,7 @@ export function GlobalEscalationInterceptor() {
     }
   };
 
-  const showModal = !hidden && !!active;
+  const showModal = !hidden && currentStaffQ.isSuccess && !!active;
 
   return (
     <>
