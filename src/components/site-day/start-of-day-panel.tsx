@@ -53,22 +53,24 @@ export function StartOfDayPanel({ sessionId }: Props) {
           Start of Day Site Declaration
         </h2>
         <p className="text-sm text-muted-foreground">
-          As the Check Leader, complete your physical walkthrough, then
-          declare site status below. Anomalies route to the Issues Register
-          for follow-up.
+          As an authorized Check Leader, please complete your physical
+          walkthrough as per your signed Competency Onboarding guidelines
+          (ensuring general safety, lock verification, and hazard checks are
+          cleared). Affirm compliance below, or record specific anomalies to
+          our Issues Register.
         </p>
       </div>
 
       <div className="rounded-lg border border-border bg-card/40 p-4">
-        <MandatedChecksList />
+        <MandatedChecksList ticked={ticked} onTickedChange={setTicked} />
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <Button
           size="lg"
-          className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700"
+          className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
           onClick={() => setConfirmOpen(true)}
-          disabled={openMut.isPending}
+          disabled={openMut.isPending || !allChecked}
         >
           <ShieldCheck className="h-6 w-6 shrink-0" />
           <span className="flex flex-col items-start">
