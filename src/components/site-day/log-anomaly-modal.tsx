@@ -93,14 +93,13 @@ export function LogAnomalyModal({
   open,
   onOpenChange,
   sessionId,
-  reportedBy,
   defaultSeverity,
 }: Props) {
   if (!sessionId) {
     throw new Error("LogAnomalyModal requires a non-empty sessionId");
   }
-  // reportedBy may be empty during initial render while auth hydrates;
-  // it is enforced at submit time below.
+
+
 
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
