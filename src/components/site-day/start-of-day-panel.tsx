@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
+import { IssuesRegisterCard } from "./issues-register-card";
 import {
   ensureTodaySession,
   openSession,
@@ -22,6 +24,9 @@ import {
 } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
+import { useSiteIssues } from "@/hooks/use-site-issues";
+import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
