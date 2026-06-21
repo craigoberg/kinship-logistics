@@ -1,5 +1,6 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, Navigate } from "@tanstack/react-router";
 import { DayCentrePage } from "@/components/site-day/day-centre-page";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 export const Route = createFileRoute("/day")({
   ssr: false,
@@ -17,6 +18,20 @@ export const Route = createFileRoute("/day")({
 });
 
 function DayPage() {
+  const { user, isReady } = useAuthReady();
+
+  if (!isReady) {
+    return (
+      <div className="mx-auto w-full max-w-5xl p-6 text-sm text-muted-foreground">
+        Restoring session…
+      </div>
+    );
+  }
+
+  if (!user) {
+    return <Navigate to="/auth" search={{ redirect: "/day" }} />;
+  }
+
   return (
     <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-6">
       <header className="space-y-1">
