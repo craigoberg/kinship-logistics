@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
+import { getEscalationBySourceIssue } from "@/lib/data-store";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
@@ -18,7 +19,14 @@ export function DayCentrePage() {
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
-
+  const redIssue =
+    (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
+  const redEscalationQ = useQuery({
+    queryKey: ["site-escalation", redIssue?.id ?? "none"],
+    queryFn: () => (redIssue ? getEscalationBySourceIssue(redIssue.id) : Promise.resolve(null)),
+    enabled: !!redIssue,
+    staleTime: 5_000,
+  });
 
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.
@@ -39,8 +47,6 @@ export function DayCentrePage() {
     bootstrappedRef.current = true;
     bootstrapMut.mutate();
   }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
-
-  
 
   console.log("Current Session State:", {
     session: sessionQ.data,
@@ -63,15 +69,11 @@ export function DayCentrePage() {
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-1">
-            <div className="font-medium">
-              Could not load the Day Centre session.
-            </div>
+            <div className="font-medium">Could not load the Day Centre session.</div>
+            <div className="text-xs">{err?.message ?? "Session row unavailable."}</div>
             <div className="text-xs">
-              {err?.message ?? "Session row unavailable."}
-            </div>
-            <div className="text-xs">
-              If the error mentions a missing table or column, an admin must
-              apply the site-day schema migration.
+              If the error mentions a missing table or column, an admin must apply the site-day
+              schema migration.
             </div>
           </div>
         </div>
@@ -87,27 +89,24 @@ export function DayCentrePage() {
     );
   }
 
-  const redIssue =
-    (issuesQ.data ?? []).find(
-      (i) => i.severity === "red" && i.status !== "resolved",
-    ) ?? null;
+  const redEscalation = redEscalationQ.data ?? null;
+  const hasLiveEscalation =
+    redEscalation?.status === "pending" || redEscalation?.status === "claimed";
+  const isEscalationActive = session.phase === "escalated_lock" || hasLiveEscalation;
 
   const renderPhase = () => {
+    if (isEscalationActive) {
+      return (
+        <div className="space-y-4">
+          <EscalationLockBanner session={session} />
+          <EscalationResolutionPanel session={session} redIssue={redIssue} />
+        </div>
+      );
+    }
+
     switch (session.phase) {
       case "open_pending":
-        return (
-          <StartOfDayPanel
-            sessionId={session.id}
-            reportedBy={user?.id ?? ""}
-          />
-        );
-      case "escalated_lock":
-        return (
-          <div className="space-y-4">
-            <EscalationLockBanner session={session} />
-            <EscalationResolutionPanel session={session} redIssue={redIssue} />
-          </div>
-        );
+        return <StartOfDayPanel sessionId={session.id} reportedBy={user?.id ?? ""} />;
       case "active_day":
         return <ActiveDayPanel session={session} />;
       case "closed_orderly":

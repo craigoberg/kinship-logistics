@@ -4360,7 +4360,8 @@ export async function listPendingEscalations(): Promise<OperationalEscalation[]>
 
 /**
  * Guard the global Claim popup from stale site-day rows. A Day Centre RED
- * escalation is claimable only while its linked session is still locked.
+ * escalation is claimable while its linked red issue is still open and the
+ * escalation row itself is still pending.
  */
 export async function isOperationalEscalationClaimable(
   escalation: OperationalEscalation,
@@ -4392,18 +4393,7 @@ export async function isOperationalEscalationClaimable(
   if (issue.severity !== "red" || (issue.status ?? "open") !== "open") {
     return false;
   }
-
-  const sessionRes = await supabase
-    .from("site_day_sessions")
-    .select("phase")
-    .eq("id", issue.session_id)
-    .maybeSingle();
-  if (sessionRes.error) {
-    throwPg("[isOperationalEscalationClaimable.session]", sessionRes.error);
-  }
-
-  const session = sessionRes.data as { phase: string | null } | null;
-  return session?.phase === "escalated_lock";
+  return true;
 }
 
 /** Fetch pending escalations that should currently interrupt coordinators. */
