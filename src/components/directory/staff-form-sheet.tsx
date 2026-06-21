@@ -138,8 +138,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     }
   };
 
+  const trimmedName = fullName.trim();
+  const trimmedPinLive = pin.trim();
+  const pinValidLive = /^\d{4}$/.test(trimmedPinLive);
+  const nameMissing = !trimmedName;
+  const pinMissing = !isEdit && !pinValidLive;
+  const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
+  const canSave = !busy && !nameMissing && !pinMissing && !pinBadFormat;
 
   return (
+
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
