@@ -352,13 +352,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         <SheetFooter className="flex-col items-stretch gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-end">
           {!canSave && !busy && (
             <p className="text-[11px] text-destructive sm:mr-auto">
-              {nameMissing && pinMissing
-                ? "Full name and 4-digit PIN are required."
-                : nameMissing
-                  ? "Full name is required."
-                  : pinMissing
-                    ? "A 4-digit PIN is required."
-                    : "PIN must be exactly 4 digits."}
+              {[
+                nameMissing && "Full name",
+                roleMissing && "Role / title",
+                personnelTypeMissing && "System access level",
+                pinMissing && "4-digit PIN",
+                pinBadFormat && "PIN must be exactly 4 digits",
+              ]
+                .filter(Boolean)
+                .join(", ")}
+              {" "}is required.
             </p>
           )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
