@@ -53,8 +53,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
   const openMut = useMutation({
     mutationFn: async () => {
-      await ensureTodaySession();
-      return openSession("");
+      console.info("[StartOfDay] click → ensureTodaySession");
+      const ensured = await ensureTodaySession();
+      console.info("[StartOfDay] ensured row", ensured.id, ensured.phase);
+      const next = await openSession("");
+      console.info("[StartOfDay] openSession → phase", next.phase);
+      return next;
     },
     onSuccess: (next: SiteDaySession) => {
       setErrorMessage(null);
@@ -65,12 +69,14 @@ export function StartOfDayPanel({ sessionId }: Props) {
       setConfirmOpen(false);
     },
     onError: (e: unknown) => {
+      console.error("[StartOfDay] openMut error", e);
       const msg = formatServerError(e);
       setConfirmOpen(false);
       setErrorMessage(msg);
       toast.error("Could not open the day", { description: msg });
     },
   });
+
 
 
 
