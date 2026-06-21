@@ -46,7 +46,7 @@ function Dashboard() {
           <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground tabular-nums">
             {formatDate(new Date())}
           </p>
-          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, coordinator</h2>
+          <h2 className="text-2xl font-semibold tracking-tight md:text-3xl">Good day, {getActiveUserProfile()?.fullName ?? "there"}</h2>
           <p className="text-sm text-muted-foreground">
             Here's where things stand across Yada Connect right now.
           </p>
