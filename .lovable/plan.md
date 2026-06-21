@@ -1,96 +1,55 @@
-## Goal
-Stop the dashboard's background polling from re-rendering Admin/Governance forms and modals, and make in-progress forms survivable across refresh/tab-close.
+# 401 Recovery Flow for Day Centre Open/Close
 
-## 1. Smart polling (kill mid-typing re-renders)
+When `openSession` or `closeSession` fails with an auth/permission error (HTTP 401 from PostgREST, or Postgres code `42501` RLS rejection), the current UI just shows a generic red toast like "Could not open the day: …". The Check Leader has no idea what to do next. This plan adds a clear, recoverable flow.
 
-Update every `useQuery` that currently sets `refetchInterval`:
+## What the user will see
 
-- `src/components/dashboard/OperationsExceptionHub.tsx` — `pendingReviewsQ` (10s) and `groundedQ` (15s)
-- `src/hooks/use-supabase-data.ts` line 936 (15s)
-- `src/hooks/use-exception-feed.ts` — medication, clearance and compliance feeds
+1. They tap **Declare Site Safe & Compliant** (or **Close Day**).
+2. If the call returns 401 / RLS-denied, instead of a toast we open a blocking dialog:
+   - **Title:** "Session expired — please re-enter your PIN"
+   - **Body:** "Your terminal sign-in has timed out. Re-enter your 4-digit operator PIN to continue. Your mandated checks and notes are preserved."
+   - **Primary button:** *Re-enter PIN* (opens an inline PIN pad).
+   - **Secondary button:** *Cancel*.
+3. After a successful PIN re-entry, a **Retry** button appears (and auto-fires once) that re-runs the exact same open/close call. On success the dialog closes and the normal success toast shows.
+4. All other (non-401) errors keep the existing red toast behaviour — no change.
 
-Apply the same three options to each:
+## Pieces to build
 
-```ts
-refetchInterval: 30_000,           // back off from 10/15s
-refetchIntervalInBackground: false, // pause when tab hidden
-refetchOnWindowFocus: true,         // catch up on focus
-```
+### 1. Shared auth-error helper — `src/lib/api/auth-errors.ts` (new)
+- `isAuthError(err: unknown): boolean` — true when the error is a PostgrestError with `code === "42501"`, or any error whose `status === 401`, or message contains "row-level security" / "JWT".
+- `AuthExpiredError` class for callers that want to rethrow as a typed error.
 
-Rationale: `refetchInterval` always re-renders the consuming component on success even when data is structurally identical, which is what's nuking sibling form state in any component that re-mounts under a parent that uses these hooks.
+### 2. Re-usable PIN re-entry dialog — `src/components/auth/pin-reauth-dialog.tsx` (new)
+- Controlled `open` / `onOpenChange` props.
+- Reuses the same 4-digit numeric input pattern as `src/routes/auth.tsx` (auto-submit on 4 digits, `loginWithPin`, GuardianPinError handling).
+- Props:
+  - `reason?: string` — short context line ("Re-authenticate to open the Day Centre").
+  - `onAuthenticated: () => void` — fired after `loginWithPin` succeeds; parent triggers the retry.
+- Internal busy/error state mirrors the auth route; no navigation occurs.
 
-## 2. Isolation — stop dashboard hooks from leaking into Admin
+### 3. Wire 401 handling into the two mutations
+- **`src/components/site-day/start-of-day-panel.tsx`**
+  - Add `reauthOpen` state.
+  - In `openMut.onError`, branch: `isAuthError(e)` → `setReauthOpen(true)`; else current toast.
+  - Render `<PinReauthDialog open={reauthOpen} reason="Re-authenticate to open the Day Centre." onOpenChange={setReauthOpen} onAuthenticated={() => { setReauthOpen(false); openMut.mutate(); }} />`.
+  - Preserve `ticked` state (already component-local, so nothing extra needed).
+- **`src/components/site-day/active-day-panel.tsx`**
+  - Same pattern around the close mutation; reason text "Re-authenticate to close the Day Centre."
+  - Preserve any in-flight close notes by lifting them into state before the mutate call (they already live in component state).
 
-`OperationsExceptionHub` is dashboard-only, but `useComplianceExceptions` (in `use-exception-feed.ts`) shares the `["compliance-assets"]` query key with `GovernanceHubWorkspace`. Today, dashboard polling invalidates/refetches that key and forces the Governance table — and any open `EditAssetModal` mounted as its child — to re-render.
-
-Fix:
-
-- Give the dashboard feed its own key: `["compliance-exceptions"]` (selecting/derived from the same fetch), OR scope the polling to the dashboard only by passing `refetchInterval` from the dashboard consumer rather than baking it into the shared hook.
-- Confirm `EditAssetModal` form state isn't keyed off `asset` identity in a way that resets on refetch. If it is, switch the `useState` initializers to a `useRef` snapshot keyed by `asset.id`, so a refetched-but-identical asset object doesn't reset typed input.
-
-## 3. `usePersistedForm` hook
-
-New file `src/hooks/use-persisted-form.ts`:
-
-```ts
-export function usePersistedForm<T extends object>(
-  key: string,
-  initial: T,
-): {
-  values: T;
-  setValues: (next: Partial<T>) => void;
-  reset: () => void;
-  isDirty: boolean;
-  hasDraft: boolean;
-  resumeDraft: () => void;
-  discardDraft: () => void;
-};
-```
-
-Behaviour:
-
-- On mount, read `sessionStorage[`form:${key}`]`. If present and different from `initial`, expose `hasDraft = true` and DO NOT auto-apply — let the form render a "Resume previous draft?" banner that calls `resumeDraft()`.
-- On every `setValues`, persist the merged object to sessionStorage (debounced ~300 ms).
-- `reset()` and `discardDraft()` clear the storage key. The form's successful-save handler must call `reset()`.
-- `isDirty` = current values differ from `initial`.
-- `beforeunload` listener attached while `isDirty === true`, detached on unmount or reset (this is the "warn before refresh/close" requirement).
-
-## 4. Wire `usePersistedForm` into the two target forms
-
-**`src/components/admin/governance-hub-workspace.tsx` — `EditAssetModal`**
-
-- Storage key: `governance-asset:${asset?.id ?? "new"}`.
-- Replace the individual `useState` calls (category, type, name, description, justification, expiry, action_module, config knobs, etc.) with a single `usePersistedForm` object.
-- On open, if `hasDraft`, show a yellow "Resume unsaved draft from {timestamp}? [Resume] [Discard]" bar above the form fields.
-- On successful `upsertComplianceAsset` mutation, call `reset()`.
-- PIN values (`managerStaffId`, `managerPin`) stay in normal `useState` — never persisted to sessionStorage.
-
-**`src/components/dashboard/formal-audit-checklist.tsx` — Formal Audit Modal**
-
-- Storage key: `formal-audit:${assetId}`.
-- Persist checklist answers, justification text, signatures-in-progress (but again, never PINs).
-- Same "Resume draft" banner pattern.
-- Clear on submit success or on explicit "Discard".
-
-## 5. Verification
-
-- Open Governance Hub → start typing in a new asset → wait 30 s with dashboard tab focused → input must not reset.
-- Same test with tab in background for 2 min → no polling should occur (check Network tab: no requests while hidden).
-- Switch tabs back → exactly one refetch fires per query (focus refetch).
-- Type into form, hit browser refresh → browser shows native "Leave site?" prompt; after reload the form shows a "Resume draft" banner with the prior values.
-- Save successfully → refresh → no resume banner (draft cleared).
-
-## Files touched
-
-- New: `src/hooks/use-persisted-form.ts`
-- Edit: `src/components/dashboard/OperationsExceptionHub.tsx`
-- Edit: `src/hooks/use-exception-feed.ts`
-- Edit: `src/hooks/use-supabase-data.ts` (single polling block at line 936)
-- Edit: `src/components/admin/governance-hub-workspace.tsx`
-- Edit: `src/components/dashboard/formal-audit-checklist.tsx`
+### 4. Toast copy when we don't open the dialog
+- Keep current generic toast for non-auth errors.
+- When the dialog opens, also fire a single neutral `toast.message("Session expired — please re-enter your PIN.")` so the user notices if the dialog is briefly missed.
 
 ## Out of scope
 
-- No DB / migration changes.
-- No changes to `dispatch-resolve-modal.tsx` or other resolve modals (can be added later with the same hook if useful).
-- No global QueryClient defaults change — settings applied per-query to avoid affecting unrelated reads.
+- No RLS / migration changes.
+- No changes to `site-day-sessions.ts` API surface beyond optionally exporting the auth-error helper if convenient.
+- No global auth interceptor — scoped to the two Day Centre mutations the user called out. (We can generalise later if other surfaces need it.)
+
+## Files touched
+
+- new: `src/lib/api/auth-errors.ts`
+- new: `src/components/auth/pin-reauth-dialog.tsx`
+- edit: `src/components/site-day/start-of-day-panel.tsx`
+- edit: `src/components/site-day/active-day-panel.tsx`
