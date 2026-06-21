@@ -4,18 +4,16 @@ import { useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { AlertOctagon } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 
 import {
+  DEFAULT_STAFF_UUID,
   claimOperationalEscalation,
-  listPendingEscalations,
-  resolveStaffIdWithFallback,
+  getActiveUserProfile,
+  getStaffId,
+  isOperationalEscalationClaimable,
+  listClaimableEscalations,
   subscribeToEscalationPool,
   type OperationalEscalation,
 } from "@/lib/data-store";
@@ -25,6 +23,14 @@ import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
 
 const HIDDEN_ROUTES = new Set<string>(["/manifest", "/auth"]);
+
+function getCurrentTerminalStaffId(): string | null {
+  const profileStaffId = getActiveUserProfile()?.staffId ?? null;
+  if (profileStaffId && profileStaffId !== DEFAULT_STAFF_UUID) return profileStaffId;
+
+  const localStaffId = getStaffId();
+  return localStaffId && localStaffId !== DEFAULT_STAFF_UUID ? localStaffId : null;
+}
 
 function relativeAge(iso: string): string {
   const t = new Date(iso).getTime();
@@ -44,16 +50,17 @@ export function GlobalEscalationInterceptor() {
 
   const [queue, setQueue] = useState<OperationalEscalation[]>([]);
   const [claiming, setClaiming] = useState(false);
-  const [consultTarget, setConsultTarget] =
-    useState<OperationalEscalation | null>(null);
+  const [consultTarget, setConsultTarget] = useState<OperationalEscalation | null>(null);
   const [tick, setTick] = useState(0);
 
   // Current staff id — used to suppress the Claim popup for the user who
   // actually raised the incident (no self-claim).
   const currentStaffQ = useQuery({
     queryKey: ["current-staff-id"],
-    queryFn: resolveStaffIdWithFallback,
-    staleTime: 5 * 60_000,
+    queryFn: async () => getCurrentTerminalStaffId(),
+    refetchInterval: 1_000,
+    refetchOnWindowFocus: true,
+    staleTime: 1_000,
   });
   const currentStaffId = currentStaffQ.data ?? null;
 
@@ -62,19 +69,17 @@ export function GlobalEscalationInterceptor() {
 
   // Baseline post-login fetch.
   const baseline = useQuery({
-    queryKey: ["pending-escalations"],
-    queryFn: listPendingEscalations,
+    queryKey: ["claimable-escalations", currentStaffId ?? "unknown"],
+    queryFn: listClaimableEscalations,
+    enabled: !!currentStaffId,
     staleTime: 30_000,
   });
-
 
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
         const seen = new Set(prev.map((e) => e.id));
-        const additions = baseline.data.filter(
-          (e) => !seen.has(e.id) && !isOwnEscalation(e),
-        );
+        const additions = baseline.data.filter((e) => !seen.has(e.id) && !isOwnEscalation(e));
         return additions.length ? [...prev, ...additions] : prev;
       });
     }
@@ -94,22 +99,40 @@ export function GlobalEscalationInterceptor() {
       if (type === "INSERT") {
         if (row.status !== "pending") return;
         if (isOwnEscalation(row)) return;
-        setQueue((prev) =>
-          prev.some((e) => e.id === row.id) ? prev : [...prev, row],
-        );
+        void isOperationalEscalationClaimable(row).then((claimable) => {
+          if (!claimable) return;
+          setQueue((prev) => (prev.some((e) => e.id === row.id) ? prev : [...prev, row]));
+        });
       } else if (type === "UPDATE") {
         if (row.status !== "pending") {
           setQueue((prev) => prev.filter((e) => e.id !== row.id));
+          return;
         }
+
+        if (isOwnEscalation(row)) {
+          setQueue((prev) => prev.filter((e) => e.id !== row.id));
+          return;
+        }
+
+        void isOperationalEscalationClaimable(row).then((claimable) => {
+          setQueue((prev) => {
+            const without = prev.filter((e) => e.id !== row.id);
+            return claimable ? [...without, row] : without;
+          });
+        });
       }
     });
     return off;
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currentStaffId]);
 
-
   // Tick to refresh "12s ago" label every second while modal is open.
-  const active = queue[0] ?? null;
+  const visibleQueue = useMemo(
+    () => (currentStaffId ? queue.filter((e) => !isOwnEscalation(e)) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queue, currentStaffId],
+  );
+  const active = visibleQueue[0] ?? null;
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
@@ -129,7 +152,14 @@ export function GlobalEscalationInterceptor() {
     // Optimistically pop the active item so the UI feels instant.
     setQueue((prev) => prev.filter((e) => e.id !== target.id));
     try {
-      const staffId = await resolveStaffIdWithFallback();
+      const claimable = await isOperationalEscalationClaimable(target);
+      if (!claimable) {
+        toast.info("This escalation is no longer awaiting claim.");
+        return;
+      }
+
+      const staffId = currentStaffId;
+      if (!staffId) throw new Error("No current staff identity is active.");
       const result = await claimOperationalEscalation(target.id, staffId);
       if (result.success) {
         // NDIS-grade audit receipt: every Claim writes to the ledger.
@@ -158,9 +188,7 @@ export function GlobalEscalationInterceptor() {
       }
     } catch (err) {
       // Re-queue on outright failure so we don't lose the alert.
-      setQueue((prev) =>
-        prev.some((e) => e.id === target.id) ? prev : [target, ...prev],
-      );
+      setQueue((prev) => (prev.some((e) => e.id === target.id) ? prev : [target, ...prev]));
       toast.error("Could not claim escalation", {
         description: (err as Error).message,
       });
@@ -169,7 +197,7 @@ export function GlobalEscalationInterceptor() {
     }
   };
 
-  const showModal = !hidden && !!active;
+  const showModal = !hidden && !!currentStaffId && !!active;
 
   return (
     <>
@@ -223,10 +251,10 @@ export function GlobalEscalationInterceptor() {
                   )}
                 </div>
 
-                {queue.length > 1 && (
+                {visibleQueue.length > 1 && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    {queue.length - 1} more pending escalation
-                    {queue.length - 1 === 1 ? "" : "s"} queued behind this one.
+                    {visibleQueue.length - 1} more pending escalation
+                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind this one.
                   </div>
                 )}
 
@@ -239,9 +267,7 @@ export function GlobalEscalationInterceptor() {
                     claiming && "cursor-not-allowed opacity-60",
                   )}
                 >
-                  {claiming
-                    ? "Claiming…"
-                    : "👉 CLAIM INCIDENT & OPEN CONSULTATION"}
+                  {claiming ? "Claiming…" : "👉 CLAIM INCIDENT & OPEN CONSULTATION"}
                 </button>
               </div>
             </>
@@ -271,9 +297,7 @@ function ContextRow({
       <span className="w-28 shrink-0 text-[11px] font-bold uppercase tracking-wide text-slate-400">
         {label}
       </span>
-      <span className={cn("text-sm font-medium text-slate-100", valueClass)}>
-        {value}
-      </span>
+      <span className={cn("text-sm font-medium text-slate-100", valueClass)}>{value}</span>
     </div>
   );
 }
