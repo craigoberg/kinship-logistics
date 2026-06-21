@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Card } from "@/components/ui/card";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
+import { IssuesRegisterCard } from "./issues-register-card";
 import {
   ensureTodaySession,
   openSession,
@@ -22,6 +24,9 @@ import {
 } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
+import { useSiteIssues } from "@/hooks/use-site-issues";
+import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
@@ -50,6 +55,17 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const mandatedItems = useMandatedChecks();
   const allChecked =
     mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
+
+  const issuesQ = useSiteIssues(sessionId);
+  const issues = issuesQ.data ?? [];
+  const openIssues = issues.filter((i) => i.status !== "resolved");
+  const profile = useMemo(() => getActiveUserProfile(), []);
+  const permissionQ = useQuery({
+    queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
+    queryFn: () => canManageSystemParameters(profile?.staffId),
+    staleTime: 60_000,
+  });
+  const canManage = permissionQ.data === true;
 
   const openMut = useMutation({
     mutationFn: async () => {
@@ -149,7 +165,55 @@ export function StartOfDayPanel({ sessionId }: Props) {
       )}
 
 
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Walkthrough Issues Register{" "}
+            {openIssues.length > 0 && `(${openIssues.length} open)`}
+            {issues.length > 0 && (
+              <span className="ml-2 text-[10px] normal-case font-normal text-muted-foreground/70">
+                Including notes
+              </span>
+            )}
+          </h3>
+          {issuesQ.isFetching && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+        </div>
+
+        {issuesQ.isError && (
+          <Card className="border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div>
+                <div className="font-medium">
+                  Could not load issues register.
+                </div>
+                <div className="text-xs">
+                  {(issuesQ.error as Error).message}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {!issuesQ.isError && issues.length === 0 && (
+          <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            No issues or notes logged yet. Use{" "}
+            <span className="font-semibold">Log Anomalies / Action Needed</span>{" "}
+            below to flag something during the walkthrough.
+          </Card>
+        )}
+
+        <div className="space-y-2">
+          {issues.map((i) => (
+            <IssuesRegisterCard key={i.id} issue={i} canManage={canManage} />
+          ))}
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
+
         <Button
           size="lg"
           className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
