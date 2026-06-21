@@ -8,6 +8,12 @@
 
 DROP FUNCTION IF EXISTS public.reset_active_site_day_red_escalation(text);
 
+ALTER TABLE public.operational_escalations
+  ADD COLUMN IF NOT EXISTS claimed_at timestamptz,
+  ADD COLUMN IF NOT EXISTS resolved_by uuid REFERENCES public.staff_registry(id),
+  ADD COLUMN IF NOT EXISTS resolved_at timestamptz,
+  ADD COLUMN IF NOT EXISTS resolution_notes text;
+
 CREATE OR REPLACE FUNCTION public.reset_active_site_day_red_escalation(
   p_session_phase text DEFAULT 'active_day'
 )
