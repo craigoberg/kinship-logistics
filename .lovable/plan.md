@@ -1,16 +1,16 @@
-## Plan
+## Fix: Remove user-auth gate from `useSiteSession` query
 
-1. **Inspect table access**
-   - Check the live `site_day_sessions` RLS policies and table grants for `authenticated` read access.
-   - If direct schema access is unavailable from this session, use the local SQL/migration evidence and the network request diagnostics to narrow whether this is an RLS/grant problem.
+The `useSiteSession` hook in `src/hooks/use-site-session.ts` currently disables the primary site-day session fetch while `user` is `null` (`enabled: isReady && !!user`). This blocks the page from ever loading the session row, because the bootstrap effect (which creates a missing row) also gates on `!!user`.
 
-2. **Add exact query diagnostics**
-   - In `src/lib/api/site-day-sessions.ts`, log the literal `date` value immediately before the `.eq("session_date", date)` query in `getTodaySession()`.
-   - Also log the query outcome shape (`data`, `error`, and `status` if available) without changing query behavior.
+### Change
+In `src/hooks/use-site-session.ts`:
+1. Change `const canQuery = isReady && !!user;` to `const canQuery = isReady;`
+2. Remove the `user` dependency from the `useEffect` that starts the realtime subscription, keeping only `isReady` and `sessionId`.
+3. Remove the `user` variable if it becomes unused, or keep it if other code still references it.
 
-3. **Optional access fix if policies are missing**
-   - If the live policy/grant check confirms missing read access, add the minimal database grant/policy needed so authenticated users can `SELECT` from `public.site_day_sessions`.
-   - Do not widen anonymous access unless an existing policy already intentionally allows it.
+This lets the query run as soon as auth state is "ready" (regardless of whether a user object is present), matching the user's diagnosis that `hasUser: false` was permanently disabling the fetch.
 
-4. **Keep scope limited**
-   - No phase routing changes, no UI redesign, no table shape changes, and no changes to Start of Day panel behavior.
+### Scope
+- Only `src/hooks/use-site-session.ts` is touched.
+- No UI, routing, or bootstrap logic changes.
+- The `day-centre-page.tsx` bootstrap `useEffect` already handles the "no user" case by not auto-creating a session when `!user`.

@@ -16,13 +16,8 @@ export const SITE_SESSION_QUERY_KEY = ["site-day-session", "today"] as const;
  */
 export function useSiteSession() {
   const queryClient = useQueryClient();
-  const { user, isReady } = useAuthReady();
-  const canQuery = isReady && !!user;
-  console.log("[site_day_sessions] useSiteSession gate:", {
-    isReady,
-    hasUser: !!user,
-    enabled: canQuery,
-  });
+  const { isReady } = useAuthReady();
+  const canQuery = isReady;
   const q = useQuery<SiteDaySession | null>({
     queryKey: SITE_SESSION_QUERY_KEY,
     queryFn: getTodaySession,
