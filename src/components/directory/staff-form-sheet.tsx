@@ -25,6 +25,7 @@ import {
   useInsertStaffMember,
   useUpdateStaffMember,
 } from "@/hooks/use-supabase-data";
+import { hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 
 const PERSONNEL_TYPES = ["Staff", "Volunteer", "Coordinator", "Contractor"];
@@ -47,6 +48,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [streetAddress, setStreetAddress] = useState("");
   const [active, setActive] = useState(true);
   const [notes, setNotes] = useState("");
+  const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
 
   const insert = useInsertStaffMember();
@@ -63,6 +65,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setStreetAddress(staff?.streetAddress ?? "");
     setActive(staff?.active ?? true);
     setNotes(staff?.notes ?? "");
+    setPin("");
     setCerts(staff?.certifications ?? []);
   }, [open, staff]);
 
@@ -73,6 +76,19 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const save = async () => {
     if (!fullName.trim()) {
       toast.error("Full name is required", {
+        className: "!bg-red-600 !text-white !border-red-700",
+      });
+      return;
+    }
+    const trimmedPin = pin.trim();
+    if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
+      toast.error("A 4-digit PIN is required for new personnel", {
+        className: "!bg-red-600 !text-white !border-red-700",
+      });
+      return;
+    }
+    if (isEdit && trimmedPin && !/^\d{4}$/.test(trimmedPin)) {
+      toast.error("PIN must be exactly 4 digits", {
         className: "!bg-red-600 !text-white !border-red-700",
       });
       return;
@@ -94,6 +110,9 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           expiry: c.expiry || null,
         })),
     };
+    if (trimmedPin) {
+      payload.pinHash = await hashPin(trimmedPin);
+    }
     try {
       if (isEdit && staff) {
         await update.mutateAsync({ id: staff.id, payload });

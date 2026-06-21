@@ -513,10 +513,12 @@ export interface StaffPayload {
   active: boolean;
   notes: string | null;
   certifications: StaffCertification[];
+  /** Pre-hashed PIN. Omit on update to leave the existing PIN unchanged. */
+  pinHash?: string | null;
 }
 
-function staffPayloadToRow(p: StaffPayload) {
-  return {
+function staffPayloadToRow(p: StaffPayload, { includePin }: { includePin: boolean }) {
+  const row: Record<string, unknown> = {
     full_name: p.fullName,
     role: p.role,
     personnel_type: p.personnelType,
@@ -527,12 +529,14 @@ function staffPayloadToRow(p: StaffPayload) {
     notes: p.notes,
     certifications: p.certifications,
   };
+  if (includePin && p.pinHash !== undefined) row.pin_hash = p.pinHash;
+  return row;
 }
 
 export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
   const { data, error } = await supabase
     .from("staff_registry")
-    .insert(staffPayloadToRow(p))
+    .insert(staffPayloadToRow(p, { includePin: true }))
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
@@ -542,7 +546,7 @@ export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
 export async function updateStaffMember(id: string, p: StaffPayload): Promise<StaffMember> {
   const { data, error } = await supabase
     .from("staff_registry")
-    .update(staffPayloadToRow(p))
+    .update(staffPayloadToRow(p, { includePin: p.pinHash !== undefined }))
     .eq("id", id)
     .select(STAFF_COLS)
     .single();
