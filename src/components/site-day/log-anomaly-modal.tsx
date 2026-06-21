@@ -150,8 +150,25 @@ export function LogAnomalyModal({
       return issue;
     },
     onSuccess: (issue) => {
+      // Targeted invalidations (exact keys used by the parent panel/register)
       queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
+      queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
+      queryClient.invalidateQueries({ queryKey: ["site-issues"] });
+      queryClient.invalidateQueries({ queryKey: ["site-day-anomalies"] });
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      // Broad sweep — catches any query whose key starts with "site-issues"
+      // or "site-day", regardless of trailing sessionId/variant.
+      queryClient.invalidateQueries({
+        predicate: (q) => {
+          const k = q.queryKey?.[0];
+          return (
+            typeof k === "string" &&
+            (k.startsWith("site-issues") || k.startsWith("site-day"))
+          );
+        },
+      });
+      // Force an immediate refetch of the active issues list for this session.
+      queryClient.refetchQueries({ queryKey: siteIssuesKey(sessionId) });
       reset();
       onOpenChange(false);
       if (issue.severity === "red") {
