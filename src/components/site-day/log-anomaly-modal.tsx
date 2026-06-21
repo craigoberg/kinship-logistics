@@ -30,7 +30,6 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
-  reportedBy: string;
   defaultSeverity?: RygeSeverity;
 }
 
