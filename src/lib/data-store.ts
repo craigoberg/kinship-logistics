@@ -4479,3 +4479,66 @@ export async function claimOperationalEscalation(
     escalation: rawRow ? rowToEscalation(rawRow) : undefined,
   };
 }
+
+/**
+ * Fetch the operational_escalations row that was raised from a given site
+ * issue (source_kind = 'site_day_red'). Returns the latest non-resolved row,
+ * or null if none exists yet.
+ */
+export async function getEscalationBySourceIssue(
+  issueId: string,
+): Promise<OperationalEscalation | null> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("*")
+    .eq("source_issue_id", issueId)
+    .eq("source_kind", "site_day_red")
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) throwPg("[getEscalationBySourceIssue]", error);
+  return data ? rowToEscalation(data as OperationalEscalationRow) : null;
+}
+
+/** Look up a staff member's display name by id. Returns null on miss. */
+export async function getStaffDisplayName(
+  staffId: string,
+): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("full_name")
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error) {
+    console.error("[getStaffDisplayName]", error);
+    return null;
+  }
+  return (data?.full_name as string | undefined) ?? null;
+}
+
+/**
+ * Finalise a site-day escalation row after the on-screen dual-PIN
+ * consultation. `approved=true` writes resolved_approved with the plan as
+ * resolution_notes; `approved=false` writes resolved_denied with the reason.
+ */
+export async function resolveOperationalEscalation(args: {
+  id: string;
+  approved: boolean;
+  managerStaffId: string;
+  notes: string;
+}): Promise<OperationalEscalation> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .update({
+      status: args.approved ? "resolved_approved" : "resolved_denied",
+      resolved_by: args.managerStaffId,
+      resolved_at: new Date().toISOString(),
+      resolution_notes: args.notes,
+    })
+    .eq("id", args.id)
+    .select("*")
+    .single();
+  if (error) throwPg("[resolveOperationalEscalation]", error);
+  return rowToEscalation(data as OperationalEscalationRow);
+}
+
