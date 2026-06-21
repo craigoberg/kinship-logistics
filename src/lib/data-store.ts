@@ -533,7 +533,17 @@ function staffPayloadToRow(p: StaffPayload, { includePin }: { includePin: boolea
   return row;
 }
 
+function assertManagerRole(action: string): void {
+  const profile = getActiveUserProfile();
+  if (!profile || profile.role !== "coordinator") {
+    throw new Error(
+      `Permission denied: only Manager-level users can ${action}. Current role: ${profile?.role ?? "none"}.`,
+    );
+  }
+}
+
 export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
+  assertManagerRole("add personnel");
   const { data, error } = await supabase
     .from("staff_registry")
     .insert(staffPayloadToRow(p, { includePin: true }))
@@ -544,6 +554,7 @@ export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
 }
 
 export async function updateStaffMember(id: string, p: StaffPayload): Promise<StaffMember> {
+  assertManagerRole("update personnel");
   const { data, error } = await supabase
     .from("staff_registry")
     .update(staffPayloadToRow(p, { includePin: p.pinHash !== undefined }))
@@ -552,6 +563,11 @@ export async function updateStaffMember(id: string, p: StaffPayload): Promise<St
     .single();
   if (error) throw error;
   return rowToStaff(data as StaffRow);
+}
+
+/** True when the active session has Manager-level (coordinator) privileges. */
+export function isActiveUserManager(): boolean {
+  return getActiveUserProfile()?.role === "coordinator";
 }
 
 // ---------- PIN-based terminal login (RBAC) ----------
