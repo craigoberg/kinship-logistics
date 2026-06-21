@@ -12,10 +12,24 @@ function normalizeUrl(raw: string): string {
 
 let cached: SupabaseClient | null = null;
 
+function isLikelyServiceRoleKey(value: string): boolean {
+  const parts = value.split(".");
+  if (parts.length !== 3) return false;
+  try {
+    const payload = JSON.parse(
+      Buffer.from(parts[1].replace(/-/g, "+").replace(/_/g, "/"), "base64").toString("utf8"),
+    ) as { role?: string };
+    return payload.role === "service_role";
+  } catch {
+    return false;
+  }
+}
+
 export function getSiteDayAdminClient(): SupabaseClient {
   if (cached) return cached;
   const rawUrl = process.env.SUPABASE_URL ?? process.env.VITE_SUPABASE_URL;
-  const serviceRole = process.env.YADA_SUPABASE_SERVICE_ROLE_KEY;
+  const serviceRole =
+    process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.YADA_SUPABASE_SERVICE_ROLE_KEY;
   if (!rawUrl) {
     throw new Error(
       "Server config missing: SUPABASE_URL is not set. Cannot open/close the Day Centre.",
@@ -23,7 +37,12 @@ export function getSiteDayAdminClient(): SupabaseClient {
   }
   if (!serviceRole) {
     throw new Error(
-      "Server config missing: YADA_SUPABASE_SERVICE_ROLE_KEY is not set. Cannot open/close the Day Centre.",
+      "Server config missing: SUPABASE_SERVICE_ROLE_KEY / YADA_SUPABASE_SERVICE_ROLE_KEY is not set. Cannot open/close the Day Centre.",
+    );
+  }
+  if (!isLikelyServiceRoleKey(serviceRole)) {
+    throw new Error(
+      "Server config invalid: the Day Centre service-role key is not the valid service_role JWT for this backend project. Update the stored secret from Project Settings → API → service_role, then retry Confirm & Open.",
     );
   }
   cached = createClient(normalizeUrl(rawUrl), serviceRole, {
