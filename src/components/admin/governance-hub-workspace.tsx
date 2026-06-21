@@ -32,6 +32,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ClientTime } from "@/components/ui/client-time";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { getActiveUserProfile, listStaffRegistry, verifyStaffPin, type StaffMember } from "@/lib/data-store";
 import {
@@ -44,6 +45,7 @@ import {
   type ComplianceAsset,
   type ComplianceStatus,
 } from "@/lib/api/compliance-assets";
+import { UnifiedIssuesPanel } from "./unified-issues-panel";
 
 const COMPLIANCE_ASSETS_KEY = ["compliance-assets"] as const;
 
@@ -83,7 +85,23 @@ export function GovernanceHubWorkspace() {
   const visible = categoryFilter === "all" ? rows : rows.filter((r) => r.category === categoryFilter);
 
   return (
-    <div className="space-y-4">
+    <Tabs defaultValue="issues" className="space-y-4">
+      <TabsList>
+        <TabsTrigger value="issues">Open Issues</TabsTrigger>
+        <TabsTrigger value="assets">Compliance Assets</TabsTrigger>
+      </TabsList>
+
+      <TabsContent value="issues" className="space-y-4">
+        <UnifiedIssuesPanel
+          onManageRenewal={(assetId) => {
+            const asset = (listQ.data ?? []).find((a) => a.id === assetId);
+            if (asset) setEditing(asset);
+            else toast.message("Switch to Compliance Assets tab to manage this renewal.");
+          }}
+        />
+      </TabsContent>
+
+      <TabsContent value="assets" className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           Central registry of every expiring item that powers the dashboard. Adding a new category
@@ -195,6 +213,7 @@ export function GovernanceHubWorkspace() {
           </TableBody>
         </Table>
       </div>
+      </TabsContent>
 
       {editing && (
         <EditAssetModal
@@ -217,7 +236,7 @@ export function GovernanceHubWorkspace() {
           }}
         />
       )}
-    </div>
+    </Tabs>
   );
 }
 

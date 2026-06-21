@@ -157,6 +157,7 @@ export function LogAnomalyModal({
       queryClient.invalidateQueries({ queryKey: ["site-issues"] });
       queryClient.invalidateQueries({ queryKey: ["site-issues-active"] });
       queryClient.invalidateQueries({ queryKey: ["site-day-anomalies"] });
+      queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       // Broad sweep — catches any query whose key starts with "site-issues"
       // or "site-day", regardless of trailing sessionId/variant.
