@@ -242,7 +242,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
 }
 
 export async function closeSession(notes: string): Promise<SiteDaySession> {
-  const staffId = await resolveStaffIdWithFallback();
+  const closedByUserId = await resolveOpenedByUserId();
   const date = todayIso();
   const existing = await supabase
     .from("site_day_sessions")
@@ -256,7 +256,7 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
     .from("site_day_sessions")
     .update({
       phase: "closed_orderly",
-      closed_by_id: staffId,
+      closed_by_id: closedByUserId,
       close_declared_at: new Date().toISOString(),
       close_leader_notes: notes || null,
     })
