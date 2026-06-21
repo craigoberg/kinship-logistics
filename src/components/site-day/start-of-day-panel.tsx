@@ -17,6 +17,7 @@ import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { openSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
+import { useMandatedChecks } from "@/hooks/use-system-parameters";
 
 interface Props {
   sessionId: string;
