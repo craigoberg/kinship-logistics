@@ -1,7 +1,7 @@
-import { useState } from "react";
+import { useState, type ReactNode } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Building2, CheckCircle2, Mail } from "lucide-react";
+import { Building2, CheckCircle2, Info, Mail } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,11 +21,19 @@ interface Props {
 
 const SEVERITY_CHIP: Record<
   SiteIssue["severity"],
-  { label: string; classes: string }
+  { label: string; classes: string; icon: ReactNode | null }
 > = {
-  green: { label: "GREEN", classes: "bg-green-600 text-white" },
-  yellow: { label: "YELLOW", classes: "bg-yellow-400 text-black" },
-  red: { label: "RED", classes: "bg-red-600 text-white" },
+  green: {
+    label: "NOTE",
+    classes: "bg-green-600 text-white",
+    icon: <Info className="h-3 w-3" />,
+  },
+  yellow: {
+    label: "YELLOW",
+    classes: "bg-yellow-400 text-black",
+    icon: null,
+  },
+  red: { label: "RED", classes: "bg-red-600 text-white", icon: null },
 };
 
 export function IssuesRegisterCard({ issue, canManage }: Props) {
@@ -61,10 +69,11 @@ export function IssuesRegisterCard({ issue, canManage }: Props) {
           <div className="flex items-center gap-2">
             <span
               className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
+                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
                 sev.classes,
               )}
             >
+              {sev.icon}
               {sev.label}
             </span>
             <span className="text-xs text-muted-foreground">

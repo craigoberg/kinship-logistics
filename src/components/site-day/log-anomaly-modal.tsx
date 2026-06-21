@@ -232,7 +232,13 @@ export function LogAnomalyModal({
                     key={chip.value}
                     type="button"
                     data-state={active ? "on" : "off"}
-                    onClick={() => setValues({ severity: chip.value })}
+                    onClick={() => {
+                      if (chip.value === "green") {
+                        setValues({ severity: "green", workaround: "" });
+                      } else {
+                        setValues({ severity: chip.value });
+                      }
+                    }}
                     className={cn(
                       "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
                       chip.classes,
@@ -261,38 +267,31 @@ export function LogAnomalyModal({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label
-              htmlFor="anomaly-work"
-              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Workaround Plan{" "}
-              {requiresWorkaround && (
-                <span className="text-destructive">*</span>
+          {requiresWorkaround && (
+            <div className="space-y-2">
+              <Label
+                htmlFor="anomaly-work"
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Workaround Plan <span className="text-destructive">*</span>
+              </Label>
+              <Textarea
+                id="anomaly-work"
+                rows={3}
+                placeholder="Required — e.g. Door locked, Toilets 1 & 2 in use, maintenance ticket #4421 raised."
+                value={values.workaround}
+                onChange={(e) => setValues({ workaround: e.target.value })}
+                className={cn(
+                  !workaroundOk && "border-destructive focus-visible:ring-destructive",
+                )}
+              />
+              {!workaroundOk && (
+                <p className="text-xs text-destructive">
+                  A workaround is mandatory for Yellow and Red anomalies.
+                </p>
               )}
-            </Label>
-            <Textarea
-              id="anomaly-work"
-              rows={3}
-              placeholder={
-                requiresWorkaround
-                  ? "Required — e.g. Door locked, Toilets 1 & 2 in use, maintenance ticket #4421 raised."
-                  : "Optional follow-up note."
-              }
-              value={values.workaround}
-              onChange={(e) => setValues({ workaround: e.target.value })}
-              className={cn(
-                requiresWorkaround &&
-                  !workaroundOk &&
-                  "border-destructive focus-visible:ring-destructive",
-              )}
-            />
-            {requiresWorkaround && !workaroundOk && (
-              <p className="text-xs text-destructive">
-                A workaround is mandatory for Yellow and Red anomalies.
-              </p>
-            )}
-          </div>
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
