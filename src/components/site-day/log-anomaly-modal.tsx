@@ -327,12 +327,6 @@ export function LogAnomalyModal({
           </Button>
           <Button
             onClick={() => {
-              if (!reportedBy) {
-                toast.error("User session not ready", {
-                  description: "Please wait a moment and try again.",
-                });
-                return;
-              }
               mutation.mutate();
             }}
             disabled={!canSubmit}
