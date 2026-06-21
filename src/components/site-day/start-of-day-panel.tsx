@@ -216,17 +216,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
         }
       />
 
-      <PinReauthDialog
-        open={reauthOpen}
-        onOpenChange={setReauthOpen}
-        reason="Re-authenticate to open the Day Centre."
-        onAuthenticated={() => {
-          reauthRetryRef.current = true;
-          setAuthRecoveryMessage(null);
-          setReauthOpen(false);
-          openMut.mutate();
-        }}
-      />
     </section>
+
   );
 }
