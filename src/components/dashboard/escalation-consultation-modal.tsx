@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 
@@ -10,6 +11,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
@@ -21,6 +23,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { submitManagerHandshake } from "@/lib/api/site-day-sessions";
 
 interface Props {
   escalation: OperationalEscalation | null;
@@ -28,6 +31,50 @@ interface Props {
 }
 
 export function EscalationConsultationModal({ escalation, onClose }: Props) {
+  const isSiteDay = escalation?.sourceKind === "site_day_red";
+
+  // Look up the linked site session id for site_day_red escalations so we
+  // can route the proposal through submitManagerHandshake (which writes
+  // manager_plan_text + manager_decision without changing phase).
+  const sessionQ = useQuery({
+    queryKey: ["site-issue-session", escalation?.sourceIssueId ?? "none"],
+    queryFn: async () => {
+      if (!escalation?.sourceIssueId) return null;
+      const { data, error } = await supabase
+        .from("site_issues")
+        .select("session_id")
+        .eq("id", escalation.sourceIssueId)
+        .single();
+      if (error) throw error;
+      return (data as { session_id: string } | null)?.session_id ?? null;
+    },
+    enabled: !!escalation && isSiteDay,
+    staleTime: 30_000,
+  });
+
+  if (isSiteDay) {
+    return (
+      <SiteDayProposalModal
+        escalation={escalation}
+        sessionId={sessionQ.data ?? null}
+        sessionLoading={sessionQ.isLoading}
+        onClose={onClose}
+      />
+    );
+  }
+
+  return <VehicleConsultationModal escalation={escalation} onClose={onClose} />;
+}
+
+// ──────────────────────────── Vehicle (legacy) ────────────────────────────
+
+function VehicleConsultationModal({
+  escalation,
+  onClose,
+}: {
+  escalation: OperationalEscalation | null;
+  onClose: () => void;
+}) {
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState<
     null | "resolved_approved" | "resolved_denied"
@@ -57,8 +104,6 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
         .eq("id", escalation.id);
       if (error) throw error;
       if (status === "resolved_approved") {
-        // Compliance log: vehicle released back to service. Fire-and-forget;
-        // ledger failures must never block the manager's resolution flow.
         const gps = await tryGetGps();
         void writeToLedger({
           staff_id: staffId,
@@ -162,6 +207,213 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
                   <>🛑 Deny — Do Not Roll</>
+                )}
+              </Button>
+            </div>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─────────────────────────── Site Day (new flow) ───────────────────────────
+
+function SiteDayProposalModal({
+  escalation,
+  sessionId,
+  sessionLoading,
+  onClose,
+}: {
+  escalation: OperationalEscalation | null;
+  sessionId: string | null;
+  sessionLoading: boolean;
+  onClose: () => void;
+}) {
+  const [notes, setNotes] = useState("");
+  const [pin, setPin] = useState("");
+  const [submitting, setSubmitting] = useState<null | "go" | "no_go">(null);
+
+  useEffect(() => {
+    if (!escalation) {
+      setNotes("");
+      setPin("");
+    }
+  }, [escalation]);
+
+  const propose = async (decision: "go" | "no_go") => {
+    if (!escalation || submitting) return;
+    if (notes.trim().length < 10) {
+      toast.error("Plan / reason must be at least 10 characters.");
+      return;
+    }
+    if (!/^\d{4,6}$/.test(pin)) {
+      toast.error("Enter your 4–6 digit Manager PIN.");
+      return;
+    }
+    if (!sessionId) {
+      toast.error("Cannot find the linked site session.");
+      return;
+    }
+    if (!escalation.claimedBy) {
+      toast.error("Escalation must be claimed before proposing a resolution.");
+      return;
+    }
+
+    setSubmitting(decision);
+    try {
+      // 1. Persist plan + decision on the site session (verifies PIN inside).
+      await submitManagerHandshake({
+        sessionId,
+        plan: notes.trim(),
+        decision,
+        managerStaffId: escalation.claimedBy,
+        pin,
+      });
+
+      // 2. Mirror the notes onto the escalation row but KEEP status = claimed
+      //    so the opener panel re-renders into "review the manager's proposal".
+      const { error } = await supabase
+        .from("operational_escalations")
+        .update({ resolution_notes: notes.trim() })
+        .eq("id", escalation.id);
+      if (error) throw error;
+
+      // 3. Ledger — best-effort.
+      try {
+        const gps = await tryGetGps();
+        await writeToLedger({
+          staff_id: escalation.claimedBy,
+          category: "CENTRE",
+          severity: decision === "go" ? "YELLOW" : "RED",
+          action_type: "governance.escalation_manager_proposed",
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
+          metadata: {
+            escalation_id: escalation.id,
+            session_id: sessionId,
+            decision,
+            plan: notes.trim(),
+          },
+        });
+      } catch (e) {
+        console.warn("[SiteDayProposalModal] ledger write failed", e);
+      }
+
+      toast.success(
+        decision === "go"
+          ? "Proposal sent — awaiting Opener acceptance."
+          : "NO-GO proposal sent — awaiting Opener acknowledgement.",
+      );
+      onClose();
+    } catch (err) {
+      toast.error("Could not send proposal", {
+        description: (err as Error).message,
+      });
+    } finally {
+      setSubmitting(null);
+    }
+  };
+
+  const open = !!escalation;
+
+  return (
+    <Dialog
+      open={open}
+      onOpenChange={(o) => {
+        if (!o && !submitting) onClose();
+      }}
+    >
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <ShieldAlert className="h-5 w-5 text-amber-500" />
+            Day Centre Escalation — Propose Resolution
+          </DialogTitle>
+          <DialogDescription>
+            Type the agreed action plan (GO) or the reason the centre must
+            remain closed (NO-GO). The Opener will review and accept or reject
+            your proposal on their terminal.
+          </DialogDescription>
+        </DialogHeader>
+
+        {escalation && (
+          <div className="space-y-4">
+            <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+              <Row label="Raised by" value={escalation.driverName || "—"} />
+              <Row label="Site" value={escalation.vehicleInfo || "Day Centre"} />
+            </div>
+
+            {sessionLoading && (
+              <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <Loader2 className="h-3.5 w-3.5 animate-spin" /> Locating site
+                session…
+              </div>
+            )}
+
+            <div className="grid gap-1.5">
+              <Label
+                htmlFor="esc-notes"
+                className="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Negotiated Action Plan / NO-GO Reason
+              </Label>
+              <Textarea
+                id="esc-notes"
+                rows={4}
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                placeholder="For GO: the agreed mitigations to open the centre safely. For NO-GO: why the centre must remain closed. Minimum 10 characters."
+              />
+            </div>
+
+            <div className="grid gap-1.5">
+              <Label
+                htmlFor="mgr-pin"
+                className="text-xs uppercase tracking-wide text-muted-foreground"
+              >
+                Manager PIN
+              </Label>
+              <Input
+                id="mgr-pin"
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                autoComplete="off"
+                value={pin}
+                onChange={(e) =>
+                  setPin(e.target.value.replace(/\D/g, "").slice(0, 6))
+                }
+                placeholder="••••"
+                className="h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums"
+              />
+            </div>
+
+            <div className="grid gap-2 sm:grid-cols-2">
+              <Button
+                type="button"
+                disabled={!!submitting || sessionLoading}
+                onClick={() => propose("go")}
+                className="h-14 w-full bg-emerald-600 text-base font-bold text-white hover:bg-emerald-700"
+              >
+                {submitting === "go" ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck className="mr-1.5 h-5 w-5" /> Propose GO — Send to Opener
+                  </>
+                )}
+              </Button>
+              <Button
+                type="button"
+                disabled={!!submitting || sessionLoading}
+                onClick={() => propose("no_go")}
+                className="h-14 w-full bg-rose-600 text-base font-bold text-white hover:bg-rose-700"
+              >
+                {submitting === "no_go" ? (
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                ) : (
+                  <>🛑 Propose NO-GO — Send to Opener</>
                 )}
               </Button>
             </div>
