@@ -7,10 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ClientTime } from "@/components/ui/client-time";
-import {
-  markResolved,
-  type SiteIssue,
-} from "@/lib/api/site-issues";
+import { markResolved, type SiteIssue } from "@/lib/api/site-issues";
 import { siteIssuesKey } from "@/hooks/use-site-issues";
 import { RouteToCouncilModal } from "./route-to-council-modal";
 
@@ -33,13 +30,18 @@ const SEVERITY_CHIP: Record<
     classes: "bg-yellow-400 text-black",
     icon: null,
   },
-  red: { label: "RED", classes: "bg-red-600 text-white", icon: null },
+  red: {
+    label: "RED",
+    classes: "bg-red-600 text-white",
+    icon: null,
+  },
 };
 
 export function IssuesRegisterCard({ issue, canManage }: Props) {
   const queryClient = useQueryClient();
   const [councilOpen, setCouncilOpen] = useState(false);
   const sev = SEVERITY_CHIP[issue.severity];
+  const isResolved = issue.status === "resolved";
 
   const resolveMut = useMutation({
     mutationFn: () => markResolved(issue.id),
@@ -53,8 +55,6 @@ export function IssuesRegisterCard({ issue, canManage }: Props) {
       toast.error("Could not resolve issue", { description: e.message }),
   });
 
-  const isResolved = issue.status === "resolved";
-
   return (
     <>
       <Card
@@ -65,45 +65,44 @@ export function IssuesRegisterCard({ issue, canManage }: Props) {
           isResolved && "opacity-60",
         )}
       >
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <span
-              className={cn(
-                "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
-                sev.classes,
-              )}
+        <div className="flex flex-wrap items-center gap-2">
+          <span
+            className={cn(
+              "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
+              sev.classes,
+            )}
+          >
+            {sev.icon}
+            {sev.label}
+          </span>
+          <span className="text-xs text-muted-foreground">
+            <ClientTime iso={issue.createdAt} />
+          </span>
+          {issue.owner === "council" && (
+            <Badge variant="outline" className="gap-1 text-[10px]">
+              <Building2 className="h-3 w-3" /> Council
+            </Badge>
+          )}
+          {issue.emailDispatchedToCouncil && (
+            <Badge
+              variant="outline"
+              className="gap-1 border-green-600/60 text-[10px] text-green-700"
             >
-              {sev.icon}
-              {sev.label}
-            </span>
-            <span className="text-xs text-muted-foreground">
-              <ClientTime iso={issue.createdAt} />
-            </span>
-            {issue.owner === "council" && (
-              <Badge variant="outline" className="gap-1 text-[10px]">
-                <Building2 className="h-3 w-3" /> Council
-              </Badge>
-            )}
-            {issue.emailDispatchedToCouncil && (
-              <Badge
-                variant="outline"
-                className="gap-1 border-green-600/60 text-[10px] text-green-700"
-              >
-                <Mail className="h-3 w-3" /> Council notified
-              </Badge>
-            )}
-            {isResolved && (
-              <Badge
-                variant="outline"
-                className="gap-1 border-green-600/60 text-[10px] text-green-700"
-              >
-                <CheckCircle2 className="h-3 w-3" /> Resolved
-              </Badge>
-            )}
-          </div>
+              <Mail className="h-3 w-3" /> Council notified
+            </Badge>
+          )}
+          {isResolved && (
+            <Badge
+              variant="outline"
+              className="gap-1 border-green-600/60 text-[10px] text-green-700"
+            >
+              <CheckCircle2 className="h-3 w-3" /> Resolved
+            </Badge>
+          )}
         </div>
 
         <div className="text-sm">{issue.issueDescription}</div>
+
         {issue.workaroundPlan && (
           <div className="rounded bg-muted/40 p-2 text-xs text-muted-foreground">
             <span className="font-semibold">Workaround:</span>{" "}
