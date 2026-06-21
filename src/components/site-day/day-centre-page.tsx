@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
+import { getEscalationBySourceIssue } from "@/lib/data-store";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
@@ -88,10 +89,17 @@ export function DayCentrePage() {
   }
 
   const redIssue =
-    (issuesQ.data ?? []).find(
-      (i) => i.severity === "red" && i.status !== "resolved",
-    ) ?? null;
-  const isEscalationActive = session.phase === "escalated_lock" || !!redIssue;
+    (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
+  const redEscalationQ = useQuery({
+    queryKey: ["site-escalation", redIssue?.id ?? "none"],
+    queryFn: () => (redIssue ? getEscalationBySourceIssue(redIssue.id) : Promise.resolve(null)),
+    enabled: !!redIssue,
+    staleTime: 5_000,
+  });
+  const redEscalation = redEscalationQ.data ?? null;
+  const hasLiveEscalation =
+    redEscalation?.status === "pending" || redEscalation?.status === "claimed";
+  const isEscalationActive = session.phase === "escalated_lock" || hasLiveEscalation;
 
   const renderPhase = () => {
     if (isEscalationActive) {
