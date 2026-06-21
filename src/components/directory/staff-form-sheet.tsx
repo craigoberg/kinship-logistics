@@ -138,8 +138,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     }
   };
 
+  const trimmedName = fullName.trim();
+  const trimmedPinLive = pin.trim();
+  const pinValidLive = /^\d{4}$/.test(trimmedPinLive);
+  const nameMissing = !trimmedName;
+  const pinMissing = !isEdit && !pinValidLive;
+  const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
+  const canSave = !busy && !nameMissing && !pinMissing && !pinBadFormat;
 
   return (
+
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -154,9 +162,19 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <section className="grid gap-3 sm:grid-cols-2">
-            <Field label="Full name" className="sm:col-span-2">
-              <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoFocus />
+            <Field label="Full name" required className="sm:col-span-2">
+              <Input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                autoFocus
+                aria-invalid={nameMissing}
+                className={nameMissing ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {nameMissing && (
+                <p className="text-[11px] text-destructive">Full name is required.</p>
+              )}
             </Field>
+
             <Field label="Role / title">
               <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
             </Field>
@@ -180,7 +198,11 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             <Field label="Street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
-            <Field label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"} className="sm:col-span-2">
+            <Field
+              label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"}
+              required={!isEdit}
+              className="sm:col-span-2"
+            >
               <Input
                 value={pin}
                 onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
@@ -190,11 +212,24 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 placeholder="••••"
                 autoComplete="off"
                 required={!isEdit}
+                aria-invalid={pinMissing || pinBadFormat}
+                className={
+                  pinMissing || pinBadFormat
+                    ? "border-destructive focus-visible:ring-destructive"
+                    : undefined
+                }
               />
+              {pinMissing && (
+                <p className="text-[11px] text-destructive">A 4-digit PIN is required for new personnel.</p>
+              )}
+              {pinBadFormat && (
+                <p className="text-[11px] text-destructive">PIN must be exactly 4 digits.</p>
+              )}
               <p className="text-[11px] text-muted-foreground/70">
                 Used for medication witness, handshake, and terminal sign-in. Hashed before storage.
               </p>
             </Field>
+
             <Field label="Active" className="sm:col-span-2">
               <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
                 <Switch checked={active} onCheckedChange={setActive} />
@@ -286,15 +321,27 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           </Field>
         </div>
 
-        <SheetFooter className="border-t border-border px-6 py-3">
+        <SheetFooter className="flex-col items-stretch gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-end">
+          {!canSave && !busy && (
+            <p className="text-[11px] text-destructive sm:mr-auto">
+              {nameMissing && pinMissing
+                ? "Full name and 4-digit PIN are required."
+                : nameMissing
+                  ? "Full name is required."
+                  : pinMissing
+                    ? "A 4-digit PIN is required."
+                    : "PIN must be exactly 4 digits."}
+            </p>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy} className="gap-1.5">
+          <Button onClick={save} disabled={!canSave} className="gap-1.5">
             <Save className="h-4 w-4" />
             {busy ? "Saving…" : isEdit ? "Save changes" : "Add personnel"}
           </Button>
         </SheetFooter>
+
       </SheetContent>
     </Sheet>
   );
@@ -304,17 +351,21 @@ function Field({
   label,
   children,
   className,
+  required,
 }: {
   label: string;
   children: React.ReactNode;
   className?: string;
+  required?: boolean;
 }) {
   return (
     <div className={`grid gap-1.5 ${className ?? ""}`}>
       <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
+        {required && <span className="ml-1 text-destructive">*</span>}
       </Label>
       {children}
     </div>
   );
 }
+
