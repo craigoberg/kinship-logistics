@@ -102,16 +102,23 @@ export function DirectoryWorkspace() {
             <TabsTrigger value="carers">Carers &amp; Support Networks</TabsTrigger>
           </TabsList>
           {tab === "staff" ? (
-            <Button
-              onClick={() => {
-                setEditStaff(null);
-                setStaffOpen(true);
-              }}
-              className="gap-1.5"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add personnel
-            </Button>
+            isManager ? (
+              <Button
+                onClick={() => {
+                  setEditStaff(null);
+                  setStaffOpen(true);
+                }}
+                className="gap-1.5"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add personnel
+              </Button>
+            ) : (
+              <Badge variant="outline" className="gap-1.5">
+                <Lock className="h-3 w-3" />
+                Manager-only
+              </Badge>
+            )
           ) : (
             <Button
               onClick={() => {
