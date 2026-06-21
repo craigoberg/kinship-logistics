@@ -13,8 +13,13 @@ export function siteIssuesKey(sessionId: string | null | undefined) {
 
 export function useSiteIssues(sessionId: string | null | undefined) {
   const queryClient = useQueryClient();
-  const { user, isReady } = useAuthReady();
-  const canQuery = isReady && !!user && !!sessionId;
+  const { isReady } = useAuthReady();
+  // Gate only on auth-ready + sessionId. Do NOT require a signed-in user —
+  // the publishable (anon) key is sufficient to read site_issues_register
+  // under current RLS, and gating on `user` silently disables the query
+  // and renders the "No issues logged yet" empty state forever when the
+  // session hasn't been hydrated.
+  const canQuery = isReady && !!sessionId;
   const q = useQuery<SiteIssue[]>({
     queryKey: siteIssuesKey(sessionId),
     queryFn: () => (sessionId ? listIssues(sessionId) : Promise.resolve([])),
