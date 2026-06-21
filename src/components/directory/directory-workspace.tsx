@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle, Lock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
   useCarersRegistry,
   useParticipants,
 } from "@/hooks/use-supabase-data";
+import { isActiveUserManager } from "@/lib/data-store";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
