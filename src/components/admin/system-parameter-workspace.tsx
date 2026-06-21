@@ -129,6 +129,8 @@ export function SystemParameterWorkspace() {
       </div>
 
       {editing && <EditParameterModal row={editing} onClose={() => setEditing(null)} />}
+
+      <MyobExportWorkspace />
     </div>
   );
 }
