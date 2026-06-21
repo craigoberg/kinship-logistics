@@ -18,7 +18,6 @@ import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { IssuesRegisterCard } from "./issues-register-card";
 import {
-  ensureTodaySession,
   openSession,
   type SiteDaySession,
 } from "@/lib/api/site-day-sessions";
@@ -30,6 +29,7 @@ import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
+  reportedBy: string;
 }
 
 function formatServerError(e: unknown): string {
@@ -46,7 +46,11 @@ function formatServerError(e: unknown): string {
   return String(e);
 }
 
-export function StartOfDayPanel({ sessionId }: Props) {
+export function StartOfDayPanel({ sessionId, reportedBy }: Props) {
+  if (!sessionId) {
+    throw new Error("StartOfDayPanel requires a non-empty sessionId");
+  }
+
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
@@ -59,6 +63,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issuesQ = useSiteIssues(sessionId);
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
+
   const profile = useMemo(() => getActiveUserProfile(), []);
   const permissionQ = useQuery({
     queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
@@ -68,14 +73,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const canManage = permissionQ.data === true;
 
   const openMut = useMutation({
-    mutationFn: async () => {
-      console.info("[StartOfDay] click → ensureTodaySession");
-      const ensured = await ensureTodaySession();
-      console.info("[StartOfDay] ensured row", ensured.id, ensured.phase);
-      const next = await openSession("");
-      console.info("[StartOfDay] openSession → phase", next.phase);
-      return next;
-    },
+    mutationFn: () => openSession(""),
     onSuccess: (next: SiteDaySession) => {
       setErrorMessage(null);
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
@@ -85,7 +83,6 @@ export function StartOfDayPanel({ sessionId }: Props) {
       setConfirmOpen(false);
     },
     onError: (e: unknown) => {
-      console.error("[StartOfDay] openMut error", e);
       const msg = formatServerError(e);
       setConfirmOpen(false);
       setErrorMessage(msg);
@@ -93,12 +90,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
     },
   });
 
-
-
-
-
   return (
     <section className="space-y-5">
+      {/* Heading */}
       <div className="space-y-1">
         <h2 className="text-lg font-semibold tracking-tight">
           Start of Day Site Declaration
@@ -112,10 +106,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </p>
       </div>
 
+      {/* MandatedChecksList */}
       <div className="rounded-lg border border-border bg-card/40 p-4">
         <MandatedChecksList ticked={ticked} onTickedChange={setTicked} />
       </div>
 
+      {/* Unticked warning */}
       {mandatedItems.length > 0 && !allChecked && (
         <div className="flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3 text-sm text-yellow-800 dark:text-yellow-200">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
@@ -164,17 +160,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       )}
 
-
+      {/* Walkthrough Issues Register */}
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Walkthrough Issues Register{" "}
             {openIssues.length > 0 && `(${openIssues.length} open)`}
-            {issues.length > 0 && (
-              <span className="ml-2 text-[10px] normal-case font-normal text-muted-foreground/70">
-                Including notes
-              </span>
-            )}
           </h3>
           {issuesQ.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
@@ -197,7 +188,14 @@ export function StartOfDayPanel({ sessionId }: Props) {
           </Card>
         )}
 
-        {!issuesQ.isError && issues.length === 0 && (
+        {!issuesQ.isError && issuesQ.isLoading && (
+          <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            <Loader2 className="mr-2 inline h-3.5 w-3.5 animate-spin" />
+            Loading walkthrough entries…
+          </Card>
+        )}
+
+        {!issuesQ.isError && !issuesQ.isLoading && issues.length === 0 && (
           <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
             No issues or notes logged yet. Use{" "}
             <span className="font-semibold">Log Anomalies / Action Needed</span>{" "}
@@ -212,8 +210,8 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       </div>
 
+      {/* 2-button grid */}
       <div className="grid gap-3 md:grid-cols-2">
-
         <Button
           size="lg"
           className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
@@ -243,12 +241,13 @@ export function StartOfDayPanel({ sessionId }: Props) {
               Log Anomalies / Action Needed
             </span>
             <span className="text-xs font-normal text-muted-foreground">
-              Yellow / Red · Workaround or escalation required
+              Green note · Yellow workaround · Red escalation
             </span>
           </span>
         </Button>
       </div>
 
+      {/* Confirm AlertDialog */}
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
@@ -277,16 +276,16 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </AlertDialogContent>
       </AlertDialog>
 
+      {/* LogAnomalyModal */}
       <LogAnomalyModal
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
         sessionId={sessionId}
+        reportedBy={reportedBy}
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
       />
-
     </section>
-
   );
 }

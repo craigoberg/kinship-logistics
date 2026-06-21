@@ -33,6 +33,9 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
+  /** Phase 2 will wire this through createIssue. Accepted now to keep the
+   *  parent prop contract stable while Phase 1 ships. */
+  reportedBy?: string;
   defaultSeverity?: RygeSeverity;
 }
 
