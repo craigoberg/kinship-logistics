@@ -130,6 +130,36 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
 }
 
 /**
+ * Return today's session row if it exists, otherwise insert a fresh row in
+ * `open_pending` phase (no open_declared_at). Used when the Check Leader
+ * needs to log an anomaly before declaring the site safe — guarantees a
+ * real session id for `createIssue` / `setPhase` calls.
+ */
+export async function ensureTodaySession(): Promise<SiteDaySession> {
+  const existing = await getTodaySession();
+  if (existing) return existing;
+  const date = todayIso();
+  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .insert({
+      session_date: date,
+      phase: "open_pending",
+      opened_by_id: userId,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
+  await siteLedger(
+    "initialize",
+    { session_id: next.id, session_date: next.sessionDate },
+    "INFO",
+  );
+  return next;
+}
+
+/**
  * Declare site safe & open the day. If no row exists for today yet,
  * inserts a fresh row directly into `active_day`. Otherwise updates the
  * existing pending row.
