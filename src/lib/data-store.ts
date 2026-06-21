@@ -4359,6 +4359,59 @@ export async function listPendingEscalations(): Promise<OperationalEscalation[]>
 }
 
 /**
+ * Guard the global Claim popup from stale site-day rows. A Day Centre RED
+ * escalation is claimable only while its linked session is still locked.
+ */
+export async function isOperationalEscalationClaimable(
+  escalation: OperationalEscalation,
+): Promise<boolean> {
+  if (escalation.status !== "pending") return false;
+  if (escalation.sourceKind !== "site_day_red") return true;
+  if (!escalation.sourceIssueId) return false;
+
+  const issueRes = await supabase
+    .from("site_issues_register")
+    .select("session_id, severity, status")
+    .eq("id", escalation.sourceIssueId)
+    .maybeSingle();
+  if (issueRes.error) throwPg("[isOperationalEscalationClaimable.issue]", issueRes.error);
+
+  const issue = issueRes.data as
+    | { session_id: string | null; severity: string | null; status: string | null }
+    | null;
+  if (!issue?.session_id) return false;
+  if (issue.severity !== "red" || (issue.status ?? "open") !== "open") {
+    return false;
+  }
+
+  const sessionRes = await supabase
+    .from("site_day_sessions")
+    .select("phase")
+    .eq("id", issue.session_id)
+    .maybeSingle();
+  if (sessionRes.error) throwPg("[isOperationalEscalationClaimable.session]", sessionRes.error);
+
+  const session = sessionRes.data as { phase: string | null } | null;
+  return session?.phase === "escalated_lock";
+}
+
+/** Fetch pending escalations that should currently interrupt coordinators. */
+export async function listClaimableEscalations(): Promise<OperationalEscalation[]> {
+  const pending = await listPendingEscalations();
+  const checks = await Promise.all(
+    pending.map(async (row) => {
+      try {
+        return await isOperationalEscalationClaimable(row);
+      } catch (err) {
+        console.error("[listClaimableEscalations] claimability check failed", err);
+        return row.sourceKind !== "site_day_red";
+      }
+    }),
+  );
+  return pending.filter((_, index) => checks[index]);
+}
+
+/**
  * Fetch grounded vehicles for the coordinator dashboard.
  *
  * NDIS double-grounding rule: a single vehicle can accumulate multiple
