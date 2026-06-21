@@ -26,13 +26,14 @@ import {
   type RygeSeverity,
 } from "@/lib/api/site-issues";
 import { siteIssuesKey } from "@/hooks/use-site-issues";
-import { setPhase } from "@/lib/api/site-day-sessions";
+import { setPhase, ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
+  defaultSeverity?: RygeSeverity;
 }
 
 interface AnomalyDraft {
@@ -42,12 +43,12 @@ interface AnomalyDraft {
   owner: ResponsibilityOwner;
 }
 
-const INITIAL: AnomalyDraft = {
-  severity: "yellow",
+const makeInitial = (severity: RygeSeverity): AnomalyDraft => ({
+  severity,
   description: "",
   workaround: "",
   owner: "internal",
-};
+});
 
 const SEVERITY_CHIPS: Array<{
   value: RygeSeverity;
@@ -97,11 +98,16 @@ function triggerEscalation(payload: {
   }
 }
 
-export function LogAnomalyModal({ open, onOpenChange, sessionId }: Props) {
+export function LogAnomalyModal({
+  open,
+  onOpenChange,
+  sessionId,
+  defaultSeverity,
+}: Props) {
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
-    `site-day-anomaly:${sessionId}`,
-    INITIAL,
+    `site-day-anomaly:${sessionId || "bootstrap"}`,
+    makeInitial(defaultSeverity ?? "yellow"),
   );
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
     form;
@@ -123,8 +129,17 @@ export function LogAnomalyModal({ open, onOpenChange, sessionId }: Props) {
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // Bootstrap: if no session row exists yet, provision today's row in
+      // `open_pending` so the issue + escalation have a real id to bind to.
+      let effectiveSessionId = sessionId;
+      if (!effectiveSessionId) {
+        const bootstrapped = await ensureTodaySession();
+        effectiveSessionId = bootstrapped.id;
+        queryClient.setQueryData(SITE_SESSION_QUERY_KEY, bootstrapped);
+      }
+
       const payload: NewSiteIssue = {
-        sessionId,
+        sessionId: effectiveSessionId,
         severity: values.severity,
         issueDescription: values.description.trim(),
         workaroundPlan: values.workaround.trim() || null,
@@ -132,19 +147,19 @@ export function LogAnomalyModal({ open, onOpenChange, sessionId }: Props) {
       };
       const issue = await createIssue(payload);
       if (values.severity === "red") {
-        const next = await setPhase(sessionId, "escalated_lock");
+        const next = await setPhase(effectiveSessionId, "escalated_lock");
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
         triggerEscalation({
           kind: "site_session",
-          sessionId,
+          sessionId: effectiveSessionId,
           issueId: issue.id,
           description: issue.issueDescription,
         });
       }
-      return issue;
+      return { issue, effectiveSessionId };
     },
-    onSuccess: (issue) => {
-      queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
+    onSuccess: ({ issue, effectiveSessionId }) => {
+      queryClient.invalidateQueries({ queryKey: siteIssuesKey(effectiveSessionId) });
       reset();
       onOpenChange(false);
       if (issue.severity === "red") {
