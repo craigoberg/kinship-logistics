@@ -57,6 +57,8 @@ export function DirectoryWorkspace() {
   const [carerOpen, setCarerOpen] = useState(false);
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
   const [editCarer, setEditCarer] = useState<Carer | null>(null);
+  const [isManager, setIsManager] = useState(false);
+  useEffect(() => setIsManager(isActiveUserManager()), []);
 
   const { data: staff = [], isLoading: staffLoading, error: staffErr } = useStaffRegistry();
   const { data: carers = [], isLoading: carersLoading, error: carersErr } = useCarersRegistry();
