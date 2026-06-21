@@ -1,11 +1,13 @@
 import { Link, useRouterState } from "@tanstack/react-router";
-import { HeartHandshake } from "lucide-react";
+import { HeartHandshake, AlertTriangle } from "lucide-react";
 import { NAV_ITEMS } from "./bottom-nav";
 import { SyncIndicator } from "./sync-indicator";
 import { cn } from "@/lib/utils";
+import { useNoShowWatch } from "@/hooks/use-no-show-watch";
 
 export function AppSidebar() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { count: noShowCount, thresholdMinutes } = useNoShowWatch();
 
   return (
     <aside className="hidden w-64 shrink-0 flex-col border-r border-border bg-sidebar md:flex">
@@ -22,6 +24,23 @@ export function AppSidebar() {
           </div>
         </div>
       </div>
+
+      {noShowCount > 0 && (
+        <Link
+          to="/day"
+          className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 transition-colors hover:bg-yellow-500/20"
+        >
+          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+          <span>
+            <span className="font-semibold">
+              {noShowCount} client{noShowCount === 1 ? "" : "s"} overdue
+            </span>
+            <span className="block opacity-80">
+              No check-in past {thresholdMinutes} min
+            </span>
+          </span>
+        </Link>
+      )}
 
       <nav aria-label="Primary" className="flex-1 overflow-y-auto p-3">
         <ul className="space-y-1">
