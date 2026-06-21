@@ -33,6 +33,7 @@ import {
 } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
 import { ClientTime } from "@/components/ui/client-time";
+import { MyobExportWorkspace } from "./myob-export-workspace";
 
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
