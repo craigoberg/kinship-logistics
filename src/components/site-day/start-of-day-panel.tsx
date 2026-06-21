@@ -165,7 +165,55 @@ export function StartOfDayPanel({ sessionId }: Props) {
       )}
 
 
+      <div className="space-y-3">
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+            Walkthrough Issues Register{" "}
+            {openIssues.length > 0 && `(${openIssues.length} open)`}
+            {issues.length > 0 && (
+              <span className="ml-2 text-[10px] normal-case font-normal text-muted-foreground/70">
+                Including notes
+              </span>
+            )}
+          </h3>
+          {issuesQ.isFetching && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+        </div>
+
+        {issuesQ.isError && (
+          <Card className="border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            <div className="flex items-start gap-2">
+              <AlertTriangle className="mt-0.5 h-4 w-4" />
+              <div>
+                <div className="font-medium">
+                  Could not load issues register.
+                </div>
+                <div className="text-xs">
+                  {(issuesQ.error as Error).message}
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
+
+        {!issuesQ.isError && issues.length === 0 && (
+          <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
+            No issues or notes logged yet. Use{" "}
+            <span className="font-semibold">Log Anomalies / Action Needed</span>{" "}
+            below to flag something during the walkthrough.
+          </Card>
+        )}
+
+        <div className="space-y-2">
+          {issues.map((i) => (
+            <IssuesRegisterCard key={i.id} issue={i} canManage={canManage} />
+          ))}
+        </div>
+      </div>
+
       <div className="grid gap-3 md:grid-cols-2">
+
         <Button
           size="lg"
           className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
