@@ -321,15 +321,27 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           </Field>
         </div>
 
-        <SheetFooter className="border-t border-border px-6 py-3">
+        <SheetFooter className="flex-col items-stretch gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-end">
+          {!canSave && !busy && (
+            <p className="text-[11px] text-destructive sm:mr-auto">
+              {nameMissing && pinMissing
+                ? "Full name and 4-digit PIN are required."
+                : nameMissing
+                  ? "Full name is required."
+                  : pinMissing
+                    ? "A 4-digit PIN is required."
+                    : "PIN must be exactly 4 digits."}
+            </p>
+          )}
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
             Cancel
           </Button>
-          <Button onClick={save} disabled={busy} className="gap-1.5">
+          <Button onClick={save} disabled={!canSave} className="gap-1.5">
             <Save className="h-4 w-4" />
             {busy ? "Saving…" : isEdit ? "Save changes" : "Add personnel"}
           </Button>
         </SheetFooter>
+
       </SheetContent>
     </Sheet>
   );
