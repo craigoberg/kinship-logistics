@@ -18,6 +18,8 @@ import { LogAnomalyModal } from "./log-anomaly-modal";
 import { openSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
+import { isAuthError } from "@/lib/api/auth-errors";
+import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 
 interface Props {
   sessionId: string;
@@ -27,6 +29,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
   const allChecked =
@@ -42,6 +45,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
       setConfirmOpen(false);
     },
     onError: (e: Error) => {
+      if (isAuthError(e)) {
+        setConfirmOpen(false);
+        setReauthOpen(true);
+        toast.message("Session expired — please re-enter your PIN.");
+        return;
+      }
       toast.error("Could not open the day", { description: e.message });
     },
   });
@@ -149,6 +158,16 @@ export function StartOfDayPanel({ sessionId }: Props) {
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
+      />
+
+      <PinReauthDialog
+        open={reauthOpen}
+        onOpenChange={setReauthOpen}
+        reason="Re-authenticate to open the Day Centre."
+        onAuthenticated={() => {
+          setReauthOpen(false);
+          openMut.mutate();
+        }}
       />
     </section>
   );

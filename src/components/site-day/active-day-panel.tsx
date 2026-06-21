@@ -24,6 +24,8 @@ import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
 import { IssuesRegisterCard } from "./issues-register-card";
 import { LogAnomalyModal } from "./log-anomaly-modal";
+import { isAuthError } from "@/lib/api/auth-errors";
+import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 
 interface Props {
   session: SiteDaySession;
@@ -34,6 +36,7 @@ export function ActiveDayPanel({ session }: Props) {
   const issuesQ = useSiteIssues(session.id);
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [reauthOpen, setReauthOpen] = useState(false);
 
   const profile = useMemo(() => getActiveUserProfile(), []);
   const permissionQ = useQuery({
@@ -59,8 +62,15 @@ export function ActiveDayPanel({ session }: Props) {
       });
       setCloseOpen(false);
     },
-    onError: (e: Error) =>
-      toast.error("Could not close the day", { description: e.message }),
+    onError: (e: Error) => {
+      if (isAuthError(e)) {
+        setCloseOpen(false);
+        setReauthOpen(true);
+        toast.message("Session expired — please re-enter your PIN.");
+        return;
+      }
+      toast.error("Could not close the day", { description: e.message });
+    },
   });
 
   const issues = issuesQ.data ?? [];
@@ -170,6 +180,16 @@ export function ActiveDayPanel({ session }: Props) {
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
         sessionId={session.id}
+      />
+
+      <PinReauthDialog
+        open={reauthOpen}
+        onOpenChange={setReauthOpen}
+        reason="Re-authenticate to close the Day Centre."
+        onAuthenticated={() => {
+          setReauthOpen(false);
+          closeMut.mutate();
+        }}
       />
     </section>
   );
