@@ -1,11 +1,12 @@
 import type { ReactNode } from "react";
-import { useRouterState } from "@tanstack/react-router";
-import { LogOut } from "lucide-react";
+import { Link, useRouterState } from "@tanstack/react-router";
+import { LogOut, ShieldOff } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
 import { BottomNav, NAV_ITEMS } from "./bottom-nav";
 import { SyncIndicator } from "./sync-indicator";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { useSiteSession } from "@/hooks/use-site-session";
 
 function handleLogout() {
   try {
@@ -16,6 +17,46 @@ function handleLogout() {
     // ignore cleanup errors
   }
   window.location.href = "/auth";
+}
+
+/**
+ * Global Day Centre banner — surfaces a hard-lock state to every page when
+ * the site session has been NO-GO'd or is mid-escalation. Quietly returns
+ * null while the session loads or is in a normal phase.
+ */
+function SiteNoGoBanner() {
+  const q = useSiteSession();
+  const session = q.data;
+  if (!session) return null;
+  if (session.phase !== "closed_no_go" && session.phase !== "escalated_lock")
+    return null;
+  const isNoGo = session.phase === "closed_no_go";
+  return (
+    <div
+      className={`flex items-center justify-between gap-3 border-b px-4 py-2 text-xs md:px-6 ${
+        isNoGo
+          ? "border-red-600/60 bg-red-600/10 text-red-700"
+          : "border-yellow-500/60 bg-yellow-500/10 text-yellow-700"
+      }`}
+    >
+      <div className="flex items-center gap-2">
+        <ShieldOff className="h-3.5 w-3.5" />
+        <span className="font-semibold uppercase tracking-wide">
+          {isNoGo
+            ? "Centre closed — NO-GO"
+            : "Site locked — escalation in progress"}
+        </span>
+        <span className="hidden text-[11px] opacity-80 sm:inline">
+          {isNoGo
+            ? "No client services today."
+            : "Manager + Leader dual-PIN handshake required."}
+        </span>
+      </div>
+      <Link to="/day" className="font-semibold underline-offset-2 hover:underline">
+        Open Day Centre →
+      </Link>
+    </div>
+  );
 }
 
 export function AppShell({ children }: { children: ReactNode }) {
@@ -46,6 +87,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             </Button>
           </div>
         </header>
+        <SiteNoGoBanner />
         <main className="flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6">
           {children}
         </main>

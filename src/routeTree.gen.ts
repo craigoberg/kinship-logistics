@@ -16,6 +16,7 @@ import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as ManifestRouteImport } from './routes/manifest'
 import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as EventsRouteImport } from './routes/events'
+import { Route as DayRouteImport } from './routes/day'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
@@ -55,6 +56,11 @@ const EventsRoute = EventsRouteImport.update({
   path: '/events',
   getParentRoute: () => rootRouteImport,
 } as any)
+const DayRoute = DayRouteImport.update({
+  id: '/day',
+  path: '/day',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const AuthRoute = AuthRouteImport.update({
   id: '/auth',
   path: '/auth',
@@ -75,6 +81,7 @@ export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/day': typeof DayRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -87,6 +94,7 @@ export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/day': typeof DayRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -100,6 +108,7 @@ export interface FileRoutesById {
   '/': typeof IndexRoute
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
+  '/day': typeof DayRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -114,6 +123,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/auth'
+    | '/day'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/auth'
+    | '/day'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/'
     | '/admin'
     | '/auth'
+    | '/day'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -151,6 +163,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
+  DayRoute: typeof DayRoute
   EventsRoute: typeof EventsRoute
   GovernanceRoute: typeof GovernanceRoute
   ManifestRoute: typeof ManifestRoute
@@ -211,6 +224,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/day': {
+      id: '/day'
+      path: '/day'
+      fullPath: '/day'
+      preLoaderRoute: typeof DayRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/auth': {
       id: '/auth'
       path: '/auth'
@@ -239,6 +259,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
+  DayRoute: DayRoute,
   EventsRoute: EventsRoute,
   GovernanceRoute: GovernanceRoute,
   ManifestRoute: ManifestRoute,
@@ -250,13 +271,3 @@ const rootRouteChildren: RootRouteChildren = {
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}
