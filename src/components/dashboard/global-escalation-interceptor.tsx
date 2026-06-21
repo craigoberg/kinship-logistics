@@ -146,6 +146,12 @@ export function GlobalEscalationInterceptor() {
     // Optimistically pop the active item so the UI feels instant.
     setQueue((prev) => prev.filter((e) => e.id !== target.id));
     try {
+      const claimable = await isOperationalEscalationClaimable(target);
+      if (!claimable) {
+        toast.info("This escalation is no longer awaiting claim.");
+        return;
+      }
+
       const staffId = await resolveStaffIdWithFallback();
       const result = await claimOperationalEscalation(target.id, staffId);
       if (result.success) {
