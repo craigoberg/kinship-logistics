@@ -189,19 +189,33 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               )}
             </Field>
 
-            <Field label="Role / title">
-              <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
+            <Field label="Role / title" required={!isEdit}>
+              <Input
+                value={role}
+                onChange={(e) => setRole(e.target.value)}
+                placeholder="e.g. Registered Nurse"
+                aria-invalid={roleMissing}
+                className={roleMissing ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {roleMissing && (
+                <p className="text-[11px] text-destructive">Role / title is required.</p>
+              )}
             </Field>
 
-            <Field label="SYSTEM ACCESS LEVEL">
+            <Field label="SYSTEM ACCESS LEVEL" required={!isEdit}>
               <Select value={personnelType} onValueChange={setPersonnelType}>
-                <SelectTrigger><SelectValue placeholder="Select personnel type" /></SelectTrigger>
+                <SelectTrigger aria-invalid={personnelTypeMissing} className={personnelTypeMissing ? "border-destructive focus-visible:ring-destructive" : undefined}>
+                  <SelectValue placeholder="Select access level" />
+                </SelectTrigger>
                 <SelectContent>
                   {ACCESS_ROLES.map((r) => (
                     <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {personnelTypeMissing && (
+                <p className="text-[11px] text-destructive">System access level is required.</p>
+              )}
             </Field>
             <Field label="Phone">
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
