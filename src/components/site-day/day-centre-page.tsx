@@ -19,6 +19,14 @@ export function DayCentrePage() {
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
+  const redIssue =
+    (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
+  const redEscalationQ = useQuery({
+    queryKey: ["site-escalation", redIssue?.id ?? "none"],
+    queryFn: () => (redIssue ? getEscalationBySourceIssue(redIssue.id) : Promise.resolve(null)),
+    enabled: !!redIssue,
+    staleTime: 5_000,
+  });
 
 
   // One-shot bootstrap: if no row exists for today, provision exactly one
@@ -88,14 +96,6 @@ export function DayCentrePage() {
     );
   }
 
-  const redIssue =
-    (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
-  const redEscalationQ = useQuery({
-    queryKey: ["site-escalation", redIssue?.id ?? "none"],
-    queryFn: () => (redIssue ? getEscalationBySourceIssue(redIssue.id) : Promise.resolve(null)),
-    enabled: !!redIssue,
-    staleTime: 5_000,
-  });
   const redEscalation = redEscalationQ.data ?? null;
   const hasLiveEscalation =
     redEscalation?.status === "pending" || redEscalation?.status === "claimed";
