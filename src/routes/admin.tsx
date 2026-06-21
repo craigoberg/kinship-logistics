@@ -8,12 +8,13 @@ import {
 } from "@/components/ui/tabs";
 import { AdminLookupWorkspace } from "@/components/admin/admin-lookup-workspace";
 import { SystemParameterWorkspace } from "@/components/admin/system-parameter-workspace";
+import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "parameters";
+type AdminTab = "lookups" | "parameters" | "access";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
@@ -24,7 +25,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage lookup parameters and tunable system thresholds.
+          Manage lookup parameters, tunable system thresholds, and role access.
         </p>
       </header>
 
@@ -32,6 +33,7 @@ function AdminPage() {
         <TabsList>
           <TabsTrigger value="lookups">Lookups</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
+          <TabsTrigger value="access">Menu Access</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
           <AdminLookupWorkspace />
@@ -39,7 +41,11 @@ function AdminPage() {
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
         </TabsContent>
+        <TabsContent value="access">
+          <MenuAccessMatrix />
+        </TabsContent>
       </Tabs>
     </div>
   );
 }
+
