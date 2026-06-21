@@ -5,8 +5,6 @@ import { Card } from "@/components/ui/card";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
-import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { getActiveUserProfile } from "@/lib/data-store";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
