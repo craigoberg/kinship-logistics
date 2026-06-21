@@ -158,9 +158,8 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
 }
 
 /**
- * Declare site safe & open the day. If no row exists for today yet,
- * inserts a fresh row directly into `active_day`. Otherwise updates the
- * existing pending row.
+ * Declare site safe & open the day. If no row exists for today yet, create the
+ * RLS-permitted `open_pending` shell first, then update that row to active.
  */
 export async function openSession(notes: string): Promise<SiteDaySession> {
   const staffId = await resolveStaffIdWithFallback();
