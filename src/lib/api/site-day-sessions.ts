@@ -197,9 +197,10 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
 
 /** Declare site safe & open the day. Find-or-create today's row, then flip to active_day. */
 export async function openSession(notes: string): Promise<SiteDaySession> {
-  const staffId = await resolveStaffIdWithFallback();
+  const openedByUserId = await resolveOpenedByUserId();
   const date = todayIso();
   const nowIso = new Date().toISOString();
+
 
   const existing = await supabase
     .from("site_day_sessions")
