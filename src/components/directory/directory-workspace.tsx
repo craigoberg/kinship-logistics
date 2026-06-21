@@ -1,5 +1,5 @@
-import { useMemo, useState } from "react";
-import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle, Lock } from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -17,6 +17,7 @@ import {
   useCarersRegistry,
   useParticipants,
 } from "@/hooks/use-supabase-data";
+import { isActiveUserManager } from "@/lib/data-store";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
@@ -56,6 +57,8 @@ export function DirectoryWorkspace() {
   const [carerOpen, setCarerOpen] = useState(false);
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
   const [editCarer, setEditCarer] = useState<Carer | null>(null);
+  const [isManager, setIsManager] = useState(false);
+  useEffect(() => setIsManager(isActiveUserManager()), []);
 
   const { data: staff = [], isLoading: staffLoading, error: staffErr } = useStaffRegistry();
   const { data: carers = [], isLoading: carersLoading, error: carersErr } = useCarersRegistry();
@@ -99,16 +102,23 @@ export function DirectoryWorkspace() {
             <TabsTrigger value="carers">Carers &amp; Support Networks</TabsTrigger>
           </TabsList>
           {tab === "staff" ? (
-            <Button
-              onClick={() => {
-                setEditStaff(null);
-                setStaffOpen(true);
-              }}
-              className="gap-1.5"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add personnel
-            </Button>
+            isManager ? (
+              <Button
+                onClick={() => {
+                  setEditStaff(null);
+                  setStaffOpen(true);
+                }}
+                className="gap-1.5"
+              >
+                <UserPlus className="h-4 w-4" />
+                Add personnel
+              </Button>
+            ) : (
+              <Badge variant="outline" className="gap-1.5">
+                <Lock className="h-3 w-3" />
+                Manager-only
+              </Badge>
+            )
           ) : (
             <Button
               onClick={() => {
@@ -173,17 +183,21 @@ export function DirectoryWorkspace() {
                           <CertBadges certs={s.certifications} />
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => {
-                              setEditStaff(s);
-                              setStaffOpen(true);
-                            }}
-                            aria-label={`Edit ${s.fullName}`}
-                          >
-                            <Pencil className="h-4 w-4" />
-                          </Button>
+                          {isManager ? (
+                            <Button
+                              size="icon"
+                              variant="ghost"
+                              onClick={() => {
+                                setEditStaff(s);
+                                setStaffOpen(true);
+                              }}
+                              aria-label={`Edit ${s.fullName}`}
+                            >
+                              <Pencil className="h-4 w-4" />
+                            </Button>
+                          ) : (
+                            <Lock className="ml-auto h-4 w-4 text-muted-foreground" aria-label="Manager-only" />
+                          )}
                         </TableCell>
                       </TableRow>
                     );
