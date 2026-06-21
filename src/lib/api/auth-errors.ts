@@ -10,10 +10,9 @@ export class AuthExpiredError extends Error {
 }
 
 /**
- * True when the error looks like an authentication / authorisation failure:
- * - HTTP 401 from PostgREST or fetch
- * - Postgres RLS rejection (SQLSTATE 42501)
- * - JWT expiry / missing claim messages
+ * True ONLY for explicit session-expiration or strict HTTP 401.
+ * Postgres RLS / permission / configuration errors are NOT treated as
+ * auth failures; they must surface as raw system errors instead.
  */
 export function isAuthError(err: unknown): boolean {
   if (!err) return false;
@@ -26,20 +25,5 @@ export function isAuthError(err: unknown): boolean {
       : typeof anyErr.statusCode === "number"
         ? (anyErr.statusCode as number)
         : undefined;
-  if (status === 401 || status === 403) return true;
-
-  const code = typeof anyErr.code === "string" ? anyErr.code : undefined;
-  if (code === "42501" || code === "PGRST301" || code === "PGRST302") return true;
-
-  const message =
-    typeof anyErr.message === "string" ? anyErr.message.toLowerCase() : "";
-  if (!message) return false;
-  return (
-    message.includes("row-level security") ||
-    message.includes("row level security") ||
-    message.includes("jwt") ||
-    message.includes("unauthorized") ||
-
-    message.includes("not authenticated")
-  );
+  return status === 401;
 }
