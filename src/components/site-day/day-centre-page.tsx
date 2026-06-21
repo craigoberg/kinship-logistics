@@ -19,14 +19,6 @@ export function DayCentrePage() {
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
 
-  const profile = useMemo(() => getActiveUserProfile(), []);
-  const permissionQ = useQuery({
-    queryKey: ["site-day", "can-manage", profile?.staffId ?? "auth-user"],
-    queryFn: () => canManageSystemParameters(profile?.staffId),
-    enabled: isReady && !!user,
-    staleTime: 60_000,
-  });
-  const isManager = permissionQ.data === true;
 
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.
