@@ -84,6 +84,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         });
         return;
       }
+      if (!isEdit && !role.trim()) {
+        toast.error("Role / title is required", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
+      if (!isEdit && !personnelType) {
+        toast.error("System access level is required", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
       const trimmedPin = pin.trim();
       if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
         toast.error("A 4-digit PIN is required for new personnel", {
