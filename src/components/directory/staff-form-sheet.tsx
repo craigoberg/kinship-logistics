@@ -30,7 +30,7 @@ import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-s
 import { ACCESS_ROLES } from "@/lib/access-roles";
 
 
-const PERSONNEL_TYPES = ["Staff", "Volunteer", "Coordinator", "Contractor"];
+
 
 interface Props {
   open: boolean;
@@ -61,7 +61,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     if (!open) return;
     setFullName(staff?.fullName ?? "");
     setRole(staff?.role ?? "");
-    setPersonnelType(staff?.personnelType ?? "Staff");
+    setPersonnelType(staff?.personnelType ?? "");
     setPhone(staff?.phone ?? "");
     setEmail(staff?.email ?? "");
     setStreetAddress(staff?.streetAddress ?? "");
@@ -153,22 +153,15 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoFocus />
             </Field>
             <Field label="Role / title">
-              <Select value={role || undefined} onValueChange={setRole}>
-                <SelectTrigger><SelectValue placeholder="Select a role" /></SelectTrigger>
-                <SelectContent>
-                  {ACCESS_ROLES.map((r) => (
-                    <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
             </Field>
 
             <Field label="Personnel type">
-              <Select value={personnelType} onValueChange={setPersonnelType}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+              <Select value={personnelType || undefined} onValueChange={setPersonnelType}>
+                <SelectTrigger><SelectValue placeholder="Select personnel type" /></SelectTrigger>
                 <SelectContent>
-                  {PERSONNEL_TYPES.map((t) => (
-                    <SelectItem key={t} value={t}>{t}</SelectItem>
+                  {ACCESS_ROLES.map((r) => (
+                    <SelectItem key={r.key} value={r.key}>{r.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
