@@ -76,46 +76,50 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   };
 
   const save = async () => {
-    if (!fullName.trim()) {
-      toast.error("Full name is required", {
-        className: "!bg-red-600 !text-white !border-red-700",
-      });
-      return;
-    }
-    const trimmedPin = pin.trim();
-    if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
-      toast.error("A 4-digit PIN is required for new personnel", {
-        className: "!bg-red-600 !text-white !border-red-700",
-      });
-      return;
-    }
-    if (isEdit && trimmedPin && !/^\d{4}$/.test(trimmedPin)) {
-      toast.error("PIN must be exactly 4 digits", {
-        className: "!bg-red-600 !text-white !border-red-700",
-      });
-      return;
-    }
-    const payload: StaffPayload = {
-      fullName: fullName.trim(),
-      role: role.trim() || null,
-      personnelType: personnelType || null,
-      phone: phone.trim() || null,
-      email: email.trim() || null,
-      streetAddress: streetAddress.trim() || null,
-      active,
-      notes: notes.trim() || null,
-      certifications: certs
-        .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
-        .map((c) => ({
-          name: c.name.trim(),
-          number: c.number.trim(),
-          expiry: c.expiry || null,
-        })),
-    };
-    if (trimmedPin) {
-      payload.pinHash = await hashPin(trimmedPin);
-    }
+    console.log("[staff-form] save() invoked", { isEdit, fullName, personnelType, pinLen: pin.length });
     try {
+      if (!fullName.trim()) {
+        toast.error("Full name is required", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
+      const trimmedPin = pin.trim();
+      if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
+        toast.error("A 4-digit PIN is required for new personnel", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
+      if (isEdit && trimmedPin && !/^\d{4}$/.test(trimmedPin)) {
+        toast.error("PIN must be exactly 4 digits", {
+          className: "!bg-red-600 !text-white !border-red-700",
+        });
+        return;
+      }
+      const payload: StaffPayload = {
+        fullName: fullName.trim(),
+        role: role.trim() || null,
+        personnelType: personnelType || null,
+        phone: phone.trim() || null,
+        email: email.trim() || null,
+        streetAddress: streetAddress.trim() || null,
+        active,
+        notes: notes.trim() || null,
+        certifications: certs
+          .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
+          .map((c) => ({
+            name: c.name.trim(),
+            number: c.number.trim(),
+            expiry: c.expiry || null,
+          })),
+      };
+      if (trimmedPin) {
+        console.log("[staff-form] hashing PIN");
+        payload.pinHash = await hashPin(trimmedPin);
+        console.log("[staff-form] PIN hashed OK");
+      }
+      console.log("[staff-form] sending mutation", payload);
       if (isEdit && staff) {
         await update.mutateAsync({ id: staff.id, payload });
         toast.success("Personnel updated", { description: payload.fullName });
@@ -125,14 +129,15 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
       }
       onOpenChange(false);
     } catch (err) {
-      // Hold the form open and surface the raw Postgres message.
-      toast.error("Save failed — database rejected the record", {
-        description: (err as Error).message,
+      console.error("[staff-form] save failed", err);
+      toast.error("Save failed", {
+        description: (err as Error)?.message ?? String(err),
         className: "!bg-red-600 !text-white !border-red-700",
         duration: 12_000,
       });
     }
   };
+
 
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
