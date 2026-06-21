@@ -8,7 +8,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { cn } from "@/lib/utils";
 
 import {
+  DEFAULT_STAFF_UUID,
   claimOperationalEscalation,
+  getActiveUserProfile,
+  getStaffId,
   isOperationalEscalationClaimable,
   listClaimableEscalations,
   resolveStaffIdWithFallback,
@@ -21,6 +24,14 @@ import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
 
 const HIDDEN_ROUTES = new Set<string>(["/manifest", "/auth"]);
+
+function getCurrentTerminalStaffId(): string | null {
+  const profileStaffId = getActiveUserProfile()?.staffId ?? null;
+  if (profileStaffId && profileStaffId !== DEFAULT_STAFF_UUID) return profileStaffId;
+
+  const localStaffId = getStaffId();
+  return localStaffId && localStaffId !== DEFAULT_STAFF_UUID ? localStaffId : null;
+}
 
 function relativeAge(iso: string): string {
   const t = new Date(iso).getTime();
@@ -47,8 +58,10 @@ export function GlobalEscalationInterceptor() {
   // actually raised the incident (no self-claim).
   const currentStaffQ = useQuery({
     queryKey: ["current-staff-id"],
-    queryFn: resolveStaffIdWithFallback,
-    staleTime: 5 * 60_000,
+    queryFn: async () => getCurrentTerminalStaffId(),
+    refetchInterval: (q) => (q.state.data ? false : 1_000),
+    refetchOnWindowFocus: true,
+    staleTime: 1_000,
   });
   const currentStaffId = currentStaffQ.data ?? null;
 
@@ -59,7 +72,7 @@ export function GlobalEscalationInterceptor() {
   const baseline = useQuery({
     queryKey: ["claimable-escalations", currentStaffId ?? "unknown"],
     queryFn: listClaimableEscalations,
-    enabled: currentStaffQ.isSuccess,
+    enabled: !!currentStaffId,
     staleTime: 30_000,
   });
 
@@ -116,7 +129,7 @@ export function GlobalEscalationInterceptor() {
 
   // Tick to refresh "12s ago" label every second while modal is open.
   const visibleQueue = useMemo(
-    () => (currentStaffQ.isSuccess ? queue.filter((e) => !isOwnEscalation(e)) : []),
+    () => (currentStaffId ? queue.filter((e) => !isOwnEscalation(e)) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [queue, currentStaffId, currentStaffQ.isSuccess],
   );
@@ -184,7 +197,7 @@ export function GlobalEscalationInterceptor() {
     }
   };
 
-  const showModal = !hidden && currentStaffQ.isSuccess && !!active;
+  const showModal = !hidden && !!currentStaffId && !!active;
 
   return (
     <>
