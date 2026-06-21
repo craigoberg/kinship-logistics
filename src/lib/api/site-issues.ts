@@ -92,6 +92,11 @@ export interface NewSiteIssue {
 
 export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  console.info("[SiteIssues] createIssue → inserting", {
+    session_id: payload.sessionId,
+    severity: payload.severity,
+    owner: payload.owner,
+  });
   const { data, error } = await supabase
     .from("site_issues_register")
     .insert({
@@ -107,6 +112,11 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     .single();
   if (error) throw error;
   const next = rowToIssue(data as SiteIssueRow);
+  console.info("[SiteIssues] createIssue ← inserted row", {
+    id: next.id,
+    session_id: next.sessionId,
+    severity: next.severity,
+  });
 
   // Ledger receipt — site_day.issue_logged
   try {
