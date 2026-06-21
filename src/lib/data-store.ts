@@ -4238,6 +4238,7 @@ export interface OperationalEscalation {
   createdAt: string;
   sourceKind: "bus_walkaround" | "site_day_red" | null;
   sourceIssueId: string | null;
+  raisedBy: string | null;
 }
 
 interface OperationalEscalationRow {
@@ -4255,6 +4256,7 @@ interface OperationalEscalationRow {
   created_at: string;
   source_kind: "bus_walkaround" | "site_day_red" | null;
   source_issue_id: string | null;
+  raised_by: string | null;
 }
 
 function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
@@ -4273,6 +4275,7 @@ function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
     createdAt: r.created_at,
     sourceKind: r.source_kind ?? null,
     sourceIssueId: r.source_issue_id ?? null,
+    raisedBy: r.raised_by ?? null,
   };
 }
 
@@ -4284,7 +4287,20 @@ export async function raiseOperationalEscalation(input: {
   gateId: string;
   sourceKind?: "bus_walkaround" | "site_day_red";
   sourceIssueId?: string | null;
+  raisedBy?: string | null;
 }): Promise<OperationalEscalation> {
+  // Best-effort resolve the raiser when the caller didn't pass one in, so
+  // the Global Escalation Interceptor can suppress the Claim popup for the
+  // very user who reported this incident.
+  let raisedBy = input.raisedBy ?? null;
+  if (!raisedBy) {
+    try {
+      raisedBy = await resolveStaffIdWithFallback();
+    } catch {
+      raisedBy = null;
+    }
+  }
+
   const { data, error } = await supabase
     .from("operational_escalations")
     .insert([
@@ -4296,6 +4312,7 @@ export async function raiseOperationalEscalation(input: {
         status: "pending",
         source_kind: input.sourceKind ?? "bus_walkaround",
         source_issue_id: input.sourceIssueId ?? null,
+        raised_by: raisedBy,
       },
     ])
     .select("*")
