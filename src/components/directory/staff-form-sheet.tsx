@@ -154,9 +154,11 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const trimmedPinLive = pin.trim();
   const pinValidLive = /^\d{4}$/.test(trimmedPinLive);
   const nameMissing = !trimmedName;
+  const roleMissing = !isEdit && !role.trim();
+  const personnelTypeMissing = !isEdit && !personnelType;
   const pinMissing = !isEdit && !pinValidLive;
   const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
-  const canSave = !busy && !nameMissing && !pinMissing && !pinBadFormat;
+  const canSave = !busy && !nameMissing && !roleMissing && !personnelTypeMissing && !pinMissing && !pinBadFormat;
 
   return (
 
