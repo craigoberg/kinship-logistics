@@ -92,44 +92,21 @@ function todayIso(): string {
 
 /**
  * Resolve a uuid that satisfies the `opened_by_id`/`closed_by_id` FK
- * (references `auth.users`). Order:
- *   1. Current authenticated session user (auth.uid()).
- *   2. staff_registry.auth_user_id for the active staff id.
- *   3. First staff_registry row with a non-null auth_user_id (dev fallback).
- * Returns null if nothing usable is found — the caller will then send null
- * rather than violate the FK with a placeholder uuid.
+ * (references `auth.users`). Uses the current authenticated session user
+ * (auth.uid()). Returns null if there is no signed-in user — the caller
+ * will then send null rather than violate the FK with a placeholder uuid.
+ *
+ * Note: `staff_registry` has no `auth_user_id` column; its `id` is the
+ * canonical identifier. We therefore never read a mapping column here.
  */
 async function resolveOpenedByUserId(): Promise<string | null> {
   try {
     const { data: auth } = await supabase.auth.getUser();
     if (auth?.user?.id) return auth.user.id;
   } catch {
-    /* ignore — fall through */
+    /* ignore */
   }
-
-  try {
-    const staffId = await resolveStaffIdWithFallback();
-    const byStaff = await supabase
-      .from("staff_registry")
-      .select("auth_user_id")
-      .eq("id", staffId)
-      .maybeSingle();
-    const mapped = (byStaff.data as { auth_user_id: string | null } | null)
-      ?.auth_user_id;
-    if (mapped) return mapped;
-  } catch {
-    /* ignore — fall through to global fallback */
-  }
-
-  const anyStaff = await supabase
-    .from("staff_registry")
-    .select("auth_user_id")
-    .not("auth_user_id", "is", null)
-    .limit(1)
-    .maybeSingle();
-  const fallback = (anyStaff.data as { auth_user_id: string | null } | null)
-    ?.auth_user_id;
-  return fallback ?? null;
+  return null;
 }
 
 /** site_day.* ledger event prefix. Best-effort — never blocks the caller. */
