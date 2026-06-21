@@ -1,4 +1,4 @@
-import { useRef, useState } from "react";
+import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ShieldCheck } from "lucide-react";
@@ -15,61 +15,64 @@ import {
 } from "@/components/ui/alert-dialog";
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
-import { openSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import {
+  ensureTodaySession,
+  openSession,
+  type SiteDaySession,
+} from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
-import { isAuthError } from "@/lib/api/auth-errors";
-import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 
 interface Props {
   sessionId: string;
 }
 
+function formatServerError(e: unknown): string {
+  if (e && typeof e === "object") {
+    const o = e as Record<string, unknown>;
+    const parts: string[] = [];
+    if (typeof o.message === "string" && o.message) parts.push(o.message);
+    if (typeof o.code === "string" && o.code) parts.push(`code: ${o.code}`);
+    if (typeof o.details === "string" && o.details) parts.push(`details: ${o.details}`);
+    if (typeof o.hint === "string" && o.hint) parts.push(`hint: ${o.hint}`);
+    if (parts.length) return parts.join(" · ");
+  }
+  if (e instanceof Error) return e.message;
+  return String(e);
+}
+
 export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
-  const reauthRetryRef = useRef(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
-  const [reauthOpen, setReauthOpen] = useState(false);
-  const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
   const allChecked =
     mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
 
   const openMut = useMutation({
-    mutationFn: () => openSession(""),
+    mutationFn: async () => {
+      await ensureTodaySession();
+      return openSession("");
+    },
     onSuccess: (next: SiteDaySession) => {
-      reauthRetryRef.current = false;
-      setAuthRecoveryMessage(null);
+      setErrorMessage(null);
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       toast.success("Day Centre opened", {
         description: "Site declared safe & compliant.",
       });
       setConfirmOpen(false);
     },
-    onError: (e: Error) => {
-      if (isAuthError(e)) {
-        setConfirmOpen(false);
-        if (reauthRetryRef.current) {
-          reauthRetryRef.current = false;
-          setReauthOpen(false);
-          setAuthRecoveryMessage(
-            "The Day Centre open request is still being rejected by the server. This is no longer a PIN issue — the backend writer is refusing the update. Use Retry now, or contact a Manager.",
-          );
-          toast.error("Open still blocked", {
-            description: e.message,
-          });
-          return;
-        }
-        setAuthRecoveryMessage(null);
-        setReauthOpen(true);
-        toast.message("Authorisation check required — please re-enter your PIN.");
-        return;
-      }
-      toast.error("Could not open the day", { description: e.message });
+    onError: (e: unknown) => {
+      const msg = formatServerError(e);
+      setConfirmOpen(false);
+      setErrorMessage(msg);
+      toast.error("Could not open the day", { description: msg });
     },
   });
+
+
 
 
   return (
