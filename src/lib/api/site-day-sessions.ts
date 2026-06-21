@@ -90,6 +90,48 @@ function todayIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
+/**
+ * Resolve a uuid that satisfies the `opened_by_id`/`closed_by_id` FK
+ * (references `auth.users`). Order:
+ *   1. Current authenticated session user (auth.uid()).
+ *   2. staff_registry.auth_user_id for the active staff id.
+ *   3. First staff_registry row with a non-null auth_user_id (dev fallback).
+ * Returns null if nothing usable is found — the caller will then send null
+ * rather than violate the FK with a placeholder uuid.
+ */
+async function resolveOpenedByUserId(): Promise<string | null> {
+  try {
+    const { data: auth } = await supabase.auth.getUser();
+    if (auth?.user?.id) return auth.user.id;
+  } catch {
+    /* ignore — fall through */
+  }
+
+  try {
+    const staffId = await resolveStaffIdWithFallback();
+    const byStaff = await supabase
+      .from("staff_registry")
+      .select("auth_user_id")
+      .eq("id", staffId)
+      .maybeSingle();
+    const mapped = (byStaff.data as { auth_user_id: string | null } | null)
+      ?.auth_user_id;
+    if (mapped) return mapped;
+  } catch {
+    /* ignore — fall through to global fallback */
+  }
+
+  const anyStaff = await supabase
+    .from("staff_registry")
+    .select("auth_user_id")
+    .not("auth_user_id", "is", null)
+    .limit(1)
+    .maybeSingle();
+  const fallback = (anyStaff.data as { auth_user_id: string | null } | null)
+    ?.auth_user_id;
+  return fallback ?? null;
+}
+
 /** site_day.* ledger event prefix. Best-effort — never blocks the caller. */
 async function siteLedger(
   action: string,
