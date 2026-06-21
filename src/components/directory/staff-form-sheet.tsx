@@ -172,6 +172,21 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             <Field label="Street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
+            <Field label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"} className="sm:col-span-2">
+              <Input
+                value={pin}
+                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+                inputMode="numeric"
+                pattern="\d{4}"
+                maxLength={4}
+                placeholder="••••"
+                autoComplete="off"
+                required={!isEdit}
+              />
+              <p className="text-[11px] text-muted-foreground/70">
+                Used for medication witness, handshake, and terminal sign-in. Hashed before storage.
+              </p>
+            </Field>
             <Field label="Active" className="sm:col-span-2">
               <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
                 <Switch checked={active} onCheckedChange={setActive} />
