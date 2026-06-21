@@ -11,8 +11,7 @@ import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
-import { SiteLeaderHandshakePanel } from "./site-leader-handshake-panel";
-import { SiteManagerHandshakeModal } from "./site-manager-handshake-modal";
+import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 
 export function DayCentrePage() {
