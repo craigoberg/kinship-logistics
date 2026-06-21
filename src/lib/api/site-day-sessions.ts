@@ -114,9 +114,9 @@ async function siteLedger(
 }
 
 /**
- * Fetch (or create) today's site day session. Returns null if the table is
- * missing — the UI surfaces this as an issues-panel error rather than
- * auto-creating schema.
+ * Fetch today's site day session if one exists. Returns null when no row
+ * exists for today (the StartOfDayPanel will create it on Declare). Only
+ * throws on real Postgres/schema errors.
  */
 export async function getTodaySession(): Promise<SiteDaySession | null> {
   const date = todayIso();
@@ -125,44 +125,53 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
     .select("*")
     .eq("session_date", date)
     .maybeSingle();
-  if (error) {
-    // Surface to caller — never swallow schema errors.
-    throw error;
-  }
-  if (data) return rowToSession(data as SiteDaySessionRow);
-
-  // Bootstrap a fresh open_pending row for today.
-  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
-  const { data: created, error: insErr } = await supabase
-    .from("site_day_sessions")
-    .insert({
-      session_date: date,
-      phase: "open_pending",
-      opened_by_id: userId,
-    })
-    .select("*")
-    .single();
-  if (insErr) throw insErr;
-  return rowToSession(created as SiteDaySessionRow);
+  if (error) throw error;
+  return data ? rowToSession(data as SiteDaySessionRow) : null;
 }
 
+/**
+ * Declare site safe & open the day. If no row exists for today yet,
+ * inserts a fresh row directly into `active_day`. Otherwise updates the
+ * existing pending row.
+ */
 export async function openSession(notes: string): Promise<SiteDaySession> {
-  const today = await getTodaySession();
-  if (!today) throw new Error("No session row to open.");
+  const date = todayIso();
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
-  const { data, error } = await supabase
-    .from("site_day_sessions")
-    .update({
-      phase: "active_day",
-      opened_by_id: userId,
-      open_declared_at: new Date().toISOString(),
-      open_leader_notes: notes || null,
-    })
-    .eq("id", today.id)
-    .select("*")
-    .single();
-  if (error) throw error;
-  const next = rowToSession(data as SiteDaySessionRow);
+  const nowIso = new Date().toISOString();
+  const today = await getTodaySession();
+
+  let row: SiteDaySessionRow;
+  if (!today) {
+    const { data, error } = await supabase
+      .from("site_day_sessions")
+      .insert({
+        session_date: date,
+        phase: "active_day",
+        opened_by_id: userId,
+        open_declared_at: nowIso,
+        open_leader_notes: notes || null,
+      })
+      .select("*")
+      .single();
+    if (error) throw error;
+    row = data as SiteDaySessionRow;
+  } else {
+    const { data, error } = await supabase
+      .from("site_day_sessions")
+      .update({
+        phase: "active_day",
+        opened_by_id: userId,
+        open_declared_at: nowIso,
+        open_leader_notes: notes || null,
+      })
+      .eq("id", today.id)
+      .select("*")
+      .single();
+    if (error) throw error;
+    row = data as SiteDaySessionRow;
+  }
+
+  const next = rowToSession(row);
   await siteLedger(
     "open",
     { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
