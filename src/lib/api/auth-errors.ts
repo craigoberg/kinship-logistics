@@ -38,9 +38,8 @@ export function isAuthError(err: unknown): boolean {
     message.includes("row-level security") ||
     message.includes("row level security") ||
     message.includes("jwt") ||
-    message.includes("invalid api key") ||
-    message.includes("service-role key") ||
     message.includes("unauthorized") ||
+
     message.includes("not authenticated")
   );
 }

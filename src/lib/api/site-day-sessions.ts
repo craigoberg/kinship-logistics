@@ -131,16 +131,20 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
 
 /**
  * Return today's session row if it exists, otherwise insert a fresh row in
- * `open_pending` phase. The insert is routed through a TanStack server
- * function with the service-role key — the browser publishable key is
- * subject to RLS and cannot create the row.
+ * `open_pending` phase. Written from the browser client under RLS — same
+ * path the dual-PIN handshake updates use.
  */
 export async function ensureTodaySession(): Promise<SiteDaySession> {
   const existing = await getTodaySession();
   if (existing) return existing;
-  const { ensureTodaySessionFn } = await import("./site-day-sessions.functions");
-  const row = (await ensureTodaySessionFn()) as SiteDaySessionRow;
-  const next = rowToSession(row);
+  const date = todayIso();
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .insert({ session_date: date, phase: "open_pending" })
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "initialize",
     { session_id: next.id, session_date: next.sessionDate },
@@ -149,19 +153,43 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   return next;
 }
 
-/**
- * Declare site safe & open the day. The browser is PIN-authenticated only
- * (no Supabase Auth user), so the privileged write is performed server-side
- * via `openSessionFn` using the service-role key. RLS, schema and policies
- * are unchanged — we just stop hammering PostgREST with an anon bearer.
- */
+/** Declare site safe & open the day. Find-or-create today's row, then flip to active_day. */
 export async function openSession(notes: string): Promise<SiteDaySession> {
   const staffId = await resolveStaffIdWithFallback();
-  const { openSessionFn } = await import("./site-day-sessions.functions");
-  const row = (await openSessionFn({
-    data: { staffId, notes: notes ?? "" },
-  })) as SiteDaySessionRow;
-  const next = rowToSession(row);
+  const date = todayIso();
+  const nowIso = new Date().toISOString();
+
+  const existing = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+
+  let rowId = existing.data?.id as string | undefined;
+  if (!rowId) {
+    const created = await supabase
+      .from("site_day_sessions")
+      .insert({ session_date: date, phase: "open_pending" })
+      .select("id")
+      .single();
+    if (created.error) throw created.error;
+    rowId = created.data.id as string;
+  }
+
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      phase: "active_day",
+      opened_by_id: staffId,
+      open_declared_at: nowIso,
+      open_leader_notes: notes || null,
+    })
+    .eq("id", rowId!)
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "open",
     { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
@@ -172,11 +200,28 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
 
 export async function closeSession(notes: string): Promise<SiteDaySession> {
   const staffId = await resolveStaffIdWithFallback();
-  const { closeSessionFn } = await import("./site-day-sessions.functions");
-  const row = (await closeSessionFn({
-    data: { staffId, notes: notes ?? "" },
-  })) as SiteDaySessionRow;
-  const next = rowToSession(row);
+  const date = todayIso();
+  const existing = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  if (!existing.data) throw new Error("No session row to close.");
+
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      phase: "closed_orderly",
+      closed_by_id: staffId,
+      close_declared_at: new Date().toISOString(),
+      close_leader_notes: notes || null,
+    })
+    .eq("id", existing.data.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "close",
     { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
@@ -189,9 +234,14 @@ export async function setPhase(
   id: string,
   phase: SiteSessionPhase,
 ): Promise<SiteDaySession> {
-  const { setPhaseFn } = await import("./site-day-sessions.functions");
-  const row = (await setPhaseFn({ data: { id, phase } })) as SiteDaySessionRow;
-  const next = rowToSession(row);
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({ phase })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "phase_change",
     { session_id: id, new_phase: phase },
@@ -199,6 +249,7 @@ export async function setPhase(
   );
   return next;
 }
+
 
 
 export interface ManagerHandshakeArgs {
