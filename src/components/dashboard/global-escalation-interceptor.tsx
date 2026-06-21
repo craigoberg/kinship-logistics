@@ -127,7 +127,15 @@ export function GlobalEscalationInterceptor() {
 
 
   // Tick to refresh "12s ago" label every second while modal is open.
-  const active = queue[0] ?? null;
+  const visibleQueue = useMemo(
+    () =>
+      currentStaffQ.isSuccess
+        ? queue.filter((e) => !isOwnEscalation(e))
+        : [],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [queue, currentStaffId, currentStaffQ.isSuccess],
+  );
+  const active = visibleQueue[0] ?? null;
   useEffect(() => {
     if (!active) return;
     const id = setInterval(() => setTick((t) => t + 1), 1000);
@@ -247,10 +255,10 @@ export function GlobalEscalationInterceptor() {
                   )}
                 </div>
 
-                {queue.length > 1 && (
+                {visibleQueue.length > 1 && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-                    {queue.length - 1} more pending escalation
-                    {queue.length - 1 === 1 ? "" : "s"} queued behind this one.
+                    {visibleQueue.length - 1} more pending escalation
+                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind this one.
                   </div>
                 )}
 
