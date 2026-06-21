@@ -30,7 +30,7 @@ import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-s
 import { ACCESS_ROLES } from "@/lib/access-roles";
 
 
-const PERSONNEL_TYPES = ["Staff", "Volunteer", "Coordinator", "Contractor"];
+
 
 interface Props {
   open: boolean;
