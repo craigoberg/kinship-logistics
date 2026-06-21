@@ -4670,24 +4670,9 @@ export async function rejectEscalationProposal(args: {
     .eq("id", args.escalationId);
   if (escErr) throwPg("[rejectEscalationProposal:esc]", escErr);
 
-  try {
-    const gps = await tryGetGps();
-    await writeToLedger({
-      staff_id: args.openerStaffId,
-      category: "CENTRE",
-      severity: "RED",
-      action_type: "governance.escalation_rejected_by_opener",
-      gps_lat: gps?.lat ?? null,
-      gps_lng: gps?.lng ?? null,
-      metadata: {
-        escalation_id: args.escalationId,
-        session_id: args.sessionId,
-        opener_staff_id: args.openerStaffId,
-      },
-    });
-  } catch (e) {
-    console.warn("[rejectEscalationProposal] ledger write failed", e);
-  }
+  // Ledger write happens in the caller (component) to avoid a circular
+  // import between data-store and lib/api/ledger.
+
 }
 
 
