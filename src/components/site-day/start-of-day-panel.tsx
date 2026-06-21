@@ -88,7 +88,6 @@ export function StartOfDayPanel({ sessionId }: Props) {
           variant="outline"
           className="h-auto justify-start gap-3 border-yellow-500/60 bg-yellow-500/5 px-5 py-4 text-left hover:bg-yellow-500/10"
           onClick={() => setAnomalyOpen(true)}
-          disabled={openMut.isPending}
         >
           <AlertTriangle className="h-6 w-6 shrink-0 text-yellow-600" />
           <span className="flex flex-col items-start">
