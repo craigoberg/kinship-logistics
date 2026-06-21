@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { Link, useRouterState } from "@tanstack/react-router";
 import { LogOut, ShieldOff } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
@@ -7,6 +7,17 @@ import { SyncIndicator } from "./sync-indicator";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
+import { getActiveUserProfile } from "@/lib/data-store";
+
+/** Human-readable label for the active user's role. */
+function roleLabel(role: string | null | undefined): string {
+  if (!role) return "";
+  if (role === "coordinator") return "Manager";
+  if (role === "driver") return "Driver";
+  // Future roles: assistant_manager, guardian, support_worker, dashboard
+  return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
+}
+
 
 function handleLogout() {
   try {
