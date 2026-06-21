@@ -1,16 +1,28 @@
-## Fix: Remove user-auth gate from `useSiteSession` query
+## Fix: Defer `reportedBy` validation to submit time in `LogAnomalyModal`
 
-The `useSiteSession` hook in `src/hooks/use-site-session.ts` currently disables the primary site-day session fetch while `user` is `null` (`enabled: isReady && !!user`). This blocks the page from ever loading the session row, because the bootstrap effect (which creates a missing row) also gates on `!!user`.
+The render-time `throw new Error("LogAnomalyModal requires a non-empty reportedBy")` is what crashes the route boundary when the modal mounts before `user` hydrates. We will move that check to submission, so the parent page keeps rendering and the user has time to finish hydrating before they ever click the submit button.
 
-### Change
-In `src/hooks/use-site-session.ts`:
-1. Change `const canQuery = isReady && !!user;` to `const canQuery = isReady;`
-2. Remove the `user` dependency from the `useEffect` that starts the realtime subscription, keeping only `isReady` and `sessionId`.
-3. Remove the `user` variable if it becomes unused, or keep it if other code still references it.
+### Change in `src/components/site-day/log-anomaly-modal.tsx`
 
-This lets the query run as soon as auth state is "ready" (regardless of whether a user object is present), matching the user's diagnosis that `hasUser: false` was permanently disabling the fetch.
+1. Remove the render-time guard at lines 103–105:
+   ```ts
+   if (!reportedBy) {
+     throw new Error("LogAnomalyModal requires a non-empty reportedBy");
+   }
+   ```
+2. Keep the `sessionId` guard (line 100–102) as-is — `sessionId` is always available by the time this renders.
+3. In the submit handler / mutation trigger path (the `onClick` that calls `mutation.mutate()` and/or at the top of `mutationFn`), add:
+   ```ts
+   if (!reportedBy) {
+     toast.error("User session not ready", {
+       description: "Please wait a moment and try again.",
+     });
+     return;
+   }
+   ```
+   so an empty `reportedBy` blocks submission gracefully instead of crashing.
+4. No changes to `StartOfDayPanel`, `DayCentrePage`, or the auth hook. The parent keeps passing `reportedBy={user?.id ?? ""}` and the modal tolerates the empty string at render time.
 
 ### Scope
-- Only `src/hooks/use-site-session.ts` is touched.
-- No UI, routing, or bootstrap logic changes.
-- The `day-centre-page.tsx` bootstrap `useEffect` already handles the "no user" case by not auto-creating a session when `!user`.
+- One file: `src/components/site-day/log-anomaly-modal.tsx`.
+- Pure runtime-validation relaxation: no UI redesign, no query changes, no new gates on the parent.
