@@ -26,6 +26,7 @@ import { IssuesRegisterCard } from "./issues-register-card";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 
 interface Props {
   session: SiteDaySession;
@@ -33,6 +34,7 @@ interface Props {
 
 export function ActiveDayPanel({ session }: Props) {
   const queryClient = useQueryClient();
+  const { user } = useAuthReady();
   const issuesQ = useSiteIssues(session.id);
   const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
