@@ -159,6 +159,16 @@ export function StartOfDayPanel({ sessionId }: Props) {
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
       />
+
+      <PinReauthDialog
+        open={reauthOpen}
+        onOpenChange={setReauthOpen}
+        reason="Re-authenticate to open the Day Centre."
+        onAuthenticated={() => {
+          setReauthOpen(false);
+          openMut.mutate();
+        }}
+      />
     </section>
   );
 }
