@@ -16,7 +16,6 @@ import {
   claimOperationalEscalation,
   isOperationalEscalationClaimable,
   listClaimableEscalations,
-  listPendingEscalations,
   resolveStaffIdWithFallback,
   subscribeToEscalationPool,
   type OperationalEscalation,
