@@ -100,9 +100,8 @@ export function LogAnomalyModal({
   if (!sessionId) {
     throw new Error("LogAnomalyModal requires a non-empty sessionId");
   }
-  if (!reportedBy) {
-    throw new Error("LogAnomalyModal requires a non-empty reportedBy");
-  }
+  // reportedBy may be empty during initial render while auth hydrates;
+  // it is enforced at submit time below.
 
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
@@ -327,7 +326,15 @@ export function LogAnomalyModal({
             Cancel
           </Button>
           <Button
-            onClick={() => mutation.mutate()}
+            onClick={() => {
+              if (!reportedBy) {
+                toast.error("User session not ready", {
+                  description: "Please wait a moment and try again.",
+                });
+                return;
+              }
+              mutation.mutate();
+            }}
             disabled={!canSubmit}
             className={cn(
               values.severity === "red" && "bg-red-600 hover:bg-red-700",
