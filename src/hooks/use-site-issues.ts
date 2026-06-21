@@ -30,12 +30,12 @@ export function useSiteIssues(sessionId: string | null | undefined) {
     staleTime: 5_000,
   });
 
+  // Realtime subscription intentionally disabled — programmatic cache
+  // invalidation on mutation success + polling refetchInterval cover updates,
+  // and re-subscribing on the same channel caused
+  // "cannot add postgres_changes callbacks after subscribe()" crashes.
   useEffect(() => {
-    if (!canQuery || !sessionId) return;
-    const off = subscribeToSiteIssues(sessionId, () => {
-      queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
-    });
-    return off;
+    return () => {};
   }, [canQuery, sessionId, queryClient]);
 
   return q;
