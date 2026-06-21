@@ -1,12 +1,13 @@
-import { useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { useSiteSession } from "@/hooks/use-site-session";
+import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
@@ -15,6 +16,7 @@ import { SiteManagerHandshakeModal } from "./site-manager-handshake-modal";
 import { DayClosedPanel } from "./day-closed-panel";
 
 export function DayCentrePage() {
+  const queryClient = useQueryClient();
   const { user, isReady } = useAuthReady();
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
@@ -29,10 +31,31 @@ export function DayCentrePage() {
   });
   const isManager = permissionQ.data === true;
 
-  // When escalated, render Manager modal automatically for managers.
+  // One-shot bootstrap: if no row exists for today, provision exactly one
+  // so every child component reads the same session_id.
+  const bootstrappedRef = useRef(false);
+  const bootstrapMut = useMutation({
+    mutationFn: () => ensureTodaySession(),
+    onSuccess: (row) => {
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, row);
+    },
+  });
+
+  useEffect(() => {
+    if (bootstrappedRef.current) return;
+    if (!isReady || !user) return;
+    if (sessionQ.isLoading || sessionQ.isError) return;
+    if (sessionQ.data) return;
+    bootstrappedRef.current = true;
+    bootstrapMut.mutate();
+  }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
+
   const [managerModalOpen, setManagerModalOpen] = useState(true);
 
-  if (sessionQ.isLoading) {
+  if (
+    sessionQ.isLoading ||
+    (!session && !sessionQ.isError && (bootstrapMut.isPending || !bootstrappedRef.current))
+  ) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading today's session…
@@ -40,7 +63,8 @@ export function DayCentrePage() {
     );
   }
 
-  if (sessionQ.isError) {
+  if (sessionQ.isError || bootstrapMut.isError) {
+    const err = (sessionQ.error ?? bootstrapMut.error) as Error | undefined;
     return (
       <Card className="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
         <div className="flex items-start gap-2">
@@ -50,8 +74,7 @@ export function DayCentrePage() {
               Could not load the Day Centre session.
             </div>
             <div className="text-xs">
-              {(sessionQ.error as Error | undefined)?.message ??
-                "Session row unavailable."}
+              {err?.message ?? "Session row unavailable."}
             </div>
             <div className="text-xs">
               If the error mentions a missing table or column, an admin must
@@ -63,29 +86,29 @@ export function DayCentrePage() {
     );
   }
 
-  // No row yet for today → render the Start-of-Day panel so the Check Leader
-  // can declare site status (which creates the row on submit).
-  if (!session) {
-    return <StartOfDayPanel sessionId="" />;
+  if (!session || !user) {
+    return (
+      <div className="flex items-center gap-2 text-sm text-muted-foreground">
+        <Loader2 className="h-4 w-4 animate-spin" /> Loading today's session…
+      </div>
+    );
   }
 
   const redIssue =
-    (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ??
-    null;
+    (issuesQ.data ?? []).find(
+      (i) => i.severity === "red" && i.status !== "resolved",
+    ) ?? null;
 
   return (
     <div className="space-y-6">
-      {/* Phase-branched primary content */}
       {session.phase === "open_pending" && (
-        <StartOfDayPanel sessionId={session.id} />
+        <StartOfDayPanel sessionId={session.id} reportedBy={user.id} />
       )}
-
 
       {session.phase === "escalated_lock" && (
         <div className="space-y-4">
           <EscalationLockBanner session={session} />
           <SiteLeaderHandshakePanel session={session} />
-          {/* Manager-side modal pops automatically once for a manager. */}
           {isManager && (
             <SiteManagerHandshakeModal
               open={managerModalOpen}
