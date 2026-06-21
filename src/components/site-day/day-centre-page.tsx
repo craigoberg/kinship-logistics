@@ -40,7 +40,7 @@ export function DayCentrePage() {
     );
   }
 
-  if (sessionQ.isError || !session) {
+  if (sessionQ.isError) {
     return (
       <Card className="border-destructive/40 bg-destructive/5 p-4 text-sm text-destructive">
         <div className="flex items-start gap-2">
@@ -54,14 +54,19 @@ export function DayCentrePage() {
                 "Session row unavailable."}
             </div>
             <div className="text-xs">
-              If this is the first time the page loads after migration, refresh
-              once. If the error mentions a missing table or column, an admin
-              must apply the site-day schema migration.
+              If the error mentions a missing table or column, an admin must
+              apply the site-day schema migration.
             </div>
           </div>
         </div>
       </Card>
     );
+  }
+
+  // No row yet for today → render the Start-of-Day panel so the Check Leader
+  // can declare site status (which creates the row on submit).
+  if (!session) {
+    return <StartOfDayPanel sessionId="" />;
   }
 
   const redIssue =
@@ -74,6 +79,7 @@ export function DayCentrePage() {
       {session.phase === "open_pending" && (
         <StartOfDayPanel sessionId={session.id} />
       )}
+
 
       {session.phase === "escalated_lock" && (
         <div className="space-y-4">
