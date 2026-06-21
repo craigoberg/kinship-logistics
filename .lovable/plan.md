@@ -1,55 +1,35 @@
-# 401 Recovery Flow for Day Centre Open/Close
+# Stop requiring a secret for "Confirm & Open"
 
-When `openSession` or `closeSession` fails with an auth/permission error (HTTP 401 from PostgREST, or Postgres code `42501` RLS rejection), the current UI just shows a generic red toast like "Could not open the day: …". The Check Leader has no idea what to do next. This plan adds a clear, recoverable flow.
+## You're right on both counts
 
-## What the user will see
+1. **Supabase Secrets**: the "Secrets" tab in Supabase only lists Edge Function secrets. The `service_role` key isn't there — it lives under **Project Settings → API → Project API keys**. So "I have no secrets" is true and expected; we were sending you to the wrong place.
+2. **Other forms don't need one**: every other write in this app (including `submitManagerHandshake` / `submitLeaderHandshake` on this *same* `site_day_sessions` table — see `src/lib/api/site-day-sessions.ts` lines 217 and 271) goes through the normal browser Supabase client with the publishable key + your signed-in session. They work because RLS already permits authenticated users to update the row.
 
-1. They tap **Declare Site Safe & Compliant** (or **Close Day**).
-2. If the call returns 401 / RLS-denied, instead of a toast we open a blocking dialog:
-   - **Title:** "Session expired — please re-enter your PIN"
-   - **Body:** "Your terminal sign-in has timed out. Re-enter your 4-digit operator PIN to continue. Your mandated checks and notes are preserved."
-   - **Primary button:** *Re-enter PIN* (opens an inline PIN pad).
-   - **Secondary button:** *Cancel*.
-3. After a successful PIN re-entry, a **Retry** button appears (and auto-fires once) that re-runs the exact same open/close call. On success the dialog closes and the normal success toast shows.
-4. All other (non-401) errors keep the existing red toast behaviour — no change.
+The only reason **Confirm & Open** is asking for a service-role key is that I previously routed `openSession` / `ensureTodaySession` / `closeSession` / `setPhase` through a TanStack server function that uses `supabaseAdmin`. That was unnecessary — the comment in the file claims "browser is PIN-authenticated only, no Supabase Auth user", but the handshake writes prove that's not actually the case for this app: those updates land fine from the browser. So the server-fn detour added a new secret dependency for no benefit.
 
-## Pieces to build
+## Fix
 
-### 1. Shared auth-error helper — `src/lib/api/auth-errors.ts` (new)
-- `isAuthError(err: unknown): boolean` — true when the error is a PostgrestError with `code === "42501"`, or any error whose `status === 401`, or message contains "row-level security" / "JWT".
-- `AuthExpiredError` class for callers that want to rethrow as a typed error.
+Revert to the same pattern the handshake functions already use. No new SQL, no new secret, no RLS change.
 
-### 2. Re-usable PIN re-entry dialog — `src/components/auth/pin-reauth-dialog.tsx` (new)
-- Controlled `open` / `onOpenChange` props.
-- Reuses the same 4-digit numeric input pattern as `src/routes/auth.tsx` (auto-submit on 4 digits, `loginWithPin`, GuardianPinError handling).
-- Props:
-  - `reason?: string` — short context line ("Re-authenticate to open the Day Centre").
-  - `onAuthenticated: () => void` — fired after `loginWithPin` succeeds; parent triggers the retry.
-- Internal busy/error state mirrors the auth route; no navigation occurs.
+### Edits
 
-### 3. Wire 401 handling into the two mutations
-- **`src/components/site-day/start-of-day-panel.tsx`**
-  - Add `reauthOpen` state.
-  - In `openMut.onError`, branch: `isAuthError(e)` → `setReauthOpen(true)`; else current toast.
-  - Render `<PinReauthDialog open={reauthOpen} reason="Re-authenticate to open the Day Centre." onOpenChange={setReauthOpen} onAuthenticated={() => { setReauthOpen(false); openMut.mutate(); }} />`.
-  - Preserve `ticked` state (already component-local, so nothing extra needed).
-- **`src/components/site-day/active-day-panel.tsx`**
-  - Same pattern around the close mutation; reason text "Re-authenticate to close the Day Centre."
-  - Preserve any in-flight close notes by lifting them into state before the mutate call (they already live in component state).
+- **`src/lib/api/site-day-sessions.ts`** — rewrite four functions to do the work directly with the browser `supabase` client:
+  - `ensureTodaySession()` — `insert({ session_date, phase: "open_pending" }).select().single()`
+  - `openSession(notes)` — find-or-create today's row, then `update({ phase: "active_day", opened_by_id, open_declared_at, open_leader_notes })`
+  - `closeSession(notes)` — `update({ phase: "closed_orderly", closed_by_id, close_declared_at, close_leader_notes })`
+  - `setPhase(id, phase)` — `update({ phase })`
+  Keep the ledger writes and `rowToSession` mapping exactly as they are.
 
-### 4. Toast copy when we don't open the dialog
-- Keep current generic toast for non-auth errors.
-- When the dialog opens, also fire a single neutral `toast.message("Session expired — please re-enter your PIN.")` so the user notices if the dialog is briefly missed.
+- **Delete** `src/lib/api/site-day-sessions.functions.ts` and `src/lib/api/site-day-sessions.server.ts` (no other callers — verified with ripgrep).
 
-## Out of scope
+- **`src/lib/api/auth-errors.ts`** — remove the service-role-key guidance branch I added earlier; the generic Supabase error mapping is enough.
 
-- No RLS / migration changes.
-- No changes to `site-day-sessions.ts` API surface beyond optionally exporting the auth-error helper if convenient.
-- No global auth interceptor — scoped to the two Day Centre mutations the user called out. (We can generalise later if other surfaces need it.)
+- **Leave** the `YADA_SUPABASE_SERVICE_ROLE_KEY` secret in place — unused but harmless. You can delete it from Project Settings → Secrets later if you want.
 
-## Files touched
+### If a write *does* fail with a permission error after this
 
-- new: `src/lib/api/auth-errors.ts`
-- new: `src/components/auth/pin-reauth-dialog.tsx`
-- edit: `src/components/site-day/start-of-day-panel.tsx`
-- edit: `src/components/site-day/active-day-panel.tsx`
+Then the real fix is a one-line RLS policy on `site_day_sessions` for `authenticated` (mirroring whatever currently lets the handshake update succeed), not a service-role key. I'll add it if it actually surfaces — but based on the handshake code working, it won't.
+
+## What you'll see
+
+Click **Confirm & Open** → the row updates via the same path as every other form → you flip straight into Active Day. No secret prompt, no Supabase dashboard hunt.
