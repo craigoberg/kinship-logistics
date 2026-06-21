@@ -77,7 +77,7 @@ export function useSiteSession() {
     if (channelRef.current) return;
 
     const channel = supabase
-      .channel(`realtime:site-day-session-${sessionId}`)
+      .channel(`site-day-session-${sessionId}`)
       .on(
         "postgres_changes",
         {
