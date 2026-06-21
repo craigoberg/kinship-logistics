@@ -1,23 +1,16 @@
-Plan:
+## Plan
 
-1. Update `src/lib/api/site-day-sessions.ts` so `todayIso()` formats the lookup date explicitly as UTC `YYYY-MM-DD`:
+1. **Inspect table access**
+   - Check the live `site_day_sessions` RLS policies and table grants for `authenticated` read access.
+   - If direct schema access is unavailable from this session, use the local SQL/migration evidence and the network request diagnostics to narrow whether this is an RLS/grant problem.
 
-```ts
-const d = new Date();
-const year = d.getUTCFullYear();
-const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-const day = String(d.getUTCDate()).padStart(2, "0");
-return `${year}-${month}-${day}`;
-```
+2. **Add exact query diagnostics**
+   - In `src/lib/api/site-day-sessions.ts`, log the literal `date` value immediately before the `.eq("session_date", date)` query in `getTodaySession()`.
+   - Also log the query outcome shape (`data`, `error`, and `status` if available) without changing query behavior.
 
-2. Leave the existing query shape intact:
+3. **Optional access fix if policies are missing**
+   - If the live policy/grant check confirms missing read access, add the minimal database grant/policy needed so authenticated users can `SELECT` from `public.site_day_sessions`.
+   - Do not widen anonymous access unless an existing policy already intentionally allows it.
 
-```ts
-.eq("session_date", date).maybeSingle()
-```
-
-This keeps the query aligned to the database `session_date` string/DATE format while avoiding browser timezone/local-date drift.
-
-3. Do not alter tables, RLS policies, phase routing, modal behavior, or other Start of Day components.
-
-4. Keep the current diagnostic log in `day-centre-page.tsx` so the next preview refresh can confirm `sessionQ.data` becomes the existing `open_pending` row.
+4. **Keep scope limited**
+   - No phase routing changes, no UI redesign, no table shape changes, and no changes to Start of Day panel behavior.
