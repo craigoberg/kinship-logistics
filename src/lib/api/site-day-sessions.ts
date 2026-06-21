@@ -223,7 +223,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
     .from("site_day_sessions")
     .update({
       phase: "active_day",
-      opened_by_id: staffId,
+      opened_by_id: openedByUserId,
       open_declared_at: nowIso,
       open_leader_notes: notes || null,
     })
