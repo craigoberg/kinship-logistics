@@ -28,7 +28,6 @@ export function DayCentrePage() {
     staleTime: 5_000,
   });
 
-
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.
   const bootstrappedRef = useRef(false);
@@ -48,8 +47,6 @@ export function DayCentrePage() {
     bootstrappedRef.current = true;
     bootstrapMut.mutate();
   }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
-
-  
 
   console.log("Current Session State:", {
     session: sessionQ.data,
@@ -72,15 +69,11 @@ export function DayCentrePage() {
         <div className="flex items-start gap-2">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-1">
-            <div className="font-medium">
-              Could not load the Day Centre session.
-            </div>
+            <div className="font-medium">Could not load the Day Centre session.</div>
+            <div className="text-xs">{err?.message ?? "Session row unavailable."}</div>
             <div className="text-xs">
-              {err?.message ?? "Session row unavailable."}
-            </div>
-            <div className="text-xs">
-              If the error mentions a missing table or column, an admin must
-              apply the site-day schema migration.
+              If the error mentions a missing table or column, an admin must apply the site-day
+              schema migration.
             </div>
           </div>
         </div>
@@ -113,12 +106,7 @@ export function DayCentrePage() {
 
     switch (session.phase) {
       case "open_pending":
-        return (
-          <StartOfDayPanel
-            sessionId={session.id}
-            reportedBy={user?.id ?? ""}
-          />
-        );
+        return <StartOfDayPanel sessionId={session.id} reportedBy={user?.id ?? ""} />;
       case "active_day":
         return <ActiveDayPanel session={session} />;
       case "closed_orderly":
