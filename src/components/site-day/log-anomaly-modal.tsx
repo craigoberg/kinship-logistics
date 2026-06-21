@@ -25,6 +25,10 @@ import {
 import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
 import { setPhase } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
+import {
+  getActiveUserProfile,
+  raiseOperationalEscalation,
+} from "@/lib/data-store";
 
 interface Props {
   open: boolean;
@@ -140,6 +144,24 @@ export function LogAnomalyModal({
       if (values.severity === "red") {
         const next = await setPhase(sessionId, "escalated_lock");
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+        const checkerName =
+          getActiveUserProfile()?.fullName?.trim() || "Day Centre Checker";
+        try {
+          await raiseOperationalEscalation({
+            clearanceId: null,
+            driverName: checkerName,
+            vehicleInfo: `Day Centre · ${issue.issueDescription.slice(0, 80)}`,
+            gateId: "site_day_red",
+            sourceKind: "site_day_red",
+            sourceIssueId: issue.id,
+          });
+        } catch (err) {
+          // Issue is already persisted; surface but do not roll back.
+          console.error("[log-anomaly] escalation insert failed", err);
+          toast.warning(
+            "Red issue logged, but manager broadcast failed — notify a manager directly.",
+          );
+        }
         triggerEscalation({
           kind: "site_session",
           sessionId,

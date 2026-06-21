@@ -20,6 +20,7 @@ import {
   type OperationalEscalation,
 } from "@/lib/data-store";
 import { prettyGateLabel } from "@/lib/operational-forms";
+import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
 
@@ -105,6 +106,24 @@ export function GlobalEscalationInterceptor() {
       const staffId = await resolveStaffIdWithFallback();
       const result = await claimOperationalEscalation(target.id, staffId);
       if (result.success) {
+        // NDIS-grade audit receipt: every Claim writes to the ledger.
+        const gps = await tryGetGps();
+        void writeToLedger({
+          staff_id: staffId,
+          category: target.sourceKind === "site_day_red" ? "CENTRE" : "VEHICLE",
+          severity: "RED",
+          action_type: "governance.escalation_claimed",
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
+          metadata: {
+            escalation_id: target.id,
+            source_kind: target.sourceKind ?? "bus_walkaround",
+            source_issue_id: target.sourceIssueId,
+            checker_name: target.driverName,
+            gate_id: target.gateId,
+            manager_staff_id: staffId,
+          },
+        });
         setConsultTarget(result.escalation ?? target);
       } else {
         toast.info(
@@ -153,14 +172,29 @@ export function GlobalEscalationInterceptor() {
 
               <div className="space-y-4 px-6 py-5">
                 <div className="space-y-2 rounded-md border border-slate-800 bg-slate-900 p-4">
-                  <ContextRow label="Driver" value={active.driverName} />
-                  <ContextRow label="Vehicle" value={active.vehicleInfo} />
-                  <ContextRow
-                    label="Failed Gate"
-                    value={prettyGateLabel(active.gateId)}
-                    valueClass="text-amber-300"
-                  />
-                  <ContextRow label="Raised" value={ageLabel} />
+                  {active.sourceKind === "site_day_red" ? (
+                    <>
+                      <ContextRow label="Reported by" value={active.driverName} />
+                      <ContextRow label="Site" value={active.vehicleInfo} />
+                      <ContextRow
+                        label="Trigger"
+                        value={prettyGateLabel(active.gateId)}
+                        valueClass="text-amber-300"
+                      />
+                      <ContextRow label="Raised" value={ageLabel} />
+                    </>
+                  ) : (
+                    <>
+                      <ContextRow label="Driver" value={active.driverName} />
+                      <ContextRow label="Vehicle" value={active.vehicleInfo} />
+                      <ContextRow
+                        label="Failed Gate"
+                        value={prettyGateLabel(active.gateId)}
+                        valueClass="text-amber-300"
+                      />
+                      <ContextRow label="Raised" value={ageLabel} />
+                    </>
+                  )}
                 </div>
 
                 {queue.length > 1 && (
