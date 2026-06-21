@@ -91,8 +91,18 @@ export function DayCentrePage() {
     (issuesQ.data ?? []).find(
       (i) => i.severity === "red" && i.status !== "resolved",
     ) ?? null;
+  const isEscalationActive = session.phase === "escalated_lock" || !!redIssue;
 
   const renderPhase = () => {
+    if (isEscalationActive) {
+      return (
+        <div className="space-y-4">
+          <EscalationLockBanner session={session} />
+          <EscalationResolutionPanel session={session} redIssue={redIssue} />
+        </div>
+      );
+    }
+
     switch (session.phase) {
       case "open_pending":
         return (
@@ -100,13 +110,6 @@ export function DayCentrePage() {
             sessionId={session.id}
             reportedBy={user?.id ?? ""}
           />
-        );
-      case "escalated_lock":
-        return (
-          <div className="space-y-4">
-            <EscalationLockBanner session={session} />
-            <EscalationResolutionPanel session={session} redIssue={redIssue} />
-          </div>
         );
       case "active_day":
         return <ActiveDayPanel session={session} />;
