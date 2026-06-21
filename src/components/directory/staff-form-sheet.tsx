@@ -61,7 +61,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     if (!open) return;
     setFullName(staff?.fullName ?? "");
     setRole(staff?.role ?? "");
-    setPersonnelType(staff?.personnelType ?? "Staff");
+    setPersonnelType(staff?.personnelType ?? "");
     setPhone(staff?.phone ?? "");
     setEmail(staff?.email ?? "");
     setStreetAddress(staff?.streetAddress ?? "");
