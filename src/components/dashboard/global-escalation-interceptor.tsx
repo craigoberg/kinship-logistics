@@ -59,7 +59,7 @@ export function GlobalEscalationInterceptor() {
   const currentStaffQ = useQuery({
     queryKey: ["current-staff-id"],
     queryFn: async () => getCurrentTerminalStaffId(),
-    refetchInterval: (q) => (q.state.data ? false : 1_000),
+    refetchInterval: 1_000,
     refetchOnWindowFocus: true,
     staleTime: 1_000,
   });
@@ -131,7 +131,7 @@ export function GlobalEscalationInterceptor() {
   const visibleQueue = useMemo(
     () => (currentStaffId ? queue.filter((e) => !isOwnEscalation(e)) : []),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [queue, currentStaffId, currentStaffQ.isSuccess],
+    [queue, currentStaffId],
   );
   const active = visibleQueue[0] ?? null;
   useEffect(() => {
@@ -159,7 +159,8 @@ export function GlobalEscalationInterceptor() {
         return;
       }
 
-      const staffId = await resolveStaffIdWithFallback();
+      const staffId = currentStaffId;
+      if (!staffId) throw new Error("No current staff identity is active.");
       const result = await claimOperationalEscalation(target.id, staffId);
       if (result.success) {
         // NDIS-grade audit receipt: every Claim writes to the ledger.
