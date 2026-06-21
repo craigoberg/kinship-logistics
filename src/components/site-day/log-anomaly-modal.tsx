@@ -129,8 +129,17 @@ export function LogAnomalyModal({
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // Bootstrap: if no session row exists yet, provision today's row in
+      // `open_pending` so the issue + escalation have a real id to bind to.
+      let effectiveSessionId = sessionId;
+      if (!effectiveSessionId) {
+        const bootstrapped = await ensureTodaySession();
+        effectiveSessionId = bootstrapped.id;
+        queryClient.setQueryData(SITE_SESSION_QUERY_KEY, bootstrapped);
+      }
+
       const payload: NewSiteIssue = {
-        sessionId,
+        sessionId: effectiveSessionId,
         severity: values.severity,
         issueDescription: values.description.trim(),
         workaroundPlan: values.workaround.trim() || null,
@@ -138,16 +147,16 @@ export function LogAnomalyModal({
       };
       const issue = await createIssue(payload);
       if (values.severity === "red") {
-        const next = await setPhase(sessionId, "escalated_lock");
+        const next = await setPhase(effectiveSessionId, "escalated_lock");
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
         triggerEscalation({
           kind: "site_session",
-          sessionId,
+          sessionId: effectiveSessionId,
           issueId: issue.id,
           description: issue.issueDescription,
         });
       }
-      return issue;
+      return { issue, effectiveSessionId };
     },
     onSuccess: (issue) => {
       queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
