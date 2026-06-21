@@ -322,17 +322,21 @@ function Field({
   label,
   children,
   className,
+  required,
 }: {
   label: string;
   children: React.ReactNode;
   className?: string;
+  required?: boolean;
 }) {
   return (
     <div className={`grid gap-1.5 ${className ?? ""}`}>
       <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         {label}
+        {required && <span className="ml-1 text-destructive">*</span>}
       </Label>
       {children}
     </div>
   );
 }
+
