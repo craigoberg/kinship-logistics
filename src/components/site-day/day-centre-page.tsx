@@ -53,6 +53,12 @@ export function DayCentrePage() {
 
   const [managerModalOpen, setManagerModalOpen] = useState(true);
 
+  console.log("Current Session State:", {
+    session: sessionQ.data,
+    isLoading: sessionQ.isLoading,
+    bootstrapPending: bootstrapMut.isPending,
+  });
+
   if (sessionQ.isLoading || bootstrapMut.isPending) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
