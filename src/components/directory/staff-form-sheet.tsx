@@ -162,9 +162,19 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
           <section className="grid gap-3 sm:grid-cols-2">
-            <Field label="Full name" className="sm:col-span-2">
-              <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoFocus />
+            <Field label="Full name" required className="sm:col-span-2">
+              <Input
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+                autoFocus
+                aria-invalid={nameMissing}
+                className={nameMissing ? "border-destructive focus-visible:ring-destructive" : undefined}
+              />
+              {nameMissing && (
+                <p className="text-[11px] text-destructive">Full name is required.</p>
+              )}
             </Field>
+
             <Field label="Role / title">
               <Input value={role} onChange={(e) => setRole(e.target.value)} placeholder="e.g. Registered Nurse" />
             </Field>
