@@ -1,8 +1,29 @@
 ## Problem
-In `LogAnomalyModal`, clicking "Log Note" silently fails when `reportedBy` is an empty string (auth still hydrating). The `if (!reportedBy)` guard in the button click handler blocks `mutation.mutate()`, but because `reportedBy` is never passed into the `NewSiteIssue` payload or used by `createIssue`, the guard is redundant and creates a dead-end UI state.
+After logging an anomaly the modal closes and the row is persisted, but the Walkthrough Issues Register still displays the empty "No issues logged yet" state because the parent panel’s cached query is not being refreshed.
 
-## Fix
-1. **In `src/components/site-day/log-anomaly-modal.tsx`** — remove the `if (!reportedBy)` guard from the button `onClick` handler. The `createIssue` API already fetches the authenticated user internally via `supabase.auth.getUser()`, so `reportedBy` is not needed for submission.
-2. **Also remove the unused `reportedBy` prop** from `LogAnomalyModal` (and from `StartOfDayPanel` / `ActiveDayPanel` call-sites) to clean up the API surface.
+## Proposed Change
+Update the `useMutation` `onSuccess` handler in `src/components/site-day/log-anomaly-modal.tsx` to explicitly invalidate the queries that feed the Issues Register and the session overview.
 
-This eliminates the race-condition blocking behaviour entirely, rather than papering over it with a fallback string that the mutation never consumes.
+### Current `onSuccess` (line ~152)
+Already calls `queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) })`, which targets the issues list.
+
+### Update
+Add an additional invalidation for the today’s session query key so any parent components that derive state from the session also pick up the change immediately:
+
+```ts
+onSuccess: (issue) => {
+  queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
+  queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+  reset();
+  onOpenChange(false);
+  // existing toast logic preserved …
+}
+```
+
+## Scope
+- **File:** `src/components/site-day/log-anomaly-modal.tsx` only.
+- No UI, layout, or database changes.
+- Existing toast messages and red-issue escalation flow remain untouched.
+
+## Result
+The parent panel (`StartOfDayPanel` or `ActiveDayPanel`) will refetch both the issues list and the session record as soon as the mutation succeeds, eliminating the stale empty state.
