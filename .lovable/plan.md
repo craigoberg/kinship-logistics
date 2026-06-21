@@ -1,20 +1,8 @@
-## Plan: stabilize `useSiteSession` realtime channel lifecycle
+## Problem
+In `LogAnomalyModal`, clicking "Log Note" silently fails when `reportedBy` is an empty string (auth still hydrating). The `if (!reportedBy)` guard in the button click handler blocks `mutation.mutate()`, but because `reportedBy` is never passed into the `NewSiteIssue` payload or used by `createIssue`, the guard is redundant and creates a dead-end UI state.
 
-1. **Update imports in `src/hooks/use-site-session.ts`**
-   - Change the React import to include `useRef` alongside `useEffect`.
+## Fix
+1. **In `src/components/site-day/log-anomaly-modal.tsx`** — remove the `if (!reportedBy)` guard from the button `onClick` handler. The `createIssue` API already fetches the authenticated user internally via `supabase.auth.getUser()`, so `reportedBy` is not needed for submission.
+2. **Also remove the unused `reportedBy` prop** from `LogAnomalyModal` (and from `StartOfDayPanel` / `ActiveDayPanel` call-sites) to clean up the API surface.
 
-2. **Add a channel ref inside `useSiteSession`**
-   - Declare `const channelRef = useRef<any>(null);` near the top of the hook.
-
-3. **Guard the realtime effect against duplicate subscriptions**
-   - Keep `if (!sessionId) return;` as the first guard.
-   - Immediately after it, add `if (channelRef.current) return;` so rapid render ticks cannot create another channel while one is already active.
-   - Create the channel using the requested `realtime:site-day-session-${sessionId}` name and assign it to `channelRef.current` after `.subscribe()`.
-
-4. **Strictly clean up the channel ref**
-   - In the effect cleanup, check `channelRef.current`.
-   - Call `supabase.removeChannel(channelRef.current)`.
-   - Set `channelRef.current = null` immediately after removal.
-
-5. **Verify the hook file**
-   - Run a focused lint check on `src/hooks/use-site-session.ts` after the edit.
+This eliminates the race-condition blocking behaviour entirely, rather than papering over it with a fallback string that the mutation never consumes.

@@ -30,7 +30,6 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
-  reportedBy: string;
   defaultSeverity?: RygeSeverity;
 }
 
@@ -94,14 +93,13 @@ export function LogAnomalyModal({
   open,
   onOpenChange,
   sessionId,
-  reportedBy,
   defaultSeverity,
 }: Props) {
   if (!sessionId) {
     throw new Error("LogAnomalyModal requires a non-empty sessionId");
   }
-  // reportedBy may be empty during initial render while auth hydrates;
-  // it is enforced at submit time below.
+
+
 
   const queryClient = useQueryClient();
   const form = usePersistedForm<AnomalyDraft>(
@@ -327,12 +325,6 @@ export function LogAnomalyModal({
           </Button>
           <Button
             onClick={() => {
-              if (!reportedBy) {
-                toast.error("User session not ready", {
-                  description: "Please wait a moment and try again.",
-                });
-                return;
-              }
               mutation.mutate();
             }}
             disabled={!canSubmit}

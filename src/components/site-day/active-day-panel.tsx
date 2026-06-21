@@ -233,7 +233,6 @@ export function ActiveDayPanel({ session }: Props) {
           open={anomalyOpen}
           onOpenChange={setAnomalyOpen}
           sessionId={session.id}
-          reportedBy={user.id}
         />
       )}
 

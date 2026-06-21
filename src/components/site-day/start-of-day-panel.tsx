@@ -29,7 +29,7 @@ import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
-  reportedBy: string;
+  reportedBy?: string;
 }
 
 function formatServerError(e: unknown): string {
@@ -46,10 +46,11 @@ function formatServerError(e: unknown): string {
   return String(e);
 }
 
-export function StartOfDayPanel({ sessionId, reportedBy }: Props) {
+export function StartOfDayPanel({ sessionId }: Props) {
   if (!sessionId) {
     throw new Error("StartOfDayPanel requires a non-empty sessionId");
   }
+
 
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
@@ -281,7 +282,6 @@ export function StartOfDayPanel({ sessionId, reportedBy }: Props) {
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
         sessionId={sessionId}
-        reportedBy={reportedBy}
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
