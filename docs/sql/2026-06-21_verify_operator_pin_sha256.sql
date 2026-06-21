@@ -21,7 +21,7 @@ RETURNS TABLE (
 LANGUAGE sql
 SECURITY DEFINER
 STABLE
-SET search_path = public
+SET search_path = public, extensions
 AS $$
   SELECT s.id, s.full_name, s.role
   FROM public.staff_registry s
