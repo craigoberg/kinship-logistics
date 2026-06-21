@@ -241,8 +241,7 @@ export function GlobalEscalationInterceptor() {
                 {visibleQueue.length > 1 && (
                   <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
                     {visibleQueue.length - 1} more pending escalation
-                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind
-                    this one.
+                    {visibleQueue.length - 1 === 1 ? "" : "s"} queued behind this one.
                   </div>
                 )}
 
