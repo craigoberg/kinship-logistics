@@ -213,7 +213,7 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
 export async function closeSession(notes: string): Promise<SiteDaySession> {
   const today = await getTodaySession();
   if (!today) throw new Error("No session row to close.");
-  const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const userId = await resolveStaffIdWithFallback();
   const { data, error } = await supabase
     .from("site_day_sessions")
     .update({
