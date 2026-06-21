@@ -27,6 +27,8 @@ import {
 } from "@/hooks/use-supabase-data";
 import { hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
+import { ACCESS_ROLES } from "@/lib/access-roles";
+
 
 const PERSONNEL_TYPES = ["Staff", "Volunteer", "Coordinator", "Contractor"];
 
