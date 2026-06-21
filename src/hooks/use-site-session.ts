@@ -81,16 +81,17 @@ export function useSiteSession() {
       .on(
         "postgres_changes",
         {
-          event: "UPDATE",
+          event: "*",
           schema: "public",
           table: "site_day_sessions",
           filter: `id=eq.${sessionId}`,
         },
         (payload) => {
-          queryClient.setQueryData(
-            SITE_SESSION_QUERY_KEY,
-            realtimeRowToSession(payload.new as SiteDaySessionRealtimeRow),
-          );
+          const next =
+            payload.new && Object.keys(payload.new).length > 0
+              ? realtimeRowToSession(payload.new as SiteDaySessionRealtimeRow)
+              : null;
+          queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
         },
       )
       .subscribe();
