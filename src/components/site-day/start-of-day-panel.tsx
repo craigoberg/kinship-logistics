@@ -55,10 +55,10 @@ export function StartOfDayPanel({ sessionId }: Props) {
           reauthRetryRef.current = false;
           setReauthOpen(false);
           setAuthRecoveryMessage(
-            "Your PIN was accepted, but the Day Centre open request is still being rejected. Use Retry now for an immediate retry, or re-enter PIN again if a different authorised Check Leader needs to take over.",
+            "The Day Centre open request is still being rejected by the server. This is no longer a PIN issue — the backend writer is refusing the update. Use Retry now, or contact a Manager.",
           );
-          toast.error("Open still blocked after PIN re-entry", {
-            description: "Retry now, or re-enter an authorised PIN and try again.",
+          toast.error("Open still blocked", {
+            description: e.message,
           });
           return;
         }
@@ -70,6 +70,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
       toast.error("Could not open the day", { description: e.message });
     },
   });
+
 
   return (
     <section className="space-y-5">
