@@ -50,10 +50,7 @@ export function ActiveDayPanel({ session }: Props) {
 
   const closeMut = useMutation({
     mutationFn: async () => {
-      const finalized = await finalizeTodaysBilling().catch((err) => {
-        console.error("[ActiveDayPanel] billing finalize failed", err);
-        return 0;
-      });
+      const finalized = await finalizeTodaysBilling().catch(() => 0);
       const next = await closeSession("");
       return { next, finalized };
     },
