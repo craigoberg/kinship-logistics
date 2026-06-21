@@ -10,6 +10,8 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
+DROP FUNCTION IF EXISTS public.verify_operator_pin(text);
+
 CREATE OR REPLACE FUNCTION public.verify_operator_pin(entered_pin text)
 RETURNS TABLE (
   id uuid,
