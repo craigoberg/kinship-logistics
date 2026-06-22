@@ -15,12 +15,14 @@ import type {
   AssetDailyClearance,
   ClearanceIssueSeverity,
   NewClearanceItemInput,
+  OperationalEscalation,
   TransportAsset,
 } from "@/lib/data-store";
 import {
   DEFAULT_STAFF_UUID,
   getStaffId,
   insertAssetClearanceWithItems,
+  raiseOperationalEscalation,
   submitDriverAuthorization,
 } from "@/lib/data-store";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
