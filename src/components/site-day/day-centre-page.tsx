@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { AlertTriangle, ArrowRight, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
@@ -10,7 +10,7 @@ import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
-import { getEscalationBySourceIssue } from "@/lib/data-store";
+import { getActiveUserProfile, getEscalationBySourceIssue } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
@@ -18,9 +18,15 @@ import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 
+function isManagerRole(staffRole: string | null | undefined): boolean {
+  return (staffRole ?? "").toLowerCase().includes("manager");
+}
+
 export function DayCentrePage() {
   const queryClient = useQueryClient();
   const { user, isReady } = useAuthReady();
+  const profile = useMemo(() => getActiveUserProfile(), []);
+  const userIsManager = isManagerRole(profile?.staffRole);
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
@@ -160,9 +166,9 @@ export function DayCentrePage() {
               {blockingReds.length > 1 ? "s" : ""}
             </div>
             <div className="text-muted-foreground">
-              Only a Manager can clear a RED in the Governance Hub. Once every
-              RED below is resolved there, the Open Centre workflow becomes
-              available again.
+              {userIsManager
+                ? "Only a Manager can clear a RED in the Governance Hub. Once every RED below is resolved there, the Open Centre workflow becomes available again."
+                : "A Manager must clear the open RED issue(s) in the Governance Hub before the Day Centre can open. Please speak with the on-duty Manager and ask them to review and resolve the issue(s) listed below."}
             </div>
           </div>
         </div>
@@ -189,12 +195,20 @@ export function DayCentrePage() {
           ))}
         </ul>
 
-        <Button asChild size="sm">
-          <Link to="/governance">
-            Open Governance Hub
-            <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-          </Link>
-        </Button>
+        {userIsManager ? (
+          <Button asChild size="sm">
+            <Link to="/governance">
+              Open Governance Hub
+              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        ) : (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-200">
+            You do not have Manager access. Ask the on-duty Manager to open the
+            Governance Hub and resolve the RED issue above so the Day Centre
+            opening can continue.
+          </div>
+        )}
       </Card>
     );
   }
