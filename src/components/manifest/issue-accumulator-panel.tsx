@@ -1,14 +1,16 @@
 import { useMemo, useState } from "react";
-import { ClipboardCheck, Plus, ShieldAlert, Trash2 } from "lucide-react";
+import { ClipboardCheck, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
+import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
+import { getActiveEscalation } from "@/lib/api/clearance";
 
 import type {
   AssetCheckpoint,
