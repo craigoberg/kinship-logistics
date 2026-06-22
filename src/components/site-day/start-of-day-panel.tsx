@@ -387,6 +387,19 @@ export function StartOfDayPanel({ sessionId }: Props) {
             (Green note · Yellow workaround · Red escalation)
           </span>
         </Button>
+
+        {/* High-trust escape hatch when a Manager is unreachable digitally.
+            Writes an immutable VERBAL_AUTH_OVERRIDE ledger receipt. */}
+        {hasBlocking && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-10 w-full justify-center gap-2 text-xs text-amber-700 hover:bg-amber-500/10 hover:text-amber-800"
+            onClick={() => setVerbalOverrideOpen(true)}
+          >
+            ☎ Manager unreachable? Record a Verbal Authorization Override
+          </Button>
+        )}
       </div>
 
       {/* Confirm AlertDialog */}
