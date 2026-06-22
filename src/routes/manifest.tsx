@@ -56,7 +56,6 @@ import type {
   AssetCheckpoint,
   AssetDailyClearance,
   TodayManifestSummary,
-  OperationalEscalation,
 } from "@/lib/data-store";
 import {
   listTransportAssets,
@@ -71,32 +70,15 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
+// RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
+// through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
-import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
-import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
-import { subscribeToEscalationPool } from "@/lib/data-store";
-import { supabase } from "@/integrations/supabase/client";
+import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
-  beforeLoad: async () => {
-    // This runs before the component mounts, preventing the "flicker".
-    // Resolve the active driver from local session; fall back to the
-    // shared default UUID when no staff member is signed in locally.
-    const driverId = getStaffId() || DEFAULT_STAFF_UUID;
-    try {
-      const escalation = await getActiveEscalation(driverId);
-      console.log("Guard check result:", escalation);
-      return { escalation };
-    } catch (error) {
-      console.error("[manifest.beforeLoad] getActiveEscalation failed:", error);
-      // Never hard-crash the route on a database anomaly — degrade to
-      // "no active escalation" and let the page render normally.
-      return { escalation: null };
-    }
-  },
   head: () => ({
     meta: [
       { title: "Active Driver Manifest — Yada Connect" },
