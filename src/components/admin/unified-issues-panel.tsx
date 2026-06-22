@@ -210,6 +210,20 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
                   <TableCell>{severityBadge(i.severity)}</TableCell>
                   <TableCell className="max-w-[28rem]">
                     <div className="font-medium truncate">{i.title}</div>
+                    {i.source === "escalation" && (() => {
+                      const r = i.raw as {
+                        id?: string;
+                        claimed_by?: string | null;
+                        operator_acknowledged_at?: string | null;
+                      };
+                      return (
+                        <div className="mt-1 font-mono text-[10px] text-amber-700 dark:text-amber-300">
+                          ESC {String(r.id ?? "").slice(0, 8)} · {i.status}
+                          {r.claimed_by ? ` · claimed ${String(r.claimed_by).slice(0, 8)}` : " · unclaimed"}
+                          {r.operator_acknowledged_at ? " · op-ack ✓" : ""}
+                        </div>
+                      );
+                    })()}
                     {i.description && i.description !== i.title && (
                       <div className="text-xs text-muted-foreground line-clamp-2">
                         {i.description}
