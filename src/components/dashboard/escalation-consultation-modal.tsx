@@ -24,6 +24,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { submitManagerHandshake } from "@/lib/api/site-day-sessions";
+import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
 interface Props {
   escalation: OperationalEscalation | null;
