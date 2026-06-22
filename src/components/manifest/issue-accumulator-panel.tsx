@@ -101,6 +101,7 @@ export function IssueAccumulatorPanel({
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
   const [driverPin, setDriverPin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Pending RED draft awaiting verbal authorization. When non-null, the
   // VerbalAuthOverrideDialog is open and gates the next ledger + incident
