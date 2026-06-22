@@ -146,6 +146,59 @@ export function DayCentrePage() {
     );
   }
 
+  // Blocking RED check — show BEFORE provisioning today's session. The
+  // Day Centre cannot open while any RED issue is still open in the
+  // Governance Hub. Only a Manager can clear it.
+  if (hasBlockingRed && !session) {
+    return (
+      <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
+        <div className="flex items-start gap-3">
+          <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+          <div className="space-y-1">
+            <div className="text-base font-semibold text-destructive">
+              Day Centre cannot be opened — unresolved RED issue
+              {blockingReds.length > 1 ? "s" : ""}
+            </div>
+            <div className="text-muted-foreground">
+              Only a Manager can clear a RED in the Governance Hub. Once every
+              RED below is resolved there, the Open Centre workflow becomes
+              available again.
+            </div>
+          </div>
+        </div>
+
+        <ul className="space-y-2">
+          {blockingReds.map((r) => (
+            <li
+              key={r.id}
+              className="rounded-md border border-destructive/30 bg-background/40 p-3"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <span className="rounded bg-destructive px-2 py-0.5 text-xs font-semibold text-destructive-foreground">
+                  RED
+                </span>
+                <ClientTime value={r.created_at} className="text-xs text-muted-foreground" />
+              </div>
+              <div className="mt-1 font-medium">{r.issue_description}</div>
+              {r.workaround_plan ? (
+                <div className="mt-1 text-xs text-muted-foreground">
+                  Workaround: {r.workaround_plan}
+                </div>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+
+        <Button asChild size="sm">
+          <Link to="/governance">
+            Open Governance Hub
+            <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+          </Link>
+        </Button>
+      </Card>
+    );
+  }
+
   if (!session) {
     // No row yet and bootstrap hasn't started/finished — give the user an
     // explicit recovery path instead of a silent spinner.
