@@ -526,3 +526,102 @@ function ContextRow({
     </div>
   );
 }
+
+function RejectionAwarenessModal({
+  rejection,
+  onAcknowledge,
+}: {
+  rejection: OperationalEscalation | null;
+  onAcknowledge: () => void;
+}) {
+  const open = !!rejection;
+  const parsed = parseRejectionNotes(rejection?.resolutionNotes ?? null);
+  const isSiteDay = rejection?.sourceKind === "site_day_red";
+
+  return (
+    <Dialog open={open}>
+      <DialogContent
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        className="border-2 border-rose-500/70 bg-slate-950 p-0 text-slate-100 sm:max-w-lg"
+      >
+        {rejection && (
+          <>
+            <DialogHeader className="rounded-t-lg border-b border-rose-500/40 bg-rose-500/15 px-6 py-4">
+              <DialogTitle className="flex items-center gap-3 text-rose-300">
+                <ShieldAlert className="h-5 w-5" />
+                <span className="text-base font-extrabold uppercase tracking-wide">
+                  Opener Rejected Your Proposal
+                </span>
+              </DialogTitle>
+              <DialogDescription className="text-rose-200/80">
+                Review the Opener's reason. No further app action is taken — you decide the next step.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 px-6 py-5">
+              <div className="space-y-2 rounded-md border border-slate-800 bg-slate-900 p-4">
+                {isSiteDay ? (
+                  <>
+                    <ContextRow label="Reported by" value={rejection.driverName} />
+                    <ContextRow label="Site" value={rejection.vehicleInfo} />
+                    <ContextRow
+                      label="Trigger"
+                      value={prettyGateLabel(rejection.gateId)}
+                      valueClass="text-amber-300"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <ContextRow label="Driver" value={rejection.driverName} />
+                    <ContextRow label="Vehicle" value={rejection.vehicleInfo} />
+                    <ContextRow
+                      label="Failed Gate"
+                      value={prettyGateLabel(rejection.gateId)}
+                      valueClass="text-amber-300"
+                    />
+                  </>
+                )}
+              </div>
+
+              {parsed.managerProposal && (
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    Your proposal
+                  </div>
+                  <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-slate-700 pl-3 text-sm italic text-slate-200">
+                    {parsed.managerProposal}
+                  </blockquote>
+                </div>
+              )}
+
+              <div className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
+                  Opener's reason
+                </div>
+                <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-rose-500/60 pl-3 text-sm italic text-rose-100">
+                  [REJECTED] {parsed.rejectedReason || "(no reason given)"}
+                </blockquote>
+              </div>
+
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                This RED issue remains <strong>OPEN in the Governance Hub</strong>. Decide your next step there — no further action is taken automatically.
+              </div>
+            </div>
+
+            <DialogFooter className="border-t border-slate-800 bg-slate-900/60 px-6 py-4">
+              <Button
+                type="button"
+                onClick={onAcknowledge}
+                className="h-12 w-full bg-blue-600 text-base font-bold text-white hover:bg-blue-700"
+              >
+                Acknowledged
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
