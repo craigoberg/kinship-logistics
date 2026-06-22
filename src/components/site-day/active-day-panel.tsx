@@ -22,6 +22,9 @@ import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
 import { IssuesRegisterCard } from "./issues-register-card";
 import { LogAnomalyModal } from "./log-anomaly-modal";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
+import { createIssue, type ResponsibilityOwner } from "@/lib/api/site-issues";
+import { activeSiteIssuesKey, siteIssuesKey } from "@/hooks/use-site-issues";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { useAuthReady } from "@/hooks/use-auth-ready";
@@ -39,6 +42,11 @@ export function ActiveDayPanel({ session }: Props) {
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
   const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
+  // Pending RED draft awaiting verbal-consultation log.
+  const [verbalPending, setVerbalPending] = useState<{
+    description: string;
+    owner: ResponsibilityOwner;
+  } | null>(null);
 
 
   const resetMut = useMutation({
