@@ -47,6 +47,16 @@ function formatServerError(e: unknown): string {
   return String(e);
 }
 
+function redHasAcceptedWorkaround(issue: {
+  status: string | null;
+  workaroundPlan: string | null;
+}): boolean {
+  return (
+    issue.status === "workaround_accepted" ||
+    !!issue.workaroundPlan?.trim()
+  );
+}
+
 export function StartOfDayPanel({ sessionId }: Props) {
   if (!sessionId) {
     throw new Error("StartOfDayPanel requires a non-empty sessionId");
@@ -67,12 +77,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const openIssues = issues.filter((i) => i.status !== "resolved");
   const blockingIssues = openIssues.filter(
     (i) =>
-      (i.severity === "red" && i.status !== "workaround_accepted") ||
+      (i.severity === "red" && !redHasAcceptedWorkaround(i)) ||
       (i.severity === "yellow" && !i.workaroundPlan?.trim()),
   );
   const carriedIssues = openIssues.filter(
     (i) =>
-      (i.severity === "red" && i.status === "workaround_accepted") ||
+      (i.severity === "red" && redHasAcceptedWorkaround(i)) ||
       (i.severity === "yellow" && !!i.workaroundPlan?.trim()),
   );
   const hasBlocking = blockingIssues.length > 0;
