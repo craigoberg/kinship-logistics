@@ -1,46 +1,51 @@
-**Do I know what the issue is?** Yes.
+## Goal
 
-The diagnostic proves the RED issue is still blocking because the manager escalation was marked `resolved_approved` with notes, but the original RED issue row stayed `status: open` and `workaround_plan: null`. The acceptance/writeback path didn’t update the issue row, likely because the browser-side database update matched/changed zero rows without surfacing a hard error.
+Stop the Manager Propose modal from wiping the typed plan/PIN when the underlying escalation row rehydrates via realtime, and add lightweight tracing so the previous "nothing happened" no-op is diagnosable if it recurs.
 
-**Plan**
+## Scope
 
-1. **Make the blocker rule resilient**
-   - Update the Day Centre blocking logic so a RED is treated as “workaround agreed” when either:
-     - the issue row says `workaround_accepted`, or
-     - the issue row has `workaround_plan`, or
-     - its linked escalation is `resolved_approved` and has `resolution_notes`.
-   - This immediately unblocks the existing case shown in the diagnostic while still blocking unresolved REDs and denied/no-workaround REDs.
+Two files only. No schema, no RPC, no behaviour change to the happy path.
 
-2. **Show carried RED workaround details correctly**
-   - When the workaround comes from the linked escalation, display those `resolution_notes` as the carried workaround text in Start of Day.
-   - Keep unresolved RED/YELLOW issues without workarounds in the blocking panel.
+1. `src/components/dashboard/escalation-consultation-modal.tsx` (Manager Propose modal)
+2. `src/lib/api/site-day-sessions.ts` (`submitManagerHandshake`)
 
-3. **Fix the acceptance writeback path**
-   - Strengthen `acceptEscalationWorkaround` so the issue update verifies that a row was actually changed/read back.
-   - If writeback cannot update the linked RED issue, do not silently continue as if it worked; surface a clear error instead.
+## Changes
 
-4. **Refresh the affected query caches**
-   - Invalidate the all-RED blocker query, session issue query, escalation query, and diagnostic query after acceptance so hard refresh and live navigation agree.
+### 1. Preserve typed input across rehydrates
 
-5. **Keep the diagnostic temporarily**
-   - Update the diagnostic to report the new computed result as `CARRIED` for the exact case in the screenshot: escalation `resolved_approved` + notes, even if the issue row still says `open`.
-   - Once confirmed, the diagnostic can be removed in a follow-up.
+- Treat `notes` and `pin` as user-owned local state that only resets when the modal **closes** (or the escalation `id` actually changes), not whenever the escalation row object reference changes from realtime.
+- Replace any effect that resets state on `[escalation]` with one keyed on `[escalation?.id, open]` and only clear when `open` flips to `false` or the id changes.
+- If a "draft restore" hook (e.g. seeding `notes` from `escalation.managerPlanText`) exists, only seed once per `(open=true, id)` transition — never overwrite a non-empty `notes` the user has already typed.
 
-**Files to change**
+### 2. Tracing on the submit path
 
-- `src/components/site-day/day-centre-page.tsx`
-- `src/components/site-day/start-of-day-panel.tsx`
-- `src/lib/data-store.ts`
-- `src/components/dev/day-blocking-diagnostic.tsx`
+In the modal's `propose` handler, add `console.debug('[propose]', step, payload)` lines for each early return:
+- notes invalid / too short
+- pin missing / invalid format
+- session missing
+- `claimedBy` missing on escalation
+- pre-call snapshot of `{ escalationId, sessionId, staffId, notesLen, pinLen }`
 
-**Expected outcome**
+In `submitManagerHandshake`:
+- log PIN verify result
+- log update payload
+- log returned row from `.select()`
+- on Postgres error, `console.error('[submitManagerHandshake]', { code, message, details, hint })`
 
-The current RED shown in your screenshot will be carried forward with its agreed workaround, and the Open Centre workflow will become available unless there is another RED/YELLOW with no agreed workaround.
+In the modal's `catch` block, mirror the toast message via `console.error('[propose:caught]', err)` so it shows up in the log feed even when the toast is missed.
 
-<presentation-actions>
-  <presentation-open-history>View History</presentation-open-history>
-</presentation-actions>
+### 3. Inline error strip (small)
 
-<presentation-actions>
-<presentation-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</presentation-link>
-</presentation-actions>
+Render a single red text line at the bottom of the modal showing the last failure reason; clears on next submit attempt. Guarantees the user sees *why* nothing happened without hunting in the toast stack.
+
+## Out of scope
+
+- No change to RLS, RPC, or the writeback shape.
+- No removal of the day-blocking diagnostic yet — keep until the next clean Manager Propose round-trip is observed.
+- The probable RLS / `verifyStaffPin` follow-ups from the prior plan are deferred until the new tracing actually fingers one of them.
+
+## Verification
+
+- Open the modal, type, wait for a realtime tick (or trigger one by another tab) → typed text remains.
+- Submit with bad PIN → red inline strip + `[submitManagerHandshake]` error in console.
+- Submit happy path → session row updates `manager_plan_text` / `manager_decision`, opener panel renders.
