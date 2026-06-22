@@ -170,7 +170,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   });
 
   const rejectMutation = useMutation({
-    mutationFn: async () => {
+    mutationFn: async (reason: string) => {
       if (!escalation) throw new Error("No escalation to reject.");
       if (!/^\d{4,6}$/.test(openerPin))
         throw new Error("Enter your 4–6 digit Opener PIN.");
@@ -183,6 +183,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         sessionId: session.id,
         openerStaffId: leaderStaffId,
         pin: openerPin,
+        reason,
       });
     },
     onSuccess: () => {
@@ -190,6 +191,9 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       queryClient.invalidateQueries({ queryKey: ["site-escalation"] });
       queryClient.invalidateQueries({ queryKey: ["site-issues"] });
       setOpenerPin("");
+      setRejectOpen(false);
+      setRejectReason("");
+      setRejectAttempted(false);
       toast.success("Proposal rejected.", {
         description:
           "Centre returned to Open Pending. RED issue stays in the Open Issues list until resolved in the Hub.",
@@ -199,6 +203,13 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       toast.error("Could not reject the proposal", { description: e.message });
     },
   });
+
+  // Reject reason mini-dialog state
+  const [rejectOpen, setRejectOpen] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [rejectAttempted, setRejectAttempted] = useState(false);
+  const rejectReasonValid = rejectReason.trim().length >= 10;
+  const showRejectReasonError = rejectAttempted && !rejectReasonValid;
 
   // ── States ─────────────────────────────────────────────────────────────
   if (escQ.isLoading) {
