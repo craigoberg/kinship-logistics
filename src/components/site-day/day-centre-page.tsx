@@ -32,7 +32,7 @@ export function DayCentrePage() {
   // BEFORE provisioning.
   const openRedsQ = useQuery({
     queryKey: ["site-issues", "open-reds-all"],
-    enabled: isReady && !!user,
+    enabled: isReady,
     staleTime: 5_000,
     refetchInterval: 30_000,
     queryFn: async () => {
