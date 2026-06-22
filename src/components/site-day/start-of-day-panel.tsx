@@ -20,6 +20,7 @@ import {
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { IssuesRegisterCard } from "./issues-register-card";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 import {
   openSession,
   type SiteDaySession,
