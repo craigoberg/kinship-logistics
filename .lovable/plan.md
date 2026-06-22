@@ -1,33 +1,20 @@
-## Two-part fix
+## Problem
 
-### Part A — Recover from the silent bootstrap failure
+`/day` shows "You are not signed in" for Craig even though he's logged in as Manager. The page gates on Supabase auth `user`, but this app authenticates staff via the staff profile / PIN system (`getActiveUserProfile()`), not Supabase Auth. Console confirms: `userId: null` while the active profile clearly identifies Craig as Manager (the role-based "ask a Manager" branch never even renders because we bail out earlier on `!user`).
 
-`src/components/site-day/day-centre-page.tsx`:
+## Fix (single file: `src/components/site-day/day-centre-page.tsx`)
 
-1. Add `onError` to `bootstrapMut`:
-   - Reset `bootstrappedRef.current = false` so a refetch can retry.
-   - Surface the error via toast and via the existing `sessionQ.isError || bootstrapMut.isError` error card.
-2. Replace the silent `if (!session)` fallthrough with an explicit branch that shows "Provisioning today's session…" plus a **Retry** button that re-runs `bootstrapMut.mutate()` (also resetting the ref).
-3. Add `isReady`, `user?.id`, `bootstrapMut.status`, and `bootstrapMut.error?.message` into the existing `console.log("Current Session State")` for next-time diagnosis.
+Treat "signed in" as: Supabase auth user **OR** an active staff profile present. The Manager check already uses `profile.staffRole` — extend the same source to the sign-in gate.
 
-### Part B — Tell the Opener exactly why they can't open
+1. Compute `isSignedIn = !!user || !!profile` once near the top.
+2. Bootstrap effect: change `if (!isReady || !user) return;` → `if (!isReady || !isSignedIn) return;` so `ensureTodaySession()` runs for staff-profile logins too.
+3. `reportedBy` for `StartOfDayPanel`: fall back to `profile.id` (or the staff profile's user id field) when Supabase `user` is absent, so the opener is still attributed.
+4. Signed-out card branch: replace `isReady && !user` with `isReady && !isSignedIn` so it only shows when there's genuinely no session at all.
+5. Retry button `disabled`: replace `!user` with `!isSignedIn`.
 
-`src/components/site-day/start-of-day-panel.tsx`:
+No other files change. No business-logic / workflow changes — purely the gate that was reading the wrong source.
 
-Replace the bare "X unresolved RED issues" banner with a full guidance card when `hasOpenRed`:
+## Out of scope
 
-- Headline: **"Cannot open the Day Centre — unresolved RED issue(s)"**
-- Body explanation: *"Only a Manager can clear a RED in the Governance Hub. Once every RED below is resolved there, the Open Centre workflow becomes available again."*
-- List each open RED `site_issue`:
-  - severity chip (RED) + the issue's `title` / `description` (whichever the row carries)
-  - logged-at timestamp via `<ClientTime>`
-  - logger's display name when available
-- Primary CTA button **"Open Governance Hub →"** that navigates to `/admin` (or the existing Hub route — I'll grep `governance-hub-workspace` and `routes/admin.tsx` to confirm the exact path and tab) using TanStack `<Link>`.
-- Keep the existing rule that the "Declare Site Safe & Compliant" button stays disabled while `hasOpenRed`.
-
-No schema changes. No backend changes. Manager workflow from the previous turn is untouched.
-
-## Files touched
-
-- `src/components/site-day/day-centre-page.tsx`
-- `src/components/site-day/start-of-day-panel.tsx`
+- Reworking Supabase auth integration vs. staff-PIN auth.
+- Any change to the blocking-RED card, Governance Hub flow, or Manager messaging (those are correct and stay as-is).

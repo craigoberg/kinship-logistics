@@ -27,6 +27,8 @@ export function DayCentrePage() {
   const { user, isReady } = useAuthReady();
   const profile = useMemo(() => getActiveUserProfile(), []);
   const userIsManager = isManagerRole(profile?.staffRole);
+  const isSignedIn = !!user || !!profile;
+  const reporterId = user?.id ?? profile?.staffId ?? "";
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
@@ -83,7 +85,7 @@ export function DayCentrePage() {
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
-    if (!isReady || !user) return;
+    if (!isReady || !isSignedIn) return;
     if (sessionQ.isLoading || sessionQ.isError) return;
     if (sessionQ.data) return;
     // Do not auto-provision today's session while an unresolved RED is
@@ -94,7 +96,7 @@ export function DayCentrePage() {
     bootstrapMut.mutate();
   }, [
     isReady,
-    user,
+    isSignedIn,
     sessionQ.isLoading,
     sessionQ.isError,
     sessionQ.data,
@@ -215,7 +217,7 @@ export function DayCentrePage() {
 
   if (!session) {
     // Not signed in — show a clear sign-in prompt rather than a spinner.
-    if (isReady && !user) {
+    if (isReady && !isSignedIn) {
       return (
         <Card className="space-y-3 border-amber-500/40 bg-amber-500/5 p-5 text-sm">
           <div className="flex items-start gap-3">
@@ -254,7 +256,7 @@ export function DayCentrePage() {
         <Button
           size="sm"
           variant="outline"
-          disabled={!isReady || !user || bootstrapMut.isPending}
+          disabled={!isReady || !isSignedIn || bootstrapMut.isPending}
           onClick={() => {
             bootstrappedRef.current = false;
             bootstrapMut.mutate();
@@ -286,7 +288,7 @@ export function DayCentrePage() {
 
     switch (session.phase) {
       case "open_pending":
-        return <StartOfDayPanel sessionId={session.id} reportedBy={user?.id ?? ""} />;
+        return <StartOfDayPanel sessionId={session.id} reportedBy={reporterId} />;
       case "active_day":
         return <ActiveDayPanel session={session} />;
       case "closed_orderly":
