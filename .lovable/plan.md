@@ -1,62 +1,49 @@
+## Diagnostic plan
 
-## Goal
+### Goal
+Stop guessing why Start of Day is still blocked by showing exactly which data row is causing the block, what linked escalation/workaround state exists, and which rule the UI applied.
 
-Refine the Start-of-Day open gate so that **only issues without an accepted workaround block** the Open Centre flow. Issues that already have an agreed workaround (RED accepted by a Manager, or YELLOW with the opener's own workaround) should be **clearly displayed alongside the open workflow** but must **not** block it.
+### What I’ll add
+1. **Test-only diagnostic panel on `/day`**
+   - Visible only in the existing test/dev environment wrapper.
+   - Shows:
+     - current site day session id + phase
+     - each RED issue for the session and cross-session guard
+     - issue `status`, `workaround_plan`, `resolved_at`
+     - linked escalation `status`, `resolution_notes`, `resolved_at`, `source_issue_id`
+     - final computed result: `BLOCKING` or `CARRIED WITH WORKAROUND`
 
-## Rule (canonical)
+2. **Explain the blocker in plain text**
+   - For each RED issue, display why it is blocking, e.g.:
+     - `Issue status is open and no workaround_plan is stored`
+     - `Linked escalation is resolved_approved but issue row was not updated`
+     - `Issue is resolved`
+     - `Workaround accepted`
 
-An open issue is **blocking** when:
-- `severity = "red"` AND `status ≠ "workaround_accepted"` (no Manager-agreed workaround, or Manager said NO), OR
-- `severity = "yellow"` AND `workaroundPlan` is empty/null (opener never recorded a workaround)
+3. **Add temporary console diagnostics**
+   - Log one compact table when `/day` loads/refetches:
+     - issue id
+     - issue status
+     - workaround present
+     - linked escalation status
+     - linked escalation notes present
+     - computed blocking reason
 
-An open issue is **non-blocking / acknowledged** when:
-- `severity = "red"` AND `status = "workaround_accepted"` (Manager-agreed workaround in place), OR
-- `severity = "yellow"` AND `workaroundPlan` is present (opener's recorded workaround)
-- (GREEN notes are informational, never blocking.)
+4. **Use the diagnostic result to identify the real fix**
+   - Based on the network data you pasted, the likely mismatch is:
+     - the linked escalation is `resolved_approved` with notes
+     - but the original issue row is still `status: open` and `workaround_plan: null`
+   - The diagnostic will confirm whether the acceptance flow failed to copy the approved workaround back onto `site_issues_register`.
 
-If any blocking issue exists → Open Centre is gated (current red blocking card behavior).
-If only non-blocking issues exist → Open Centre proceeds normally, but the panel shows a yellow-toned **"Open issues carried with agreed workarounds"** card listing each one with its workaround text.
+### Likely follow-up fix after diagnosis
+If confirmed, update the RED blocking rule to treat a linked `resolved_approved` escalation with `resolution_notes` as an accepted workaround, and/or repair the acceptance path so it always updates the issue row to `workaround_accepted` with the agreed plan.
 
-## Files
+### Files likely involved
+- `src/components/site-day/day-centre-page.tsx`
+- `src/components/site-day/start-of-day-panel.tsx`
+- optionally a small test-only diagnostic component under `src/components/dev/`
 
-### `src/components/site-day/start-of-day-panel.tsx`
-
-Replace the current `openRedIssues` / `hasOpenRed` derivation with:
-
-```ts
-const openIssues = issues.filter(i => i.status !== "resolved");
-
-const blockingIssues = openIssues.filter(i =>
-  (i.severity === "red"    && i.status !== "workaround_accepted") ||
-  (i.severity === "yellow" && !(i.workaroundPlan?.trim()))
-);
-
-const carriedIssues = openIssues.filter(i =>
-  (i.severity === "red"    && i.status === "workaround_accepted") ||
-  (i.severity === "yellow" && !!i.workaroundPlan?.trim())
-);
-
-const hasBlocking = blockingIssues.length > 0;
-```
-
-Update the existing RED-block card so it:
-- Renders when `hasBlocking` (not just RED).
-- Title: "Cannot open the Day Centre — unresolved issue(s) without an agreed workaround".
-- Body explains: RED items need a Manager-agreed workaround (Governance Hub); YELLOW items need a workaround recorded by the opener.
-- Lists every `blockingIssues` row with a severity chip (RED red, YELLOW amber) using the same row layout already in the file.
-- Keeps the "Open Governance Hub" CTA but only if at least one blocking item is RED (otherwise hide it — YELLOW can be self-resolved by the opener via Log Anomalies).
-
-Add a new **non-blocking** "Open issues carried with agreed workarounds" card (amber border, not red) rendered whenever `carriedIssues.length > 0`, above the Open Centre button. Each row shows severity chip, description, `Workaround: …`, and the logged timestamp — same row markup as the blocking list, just amber-themed.
-
-Gate the Open Centre button on `!hasBlocking && allChecked` (replace existing `hasOpenRed` references).
-
-### No other files
-
-- No schema, server-function, ledger, or query changes.
-- `data-store.ts`, `site-issues.ts`, `escalation-resolution-panel.tsx` unchanged — the "workaround_accepted" status they already write is what we key off.
-- `issues-register-card.tsx` already shows workaround text correctly; no change.
-
-## Out of scope
-
-- No change to the global escalated-lock banner (`EscalationLockBanner`) — a live RED escalation in `operational_escalations` still hard-locks the page until claimed/resolved, which is correct. The new rule only governs the **issue-register** gate inside Start of Day after the escalation has been parked with an accepted workaround.
-- No change to Active Day / Close / Reopen logic.
+### Safety
+- No published-production visibility: diagnostics are wrapped in the existing test-only tooling.
+- No data rollback or issue mutation in the diagnostic step.
+- No change to RED/YELLOW business rules until the diagnostic confirms the mismatch.

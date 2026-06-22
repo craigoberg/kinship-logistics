@@ -17,6 +17,7 @@ import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
+import { DayBlockingDiagnostic } from "@/components/dev/day-blocking-diagnostic";
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
@@ -169,6 +170,8 @@ export function DayCentrePage() {
   // Day Centre cannot open while any RED issue has no agreed workaround.
   if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
+      <div className="space-y-4">
+        <DayBlockingDiagnostic sessionId={session?.id ?? null} />
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -222,6 +225,7 @@ export function DayCentrePage() {
           </div>
         )}
       </Card>
+      </div>
     );
   }
 
@@ -313,5 +317,10 @@ export function DayCentrePage() {
     }
   };
 
-  return <div className="space-y-6">{renderPhase()}</div>;
+  return (
+    <div className="space-y-6">
+      <DayBlockingDiagnostic sessionId={session?.id ?? null} />
+      {renderPhase()}
+    </div>
+  );
 }
