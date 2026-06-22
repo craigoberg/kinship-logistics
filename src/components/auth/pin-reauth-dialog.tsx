@@ -55,7 +55,7 @@ export function PinReauthDialog({
   const submit = async (value: string) => {
     if (busy) return;
     if (!/^\d{4}$/.test(value)) {
-      setError("Enter your 4-digit PIN.");
+      setError("Incorrect PIN. Please try again.");
       return;
     }
     setBusy(true);
@@ -63,7 +63,7 @@ export function PinReauthDialog({
     try {
       const profile = await loginWithPin(value);
       if (!profile) {
-        setError("PIN not recognised. Try again.");
+        setError("Incorrect PIN. Please try again.");
         setPin("");
         inputRef.current?.focus();
         return;
@@ -126,9 +126,13 @@ export function PinReauthDialog({
               setError(null);
               if (next.length === 4) void submit(next);
             }}
-            className="h-14 text-center text-2xl tracking-[1em] font-mono"
-            placeholder="••••"
+            onFocus={() => setError(null)}
+            className={`h-14 text-center text-2xl tracking-[1em] font-mono ${
+              error ? "border-2 border-destructive focus-visible:ring-destructive" : ""
+            }`}
+            placeholder="----"
             aria-label="4-digit PIN"
+            aria-invalid={!!error}
             disabled={busy}
           />
           {error && (

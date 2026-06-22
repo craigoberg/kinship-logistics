@@ -237,7 +237,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 inputMode="numeric"
                 pattern="\d{4}"
                 maxLength={4}
-                placeholder="••••"
+                placeholder="----"
                 autoComplete="off"
                 required={!isEdit}
                 aria-invalid={pinMissing || pinBadFormat}

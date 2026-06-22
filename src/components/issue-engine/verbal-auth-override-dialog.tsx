@@ -79,11 +79,13 @@ export function VerbalAuthOverrideDialog({
   const [managerName, setManagerName] = useState("");
   const [reason, setReason] = useState("");
   const [operatorPin, setOperatorPin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const reset = () => {
     setManagerName("");
     setReason("");
     setOperatorPin("");
+    setPinError(null);
   };
 
   const submitMut = useMutation({
@@ -91,10 +93,17 @@ export function VerbalAuthOverrideDialog({
       const operatorStaffId =
         getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
       if (!/^\d{4,6}$/.test(operatorPin)) {
-        throw new Error("Enter your 4–6 digit operator PIN.");
+        const msg = "Incorrect PIN. Please try again.";
+        setPinError(msg);
+        throw new Error(msg);
       }
       const pinOk = await verifyStaffPin(operatorStaffId, operatorPin);
-      if (!pinOk) throw new Error("Operator PIN does not match.");
+      if (!pinOk) {
+        const msg = "Incorrect PIN. Please try again.";
+        setPinError(msg);
+        setOperatorPin("");
+        throw new Error(msg);
+      }
 
       const gps = await tryGetGps();
       await writeToLedger({
@@ -223,16 +232,22 @@ export function VerbalAuthOverrideDialog({
               maxLength={6}
               autoComplete="off"
               value={operatorPin}
-              onChange={(e) =>
-                setOperatorPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-              }
-              placeholder="••••"
+              onChange={(e) => {
+                setOperatorPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+                if (pinError) setPinError(null);
+              }}
+              onFocus={() => pinError && setPinError(null)}
+              placeholder="----"
+              aria-invalid={!!pinError}
               className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
-                !pinOk
+                pinError || !pinOk
                   ? "border-2 border-destructive focus-visible:ring-destructive"
                   : ""
               }`}
             />
+            {pinError && (
+              <p className="text-xs font-medium text-destructive">{pinError}</p>
+            )}
           </div>
         </div>
 

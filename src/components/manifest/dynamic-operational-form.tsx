@@ -584,7 +584,7 @@ function PinDeclarationModal({
             onChange={(e) =>
               setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
             }
-            placeholder="••••"
+            placeholder="----"
             className="h-14 max-w-[200px] text-center text-2xl tracking-[0.6em] tabular-nums"
           />
         </div>

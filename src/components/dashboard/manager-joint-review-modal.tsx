@@ -48,11 +48,13 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
     row?.clearance ?? null,
   );
   const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setLive(row?.clearance ?? null);
     setPin("");
+    setPinError(null);
   }, [row?.clearance.id]);
 
   useEffect(() => {
@@ -81,10 +83,11 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
   const submitManager = async () => {
     if (submitting) return;
     if (!/^\d{4}$/.test(pin)) {
-      toast.error("Enter your 4-digit manager PIN.");
+      setPinError("Incorrect PIN. Please try again.");
       return;
     }
     setSubmitting(true);
+    setPinError(null);
     try {
       const managerStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       const next = await submitManagerAuthorization(
@@ -95,6 +98,8 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
       setLive(next);
       toast.success("Manager PIN verified — driver may now confirm.");
     } catch (err) {
+      setPinError("Incorrect PIN. Please try again.");
+      setPin("");
       toast.error("Manager PIN rejected", {
         description: (err as Error).message,
       });
@@ -172,12 +177,21 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
               maxLength={4}
               autoComplete="off"
               value={pin}
-              onChange={(e) =>
-                setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
+              onChange={(e) => {
+                setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+                if (pinError) setPinError(null);
+              }}
+              onFocus={() => pinError && setPinError(null)}
+              placeholder="----"
+              aria-invalid={!!pinError}
+              className={
+                "mt-1 h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums" +
+                (pinError ? " border-2 border-destructive focus-visible:ring-destructive" : "")
               }
-              placeholder="••••"
-              className="mt-1 h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums"
             />
+            {pinError && (
+              <p className="mt-1 text-xs font-medium text-destructive">{pinError}</p>
+            )}
           </div>
         ) : (
           <div className="flex items-center gap-2 rounded-md border border-green-600/40 bg-green-600/5 p-3 text-sm">

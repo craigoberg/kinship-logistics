@@ -558,6 +558,7 @@ function WalkaroundChecklist({
   const [overrideUnlocked, setOverrideUnlocked] = useState(false);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [pinInput, setPinInput] = useState("");
+  const [pinInputError, setPinInputError] = useState<string | null>(null);
 
   const submitMut = useMutation({
     mutationFn: async (input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean }) => {
@@ -666,11 +667,14 @@ function WalkaroundChecklist({
       setOverrideUnlocked(true);
       setPinDialogOpen(false);
       setPinInput("");
+      setPinInputError(null);
       toast.success("Manager override accepted", {
         description: "Capacity mismatch unlocked — proceed with caution.",
       });
     } else {
-      toast.error("Invalid override PIN");
+      setPinInputError("Incorrect PIN. Please try again.");
+      setPinInput("");
+      toast.error("Incorrect PIN. Please try again.");
     }
   };
 
@@ -877,12 +881,23 @@ function WalkaroundChecklist({
             inputMode="numeric"
             maxLength={4}
             value={pinInput}
-            onChange={(e) => setPinInput(e.target.value)}
-            placeholder="••••"
-            className="h-12 text-center text-lg tracking-[0.5em]"
+            onChange={(e) => {
+              setPinInput(e.target.value);
+              if (pinInputError) setPinInputError(null);
+            }}
+            onFocus={() => pinInputError && setPinInputError(null)}
+            placeholder="----"
+            aria-invalid={!!pinInputError}
+            className={cn(
+              "h-12 text-center text-lg tracking-[0.5em]",
+              pinInputError && "border-2 border-destructive focus-visible:ring-destructive",
+            )}
           />
+          {pinInputError && (
+            <p className="text-xs font-medium text-destructive">{pinInputError}</p>
+          )}
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPinInput("")}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel onClick={() => { setPinInput(""); setPinInputError(null); }}>Cancel</AlertDialogCancel>
             <AlertDialogAction onClick={handleOverrideSubmit}>Unlock</AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
