@@ -18,6 +18,7 @@ import {
 } from "@/components/ui/dialog";
 import { cn } from "@/lib/utils";
 import { ClientTime } from "@/components/ui/client-time";
+import { ElapsedTimer } from "@/components/ui/elapsed-timer";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import {
   submitLeaderHandshake,
@@ -305,9 +306,21 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
     return (
       <Card className="flex items-start gap-3 border-yellow-500/60 bg-yellow-500/10 p-4">
         <Loader2 className="mt-0.5 h-5 w-5 animate-spin text-amber-600" />
-        <div className="space-y-1 text-sm">
-          <div className="font-semibold text-yellow-900 dark:text-yellow-200">
-            Escalation claimed by {claimedByName}
+        <div className="flex-1 space-y-2 text-sm">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="font-semibold text-yellow-900 dark:text-yellow-200">
+              Escalation claimed by {claimedByName}
+            </div>
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-200">
+              <ElapsedTimer since={escalation.createdAt} label="Open" />
+              {escalation.claimedAt && (
+                <ElapsedTimer
+                  since={escalation.claimedAt}
+                  label="Claimed"
+                  className="opacity-80"
+                />
+              )}
+            </div>
           </div>
           <p className="text-muted-foreground">
             Claimed <ClientTime iso={escalation.claimedAt} />. Awaiting the
