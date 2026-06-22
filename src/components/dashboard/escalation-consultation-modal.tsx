@@ -508,7 +508,15 @@ function SiteDayProposalModal({
                 )}
               </Button>
             </div>
+
+            {lastError && (
+              <div className="rounded-md border border-rose-600 bg-rose-600/10 p-2 text-xs font-semibold text-rose-700">
+                {lastError}
+              </div>
+            )}
           </div>
+        )}
+
         )}
       </DialogContent>
     </Dialog>
