@@ -4729,13 +4729,20 @@ export async function acceptEscalationWorkaround(args: {
     }
   }
 
+  // Day Centre: the on-site joint review is BOTH the manager approval and
+  // the operator acknowledgment (the opener is the on-site operator). Write
+  // operator_acknowledged_* in the SAME update so the Hub does not leave a
+  // residual "awaiting operator ack" row that would lock the centre.
+  const nowIso = new Date().toISOString();
   const { error: escErr } = await supabase
     .from("operational_escalations")
     .update({
       status: "resolved_approved",
       resolved_by: args.managerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: nowIso,
       resolution_notes: trimmedPlan,
+      operator_acknowledged_at: nowIso,
+      operator_acknowledged_by: args.openerStaffId,
     })
     .eq("id", args.escalationId);
   if (escErr) throwPg("[acceptEscalationWorkaround:esc]", escErr);
