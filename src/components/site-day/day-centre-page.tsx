@@ -170,6 +170,8 @@ export function DayCentrePage() {
   // Day Centre cannot open while any RED issue has no agreed workaround.
   if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
+      <div className="space-y-4">
+        <DayBlockingDiagnostic sessionId={session?.id ?? null} />
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -223,6 +225,7 @@ export function DayCentrePage() {
           </div>
         )}
       </Card>
+      </div>
     );
   }
 
