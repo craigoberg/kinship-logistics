@@ -183,35 +183,10 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
 
-  /* ------------------------------------------------------------------
-     🔒 GLOBAL SYSTEM LOCKS: Hoisted directly out of the wizard loop 
-     ------------------------------------------------------------------ */
-  const [globalEscalation, setGlobalEscalation] = useState<OperationalEscalation | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_escalation");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  const [globalHandshake, setGlobalHandshake] = useState<{
-    clearance: AssetDailyClearance;
-    issues: any[];
-  } | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_handshake");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  const escalatedAsset = useMemo<TransportAsset | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_escalation_asset");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  }, [globalEscalation, globalHandshake]);
+  // Global escalation/handshake locks removed — RED issues no longer take
+  // over the wizard; the verbal-consultation dialog inside
+  // IssueAccumulatorPanel records the workaround and lets the driver keep
+  // rolling.
 
   // Standard setup configuration states
   const [step, setStep] = useState<InitStep>(() => {
