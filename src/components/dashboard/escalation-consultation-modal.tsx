@@ -404,15 +404,17 @@ function SiteDayProposalModal({
 
         {escalation && (
           <div className="space-y-4">
-            <div className="flex flex-wrap items-center justify-end gap-x-3 gap-y-1 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-amber-800 dark:text-amber-200">
-              <ElapsedTimer since={escalation.createdAt} label="Open" />
-              {escalation.claimedAt && (
-                <ElapsedTimer
-                  since={escalation.claimedAt}
-                  label="Claimed"
-                  className="opacity-80"
-                />
-              )}
+            <div className="flex justify-end">
+              <div className="inline-flex flex-wrap items-center gap-x-3 gap-y-1 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-1.5 text-amber-800 dark:text-amber-200">
+                <ElapsedTimer since={escalation.createdAt} label="Open" />
+                {escalation.claimedAt && (
+                  <ElapsedTimer
+                    since={escalation.claimedAt}
+                    label="Claimed"
+                    className="opacity-80"
+                  />
+                )}
+              </div>
             </div>
             {(() => {
               const raw = escalation.vehicleInfo || "Day Centre";
