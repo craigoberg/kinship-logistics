@@ -217,7 +217,7 @@ export function DayCentrePage() {
 
   if (!session) {
     // Not signed in — show a clear sign-in prompt rather than a spinner.
-    if (isReady && !user) {
+    if (isReady && !isSignedIn) {
       return (
         <Card className="space-y-3 border-amber-500/40 bg-amber-500/5 p-5 text-sm">
           <div className="flex items-start gap-3">
