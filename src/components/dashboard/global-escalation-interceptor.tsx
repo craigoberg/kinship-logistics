@@ -69,7 +69,7 @@ async function listMyClaimedAwaitingProposal(
 
     if (escalation.sourceKind === "site_day_red" && escalation.sourceIssueId) {
       const sess = await supabase
-        .from("site_issues")
+        .from("site_issues_register")
         .select("session_id")
         .eq("id", escalation.sourceIssueId)
         .maybeSingle();
