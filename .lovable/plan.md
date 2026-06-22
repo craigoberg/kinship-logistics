@@ -1,69 +1,86 @@
+# Full Rehydration of the Sev 1 Escalation Workflow
+
 ## Problem
 
-Two related defects in the pre-trip Daily Walkaround:
+When a driver raises a Sev 1 from the walkaround and then refreshes (or the tab is reloaded), the route-guard in `src/routes/manifest.tsx` (lines 146–153) currently swaps the screen for the minimal "wait for decision" card in `red-handshake-waiting-panel.tsx` (lines 88–109). That card:
 
-1. **Green/Yellow issues never reach the Governance Hub.** The Hub's Open Issues panel (`UnifiedIssuesPanel` → `listOpenUnifiedIssues`) reads from four sources: `site_issues_register`, `operational_incidents`, `operational_escalations`, and compliance asset renewals. Pre-trip findings live only in `asset_daily_clearance_items` (and only after the driver clicks **Lock In Declaration**), so the Hub has no visibility.
+- Drops the accumulated issue list the driver typed.
+- Drops the asset/driver context.
+- Skips the three-phase state machine (pending → claimed → resolved_approved → operator PIN), so when the manager approves the workaround the driver never sees the green "Manager Workaround Authorized" PIN card.
 
-2. **Drafts vanish on refresh.** `IssueAccumulatorPanel` stores added Green/Yellow issues in local `useState` only. Nothing is persisted until the final submit, so a re-render, refetch, or tab refresh wipes them.
+Result: the driver who raised the issue is stuck on a dead-end card instead of being put back inside the live escalation form they were in before the refresh.
 
-RED handling is unaffected — it already writes through `operational_escalations` immediately.
+Separately, when a manager hard-refreshes the Governance Hub, the open RED escalation sometimes fails to come back because of a brittle PostgREST `.or()` filter.
 
-## Approach — write-ahead through the single-rail `operational_incidents` table
+## 1. Driver-side: rehydrate the full escalation form
 
-Use the existing single-rail surface the Hub already understands. Each Green/Yellow finding is written to `operational_incidents` the instant the driver logs it, then rehydrated from there on mount.
+Replace the minimal route-guard branch with a full rehydration that drops the driver back into `EscalationWaitingPanel` with all original context restored.
 
-### 1. Write-ahead on log
+In `src/routes/manifest.tsx`, when `escalation` is truthy:
 
-In `IssueAccumulatorPanel`'s `LogAnomalyModal.onLogged` handler (Green/Yellow branch only), after pushing to local state, insert into `operational_incidents`:
+1. Resolve the `TransportAsset` from `escalation.vehicleInfo` against `listTransportAssets()` (match by `${name} · ${regoPlate}`). Fall back to a minimal synthetic asset object if not found.
+2. Resolve `driverName` from `escalation.driverName` directly (no staff lookup needed; the row already stores the display name).
+3. Rehydrate the issue list: query `operational_incidents` for `asset.id` + today's date with `incident_type='mechanical'`, exactly the same logic `IssueAccumulatorPanel`'s rehydrate already uses, then map to `DraftIssue[]`. Also include the RED entry itself (derived from `escalation.sourceIssueId` if present) so the driver still sees what they reported.
+4. Render `<RedHandshakeWaitingPanel escalationId={escalation.id} asset={asset} driverName={driverName} ... />` instead of the `escalation`-only branch.
+5. Also restore `localStorage.yada_global_escalation` + `yada_global_escalation_asset` so the existing `onAuthorized` / `onBack` flow inside `InitializeTripScreen` continues to work after the driver acknowledges.
 
-- `incident_type: "mechanical"` (pre-trip walkaround is fleet/asset-scoped)
-- `severity: yellow → "sev2"`, `green → "sev3"`
-- `vehicle_id: asset.id`
-- `description`: `"[Pre-trip] {finding} — Workaround: {workaround}"` (workaround only if present)
-- `reported_by`: driver name
-- `status: "pending"` (default)
+This means the existing `EscalationWaitingPanel` (already in the file, lines 313+) becomes the single rehydration target. It already handles:
 
-Store the returned `id` on the `DraftIssue` so the local row and the DB row stay linked. Roll back the local push on insert failure and toast.
+- Live subscription to status changes.
+- Verbal-Auth-Override.
+- Elapsed timer.
+- "Manager Workaround Authorized" green card + Driver PIN submit + ledger write.
 
-### 2. Rehydrate on mount
+So no new state machine code is needed — just feed it the rehydrated props.
 
-Add a query (or one-shot fetch in `useEffect`) keyed by `[asset.id, dateStr]`:
+Then, delete the dead route-guard "Awaiting office authorization" branch in `red-handshake-waiting-panel.tsx` (lines 87–109) and the `escalation?: any` prop, since rehydration is now done one level up.
 
-```ts
-supabase.from("operational_incidents")
-  .select("*")
-  .eq("vehicle_id", asset.id)
-  .eq("status", "pending")
-  .gte("created_at", `${dateStr}T00:00:00Z`)
-  .in("severity", ["sev2","sev3"])
+### Detail panel inside `EscalationWaitingPanel`
+
+Add a compact "What was reported" block above the PIN card showing:
+
+- `escalation.vehicleInfo`, `escalation.driverName`.
+- `escalation.gateId` and a "Bus walkaround" / "Day Centre" label from `sourceKind`.
+- Rehydrated issue list (chips identical to `ClearanceWaitingPanel`'s "Accumulated issues sent to manager").
+- The originating issue text fetched from `operational_incidents` / `site_issues_register` when `sourceIssueId` is set (best-effort; hide if fetch fails).
+
+The elapsed timer + the existing pending / claimed / approved cards stay as-is.
+
+## 2. Manager-side: fix unresolved-RED rehydration on hard refresh
+
+Root cause is the combined `.or()` filter used in two places:
+
+```
+status.in.(pending,claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)
 ```
 
-Map rows back to `DraftIssue[]` and seed the `issues` state. This makes the panel survive refresh.
+The comma inside `in.(pending,claimed)` collides with the top-level `.or()` separator, so under some query plans rows do not match. Replace with a form where every branch is wrapped in its own `and(...)`:
 
-### 3. Lock-In Declaration is unchanged in effect
+```ts
+.or(
+  "and(status.eq.pending),and(status.eq.claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)"
+)
+```
 
-`insertAssetClearanceWithItems` still writes the clearance + items + `accumulated_issues` blob. The pre-existing `operational_incidents` rows remain `pending` — they are the Hub's view of the finding and the Hub already has a working **Resolve** flow (`resolveUnifiedIssue` → ledger receipt + `status: "resolved"`). No new resolve UI needed.
+Apply in:
 
-Optional polish (not required for the fix): include the inserted incident IDs in the clearance `accumulated_issues` blob or items' `notes` for cross-reference.
+- `src/lib/api/clearance.ts` → `getActiveEscalation` (so the driver guard rehydrates reliably too).
+- `src/lib/api/unified-issues.ts` → `listOpenUnifiedIssues` (Hub).
 
-### 4. Removing a draft before submit
+As a belt-and-braces, in `src/components/admin/unified-issues-panel.tsx` subscribe to `subscribeToEscalationPool` and call `queryClient.invalidateQueries(unifiedIssuesKey)` on any change. Keeps the Hub current without re-enabling the typing-killer interval poll.
 
-The trash-can button currently only removes from local state. Extend `removeIssue` to also `update({ status: "resolved" })` the corresponding `operational_incidents` row so the Hub doesn't show a phantom that the driver deleted before locking in.
+## Technical Notes
 
-### 5. RED unchanged
-
-RED still goes straight through `raiseOperationalEscalation` inside `LogAnomalyModal`. We do NOT also write an `operational_incidents` row for RED — that would double-count it in the Hub feed (escalations branch already covers it).
-
-## Files to touch (build mode only)
-
-- `src/components/manifest/issue-accumulator-panel.tsx` — write-ahead in `onLogged`, rehydrate on mount, soft-resolve on `removeIssue`.
-- (Optional helper) a small wrapper in `src/lib/api/fleet.ts` or new `src/lib/api/pre-trip-findings.ts` for the insert/list/soft-resolve calls, to keep the component clean.
-
-No SQL migration required — `operational_incidents` already has every column we need.
+- Files touched:
+  - `src/routes/manifest.tsx` — rehydrate asset + issues, route to full `RedHandshakeWaitingPanel` with `escalationId`.
+  - `src/components/manifest/red-handshake-waiting-panel.tsx` — remove `escalation` prop / dead branch; add "What was reported" details block to `EscalationWaitingPanel`; optional fetch of source issue description.
+  - `src/lib/api/clearance.ts`, `src/lib/api/unified-issues.ts` — replace `.or(...)` filters.
+  - `src/components/admin/unified-issues-panel.tsx` — realtime invalidation.
+- No schema or migration changes.
+- No changes to polling/staleTime (kept off).
 
 ## Verification
 
-1. Reload `/manifest`, open the walkaround for any bus, add one Green and one Yellow finding → confirm they appear in `/governance` → Open Issues with source = **Incident**, severity badges Green/Yellow.
-2. Refresh `/manifest` mid-walkaround → confirm the Green/Yellow rows are still listed in the accumulator (rehydrated from DB).
-3. Click the trash icon on a draft → confirm it disappears from both the panel and the Hub.
-4. Click **Lock In Declaration** with the comfort PIN → confirm clearance saves and the Hub rows remain open and resolvable from the Hub's Resolve dialog (which writes the ledger receipt).
+1. Driver raises Sev 1 → hard refresh → returns to the same escalation form with vehicle, gate, accumulated issues, elapsed timer, and the live state machine still wired up; manager approval transitions to the green PIN card without another refresh.
+2. Manager opens an unresolved RED in Governance Hub → hard refresh → row reappears immediately.
+3. Manager approves workaround → driver popup transitions to "Manager Workaround Authorized" with PIN entry; PIN submit drops the shield on both sides.
