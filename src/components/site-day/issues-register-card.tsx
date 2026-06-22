@@ -34,6 +34,7 @@ const SEVERITY_CHIP: Record<
 export function IssuesRegisterCard({ issue }: Props) {
   const sev = SEVERITY_CHIP[issue.severity];
   const isResolved = issue.status === "resolved";
+  const isWorkaroundAccepted = issue.status === "workaround_accepted";
 
   return (
     <Card
