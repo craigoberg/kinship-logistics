@@ -4239,6 +4239,9 @@ export interface OperationalEscalation {
   sourceKind: "bus_walkaround" | "site_day_red" | null;
   sourceIssueId: string | null;
   raisedBy: string | null;
+  /** Set when the on-site operator (driver OR opener) confirms a manager-approved workaround. */
+  operatorAcknowledgedAt: string | null;
+  operatorAcknowledgedBy: string | null;
 }
 
 interface OperationalEscalationRow {
@@ -4257,6 +4260,8 @@ interface OperationalEscalationRow {
   source_kind: "bus_walkaround" | "site_day_red" | null;
   source_issue_id: string | null;
   raised_by: string | null;
+  operator_acknowledged_at: string | null;
+  operator_acknowledged_by: string | null;
 }
 
 function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
@@ -4276,6 +4281,8 @@ function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
     sourceKind: r.source_kind ?? null,
     sourceIssueId: r.source_issue_id ?? null,
     raisedBy: r.raised_by ?? null,
+    operatorAcknowledgedAt: r.operator_acknowledged_at ?? null,
+    operatorAcknowledgedBy: r.operator_acknowledged_by ?? null,
   };
 }
 
@@ -4722,13 +4729,20 @@ export async function acceptEscalationWorkaround(args: {
     }
   }
 
+  // Day Centre: the on-site joint review is BOTH the manager approval and
+  // the operator acknowledgment (the opener is the on-site operator). Write
+  // operator_acknowledged_* in the SAME update so the Hub does not leave a
+  // residual "awaiting operator ack" row that would lock the centre.
+  const nowIso = new Date().toISOString();
   const { error: escErr } = await supabase
     .from("operational_escalations")
     .update({
       status: "resolved_approved",
       resolved_by: args.managerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: nowIso,
       resolution_notes: trimmedPlan,
+      operator_acknowledged_at: nowIso,
+      operator_acknowledged_by: args.openerStaffId,
     })
     .eq("id", args.escalationId);
   if (escErr) throwPg("[acceptEscalationWorkaround:esc]", escErr);

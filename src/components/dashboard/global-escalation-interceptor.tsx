@@ -117,6 +117,8 @@ async function listMyClaimedAwaitingProposal(
         "bus_walkaround",
       sourceIssueId: (raw.source_issue_id as string | null) ?? null,
       raisedBy: (raw.raised_by as string | null) ?? null,
+      operatorAcknowledgedAt: (raw.operator_acknowledged_at as string | null) ?? null,
+      operatorAcknowledgedBy: (raw.operator_acknowledged_by as string | null) ?? null,
     } as OperationalEscalation;
 
     if (escalation.sourceKind === "site_day_red" && escalation.sourceIssueId) {
@@ -264,6 +266,8 @@ export function GlobalEscalationInterceptor() {
               "bus_walkaround",
             sourceIssueId: (raw.source_issue_id as string | null) ?? null,
             raisedBy: (raw.raised_by as string | null) ?? null,
+            operatorAcknowledgedAt: (raw.operator_acknowledged_at as string | null) ?? null,
+            operatorAcknowledgedBy: (raw.operator_acknowledged_by as string | null) ?? null,
           }) as OperationalEscalation,
       );
     },
