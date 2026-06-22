@@ -117,22 +117,8 @@ const SEVERITY_CHIPS: Array<{
   },
 ];
 
-function triggerEscalation(payload: {
-  kind: "site_session";
-  sessionId: string;
-  issueId: string;
-  description: string;
-}) {
-  if (typeof window !== "undefined") {
-    try {
-      window.dispatchEvent(
-        new CustomEvent("yada:escalation", { detail: payload }),
-      );
-    } catch {
-      // informational broadcast only
-    }
-  }
-}
+// `triggerEscalation` event broadcaster removed — RED now opens the local
+// VerbalAuthOverrideDialog instead of dispatching a multi-device alert.
 
 export function LogAnomalyModal({
   open,
@@ -259,14 +245,22 @@ export function LogAnomalyModal({
         } else {
           toast.success("Note added to the Issues Register.");
         }
+      if (result.kind === "site-day-red") {
+        // Parent will open VerbalAuthOverrideDialog; close this modal cleanly.
+        reset();
+        onOpenChange(false);
+        return;
+      }
+      if (result.kind === "site-day") {
+        // handled above
       } else {
         // pre-trip
         reset();
         onOpenChange(false);
         if (result.severity === "red") {
-          toast.error("Red pre-trip issue raised — awaiting Manager handshake.", {
+          toast.warning("Red pre-trip issue — verbal consultation required.", {
             description:
-              "Bus is locked from dispatch until a Manager claims and resolves.",
+              "Document the manager's verbal workaround and sign it with your operator PIN.",
           });
         } else if (result.severity === "yellow") {
           toast.warning("Yellow pre-trip issue captured.", {
