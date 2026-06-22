@@ -71,6 +71,20 @@ export function DayClosedPanel({ session }: Props) {
     },
   });
 
+  const resetMut = useMutation({
+    mutationFn: () => resetStartOfDay("test: rewind to start of day"),
+    onSuccess: (next) => {
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      toast.success("Session reset to Start of Day", {
+        description: "Issues, escalations, attendance and billing are preserved.",
+      });
+    },
+    onError: (e: Error) => {
+      toast.error("Reset failed", { description: e.message });
+    },
+  });
+
   return (
     <>
       <Card
