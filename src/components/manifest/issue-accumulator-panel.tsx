@@ -11,15 +11,13 @@ import { cn } from "@/lib/utils";
 
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
 import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
-import { getActiveEscalation } from "@/lib/api/clearance";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 import { supabase } from "@/integrations/supabase/client";
 
 import type {
   AssetCheckpoint,
-  AssetDailyClearance,
   ClearanceIssueSeverity,
   NewClearanceItemInput,
-  OperationalEscalation,
   TransportAsset,
 } from "@/lib/data-store";
 import {
@@ -29,7 +27,8 @@ import {
   submitDriverAuthorization,
 } from "@/lib/data-store";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
-import { RedHandshakeWaitingPanel } from "./red-handshake-waiting-panel";
+// RedHandshakeWaitingPanel removed — single-user verbal flow replaces the
+// multi-device handshake; RED issues now route through VerbalAuthOverrideDialog.
 
 const COMFORT_DECLARATION_TEXT =
   "I confirm that all issues have been cleanly recorded, appropriate workarounds are deployed, and I am personally comfortable, oriented, and acting in accordance with my signed Organization Onboarding Guidelines to operate safely today.";
@@ -87,7 +86,6 @@ interface Props {
   driverName: string;
   onCleared: () => void;
   onBack: () => void;
-  onRedRaised?: (esc: OperationalEscalation) => void;
 }
 
 export function IssueAccumulatorPanel({
@@ -98,15 +96,19 @@ export function IssueAccumulatorPanel({
   driverName,
   onCleared,
   onBack,
-  onRedRaised,
 }: Props) {
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
   const [driverPin, setDriverPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const [redClearance, setRedClearance] =
-    useState<AssetDailyClearance | null>(null);
+  // Pending RED draft awaiting verbal authorization. When non-null, the
+  // VerbalAuthOverrideDialog is open and gates the next ledger + incident
+  // write.
+  const [verbalPending, setVerbalPending] = useState<{
+    description: string;
+    owner: "internal" | "council";
+  } | null>(null);
 
   const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
   const hasRed = useMemo(() => issues.some((i) => i.severity === "red"), [issues]);
