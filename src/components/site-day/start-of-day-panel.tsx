@@ -226,7 +226,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
           size="lg"
           className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
           onClick={() => setConfirmOpen(true)}
-          disabled={openMut.isPending || !allChecked}
+          disabled={openMut.isPending || !allChecked || hasOpenRed}
         >
           <ShieldCheck className="h-6 w-6 shrink-0" />
           <span className="flex flex-col items-start">
