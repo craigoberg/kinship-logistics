@@ -1,29 +1,24 @@
-## Plan: Day Centre RED escalation proposal fix
+## Problem
 
-1. **Make Buffy’s claimed consultation rehydrate after refresh**
-   - Extend `GlobalEscalationInterceptor` so its baseline query also finds escalations already claimed by the current Manager, not only pending claimable rows.
-   - If the current staff member has a claimed, unresolved `site_day_red` escalation with no manager proposal yet, reopen `EscalationConsultationModal` automatically.
-   - Keep Craig suppressed from seeing his own claim popup via the existing `raisedBy` check.
+Buffy's "Propose Resolution" modal always shows **"Linked site session could not be found — refresh and retry."** even though the escalation row and the linked site_day_session exist.
 
-2. **Fix “Propose GO” not advancing Craig from pending**
-   - Update the manager proposal success path so the returned `site_day_sessions` row is pushed into the query cache and the linked site session / escalation queries are invalidated immediately.
-   - Add a realtime subscription to the linked `site_day_sessions` row while Craig is waiting, so when Buffy submits GO/NO-GO Craig’s opener panel moves from “Manager is reviewing” to Accept/Reject without relying on polling or a manual refresh.
+## Root Cause
 
-3. **Required-field red borders and blank PIN state**
-   - In `EscalationConsultationModal`, track attempted submit.
-   - Show thick red borders on:
-     - action plan / NO-GO reason when under the required minimum,
-     - Manager PIN when blank/invalid,
-     - session lookup problem if the linked session cannot be found.
-   - Remove the PIN placeholder bullets so an empty PIN field is visually blank, not ghost-filled.
+`src/components/dashboard/escalation-consultation-modal.tsx` (line 45) queries `from("site_issues")`, but everywhere else in the codebase the table is `site_issues_register`. The query throws, react-query catches it, and `sessionQ.data` resolves to `null` → `sessionMissing` becomes `true` → red banner + the GO/NO-GO buttons effectively cannot submit (the `!sessionId` guard inside `propose()` blocks it).
 
-4. **Button text formatting**
-   - Rework the GO / NO-GO action buttons to prevent overflow on the modal width shown in the screenshot.
-   - Use wrapped/stack-safe text, smaller responsive labels, and icons that do not force the text outside the button.
+## Fix
 
-5. **Opener-side consistency**
-   - Apply the same red-border / blank-placeholder rule to Craig’s opener PIN in `EscalationResolutionPanel` when he attempts Accept/Reject without a valid PIN.
-   - Keep the dual-signoff rules unchanged: Buffy proposes; Craig accepts/declines with PIN; unresolved RED remains locked.
+Change the one query in `SiteDayProposalModal`'s `sessionQ` from `site_issues` to `site_issues_register`. No other logic needs to change — the column (`session_id`) and filter (`id = escalation.sourceIssueId`) are already correct.
 
-6. **Verification**
-   - Check the changed source paths and use the existing preview/network signals to confirm the intended database updates are triggered and the UI no longer relies on transient modal state only.
+```ts
+// before
+.from("site_issues").select("session_id").eq("id", escalation.sourceIssueId).single()
+// after
+.from("site_issues_register").select("session_id").eq("id", escalation.sourceIssueId).maybeSingle()
+```
+
+I'll also switch `.single()` → `.maybeSingle()` so a missing row surfaces as `null` (clean red banner) instead of a thrown error.
+
+## Verification
+
+After the edit: reopen the same escalation as Buffy → the "Locating site session…" line should appear briefly, then disappear with no red banner, and the Propose GO / NO-GO buttons should submit successfully.
