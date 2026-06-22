@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Building2, CheckCircle2, Info, Mail } from "lucide-react";
+import { Building2, CheckCircle2, Info, Mail, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
@@ -34,6 +34,7 @@ const SEVERITY_CHIP: Record<
 export function IssuesRegisterCard({ issue }: Props) {
   const sev = SEVERITY_CHIP[issue.severity];
   const isResolved = issue.status === "resolved";
+  const isWorkaroundAccepted = issue.status === "workaround_accepted";
 
   return (
     <Card
@@ -76,6 +77,14 @@ export function IssuesRegisterCard({ issue }: Props) {
             className="gap-1 border-green-600/60 text-[10px] text-green-700"
           >
             <CheckCircle2 className="h-3 w-3" /> Resolved
+          </Badge>
+        )}
+        {isWorkaroundAccepted && (
+          <Badge
+            variant="outline"
+            className="gap-1 border-emerald-600/60 text-[10px] text-emerald-700"
+          >
+            <ShieldCheck className="h-3 w-3" /> Workaround accepted
           </Badge>
         )}
       </div>

@@ -1,40 +1,54 @@
 ## Problem
 
-When Craig (Opener) clicks **Confirm Reject** in the rejection-reason dialog, nothing happens. The red validation border disappears (so the 10-char check passed) but the mutation silently fails.
+Right now, when Buffy (opener) **Accepts** the Manager's GO proposal on a RED escalation, the site session jumps straight to `active_day` ("Day Centre — Active"). That bypasses:
 
-### Root cause
+- the **mandated compliance checks** (which were never ticked), and
+- the explicit **Open Centre** button (which was never pressed).
 
-Looking at the live `site_day_sessions` row in the console logs:
-
-```
-opened_by_id: null
-phase: "escalated_lock"
-```
-
-The escalation was raised before the Start-of-Day handshake completed, so `session.openedById` is `null`. In `escalation-resolution-panel.tsx` both mutations do:
-
-```ts
-const leaderStaffId = session.openedById;
-if (!leaderStaffId) throw new Error("Session has no recorded opener.");
-```
-
-So `rejectMutation.mutateAsync()` throws immediately → `onError` → `toast.error`. The toast is the only visible signal and Craig didn't notice it. The same trap exists on the Accept path.
-
-The opener identity should come from **the currently signed-in staff actually using the panel** (Craig), not from a session field that may be null when the RED hit before opening.
+Agreeing a workaround for one RED should only clear that RED off the "blockers" list. The Centre must remain in **Start of Day** until *every* RED is cleared (resolved or workaround-accepted), all mandated checks are ticked, and the opener explicitly presses Open Centre.
 
 ## Fix
 
-### `src/components/site-day/escalation-resolution-panel.tsx`
+### 1. Escalation Accept (GO) no longer opens the Centre
 
-1. Import `getActiveUserProfile` from `@/lib/data-store`.
-2. Compute `const actorStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;` once near the other derived state.
-3. In **both** `acceptMutation` and `rejectMutation`, replace `const leaderStaffId = session.openedById;` with `const leaderStaffId = actorStaffId;` and keep the existing `if (!leaderStaffId) throw ...` guard (message updated to "No signed-in staff to authorise rejection — please sign in again.").
-4. Disable Accept & Reject buttons (and add a small muted hint under the PIN field) when `!actorStaffId`, so the failure mode is visible up-front instead of only via a toast after click.
+`src/components/site-day/escalation-resolution-panel.tsx` — `acceptMutation`:
 
-No business-logic change: PIN is still verified against that staff id, the RED issue still stays open, phase still reverts to `open_pending`, and notes are still appended with `[REJECTED] …`.
+- **Remove** the call to `submitLeaderHandshake(...)` for the GO path. (That call is what flips phase → `active_day`.)
+- Instead, when manager's decision is **GO**:
+  1. Mark the source site_issue (`escalation.sourceIssueId`) with `status = 'workaround_accepted'` and persist the manager's plan text into `workaround_plan`.
+  2. Call `resolveOperationalEscalation({ approved: true, … })` to close the escalation row.
+  3. Revert the session: clear `manager_decision` / `manager_plan_text` / `manager_auth_*` and set `phase = 'open_pending'` (same shape as `rejectEscalationProposal` already does, just without the `[REJECTED]` note).
+  4. Write ledger receipt `site_day.red_workaround_accepted` (GREEN severity, includes opener + manager staff ids, source issue id, plan text).
+  5. Toast: *"Workaround accepted — complete mandated checks, then Open Centre."*
+- When manager's decision is **NO-GO**: keep existing behaviour (`submitLeaderHandshake` → `closed_no_go`).
 
-### Files touched
+### 2. Start-of-Day panel treats "workaround accepted" as cleared
 
-- `src/components/site-day/escalation-resolution-panel.tsx` (≈10 line edit)
+`src/components/site-day/start-of-day-panel.tsx`:
 
-No DB / RPC / data-store changes required.
+- Change `openRedIssues` filter from `status !== 'resolved'` to `status !== 'resolved' && status !== 'workaround_accepted'`. (RED with an accepted workaround no longer blocks Open Centre, but it stays visible in the register.)
+- Mandated checks + `Confirm & Open` AlertDialog remain unchanged → still mandatory.
+
+### 3. Issues Register card shows the "Workaround accepted" badge
+
+`src/components/site-day/issues-register-card.tsx` (and `active-day-panel.tsx` / `issues-register` reuse): add a small green-outlined "Workaround accepted" badge next to RED issues whose `status === 'workaround_accepted'`, mirroring the existing "Resolved" badge styling.
+
+### 4. New data-store helper
+
+`src/lib/data-store.ts` — add `acceptEscalationProposal(sessionId, escalationId, sourceIssueId, managerPlanText, openerStaffId)` that performs the four DB writes in step 1 above (issue update, escalation resolve, session revert, ledger). The escalation panel calls this single helper.
+
+### Out of scope
+
+- No DB migration. `site_issues_register.status` is already a free-text column; the new value `'workaround_accepted'` is additive. Hub/Governance code that filters on `status = 'open'` already treats anything non-open as not-open, which is the desired behaviour (it stops counting toward the "must clear" list).
+- No change to the Reject flow or to the rejection-awareness modal.
+- No change to NO-GO acceptance.
+- No change to the Manager handshake screen.
+
+### Verification
+
+After build:
+1. Open a session with a logged RED → centre is `open_pending`.
+2. Manager proposes GO with a plan; Opener Accepts with PIN.
+3. Phase stays `open_pending`; RED card shows "Workaround accepted"; mandated checks panel is still front-and-centre; green **Declare Site Safe & Compliant** button enables only after all checks are ticked.
+4. Pressing it opens the AlertDialog; confirming flips phase → `active_day` (existing path).
+5. NO-GO acceptance still closes the day immediately.

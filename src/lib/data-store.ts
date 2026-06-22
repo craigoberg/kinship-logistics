@@ -4682,4 +4682,62 @@ export async function rejectEscalationProposal(args: {
 
 }
 
+/**
+ * Opener accepts a Manager GO proposal that includes an agreed workaround.
+ *
+ * Unlike the original `submitLeaderHandshake` GO path, this does NOT flip
+ * the session to `active_day`. The RED is parked as "workaround accepted"
+ * so it no longer blocks Start-of-Day, but the Opener still has to complete
+ * mandated checks and press Open Centre.
+ */
+export async function acceptEscalationWorkaround(args: {
+  escalationId: string;
+  sessionId: string;
+  sourceIssueId: string | null;
+  managerStaffId: string;
+  openerStaffId: string;
+  pin: string;
+  planText: string;
+}): Promise<void> {
+  const ok = await verifyStaffPin(args.openerStaffId, args.pin);
+  if (!ok) throw new Error("Opener PIN does not match.");
+
+  const trimmedPlan = (args.planText ?? "").trim();
+
+  if (args.sourceIssueId) {
+    const { error: issueErr } = await supabase
+      .from("site_issues_register")
+      .update({
+        status: "workaround_accepted",
+        workaround_plan: trimmedPlan || null,
+      })
+      .eq("id", args.sourceIssueId);
+    if (issueErr) throwPg("[acceptEscalationWorkaround:issue]", issueErr);
+  }
+
+  const { error: escErr } = await supabase
+    .from("operational_escalations")
+    .update({
+      status: "resolved_approved",
+      resolved_by: args.managerStaffId,
+      resolved_at: new Date().toISOString(),
+      resolution_notes: trimmedPlan,
+    })
+    .eq("id", args.escalationId);
+  if (escErr) throwPg("[acceptEscalationWorkaround:esc]", escErr);
+
+  const { error: sessErr } = await supabase
+    .from("site_day_sessions")
+    .update({
+      manager_plan_text: null,
+      manager_decision: null,
+      manager_auth_staff_id: null,
+      manager_auth_at: null,
+      phase: "open_pending",
+    })
+    .eq("id", args.sessionId);
+  if (sessErr) throwPg("[acceptEscalationWorkaround:session]", sessErr);
+}
+
+
 

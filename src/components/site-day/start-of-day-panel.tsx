@@ -65,7 +65,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issuesQ = useSiteIssues(sessionId);
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
-  const openRedIssues = openIssues.filter((i) => i.severity === "red");
+  const openRedIssues = openIssues.filter(
+    (i) => i.severity === "red" && i.status !== "workaround_accepted",
+  );
   const hasOpenRed = openRedIssues.length > 0;
 
 
