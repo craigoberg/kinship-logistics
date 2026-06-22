@@ -56,11 +56,17 @@ export function DayCentrePage() {
         .eq("severity", "red")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      const rows = data ?? [];
+      const escMap = await fetchApprovedRedWorkarounds(
+        rows.filter((r) => r.status !== "resolved").map((r) => r.id),
+      );
+      return { rows, escMap };
     },
   });
-  const blockingReds = (openRedsQ.data ?? []).filter(
-    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue),
+  const allReds = openRedsQ.data?.rows ?? [];
+  const escMap = openRedsQ.data?.escMap ?? null;
+  const blockingReds = allReds.filter(
+    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue, escMap),
   );
   const hasBlockingRed = blockingReds.length > 0;
 
