@@ -83,16 +83,20 @@ Flow Graph:
 
 To entirely eliminate Look-and-Feel drift and divergent input validation rules, all interfaces must import canonical UI primitives rather than reproducing isolated variants:
 
-### 4.1 Global Primitive Mappings
+### 4.1 Global Primitive Mappings & Centralized Issue Engine
 
-- PIN Re-Authentication: Must explicitly use PinReauthDialog located within src/components/auth/pin-reauth-dialog.tsx.
-- Escalation Intercepts: Must explicitly utilize the global GlobalEscalationInterceptor located within src/components/dashboard/global-escalation-interceptor.tsx.
+To maintain a single source of truth and eliminate look-and-feel drift, duplicate local form states or isolated textareas are strictly forbidden. All current and future modules must consume these exact global primitives:
 
-### 4.2 Textarea Validation & Character Tracking
+| Pattern / Functional Layer  | Canonical Component / Hook Path                               | Operational Purpose                                                                              |
+| :-------------------------- | :------------------------------------------------------------ | :----------------------------------------------------------------------------------------------- |
+| PIN Re-Authentication       | `src/components/auth/pin-reauth-dialog.tsx`                   | Secure dual-PIN multi-session handshakes.                                                        |
+| Textarea Input & Validation | `src/components/ui/character-counted-textarea.tsx`            | Enforces the 20-char rule, live X/Y tracker, blue progress line, and thick red required borders. |
+| Centralized Issue Panel     | `src/components/issue-engine/issue-declaration-panel.tsx`     | Context-sensitive reentrant engine governing all RYGE checklist gates and refresh halts.         |
+| Mandated Checks Lookup      | `src/hooks/use-mandated-checks.ts` (or data layer equivalent) | Dynamically sources checkpoints via registry scope ('site_day' vs 'pre_trip').                   |
+| High-Trust Escape Hatch     | `src/components/auth/verbal-auth-override-dialog.tsx`         | Renders the auditable verbal authorization bypass for un-reachable manager states.               |
+| Global Escalation Intercept | `src/components/dashboard/global-escalation-interceptor.tsx`  | Real-time broadcast coordinator pop-up handling atomic RPC claims.                               |
 
-- The 20-Character Rule: Every operational issue statement, fault description, resolution note, or escalation clearance text box across ALL modules must strictly enforce a minimum 20-character rule.
-- Visual Character Progress Tokens: The UI wrapping these textareas must explicitly render BOTH a live 'X/Y' character countdown counter AND a solid blue progress bar tracking across the absolute bottom edge of the input box as the user types.
-- Button Suppression: The primary 'Submit', 'Confirm', or 'Finalise' button for the form must remain completely greyed out and disabled until the character count reaches >= 20 and all other required data fields are populated.
+Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
 ### 4.3 Required Field Visual Identifiers
 
