@@ -1,93 +1,87 @@
 ## Goal
-When a Red anomaly is logged in the Day Centre, fire it through the exact same operational-escalation rail that the Bus Walkaround already uses: insert a pending `operational_escalations` row, let the existing `GlobalEscalationInterceptor` pop a non-dismissible Claim modal on every coordinator/manager session, claim it atomically via the existing RPC, and append a `governance.escalation_claimed` ledger receipt with checker name + issue id + manager id.
 
-No new realtime channel and no parallel modal — we reuse the bus-walkaround pipeline (`raiseOperationalEscalation` → `subscribeToEscalationPool` → `claim_operational_escalation` RPC) so the two flows are literally the same code path.
+Mirror the Bus Walk Around handshake on the Day Centre escalation flow:
 
-## Schema — `operational_escalations` (additive)
+1. **Manager** (claimer, e.g. Buffy) types the proposed resolution and submits **with her PIN only**. This does **not** open the centre.
+2. **Opener** (raiser, e.g. Craig) immediately sees a review popup with the Manager's proposal and the GO/NO-GO decision the Manager picked.
+3. Opener can **Accept** (with own PIN) — centre opens (GO) or formally closes (NO-GO).
+4. Opener can **Reject** — escalation is voided, session reverts to `open_pending`, the **RED `site_issue` row stays open and unresolved**. It appears in the Governance Hub open-issue list and in the Day Centre "open issues" view. The centre cannot fully open until that RED is resolved in the Hub; then the normal open-centre workflow proceeds.
 
-New migration `docs/sql/2026-07-08_escalations_source_link.sql`:
-- `ALTER TABLE public.operational_escalations ADD COLUMN source_kind text NULL;`
-  Values: `'bus_walkaround'` (default for existing rows via backfill) or `'site_day_red'`.
-- `ALTER TABLE public.operational_escalations ADD COLUMN source_issue_id uuid NULL;`
-  FK soft-link to `site_issues_register.id`. Nullable so the existing bus rows stay valid.
-- Backfill: `UPDATE public.operational_escalations SET source_kind='bus_walkaround' WHERE source_kind IS NULL;`
-- Idempotent index: `CREATE INDEX IF NOT EXISTS idx_op_escalations_source ON public.operational_escalations (source_kind, source_issue_id);`
+## Current bug
 
-No RLS changes (existing policies already cover `authenticated`).
+`EscalationConsultationModal` (Manager side) flips `operational_escalations.status` straight to `resolved_approved`, which removes the Opener's `EscalationResolutionPanel` and lets `session.phase = 'active_day'` show through. The centre opens with an unresolved RED and the Opener never gets to review or veto the Manager's plan.
 
-## Data layer
+## Changes
 
-### `src/lib/data-store.ts`
-- Extend `OperationalEscalationRow` and `OperationalEscalation` types with `sourceKind: 'bus_walkaround' | 'site_day_red' | null` and `sourceIssueId: string | null`.
-- Update `rowToEscalation` mapper.
-- Extend `raiseOperationalEscalation` to accept optional `sourceKind` and `sourceIssueId`, persist them on insert. Default `sourceKind='bus_walkaround'` so existing callers (the dynamic operational form) keep their semantics unchanged with zero edit.
+### 1. `src/components/dashboard/escalation-consultation-modal.tsx`
 
-### `src/lib/operational-forms.ts`
-- Add `site_day_red → "Day Centre — Red Anomaly"` to `prettyGateLabel`.
+Branch on `escalation.sourceKind === 'site_day_red'`:
 
-## Trigger — `src/components/site-day/log-anomaly-modal.tsx`
-In the existing mutation, after `createIssue(payload)` succeeds AND `values.severity === 'red'`:
-1. Resolve checker name from `getActiveUserProfile()?.fullName ?? "Day Centre Checker"`.
-2. Call `raiseOperationalEscalation({ clearanceId: null, driverName: <checkerName>, vehicleInfo: \`Day Centre · ${issue.issueDescription.slice(0,80)}\`, gateId: "site_day_red", sourceKind: "site_day_red", sourceIssueId: issue.id })`.
-3. Wrap in try/catch — if escalation insert fails, surface a toast but DO NOT undo the issue insert. The lock-phase + window CustomEvent path stays unchanged so existing UX (escalation lock banner) still triggers.
-4. Remove the now-redundant `window.dispatchEvent("yada:escalation", ...)` only if nothing else listens for it (verify with `rg yada:escalation`); otherwise leave as-is.
+- Replace single "Approve & Send Workaround / Deny" with **"Propose GO — Send to Opener"** and **"Propose NO-GO — Send to Opener"**.
+- Add Manager-PIN input. On submit:
+  - Call `submitManagerHandshake({ sessionId, plan: notes, decision, managerStaffId, pin })` (existing function — verifies PIN, persists `manager_plan_text` + `manager_decision` on the site session, does NOT change phase).
+  - Write `resolution_notes = notes` onto `operational_escalations`. **Leave `status = 'claimed'`** so the Opener panel re-renders into the review state.
+  - Ledger entry `escalation.manager_proposed` (YELLOW for GO, RED for NO-GO).
+- Vehicle (`bus_walkaround`) path is unchanged.
 
-The postgres_changes INSERT into `operational_escalations` is what notifies every manager session — no extra broadcast plumbing required.
+Detection of "proposal exists" uses `session.managerDecision != null` (no new column needed).
 
-## Role-gated manager pop-up
+### 2. `src/components/site-day/escalation-resolution-panel.tsx`
 
-Already exists as `GlobalEscalationInterceptor` mounted in `src/routes/__root.tsx` via `RoleAwareGuardians`. Two minimal changes:
+Replace the current dual-PIN form with three states keyed off the live escalation + session:
 
-### `src/routes/__root.tsx`
-In `RoleAwareGuardians`, mount the interceptor only when `role === "coordinator"` (the role normaliser in `data-store.ts` already maps `"manager"` and `"coordinator"` to `"coordinator"`). Drivers no longer see the modal — they never could action it anyway.
+| State | Condition | UI |
+|---|---|---|
+| Awaiting pickup | `status = pending` | (unchanged) "Awaiting Manager pickup…" |
+| Manager consulting | `status = claimed` AND `session.managerDecision == null` | (unchanged) "Escalation claimed by <name>" spinner |
+| **Opener review** (new) | `status = claimed` AND `session.managerDecision != null` | Card titled "Manager <name> proposes **GO** / **NO-GO**" with quoted plan, single Opener-PIN input, **Accept Manager's Plan** + **Reject — Keep Closed** buttons |
 
-### `src/components/dashboard/global-escalation-interceptor.tsx`
-- ContextRow labels become source-aware:
-  - `sourceKind === 'site_day_red'` → labels: **Reported by / Site / Trigger / Raised**.
-  - default → existing **Driver / Vehicle / Failed Gate / Raised**.
-- Button copy stays the same ("CLAIM INCIDENT & OPEN CONSULTATION") — the consultation modal already accepts any escalation row.
+Accept handler:
+- Verify Opener PIN, call `submitLeaderHandshake({ decision: session.managerDecision, leaderStaffId: session.openedById, pin })` → session moves to `active_day` (GO) or `closed_no_go` (NO-GO).
+- Call `resolveOperationalEscalation({ id, approved: session.managerDecision === 'go', managerStaffId: escalation.claimedBy, notes: session.managerPlanText })`.
 
-## Claim audit — `GlobalEscalationInterceptor.handleClaim`
-Inside the `if (result.success)` branch, before opening the consultation modal, append a ledger receipt:
+Reject handler → new `rejectEscalationProposal(...)` (below). RED `site_issue` is left untouched, so it remains open in the Hub and the Day Centre open-issues list.
+
+### 3. `src/lib/data-store.ts`
+
+Add:
 
 ```ts
-await writeToLedger({
-  staff_id: staffId,                                  // manager who claimed
-  category: target.sourceKind === 'site_day_red' ? 'CENTRE' : 'VEHICLE',
-  severity: 'RED',
-  action_type: 'governance.escalation_claimed',
-  gps_lat: gps?.lat ?? null,
-  gps_lng: gps?.lng ?? null,
-  metadata: {
-    escalation_id: target.id,
-    source_kind: target.sourceKind ?? 'bus_walkaround',
-    source_issue_id: target.sourceIssueId,
-    checker_name: target.driverName,                  // reporter for site_day, driver for bus
-    gate_id: target.gateId,
-    manager_staff_id: staffId,
-  },
-});
+rejectEscalationProposal({ escalationId, sessionId, openerStaffId, pin }):
+  - verifyStaffPin(openerStaffId, pin)
+  - UPDATE site_day_sessions SET
+      manager_plan_text = NULL,
+      manager_decision = NULL,
+      manager_auth_staff_id = NULL,
+      manager_auth_at = NULL,
+      phase = 'open_pending'
+    WHERE id = sessionId
+  - UPDATE operational_escalations SET
+      status = 'resolved_denied',
+      resolved_by = openerStaffId,
+      resolved_at = now(),
+      resolution_notes = 'Opener rejected manager proposal: ' || existing notes
+    WHERE id = escalationId
+  - ledger: 'escalation_rejected_by_opener' (RED)
 ```
 
-`tryGetGps()` is already imported via the ledger module; pull it in here as well. Failure is swallowed by `writeToLedger`, so it cannot break the claim flow.
+The RED `site_issues` row is **not** touched — it stays `open`, surfaces in the Governance Hub, and blocks `open_pending → active_day` on the next attempt until resolved there.
 
-## State synchronisation across manager sessions
+### 4. Global interceptor
 
-Already handled by the existing rail:
-- INSERT visible to every subscriber via `subscribeToEscalationPool`.
-- RPC `claim_operational_escalation` flips `status='claimed'` + `claimed_by`/`claimed_at` atomically.
-- The UPDATE replays through the same channel; `GlobalEscalationInterceptor`'s `useEffect` removes the row from its local queue when `status !== 'pending'`. Other managers' modals disappear automatically.
-- The `Exception Hub` and any dashboard listing pending escalations re-render off the same postgres_changes feed.
+No change. After the Manager proposes, escalation remains `claimed`, so the "Claim Incident" popup does not re-pop for other managers.
 
-## Out of scope
+### 5. Open-pending RED block (verify, not necessarily change)
 
-- Replacing the existing `EscalationConsultationModal` UI — it already works for any escalation kind.
-- Showing the originating Red issue details inside the consultation modal (future polish: deep-link to `site_issues_register` row via `sourceIssueId`).
-- Mirroring this for Yellow severities — explicit requirement is Red only.
+I'll verify `StartOfDayPanel` / open-centre workflow refuses to flip phase to `active_day` while any unresolved RED `site_issue` exists. If it doesn't already, I'll add that guard so the user's invariant holds. (Will note in the build turn if a guard is added.)
 
-## Why this shape
+## Database
 
-- One escalation table = one realtime feed = one Claim modal = one ledger event family. No divergent rails to keep in sync.
-- Reuses the proven atomic RPC, so two managers tapping Claim simultaneously cannot double-claim.
-- The new `source_kind` / `source_issue_id` columns are additive and default-friendly, so existing bus-walkaround inserts and queries keep working with no edits to callers besides the new optional args.
-- Role gate is a one-line conditional in the existing `RoleAwareGuardians`, not a new RBAC layer.
+No schema changes. No new column.
+
+## Files touched
+
+- `src/components/dashboard/escalation-consultation-modal.tsx`
+- `src/components/site-day/escalation-resolution-panel.tsx`
+- `src/lib/data-store.ts`
+- (possibly) `src/components/site-day/start-of-day-panel.tsx` — only if the open-RED guard is missing

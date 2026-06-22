@@ -62,6 +62,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issuesQ = useSiteIssues(sessionId);
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
+  const openRedIssues = openIssues.filter((i) => i.severity === "red");
+  const hasOpenRed = openRedIssues.length > 0;
+
 
 
   const openMut = useMutation({
@@ -117,7 +120,22 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       )}
 
+      {hasOpenRed && (
+        <div className="flex items-start gap-2 rounded-md border border-red-600/60 bg-red-600/10 p-3 text-sm text-red-800 dark:text-red-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
+          <p>
+            <span className="font-semibold">
+              {openRedIssues.length} unresolved RED issue
+              {openRedIssues.length === 1 ? "" : "s"}
+            </span>{" "}
+            in the register. The centre cannot be declared safe until every RED
+            is resolved in the Governance Hub.
+          </p>
+        </div>
+      )}
+
       {errorMessage && (
+
         <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           <div className="space-y-2">
@@ -208,7 +226,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
           size="lg"
           className="h-auto justify-start gap-3 bg-green-600 px-5 py-4 text-left text-white hover:bg-green-700 disabled:bg-green-600/40"
           onClick={() => setConfirmOpen(true)}
-          disabled={openMut.isPending || !allChecked}
+          disabled={openMut.isPending || !allChecked || hasOpenRed}
         >
           <ShieldCheck className="h-6 w-6 shrink-0" />
           <span className="flex flex-col items-start">

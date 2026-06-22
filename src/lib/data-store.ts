@@ -4618,3 +4618,61 @@ export async function resolveOperationalEscalation(args: {
   return rowToEscalation(data as OperationalEscalationRow);
 }
 
+/**
+ * Opener veto: the Manager proposed a plan but the Opener does not accept it.
+ *  - Clears the Manager's plan/decision on the session and reverts phase to
+ *    `open_pending` so the Open Centre workflow runs again.
+ *  - Marks the escalation `resolved_denied` with a "rejected by opener" note,
+ *    capturing the original Manager notes for the audit trail.
+ *  - Leaves the underlying RED `site_issues` row UNTOUCHED so it stays in
+ *    the Governance Hub / Open Issues list and continues to block re-opening
+ *    the centre until separately resolved.
+ */
+export async function rejectEscalationProposal(args: {
+  escalationId: string;
+  sessionId: string;
+  openerStaffId: string;
+  pin: string;
+}): Promise<void> {
+  const ok = await verifyStaffPin(args.openerStaffId, args.pin);
+  if (!ok) throw new Error("Opener PIN does not match.");
+
+  const { data: existing, error: readErr } = await supabase
+    .from("operational_escalations")
+    .select("resolution_notes")
+    .eq("id", args.escalationId)
+    .single();
+  if (readErr) throwPg("[rejectEscalationProposal:read]", readErr);
+  const priorNotes =
+    (existing as { resolution_notes: string | null } | null)?.resolution_notes ?? "";
+
+  const { error: sessErr } = await supabase
+    .from("site_day_sessions")
+    .update({
+      manager_plan_text: null,
+      manager_decision: null,
+      manager_auth_staff_id: null,
+      manager_auth_at: null,
+      phase: "open_pending",
+    })
+    .eq("id", args.sessionId);
+  if (sessErr) throwPg("[rejectEscalationProposal:session]", sessErr);
+
+  const newNotes = `Opener rejected manager proposal: ${priorNotes || "(no prior notes)"}`;
+  const { error: escErr } = await supabase
+    .from("operational_escalations")
+    .update({
+      status: "resolved_denied",
+      resolved_by: args.openerStaffId,
+      resolved_at: new Date().toISOString(),
+      resolution_notes: newNotes,
+    })
+    .eq("id", args.escalationId);
+  if (escErr) throwPg("[rejectEscalationProposal:esc]", escErr);
+
+  // Ledger write happens in the caller (component) to avoid a circular
+  // import between data-store and lib/api/ledger.
+
+}
+
+
