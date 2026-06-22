@@ -62,20 +62,32 @@ const reporterId = user?.id ?? profile?.staffId ?? "";
 
 ---
 
-## 3. The Single-Rail Escalation Matrix
+## 3. The Single-Rail Escalation Matrix (Asynchronous Verbal-Consultation Model)
 
 ### 3.1 Architecture Rules
 
-All high-severity anomalies, RED states, and manager-level interventions must converge on a singular, unified architectural pathway. Fragmented alert schemas, parallel notification tables, or local-only component states are strictly forbidden.
+All high-severity anomalies, RED states, and manager-level interventions converge on a single, asynchronous, single-user pipeline. There is no longer a synchronous multi-device handshake; field operations are protected from network dropouts by writing the consultation receipt locally and routing the open ticket through the unified Governance Hub feed.
 
 Flow Graph:
-[Subsystem Flags RED] ---> Inserts to public.operational_escalations
----> Triggers Server-Side RPC (claim_operational_escalation)
----> Broadcasts globally via a single Postgres Realtime Feed
+[Subsystem Flags RED]
+  --> Local operator opens `VerbalAuthOverrideDialog` (action_type = `RED_VERBAL_WORKAROUND`)
+  --> Operator captures Authorising Manager, ≥20-char workaround plan, and their own PIN
+  --> Atomic write to `public.operational_ledger` (immutable receipt, GPS captured)
+  --> Open ticket inserted into the appropriate active-issues register
+        - Day Centre  → `public.site_issues_register` (severity = `red`)
+        - Manifest    → `public.operational_incidents` (severity = `sev1`)
+      with `issue_description` prefixed `"[VERBAL WORKAROUND] …"` so the
+      Governance Hub renders it as **Open — Operating via Verbal Workaround**
+  --> Local module unblocks IMMEDIATELY; no realtime broadcast, no remote
+      acknowledgment, no driver/manager handshake required
 
-- Deduplication & Multi-Grounding: An asset (vehicle or facility room) is a single logical entity. If multiple concurrent RED errors are logged against the same target, the coordinator workspace deduplicates the active panel view to show only the latest active denial.
-- Atomic Super-Resolution: When a Manager acts on an escalation, the single resolving transaction must flip the primary record to resolved_approved and automatically mark all stale, older pending denials for that specific asset target as resolved_superseded. This guarantees assets cannot immediately re-ground themselves on historic, unresolved cache parameters.
-- The Claim Guarantee: Reusing the claim_operational_escalation RPC ensures atomic concurrency control. If two managers tap "Claim" at the same moment, the database locks the row cleanly; one wins, and the other's modal instantly vanishes globally without a race condition.
+- Single Source of Truth: The ledger row is the audit artefact; the source register row is the operational tracker. Both are written in the same submit transaction. If the ledger write fails, the source row is never inserted.
+- Database Safeguard: To flag verbal-workaround records for the Hub without triggering UUID-shape errors on the `owner` column, the sentinel is always carried inside `issue_description` (prefix `"[VERBAL WORKAROUND] "`), never in `owner`.
+- Multi-Device Realtime Retired: The `RedHandshakeWaitingPanel`, `subscribeToEscalationPool` polling, and the `GlobalEscalationInterceptor` mount have all been removed from the active route tree. The legacy `operational_escalations` table remains in place for historic records and existing manager grounding logic (e.g. `getAssetGroundedStatus`); new RED anomalies do NOT write to it.
+- Single-Rail Hub Routing: The Governance Hub (`UnifiedIssuesPanel`) reads from `site_issues_register` + `operational_incidents` + `compliance_assets` and presents every `[VERBAL WORKAROUND]` ticket alongside ordinary Yellow workarounds, with "Resolve" writing the closing ledger receipt.
+- Preserved Fallbacks: `DynamicOperationalForm.tsx`, `RedHandshakeWaitingPanel` historical migrations, `GlobalEscalationInterceptor.tsx`, and the `operational_escalations` schema remain on disk as inactive fallbacks per the project's preservation policy. They MUST NOT be re-mounted without an explicit architectural review.
+
+
 
 ---
 

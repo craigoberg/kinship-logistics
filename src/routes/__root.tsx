@@ -16,7 +16,8 @@ import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getActiveUserRole } from "../lib/data-store";
 import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
-import { GlobalEscalationInterceptor } from "../components/dashboard/global-escalation-interceptor";
+// Multi-device handshake interceptor retired — single-user verbal model now drives all RED handling.
+// (GlobalEscalationInterceptor file preserved on disk as inactive fallback.)
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
 
@@ -147,11 +148,11 @@ function RoleAwareGuardians() {
   const role =
     typeof window !== "undefined" ? getActiveUserRole() : null;
 
-  // Coordinators bypass the driver re-hydration guardian entirely — their
-  // tabs must stay anchored to /dashboard, /admin, etc.
+  // Multi-device RED interceptor removed — every RED now flows through the
+  // canonical VerbalAuthOverrideDialog locally. Drivers keep the route
+  // rehydration guardian; everyone keeps the global incident intake drawer.
   return (
     <>
-      {role === "coordinator" && <GlobalEscalationInterceptor />}
       {role === "driver" && <RouteRehydrationGuardian />}
       <GlobalIncidentIntakeDrawer />
     </>

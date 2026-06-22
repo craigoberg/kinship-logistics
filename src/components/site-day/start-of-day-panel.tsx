@@ -64,6 +64,11 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [verbalOverrideOpen, setVerbalOverrideOpen] = useState(false);
+  // Pending RED draft from LogAnomalyModal → opens the canonical Verbal dialog.
+  const [verbalPending, setVerbalPending] = useState<{
+    description: string;
+    owner: "internal" | "council";
+  } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
@@ -435,13 +440,55 @@ export function StartOfDayPanel({ sessionId }: Props) {
       <LogAnomalyModal
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
-        sessionId={sessionId}
+        context={{
+          kind: "site-day",
+          sessionId,
+          onRedRequested: (description, owner) => {
+            setVerbalPending({ description, owner });
+          },
+        }}
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
       />
 
-      {/* Verbal Authorization Override — high-trust escape hatch. */}
+      {/* Canonical RED path — Verbal Consultation & Log */}
+      <VerbalAuthOverrideDialog
+        open={!!verbalPending}
+        onOpenChange={(o) => {
+          if (!o) setVerbalPending(null);
+        }}
+        ledgerCategory="CENTRE"
+        subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
+        sourceId={sessionId}
+        actionType="RED_VERBAL_WORKAROUND"
+        titleOverride="RED Verbal Consultation & Log"
+        descriptionOverride="A RED Day Centre anomaly was identified. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. The ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and the session unblocks."
+        onAccepted={async ({ managerName, reason }) => {
+          if (!verbalPending) return;
+          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          try {
+            const { createIssue } = await import("@/lib/api/site-issues");
+            await createIssue({
+              sessionId,
+              severity: "red",
+              issueDescription: prefixed,
+              workaroundPlan: reason,
+              owner: verbalPending.owner,
+            });
+            queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
+            queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+          } catch (err) {
+            console.error("[StartOfDayPanel] verbal-workaround issue insert failed", err);
+            toast.error("Verbal workaround logged to ledger, but Hub sync failed", {
+              description: (err as Error).message,
+            });
+          }
+          setVerbalPending(null);
+        }}
+      />
+
+      {/* Verbal Authorization Override — legacy "open day despite blockers" escape hatch. */}
       <VerbalAuthOverrideDialog
         open={verbalOverrideOpen}
         onOpenChange={setVerbalOverrideOpen}
@@ -449,9 +496,6 @@ export function StartOfDayPanel({ sessionId }: Props) {
         subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
         sourceId={sessionId}
         onAccepted={() => {
-          // Override is captured; let the operator try Open again.
-          // The blocking Red issue itself remains until Governance signs it
-          // off, but the audit trail records the verbal authorization.
           setConfirmOpen(true);
         }}
       />

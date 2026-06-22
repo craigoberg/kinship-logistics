@@ -56,7 +56,6 @@ import type {
   AssetCheckpoint,
   AssetDailyClearance,
   TodayManifestSummary,
-  OperationalEscalation,
 } from "@/lib/data-store";
 import {
   listTransportAssets,
@@ -71,32 +70,15 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
+// RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
+// through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
-import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
-import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
-import { subscribeToEscalationPool } from "@/lib/data-store";
-import { supabase } from "@/integrations/supabase/client";
+import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
-  beforeLoad: async () => {
-    // This runs before the component mounts, preventing the "flicker".
-    // Resolve the active driver from local session; fall back to the
-    // shared default UUID when no staff member is signed in locally.
-    const driverId = getStaffId() || DEFAULT_STAFF_UUID;
-    try {
-      const escalation = await getActiveEscalation(driverId);
-      console.log("Guard check result:", escalation);
-      return { escalation };
-    } catch (error) {
-      console.error("[manifest.beforeLoad] getActiveEscalation failed:", error);
-      // Never hard-crash the route on a database anomaly — degrade to
-      // "no active escalation" and let the page render normally.
-      return { escalation: null };
-    }
-  },
   head: () => ({
     meta: [
       { title: "Active Driver Manifest — Yada Connect" },
@@ -110,51 +92,12 @@ export const Route = createFileRoute("/manifest")({
 });
 
 function ManifestPage() {
-  const { escalation: initialEscalation } = Route.useRouteContext();
-  const queryClient = useQueryClient();
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
 
-  // 🛡️ LIVE DRIVER-SIDE REHYDRATION
-  // The route-context snapshot from `beforeLoad` is only correct at entry.
-  // If a manager remotely claims/raises an escalation for this driver
-  // while they're sitting on the manifest, re-poll + realtime-subscribe so
-  // the screen swaps to the handshake panel without a manual refresh.
-  // Realtime (subscribeToEscalationPool below) drives freshness; background
-  // polling + focus refetches are OFF so they cannot wipe PINs / typing while
-  // the driver waits for the manager.
-  const liveEscQ = useQuery({
-    queryKey: ["manifest-active-escalation", driverStaffId],
-    queryFn: () => getActiveEscalation(driverStaffId),
-    initialData: initialEscalation,
-    refetchOnWindowFocus: false,
-    staleTime: 60_000,
-  });
-  useEffect(() => {
-    const off = subscribeToEscalationPool(({ row }) => {
-      // Only react when the row concerns the current driver — name match is
-      // the same heuristic getActiveEscalation uses.
-      const r = row as { driver_name?: string | null } | null;
-      if (!r) return;
-      queryClient.invalidateQueries({
-        queryKey: ["manifest-active-escalation", driverStaffId],
-      });
-    });
-    return off;
-  }, [driverStaffId, queryClient]);
-
-  const escalation = liveEscQ.data ?? null;
-
-  // 🛡️ CRITICAL REHYDRATION SHIELD: rehydrate the FULL escalation form for
-  // the driver who raised it (vehicle + accumulated issues + live state
-  // machine) before any further hooks run.
-  if (escalation) {
-    return (
-      <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
-        <EscalationRehydrationGate escalation={escalation} />
-      </div>
-    );
-  }
-
+  // Multi-device handshake rehydration removed — RED issues now resolve
+  // locally via VerbalAuthOverrideDialog inside IssueAccumulatorPanel. No
+  // realtime escalation polling, no EscalationRehydrationGate, no waiting
+  // panel branch.
 
   const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
 
@@ -240,35 +183,10 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
 
-  /* ------------------------------------------------------------------
-     🔒 GLOBAL SYSTEM LOCKS: Hoisted directly out of the wizard loop 
-     ------------------------------------------------------------------ */
-  const [globalEscalation, setGlobalEscalation] = useState<OperationalEscalation | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_escalation");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  const [globalHandshake, setGlobalHandshake] = useState<{
-    clearance: AssetDailyClearance;
-    issues: any[];
-  } | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_handshake");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  });
-
-  const escalatedAsset = useMemo<TransportAsset | null>(() => {
-    if (typeof window !== "undefined") {
-      const saved = localStorage.getItem("yada_global_escalation_asset");
-      return saved ? JSON.parse(saved) : null;
-    }
-    return null;
-  }, [globalEscalation, globalHandshake]);
+  // Global escalation/handshake locks removed — RED issues no longer take
+  // over the wizard; the verbal-consultation dialog inside
+  // IssueAccumulatorPanel records the workaround and lets the driver keep
+  // rolling.
 
   // Standard setup configuration states
   const [step, setStep] = useState<InitStep>(() => {
@@ -331,59 +249,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
     setStep("clearance");
   };
 
-  /* ------------------------------------------------------------------
-     🛡️ CRITICAL REHYDRATION SHIELD: Short circuit layout if locked
-     ------------------------------------------------------------------ */
-  if (globalEscalation && escalatedAsset) {
-    return (
-      <div className="flex-1 overflow-y-auto p-4">
-        <RedHandshakeWaitingPanel
-          asset={escalatedAsset}
-          driverName={driverName}
-          escalationId={globalEscalation.id}
-          onAuthorized={() => {
-            localStorage.removeItem("yada_global_escalation");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalEscalation(null);
-            setClearanceOk(true);
-            setStep("event");
-          }}
-          onBack={() => {
-            localStorage.removeItem("yada_global_escalation");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalEscalation(null);
-            setStep("vehicle");
-          }}
-        />
-      </div>
-    );
-  }
-
-  if (globalHandshake && escalatedAsset) {
-    return (
-      <div className="flex-1 overflow-y-auto p-4">
-        <RedHandshakeWaitingPanel
-          asset={escalatedAsset}
-          driverName={driverName}
-          clearance={globalHandshake.clearance}
-          issues={globalHandshake.issues}
-          onAuthorized={() => {
-            localStorage.removeItem("yada_global_handshake");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalHandshake(null);
-            setClearanceOk(true);
-            setStep("event");
-          }}
-          onBack={() => {
-            localStorage.removeItem("yada_global_handshake");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalHandshake(null);
-            setStep("vehicle");
-          }}
-        />
-      </div>
-    );
-  }
+  // Multi-device handshake short-circuit branches removed.
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
@@ -452,17 +318,6 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
             setStep("event");
           }}
           onBack={() => setStep("vehicle")}
-          onEscalated={(esc) => {
-            localStorage.setItem("yada_global_escalation", JSON.stringify(esc));
-            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
-            setGlobalEscalation(esc);
-          }}
-          onRedHandshake={(clearance, issues) => {
-            const bundleState = { clearance, issues };
-            localStorage.setItem("yada_global_handshake", JSON.stringify(bundleState));
-            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
-            setGlobalHandshake(bundleState);
-          }}
         />
       )}
 
@@ -481,8 +336,6 @@ interface ClearanceGateProps {
   dateStr: string;
   onCleared: () => void;
   onBack: () => void;
-  onEscalated: (esc: OperationalEscalation) => void;
-  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
 }
 
 function ClearanceGate({
@@ -491,8 +344,6 @@ function ClearanceGate({
   dateStr,
   onCleared,
   onBack,
-  onEscalated,
-  onRedHandshake,
 }: ClearanceGateProps) {
   const existingQ = useQuery<AssetDailyClearance | null>({
     queryKey: ["asset-clearance", asset.id, dateStr],
@@ -572,8 +423,6 @@ function ClearanceGate({
       dateStr={dateStr}
       onPassed={onCleared}
       onBack={onBack}
-      onEscalated={onEscalated}
-      onRedHandshake={onRedHandshake}
     />
   );
 }
@@ -584,16 +433,12 @@ function IssueAccumulatorGate({
   dateStr,
   onPassed,
   onBack,
-  onEscalated,
-  onRedHandshake,
 }: {
   asset: TransportAsset;
   startOdometer: number;
   dateStr: string;
   onPassed: () => void;
   onBack: () => void;
-  onEscalated: (esc: OperationalEscalation) => void;
-  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
@@ -607,7 +452,6 @@ function IssueAccumulatorGate({
       driverName={driverName}
       onCleared={onPassed}
       onBack={onBack}
-      onRedRaised={onEscalated}
     />
   );
 }
@@ -1636,124 +1480,5 @@ function CancelTripButton({ tripId }: { tripId: string }) {
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  );
-}
-
-/* -------------------- Escalation Rehydration Gate -------------------- */
-
-/**
- * Drops the driver back into the FULL escalation form after a refresh.
- * Resolves the asset from `escalation.vehicleInfo`, rehydrates the
- * accumulated walkaround issues from `operational_incidents`, then renders
- * the live `RedHandshakeWaitingPanel` (with `escalationId`) so the
- * three-phase state machine (pending → claimed → approved → driver PIN) is
- * fully re-armed.
- */
-function EscalationRehydrationGate({ escalation }: { escalation: OperationalEscalation }) {
-  const dateStr = useMemo(() => todayDateStr(), []);
-
-  // Defensive: `vehicleInfo` is free-text and can be null/empty for legacy
-  // rows. Guard every `.split` / lookup so this gate cannot crash the route
-  // (which would dump the user onto the global "This page didn't load" page).
-  const vehicleInfo = escalation.vehicleInfo ?? "";
-  const vehicleParts = vehicleInfo.split(" · ");
-  const vehicleName = vehicleParts[0] || "Vehicle";
-  const vehiclePlate = vehicleParts[1] || "—";
-
-  const assetsQ = useQuery({
-    queryKey: ["transport-assets"],
-    queryFn: () => listTransportAssets(),
-    staleTime: 5 * 60_000,
-  });
-
-  const asset = useMemo<TransportAsset | null>(() => {
-    const list = assetsQ.data ?? [];
-    if (!vehicleInfo) return null;
-    return list.find((a) => `${a.name} · ${a.regoPlate}` === vehicleInfo) ?? null;
-  }, [assetsQ.data, vehicleInfo]);
-
-  const issuesQ = useQuery({
-    queryKey: ["manifest-escalation-issues", asset?.id, dateStr],
-    enabled: !!asset?.id,
-    staleTime: 60_000,
-    refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("operational_incidents")
-        .select("id, severity, description, created_at")
-        .eq("vehicle_id", asset!.id)
-        .eq("incident_type", "mechanical")
-        .gte("created_at", `${dateStr}T00:00:00.000Z`)
-        .order("created_at", { ascending: true });
-      if (error) throw error;
-      const out: Array<{
-        id: string;
-        incidentId?: string;
-        severity: "red" | "yellow" | "green";
-        text: string;
-      }> = [];
-      for (const r of data ?? []) {
-        const sevRaw = String((r as { severity?: string }).severity ?? "");
-        const sev: "red" | "yellow" | "green" | null =
-          sevRaw === "sev1" ? "red" : sevRaw === "sev2" ? "yellow" : sevRaw === "sev3" ? "green" : null;
-        if (!sev) continue;
-        const desc = String((r as { description?: string }).description ?? "");
-        const text = desc.replace(/^\[Pre-trip\]\s*/i, "");
-        out.push({
-          id: String((r as { id?: string }).id ?? ""),
-          incidentId: String((r as { id?: string }).id ?? ""),
-          severity: sev,
-          text,
-        });
-      }
-      return out;
-    },
-  });
-
-  if (assetsQ.isLoading || (asset && issuesQ.isLoading)) {
-    return (
-      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
-        <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-        <span className="text-sm">Rehydrating active escalation…</span>
-      </div>
-    );
-  }
-
-  const safeAsset: TransportAsset =
-    asset ??
-    ({
-      id: escalation.id,
-      name: vehicleName,
-      regoPlate: vehiclePlate,
-      passengerCapacity: 0,
-      isActive: true,
-    } as unknown as TransportAsset);
-
-  const handleClose = () => {
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("yada_global_escalation");
-      localStorage.removeItem("yada_global_escalation_asset");
-      window.location.reload();
-    }
-  };
-
-  return (
-    <>
-      {/* Testing visibility strip — short escalation id + status + owner */}
-      <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-mono text-amber-900 dark:text-amber-200">
-        ESC {escalation.id.slice(0, 8)} · {escalation.status}
-        {escalation.claimedBy ? ` · claimed by ${escalation.claimedBy.slice(0, 8)}` : " · unclaimed"}
-        {escalation.operatorAcknowledgedAt ? " · op-ack ✓" : ""}
-      </div>
-      <RedHandshakeWaitingPanel
-        asset={safeAsset}
-        driverName={escalation.driverName || "Driver"}
-        escalationId={escalation.id}
-        escalation={escalation}
-        issues={issuesQ.data ?? []}
-        onAuthorized={handleClose}
-        onBack={handleClose}
-      />
-    </>
   );
 }
