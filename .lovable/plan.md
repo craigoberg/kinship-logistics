@@ -1,37 +1,40 @@
-## Updated plan (adds Buffy awareness popup on top of approved plan)
+## Problem
 
-Everything from the previous approved plan stays — fix greyed Accept/Reject buttons (`disabled={busy || !pinValid}`), reject-reason mini popup with Guardrails min-10-chars / red-border validation, and `rejectEscalationProposal({ reason })` appending `[REJECTED] {reason}` to `resolution_notes`.
+When Craig (Opener) clicks **Confirm Reject** in the rejection-reason dialog, nothing happens. The red validation border disappears (so the 10-char check passed) but the mutation silently fails.
 
-### New addition — Manager awareness popup
+### Root cause
 
-When Craig rejects, the existing flow already sets the escalation to `resolved_denied` with the `[REJECTED] …` note. We just need Buffy (the manager who claimed it) to see that, acknowledge, and move on. No DB action beyond what already happens.
+Looking at the live `site_day_sessions` row in the console logs:
 
-#### Where it lives
+```
+opened_by_id: null
+phase: "escalated_lock"
+```
 
-Inside the existing `GlobalEscalationInterceptor` — it already runs on every page, already knows `currentStaffId`, and already has realtime subscription wiring. Adding the rejection awareness here keeps everything on the single-rail escalation pipeline (matches the Guardrails "single-rail" rule).
+The escalation was raised before the Start-of-Day handshake completed, so `session.openedById` is `null`. In `escalation-resolution-panel.tsx` both mutations do:
 
-#### How it triggers
+```ts
+const leaderStaffId = session.openedById;
+if (!leaderStaffId) throw new Error("Session has no recorded opener.");
+```
 
-1. New query `myRejectedAwaitingAck` — fetches `operational_escalations` where `claimed_by = currentStaffId`, `status = "resolved_denied"`, `resolution_notes` starts with `[REJECTED]`, filtered against a `localStorage` set of already-acknowledged IDs so a page refresh doesn't re-show it forever. Runs on mount and on realtime updates.
-2. Realtime: piggyback on `subscribeToEscalationPool` — when an UPDATE row arrives with `status === "resolved_denied"`, `claimed_by === currentStaffId`, and `resolution_notes` starts with `[REJECTED]`, push it into a `rejectedQueue` state.
-3. Render a new `<Dialog>` (sibling to the existing Claim modal) showing one rejection at a time. Non-dismissible until acknowledged.
+So `rejectMutation.mutateAsync()` throws immediately → `onError` → `toast.error`. The toast is the only visible signal and Craig didn't notice it. The same trap exists on the Accept path.
 
-#### Modal contents (read-only, awareness only)
+The opener identity should come from **the currently signed-in staff actually using the panel** (Craig), not from a session field that may be null when the RED hit before opening.
 
-- **Title:** "Opener Rejected Your Proposal" (rose-tinted header)
-- **Body:**
-  - "Reported by" / "Site" / "Trigger" — same `ContextRow` style as the Claim modal.
-  - **Your proposal** block — shows whatever the manager originally sent (parsed from the second half of `resolution_notes`, i.e. the text after `— Manager proposal was:` when present).
-  - **Opener's reason** block — the `[REJECTED] {text}` portion.
-  - Amber callout: "This RED issue remains OPEN in the Governance Hub. Decide your next step there — no further action is taken automatically."
-- **Single button:** "Acknowledged" (blue). On click: push the escalation id into the `acknowledged-rejections` localStorage set, drop it from `rejectedQueue`, close.
+## Fix
 
-#### Files touched
+### `src/components/site-day/escalation-resolution-panel.tsx`
 
-- `src/components/site-day/escalation-resolution-panel.tsx` — disabled logic, reject-reason mini Dialog, mutation arg (from previous plan).
-- `src/lib/data-store.ts` — `rejectEscalationProposal({ reason })` formatting (from previous plan).
-- `src/components/dashboard/global-escalation-interceptor.tsx` — new rejection-awareness Dialog + query + realtime branch + localStorage ack set.
+1. Import `getActiveUserProfile` from `@/lib/data-store`.
+2. Compute `const actorStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;` once near the other derived state.
+3. In **both** `acceptMutation` and `rejectMutation`, replace `const leaderStaffId = session.openedById;` with `const leaderStaffId = actorStaffId;` and keep the existing `if (!leaderStaffId) throw ...` guard (message updated to "No signed-in staff to authorise rejection — please sign in again.").
+4. Disable Accept & Reject buttons (and add a small muted hint under the PIN field) when `!actorStaffId`, so the failure mode is visible up-front instead of only via a toast after click.
 
-#### Verification
+No business-logic change: PIN is still verified against that staff id, the RED issue still stays open, phase still reverts to `open_pending`, and notes are still appended with `[REJECTED] …`.
 
-Buffy proposes GO → Craig types PIN → buttons un-grey → Craig clicks Reject → mini popup → types ≥10-char reason → confirms → Centre returns to Open Pending, RED issue stays open. Within ~1s on Buffy's screen, an "Opener Rejected Your Proposal" dialog appears with Craig's reason and the "RED issue remains OPEN in the Governance Hub" callout. Buffy clicks Acknowledged → dialog closes, never reappears for that row even after refresh.
+### Files touched
+
+- `src/components/site-day/escalation-resolution-panel.tsx` (≈10 line edit)
+
+No DB / RPC / data-store changes required.

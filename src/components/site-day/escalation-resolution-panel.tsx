@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/site-day-sessions";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import {
+  getActiveUserProfile,
   getEscalationBySourceIssue,
   getStaffDisplayName,
   rejectEscalationProposal,
@@ -100,10 +101,10 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       if (!/^\d{4,6}$/.test(openerPin))
         throw new Error("Enter your 4–6 digit Opener PIN.");
 
-      const leaderStaffId = session.openedById;
+      const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
         throw new Error(
-          "Session has no recorded opener — cannot complete leader sign-off.",
+          "No signed-in staff to authorise this action — please sign in again.",
         );
 
       const ok = await verifyStaffPin(leaderStaffId, openerPin);
@@ -174,9 +175,9 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       if (!escalation) throw new Error("No escalation to reject.");
       if (!/^\d{4,6}$/.test(openerPin))
         throw new Error("Enter your 4–6 digit Opener PIN.");
-      const leaderStaffId = session.openedById;
+      const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
-        throw new Error("Session has no recorded opener.");
+        throw new Error("No signed-in staff to authorise rejection — please sign in again.");
 
       await rejectEscalationProposal({
         escalationId: escalation.id,
@@ -280,6 +281,8 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const isGo = decision === "go";
   const busy = acceptMutation.isPending || rejectMutation.isPending;
   const pinValid = /^\d{4,6}$/.test(openerPin);
+  const actorStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
+  const canAct = !!actorStaffId;
 
   return (
     <Card
@@ -361,13 +364,19 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
             Enter your 4–6 digit Opener PIN
           </span>
         )}
+        {!canAct && (
+          <span className="block text-[11px] font-semibold text-rose-600">
+            No signed-in staff detected — sign in again before accepting or rejecting.
+          </span>
+        )}
       </div>
+
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
         <Button
           type="button"
           variant="outline"
-          disabled={busy || !pinValid}
+          disabled={busy || !pinValid || !canAct}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
@@ -385,7 +394,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         </Button>
         <Button
           type="button"
-          disabled={busy || !pinValid}
+          disabled={busy || !pinValid || !canAct}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
