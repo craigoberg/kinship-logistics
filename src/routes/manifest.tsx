@@ -606,8 +606,6 @@ function IssueAccumulatorGate({
   );
 }
 
-// Keep `IssueAccumulatorPanel` imported (legacy backwards compat).
-void IssueAccumulatorPanel;
 
 function FastPassBanner({
   asset,
