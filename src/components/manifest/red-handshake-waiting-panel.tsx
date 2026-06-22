@@ -205,13 +205,22 @@ function ClearanceWaitingPanel({
 
   return (
     <Card className="border-2 border-red-600/70 bg-red-600/5 p-5">
-      <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
-        <ShieldAlert className="h-6 w-6" />
-        <h2 className="text-lg font-extrabold">Awaiting Manager Joint Review</h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
+          <ShieldAlert className="h-6 w-6" />
+          <h2 className="text-lg font-extrabold">Awaiting Manager Joint Review</h2>
+        </div>
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-200">
+          <ElapsedTimer
+            since={live.createdAt}
+            label={managerCleared ? "Approved" : "Waiting"}
+          />
+        </div>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {asset.name} · {asset.regoPlate} · Driver {driverName}
       </p>
+
 
       <div className="mt-4 rounded-md border border-border bg-background/60 p-3">
         <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
@@ -340,6 +349,52 @@ function EscalationWaitingPanel({
     }
     setSubmitting(true);
     try {
+      const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+
+      // 1) Verify the driver's PIN before mutating anything.
+      const pinOk = await verifyStaffPin(driverStaffId, pin);
+      if (!pinOk) {
+        throw new Error("Driver PIN does not match this account.");
+      }
+
+      // 2) Ledger receipt FIRST so the NDIS trail exists even if the
+      //    escalation update races or fails.
+      try {
+        const gps = await tryGetGps();
+        await writeToLedger({
+          staff_id: driverStaffId,
+          category: "VEHICLE",
+          severity: "RED",
+          action_type: "escalation.operator_acknowledged",
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
+          metadata: {
+            escalation_id: escalationId,
+            asset_id: asset.id,
+            vehicle_info: `${asset.name} · ${asset.regoPlate}`,
+            driver_name: driverName,
+            manager_notes: live?.resolutionNotes ?? null,
+            acknowledged_by_staff_id: driverStaffId,
+          },
+        });
+      } catch (ledgerErr) {
+        console.warn(
+          "[EscalationWaitingPanel] ledger write failed (continuing)",
+          ledgerErr,
+        );
+      }
+
+      // 3) Flip the escalation row to "operator acknowledged" so the
+      //    manifest shield drops and the Hub row clears.
+      const { error: updErr } = await supabase
+        .from("operational_escalations")
+        .update({
+          operator_acknowledged_at: new Date().toISOString(),
+          operator_acknowledged_by: driverStaffId,
+        })
+        .eq("id", escalationId);
+      if (updErr) throw updErr;
+
       toast.success("Workaround declaration accepted", {
         description: "Driver PIN confirmed — you are cleared to roll.",
       });
@@ -352,6 +407,7 @@ function EscalationWaitingPanel({
       setSubmitting(false);
     }
   };
+
 
   if (denied) {
     return (
