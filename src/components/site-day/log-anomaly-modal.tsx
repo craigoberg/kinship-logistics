@@ -113,8 +113,10 @@ export function LogAnomalyModal({
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
     form;
 
-  const requiresWorkaround =
-    values.severity === "yellow" || values.severity === "red";
+  // Workaround is mandatory only for Yellow. Red issues are escalated and the
+  // Manager supplies the workaround / NO-GO reason during the handshake.
+  const requiresWorkaround = values.severity === "yellow";
+  const showWorkaround = requiresWorkaround;
   const descriptionOk = values.description.trim().length > 0;
   const workaroundOk =
     !requiresWorkaround || values.workaround.trim().length > 0;
@@ -123,11 +125,10 @@ export function LogAnomalyModal({
     const errs: string[] = [];
     if (!descriptionOk) errs.push("Issue Description is required.");
     if (!workaroundOk)
-      errs.push(
-        `${values.severity === "red" ? "Red" : "Yellow"} severity requires a Workaround Plan.`,
-      );
+      errs.push("Yellow severity requires a Workaround Plan.");
     return errs;
-  }, [descriptionOk, workaroundOk, values.severity]);
+  }, [descriptionOk, workaroundOk]);
+
 
   const mutation = useMutation({
     mutationFn: async () => {
