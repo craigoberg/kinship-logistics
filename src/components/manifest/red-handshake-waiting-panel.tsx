@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Loader2, PhoneCall, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 
 import type {
   AssetDailyClearance,
