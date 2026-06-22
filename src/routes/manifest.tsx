@@ -143,14 +143,17 @@ function ManifestPage() {
 
   const escalation = liveEscQ.data ?? null;
 
-  // 🛡️ CRITICAL REHYDRATION SHIELD: Block before any further hooks if escalation is active
+  // 🛡️ CRITICAL REHYDRATION SHIELD: rehydrate the FULL escalation form for
+  // the driver who raised it (vehicle + accumulated issues + live state
+  // machine) before any further hooks run.
   if (escalation) {
     return (
       <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
-        <RedHandshakeWaitingPanel escalation={escalation} />
+        <EscalationRehydrationGate escalation={escalation} />
       </div>
     );
   }
+
 
   const { data: bundle, isLoading: isTripLoading } = useActiveTrip();
 
