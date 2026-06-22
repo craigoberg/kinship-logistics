@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Loader2, PhoneCall, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
@@ -8,6 +8,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 
 import type {
   AssetDailyClearance,
@@ -315,6 +316,7 @@ function EscalationWaitingPanel({
   const [live, setLive] = useState<OperationalEscalation | null>(null);
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [verbalOpen, setVerbalOpen] = useState(false);
 
   useEffect(() => {
     const off = subscribeToEscalation(escalationId, (next) => setLive(next));
@@ -472,6 +474,16 @@ function EscalationWaitingPanel({
         a few minutes, call the office on the direct line.
       </div>
 
+      <Button
+        type="button"
+        variant="outline"
+        className="mt-3 w-full border-amber-500/60 bg-amber-500/10 text-amber-800 hover:bg-amber-500/20 dark:text-amber-200"
+        onClick={() => setVerbalOpen(true)}
+      >
+        <PhoneCall className="mr-1.5 h-4 w-4" />
+        Manager unreachable — record verbal override
+      </Button>
+
       <button
         type="button"
         onClick={onBack}
@@ -479,6 +491,15 @@ function EscalationWaitingPanel({
       >
         ← Back to vehicle pick (cancels this attempt)
       </button>
+
+      <VerbalAuthOverrideDialog
+        open={verbalOpen}
+        onOpenChange={setVerbalOpen}
+        ledgerCategory="VEHICLE"
+        subjectLabel={`${asset.name} · ${asset.regoPlate}`}
+        sourceId={escalationId}
+        onAccepted={onAuthorized}
+      />
     </Card>
   );
 }
