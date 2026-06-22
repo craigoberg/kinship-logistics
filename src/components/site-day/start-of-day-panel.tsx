@@ -63,6 +63,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [verbalOverrideOpen, setVerbalOverrideOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
