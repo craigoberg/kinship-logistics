@@ -42,10 +42,10 @@ export function EscalationConsultationModal({ escalation, onClose }: Props) {
     queryFn: async () => {
       if (!escalation?.sourceIssueId) return null;
       const { data, error } = await supabase
-        .from("site_issues")
+        .from("site_issues_register")
         .select("session_id")
         .eq("id", escalation.sourceIssueId)
-        .single();
+        .maybeSingle();
       if (error) throw error;
       return (data as { session_id: string } | null)?.session_id ?? null;
     },
