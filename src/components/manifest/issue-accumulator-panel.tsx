@@ -409,18 +409,54 @@ export function IssueAccumulatorPanel({
           asset: { id: asset.id, name: asset.name, regoPlate: asset.regoPlate },
           driverName,
           dateStr,
-          onLogged: (draft) => {
+          onLogged: async (draft) => {
+            const severity = draft.severity as ClearanceIssueSeverity;
+            const text = draft.workaround
+              ? `${draft.description} — Workaround: ${draft.workaround}`
+              : draft.description;
+            const localId = freshId();
+            // Optimistic insert into the local stack first.
             setIssues((prev) => [
               ...prev,
-              {
-                id: freshId(),
-                severity: draft.severity as ClearanceIssueSeverity,
-                text: draft.workaround
-                  ? `${draft.description} — Workaround: ${draft.workaround}`
-                  : draft.description,
-              },
+              { id: localId, severity, text },
             ]);
+            // Write-ahead to operational_incidents so the Governance Hub
+            // sees Green/Yellow findings immediately and the panel can
+            // rehydrate after refresh. RED is excluded — it already went
+            // through raiseOperationalEscalation inside the modal.
+            const incidentSev = sevToIncident(severity);
+            if (!incidentSev) return;
+            try {
+              const { data, error } = await supabase
+                .from("operational_incidents")
+                .insert({
+                  incident_type: "mechanical",
+                  severity: incidentSev,
+                  description: `${PRE_TRIP_TAG} ${text}`,
+                  vehicle_id: asset.id,
+                  reported_by: driverName || "driver",
+                  status: "pending",
+                })
+                .select("id")
+                .single();
+              if (error) throw error;
+              const incidentId = String(data.id);
+              setIssues((prev) =>
+                prev.map((i) =>
+                  i.id === localId ? { ...i, incidentId } : i,
+                ),
+              );
+            } catch (err) {
+              console.error(
+                "[IssueAccumulatorPanel] write-ahead incident failed",
+                err,
+              );
+              toast.error("Logged locally but not synced to Governance Hub", {
+                description: (err as Error).message,
+              });
+            }
           },
+
           onEscalated: async () => {
             // Resolve the full escalation row so the parent can render the
             // handshake waiting panel without another round-trip.
