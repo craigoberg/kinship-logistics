@@ -256,7 +256,7 @@ export function DayCentrePage() {
         <Button
           size="sm"
           variant="outline"
-          disabled={!isReady || !user || bootstrapMut.isPending}
+          disabled={!isReady || !isSignedIn || bootstrapMut.isPending}
           onClick={() => {
             bootstrappedRef.current = false;
             bootstrapMut.mutate();
