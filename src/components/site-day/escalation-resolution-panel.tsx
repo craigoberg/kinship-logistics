@@ -281,6 +281,8 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const isGo = decision === "go";
   const busy = acceptMutation.isPending || rejectMutation.isPending;
   const pinValid = /^\d{4,6}$/.test(openerPin);
+  const actorStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
+  const canAct = !!actorStaffId;
 
   return (
     <Card
