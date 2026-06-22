@@ -117,7 +117,7 @@ export function DayClosedPanel({ session }: Props) {
           )}
 
           {!noGo && (
-            <div className="pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -137,8 +137,28 @@ export function DayClosedPanel({ session }: Props) {
               >
                 <RotateCcw className="h-4 w-4" /> Reopen Centre
               </Button>
+              <TestOnly>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
+                  onClick={() => resetMut.mutate()}
+                  disabled={resetMut.isPending}
+                  title="TEST ONLY — rewind today's session to Start of Day. Issues, attendance and billing are preserved."
+                >
+                  {resetMut.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  Reset Start of Day
+                  <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                    Test
+                  </span>
+                </Button>
+              </TestOnly>
               {!isManager && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 w-full text-[11px] text-muted-foreground">
                   Sign in as a Manager to reopen.
                 </p>
               )}
