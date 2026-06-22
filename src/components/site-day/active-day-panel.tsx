@@ -41,6 +41,20 @@ export function ActiveDayPanel({ session }: Props) {
   const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
 
 
+  const resetMut = useMutation({
+    mutationFn: () => resetStartOfDay("test: rewind to start of day"),
+    onSuccess: (next) => {
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      toast.success("Session reset to Start of Day", {
+        description: "Issues, escalations, attendance and billing are preserved.",
+      });
+    },
+    onError: (e: Error) => {
+      toast.error("Reset failed", { description: e.message });
+    },
+  });
+
   const closeMut = useMutation({
     mutationFn: async () => {
       const finalized = await finalizeTodaysBilling().catch(() => 0);
