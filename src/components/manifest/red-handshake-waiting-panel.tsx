@@ -439,15 +439,24 @@ function EscalationWaitingPanel({
   if (approved) {
     return (
       <Card className="border-2 border-emerald-600/70 bg-slate-950 p-5 text-slate-100">
-        <div className="flex items-center gap-2 text-emerald-300">
-          <ShieldCheck className="h-6 w-6" />
-          <h2 className="text-lg font-extrabold">
-            ✅ Manager Workaround Authorized
-          </h2>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-emerald-300">
+            <ShieldCheck className="h-6 w-6" />
+            <h2 className="text-lg font-extrabold">
+              ✅ Manager Workaround Authorized
+            </h2>
+          </div>
+          <div className="rounded border border-emerald-600/40 bg-emerald-600/10 px-2 py-1 text-emerald-200">
+            <ElapsedTimer
+              since={live?.resolvedAt ?? live?.createdAt ?? null}
+              label="Awaiting your PIN"
+            />
+          </div>
         </div>
         <p className="mt-1 text-xs text-slate-400">
           {asset.name} · {asset.regoPlate} · Driver {driverName}
         </p>
+
 
         <div className="mt-4 rounded-md border border-emerald-600/40 bg-emerald-600/10 p-4">
           <div className="text-[11px] font-bold uppercase tracking-wide text-emerald-300">
@@ -506,13 +515,22 @@ function EscalationWaitingPanel({
 
   return (
     <Card className="border-2 border-rose-600/70 bg-rose-600/5 p-5">
-      <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
-        <ShieldAlert className="h-6 w-6" />
-        <h2 className="text-lg font-extrabold">Sev 1 Escalation — Office Review</h2>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
+          <ShieldAlert className="h-6 w-6" />
+          <h2 className="text-lg font-extrabold">Sev 1 Escalation — Office Review</h2>
+        </div>
+        <div className="rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-amber-800 dark:text-amber-200">
+          <ElapsedTimer
+            since={live?.createdAt ?? null}
+            label={claimed ? "Claimed" : "Waiting"}
+          />
+        </div>
       </div>
       <p className="mt-1 text-xs text-muted-foreground">
         {asset.name} · {asset.regoPlate} · Driver {driverName}
       </p>
+
 
       <div className="mt-4 flex items-center gap-3 rounded-md border border-border bg-background/60 p-3">
         <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
