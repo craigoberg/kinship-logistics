@@ -178,6 +178,39 @@ To guarantee absolute operational alignment, every module (including Day Centre,
 
   ***
 
-  ## Amendment Process
+  ## 9. State-Driven Contextual UI: Unified Exception Register
+
+To prevent alert fatigue, duplicate data entry, and UI look-and-feel drift, all current and future operational modules must display live or inherited anomalies using a single, centralized rendering component[cite: 4].
+
+### 9.1 The ActiveIssuesRegister Primitive (`src/components/shared/active-issues-register.tsx`)
+
+Every module layout (including Day Centre Open, Manifest Checkout, Transport Run, and Multi-Day Event Boards) must embed this component at the top of its workspace view. It dynamically queries open records from the unified single-rail pipeline based on the module's target identifier, enforcing a standard three-tier visual lifecycle[cite: 1, 4]:
+
+| UI Visual State             | Operational Meaning                                                                                                     | Core System Action / UX Treatment                                                                                                                                                  |
+| :-------------------------- | :---------------------------------------------------------------------------------------------------------------------- | :--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **Active Amber / Red Card** | An open anomaly exists, but a valid worker or managerial workaround is currently protecting the shift[cite: 1].         | Displays the issue description and the approved workaround text prominently[cite: 1]. Keeps the primary module workflow unlocked so staff can proceed safely[cite: 1].             |
+| **Satisfied Grey Card**     | A Coordinator or Manager has officially closed the issue within the Governance Hub during the active shift[cite: 1, 4]. | The card instantly sheds its background color, greys out text elements, and appends a green checkmark stamped with a permanent "Resolved: [Manager Review Receipt]" line[cite: 1]. |
+| **Disappeared (Hidden)**    | The issue was successfully closed during a prior shift and the system executed a day rollover[cite: 1].                 | The row item completely drops off the operator's daily dashboard view to maintain a silent, clutter-free operating environment[cite: 1].                                           |
+
+### 9.2 Cross-Module Workflow Scenarios
+
+The component acts as an abstract, state-driven engine, applying identical data behaviors to completely variant on-the-floor operational problems:
+
+- **Scenario A: Vehicle Fleet Anomalies (The Rejected Fuel Card)**
+  - An on-site operator encounters a rejected fuel card at the pump and logs a YELLOW operational notice[cite: 1, 2].
+  - The operator inputs their immediate workaround: "Paying out-of-pocket on personal card, submitting reimbursement claim."[cite: 1]
+  - The vehicle remains fully unlocked and operational[cite: 1]. The issue logs straight to the Governance Hub[cite: 1]. The moment an administrative manager clears the account balance and marks the issue resolved in the Hub, the driver's active register card turns instantly **Grey**, showing the clearance note: "Card account cleared by office, safe to reuse."[cite: 1]
+
+- **Scenario B: Event Manifest Cancellations (The Client Illness)**
+  - A client calls in sick on Day 1 of a 4-day regional travel event. The coordinator logs a YELLOW exception against the trip manifest: "Passenger May absent due to illness for entire event window."[cite: 1]
+  - The approved workaround reads: "Seating manifest locked at 11 passengers; adjusting catering headcounts."[cite: 1]
+  - For the remaining 3 days of the tour, the driver's active manifest interface does not trigger a missing-passenger red alert. The active exception card sits at the top of their checkout screen, allowing the driver to confidently press "All Accounted For" even though the physical passenger count differs from the historic manifest total[cite: 1].
+
+### 9.3 Anti-Redundancy Rules
+
+- Operators starting a new daily workspace check or vehicle inspection must be shown all existing, unresolved exceptions carried over from prior shifts before they fill out their safety checklist[cite: 1].
+- If a problem is already actively displayed in the `<ActiveIssuesRegister />` block with an active workaround, operators are strictly blocked from re-reporting or creating a duplicate ticket for the same asset fault[cite: 1, 4].
+
+### Amendment Process
 
 These guardrails may only be amended by explicit project-owner approval documented in this file via a dated signature line. AI-assisted edits must reference this file and confirm compliance before implementation.
