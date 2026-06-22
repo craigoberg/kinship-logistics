@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertOctagon } from "lucide-react";
+import { AlertOctagon, ShieldAlert } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import {
@@ -22,6 +30,50 @@ import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
+
+const ACK_STORAGE_KEY = "acknowledged-rejections-v1";
+
+function loadAckSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(ACK_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? new Set(arr.filter((x): x is string => typeof x === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function persistAckSet(set: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ACK_STORAGE_KEY, JSON.stringify([...set]));
+  } catch {
+    /* ignore */
+  }
+}
+
+function isRejectionRow(row: OperationalEscalation, staffId: string | null): boolean {
+  if (!staffId) return false;
+  if (row.claimedBy !== staffId) return false;
+  if (row.status !== "resolved_denied") return false;
+  return !!row.resolutionNotes && row.resolutionNotes.trim().startsWith("[REJECTED]");
+}
+
+function parseRejectionNotes(notes: string | null): {
+  rejectedReason: string;
+  managerProposal: string;
+} {
+  const text = (notes ?? "").trim();
+  // Format: "[REJECTED] {reason} — Manager proposal was: {proposal}"
+  const rejectedMatch = text.match(/^\[REJECTED\]\s*([\s\S]*?)(?:\s+—\s+Manager proposal was:\s*([\s\S]*))?$/);
+  if (!rejectedMatch) return { rejectedReason: text, managerProposal: "" };
+  return {
+    rejectedReason: (rejectedMatch[1] ?? "").trim(),
+    managerProposal: (rejectedMatch[2] ?? "").trim(),
+  };
+}
 
 /**
  * Returns escalations already claimed by the given manager that still need
@@ -120,6 +172,19 @@ export function GlobalEscalationInterceptor() {
   const [claiming, setClaiming] = useState(false);
   const [consultTarget, setConsultTarget] = useState<OperationalEscalation | null>(null);
   const [tick, setTick] = useState(0);
+  const [ackSet, setAckSet] = useState<Set<string>>(() => loadAckSet());
+  const [rejectedQueue, setRejectedQueue] = useState<OperationalEscalation[]>([]);
+
+  const enqueueRejection = useCallback(
+    (row: OperationalEscalation) => {
+      setRejectedQueue((prev) => {
+        if (ackSet.has(row.id)) return prev;
+        if (prev.some((r) => r.id === row.id)) return prev;
+        return [...prev, row];
+      });
+    },
+    [ackSet],
+  );
 
   // Current staff id — used to suppress the Claim popup for the user who
   // actually raised the incident (no self-claim).
@@ -162,6 +227,58 @@ export function GlobalEscalationInterceptor() {
     }
   }, [myClaimed.data, consultTarget]);
 
+  // Baseline fetch: rejections by Opener of my proposals that I haven't
+  // acknowledged yet — catches any that arrived while I was offline.
+  const myRejectedQ = useQuery({
+    queryKey: ["my-rejected-awaiting-ack", currentStaffId ?? "unknown"],
+    queryFn: async (): Promise<OperationalEscalation[]> => {
+      if (!currentStaffId) return [];
+      const { data, error } = await supabase
+        .from("operational_escalations")
+        .select("*")
+        .eq("claimed_by", currentStaffId)
+        .eq("status", "resolved_denied")
+        .order("resolved_at", { ascending: true });
+      if (error) {
+        console.error("[myRejectedQ]", error);
+        return [];
+      }
+      return ((data ?? []) as Array<Record<string, unknown>>).map(
+        (raw) =>
+          ({
+            id: raw.id as string,
+            clearanceId: (raw.clearance_id as string | null) ?? null,
+            driverName: (raw.driver_name as string) ?? "",
+            vehicleInfo: (raw.vehicle_info as string) ?? "",
+            gateId: (raw.gate_id as string) ?? "",
+            status: raw.status as OperationalEscalation["status"],
+            claimedBy: (raw.claimed_by as string | null) ?? null,
+            claimedAt: (raw.claimed_at as string | null) ?? null,
+            createdAt: raw.created_at as string,
+            updatedAt: raw.updated_at as string,
+            resolutionNotes: (raw.resolution_notes as string | null) ?? null,
+            resolvedBy: (raw.resolved_by as string | null) ?? null,
+            resolvedAt: (raw.resolved_at as string | null) ?? null,
+            sourceKind:
+              (raw.source_kind as OperationalEscalation["sourceKind"]) ??
+              "bus_walkaround",
+            sourceIssueId: (raw.source_issue_id as string | null) ?? null,
+            raisedBy: (raw.raised_by as string | null) ?? null,
+          }) as OperationalEscalation,
+      );
+    },
+    enabled: !!currentStaffId,
+    refetchOnWindowFocus: true,
+    staleTime: 10_000,
+  });
+
+  useEffect(() => {
+    if (!myRejectedQ.data) return;
+    for (const row of myRejectedQ.data) {
+      if (isRejectionRow(row, currentStaffId)) enqueueRejection(row);
+    }
+  }, [myRejectedQ.data, currentStaffId, enqueueRejection]);
+
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
@@ -192,6 +309,11 @@ export function GlobalEscalationInterceptor() {
           setQueue((prev) => (prev.some((e) => e.id === row.id) ? prev : [...prev, row]));
         });
       } else if (type === "UPDATE") {
+        // Manager-awareness: detect Opener rejection of my proposal.
+        if (isRejectionRow(row, currentStaffId)) {
+          enqueueRejection(row);
+        }
+
         if (row.status !== "pending") {
           setQueue((prev) => prev.filter((e) => e.id !== row.id));
           return;
@@ -367,6 +489,21 @@ export function GlobalEscalationInterceptor() {
         escalation={consultTarget}
         onClose={() => setConsultTarget(null)}
       />
+
+      <RejectionAwarenessModal
+        rejection={rejectedQueue[0] ?? null}
+        onAcknowledge={() => {
+          const row = rejectedQueue[0];
+          if (!row) return;
+          setAckSet((prev) => {
+            const next = new Set(prev);
+            next.add(row.id);
+            persistAckSet(next);
+            return next;
+          });
+          setRejectedQueue((prev) => prev.slice(1));
+        }}
+      />
     </>
   );
 }
@@ -387,5 +524,104 @@ function ContextRow({
       </span>
       <span className={cn("text-sm font-medium text-slate-100", valueClass)}>{value}</span>
     </div>
+  );
+}
+
+function RejectionAwarenessModal({
+  rejection,
+  onAcknowledge,
+}: {
+  rejection: OperationalEscalation | null;
+  onAcknowledge: () => void;
+}) {
+  const open = !!rejection;
+  const parsed = parseRejectionNotes(rejection?.resolutionNotes ?? null);
+  const isSiteDay = rejection?.sourceKind === "site_day_red";
+
+  return (
+    <Dialog open={open}>
+      <DialogContent
+        onEscapeKeyDown={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onInteractOutside={(e) => e.preventDefault()}
+        className="border-2 border-rose-500/70 bg-slate-950 p-0 text-slate-100 sm:max-w-lg"
+      >
+        {rejection && (
+          <>
+            <DialogHeader className="rounded-t-lg border-b border-rose-500/40 bg-rose-500/15 px-6 py-4">
+              <DialogTitle className="flex items-center gap-3 text-rose-300">
+                <ShieldAlert className="h-5 w-5" />
+                <span className="text-base font-extrabold uppercase tracking-wide">
+                  Opener Rejected Your Proposal
+                </span>
+              </DialogTitle>
+              <DialogDescription className="text-rose-200/80">
+                Review the Opener's reason. No further app action is taken — you decide the next step.
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="space-y-4 px-6 py-5">
+              <div className="space-y-2 rounded-md border border-slate-800 bg-slate-900 p-4">
+                {isSiteDay ? (
+                  <>
+                    <ContextRow label="Reported by" value={rejection.driverName} />
+                    <ContextRow label="Site" value={rejection.vehicleInfo} />
+                    <ContextRow
+                      label="Trigger"
+                      value={prettyGateLabel(rejection.gateId)}
+                      valueClass="text-amber-300"
+                    />
+                  </>
+                ) : (
+                  <>
+                    <ContextRow label="Driver" value={rejection.driverName} />
+                    <ContextRow label="Vehicle" value={rejection.vehicleInfo} />
+                    <ContextRow
+                      label="Failed Gate"
+                      value={prettyGateLabel(rejection.gateId)}
+                      valueClass="text-amber-300"
+                    />
+                  </>
+                )}
+              </div>
+
+              {parsed.managerProposal && (
+                <div className="rounded-md border border-slate-800 bg-slate-900/60 p-3">
+                  <div className="text-[11px] font-bold uppercase tracking-wide text-slate-400">
+                    Your proposal
+                  </div>
+                  <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-slate-700 pl-3 text-sm italic text-slate-200">
+                    {parsed.managerProposal}
+                  </blockquote>
+                </div>
+              )}
+
+              <div className="rounded-md border border-rose-500/40 bg-rose-500/10 p-3">
+                <div className="text-[11px] font-bold uppercase tracking-wide text-rose-300">
+                  Opener's reason
+                </div>
+                <blockquote className="mt-2 whitespace-pre-wrap border-l-2 border-rose-500/60 pl-3 text-sm italic text-rose-100">
+                  [REJECTED] {parsed.rejectedReason || "(no reason given)"}
+                </blockquote>
+              </div>
+
+              <div className="rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+                This RED issue remains <strong>OPEN in the Governance Hub</strong>. Decide your next step there — no further action is taken automatically.
+              </div>
+            </div>
+
+            <DialogFooter className="border-t border-slate-800 bg-slate-900/60 px-6 py-4">
+              <Button
+                type="button"
+                onClick={onAcknowledge}
+                className="h-12 w-full bg-blue-600 text-base font-bold text-white hover:bg-blue-700"
+              >
+                Acknowledged
+              </Button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
   );
 }
