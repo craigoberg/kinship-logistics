@@ -1638,3 +1638,109 @@ function CancelTripButton({ tripId }: { tripId: string }) {
     </AlertDialog>
   );
 }
+
+/* -------------------- Escalation Rehydration Gate -------------------- */
+
+/**
+ * Drops the driver back into the FULL escalation form after a refresh.
+ * Resolves the asset from `escalation.vehicleInfo`, rehydrates the
+ * accumulated walkaround issues from `operational_incidents`, then renders
+ * the live `RedHandshakeWaitingPanel` (with `escalationId`) so the
+ * three-phase state machine (pending → claimed → approved → driver PIN) is
+ * fully re-armed.
+ */
+function EscalationRehydrationGate({ escalation }: { escalation: OperationalEscalation }) {
+  const dateStr = useMemo(() => todayDateStr(), []);
+
+  const assetsQ = useQuery({
+    queryKey: ["transport-assets"],
+    queryFn: () => listTransportAssets(),
+    staleTime: 5 * 60_000,
+  });
+
+  const asset = useMemo<TransportAsset | null>(() => {
+    const list = assetsQ.data ?? [];
+    return (
+      list.find((a) => `${a.name} · ${a.regoPlate}` === escalation.vehicleInfo) ?? null
+    );
+  }, [assetsQ.data, escalation.vehicleInfo]);
+
+  const issuesQ = useQuery({
+    queryKey: ["manifest-escalation-issues", asset?.id, dateStr],
+    enabled: !!asset?.id,
+    staleTime: 60_000,
+    refetchOnWindowFocus: false,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("operational_incidents")
+        .select("id, severity, description, created_at")
+        .eq("vehicle_id", asset!.id)
+        .eq("incident_type", "mechanical")
+        .gte("created_at", `${dateStr}T00:00:00.000Z`)
+        .order("created_at", { ascending: true });
+      if (error) throw error;
+      const out: Array<{
+        id: string;
+        incidentId?: string;
+        severity: "red" | "yellow" | "green";
+        text: string;
+      }> = [];
+      for (const r of data ?? []) {
+        const sevRaw = String((r as { severity?: string }).severity ?? "");
+        const sev: "red" | "yellow" | "green" | null =
+          sevRaw === "sev1" ? "red" : sevRaw === "sev2" ? "yellow" : sevRaw === "sev3" ? "green" : null;
+        if (!sev) continue;
+        const desc = String((r as { description?: string }).description ?? "");
+        const text = desc.replace(/^\[Pre-trip\]\s*/i, "");
+        out.push({
+          id: String((r as { id?: string }).id ?? ""),
+          incidentId: String((r as { id?: string }).id ?? ""),
+          severity: sev,
+          text,
+        });
+      }
+      return out;
+    },
+  });
+
+  if (assetsQ.isLoading || (asset && issuesQ.isLoading)) {
+    return (
+      <div className="flex flex-1 flex-col items-center justify-center gap-3 text-muted-foreground">
+        <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
+        <span className="text-sm">Rehydrating active escalation…</span>
+      </div>
+    );
+  }
+
+  // Fall back to a synthetic asset so the panel still mounts even if the
+  // fleet lookup misses (e.g. asset deactivated mid-day).
+  const safeAsset: TransportAsset =
+    asset ??
+    ({
+      id: escalation.id,
+      name: escalation.vehicleInfo.split(" · ")[0] ?? "Vehicle",
+      regoPlate: escalation.vehicleInfo.split(" · ")[1] ?? "—",
+      passengerCapacity: 0,
+      isActive: true,
+    } as unknown as TransportAsset);
+
+  const handleClose = () => {
+    if (typeof window !== "undefined") {
+      localStorage.removeItem("yada_global_escalation");
+      localStorage.removeItem("yada_global_escalation_asset");
+      window.location.reload();
+    }
+  };
+
+  return (
+    <RedHandshakeWaitingPanel
+      asset={safeAsset}
+      driverName={escalation.driverName}
+      escalationId={escalation.id}
+      escalation={escalation}
+      issues={issuesQ.data ?? []}
+      onAuthorized={handleClose}
+      onBack={handleClose}
+    />
+  );
+}
