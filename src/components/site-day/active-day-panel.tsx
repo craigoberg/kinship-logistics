@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ClipboardCheck, Loader2, PlusCircle } from "lucide-react";
+import { AlertTriangle, ClipboardCheck, Loader2, PlusCircle, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ClientTime } from "@/components/ui/client-time";
 import { useActiveSiteIssues } from "@/hooks/use-site-issues";
-import { closeSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { closeSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { TestOnly } from "@/components/dev/test-only";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
 import { IssuesRegisterCard } from "./issues-register-card";
@@ -39,6 +40,20 @@ export function ActiveDayPanel({ session }: Props) {
   const [reauthOpen, setReauthOpen] = useState(false);
   const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
 
+
+  const resetMut = useMutation({
+    mutationFn: () => resetStartOfDay("test: rewind to start of day"),
+    onSuccess: (next) => {
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      toast.success("Session reset to Start of Day", {
+        description: "Issues, escalations, attendance and billing are preserved.",
+      });
+    },
+    onError: (e: Error) => {
+      toast.error("Reset failed", { description: e.message });
+    },
+  });
 
   const closeMut = useMutation({
     mutationFn: async () => {
@@ -110,6 +125,26 @@ export function ActiveDayPanel({ session }: Props) {
           >
             <ClipboardCheck className="h-4 w-4" /> Close Day
           </Button>
+          <TestOnly>
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
+              onClick={() => resetMut.mutate()}
+              disabled={resetMut.isPending}
+              title="TEST ONLY — rewind today's session to Start of Day. Issues, attendance and billing are preserved."
+            >
+              {resetMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Reset Start of Day
+              <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                Test
+              </span>
+            </Button>
+          </TestOnly>
         </div>
       </div>
 

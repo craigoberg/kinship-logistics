@@ -16,9 +16,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ClientTime } from "@/components/ui/client-time";
-import { reopenSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { reopenSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
+import { TestOnly } from "@/components/dev/test-only";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -70,6 +71,20 @@ export function DayClosedPanel({ session }: Props) {
     },
   });
 
+  const resetMut = useMutation({
+    mutationFn: () => resetStartOfDay("test: rewind to start of day"),
+    onSuccess: (next) => {
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      toast.success("Session reset to Start of Day", {
+        description: "Issues, escalations, attendance and billing are preserved.",
+      });
+    },
+    onError: (e: Error) => {
+      toast.error("Reset failed", { description: e.message });
+    },
+  });
+
   return (
     <>
       <Card
@@ -102,7 +117,7 @@ export function DayClosedPanel({ session }: Props) {
           )}
 
           {!noGo && (
-            <div className="pt-2">
+            <div className="flex flex-wrap items-center gap-2 pt-2">
               <Button
                 size="sm"
                 variant="outline"
@@ -122,8 +137,28 @@ export function DayClosedPanel({ session }: Props) {
               >
                 <RotateCcw className="h-4 w-4" /> Reopen Centre
               </Button>
+              <TestOnly>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
+                  onClick={() => resetMut.mutate()}
+                  disabled={resetMut.isPending}
+                  title="TEST ONLY — rewind today's session to Start of Day. Issues, attendance and billing are preserved."
+                >
+                  {resetMut.isPending ? (
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                  ) : (
+                    <RotateCcw className="h-4 w-4" />
+                  )}
+                  Reset Start of Day
+                  <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider">
+                    Test
+                  </span>
+                </Button>
+              </TestOnly>
               {!isManager && (
-                <p className="mt-1 text-[11px] text-muted-foreground">
+                <p className="mt-1 w-full text-[11px] text-muted-foreground">
                   Sign in as a Manager to reopen.
                 </p>
               )}
