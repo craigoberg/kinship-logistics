@@ -27,6 +27,12 @@ import {
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
 import { useSiteIssues } from "@/hooks/use-site-issues";
+import { useQuery } from "@tanstack/react-query";
+import {
+  fetchApprovedRedWorkarounds,
+  redHasAcceptedWorkaround,
+  effectiveWorkaroundText,
+} from "@/lib/site-day/red-workaround";
 
 interface Props {
   sessionId: string;
