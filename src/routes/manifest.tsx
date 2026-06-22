@@ -71,7 +71,7 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
-import { DynamicOperationalForm } from "@/components/manifest/dynamic-operational-form";
+// DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
 import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
 import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
