@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { Building2, CheckCircle2, Info, Mail } from "lucide-react";
+import { Building2, CheckCircle2, Info, Mail, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
