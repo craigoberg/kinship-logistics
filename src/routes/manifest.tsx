@@ -118,13 +118,15 @@ function ManifestPage() {
   // If a manager remotely claims/raises an escalation for this driver
   // while they're sitting on the manifest, re-poll + realtime-subscribe so
   // the screen swaps to the handshake panel without a manual refresh.
+  // Realtime (subscribeToEscalationPool below) drives freshness; background
+  // polling + focus refetches are OFF so they cannot wipe PINs / typing while
+  // the driver waits for the manager.
   const liveEscQ = useQuery({
     queryKey: ["manifest-active-escalation", driverStaffId],
     queryFn: () => getActiveEscalation(driverStaffId),
     initialData: initialEscalation,
-    refetchInterval: 15_000,
-    refetchOnWindowFocus: true,
-    staleTime: 5_000,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
   useEffect(() => {
     const off = subscribeToEscalationPool(({ row }) => {

@@ -10,9 +10,13 @@ import { useAuthReady } from "@/hooks/use-auth-ready";
 export const SITE_SESSION_QUERY_KEY = ["site-day-session", "today"] as const;
 
 /**
- * Today's site_day_session. Polling + Supabase realtime so the opener's
- * panel flips from "Manager is reviewing" to Accept/Reject the moment the
- * manager submits their proposal.
+ * Today's site_day_session.
+ *
+ * Background polling and focus refetches are OFF — they were the source of
+ * the noisy 15-second `[site_day_sessions]` log loop and the visible
+ * mid-typing refresh of the escalation handshake panels. Realtime
+ * (subscribeToSiteSession below) plus explicit `invalidateQueries` after
+ * writes is the freshness rail.
  */
 export function useSiteSession() {
   const queryClient = useQueryClient();
@@ -22,10 +26,8 @@ export function useSiteSession() {
     queryKey: SITE_SESSION_QUERY_KEY,
     queryFn: getTodaySession,
     enabled: canQuery,
-    refetchInterval: 15_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-    staleTime: 2_000,
+    refetchOnWindowFocus: false,
+    staleTime: 60_000,
   });
 
   const sessionId = q.data?.id;

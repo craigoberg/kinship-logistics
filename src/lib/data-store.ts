@@ -4239,6 +4239,9 @@ export interface OperationalEscalation {
   sourceKind: "bus_walkaround" | "site_day_red" | null;
   sourceIssueId: string | null;
   raisedBy: string | null;
+  /** Set when the on-site operator (driver OR opener) confirms a manager-approved workaround. */
+  operatorAcknowledgedAt: string | null;
+  operatorAcknowledgedBy: string | null;
 }
 
 interface OperationalEscalationRow {
@@ -4257,6 +4260,8 @@ interface OperationalEscalationRow {
   source_kind: "bus_walkaround" | "site_day_red" | null;
   source_issue_id: string | null;
   raised_by: string | null;
+  operator_acknowledged_at: string | null;
+  operator_acknowledged_by: string | null;
 }
 
 function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
@@ -4276,6 +4281,8 @@ function rowToEscalation(r: OperationalEscalationRow): OperationalEscalation {
     sourceKind: r.source_kind ?? null,
     sourceIssueId: r.source_issue_id ?? null,
     raisedBy: r.raised_by ?? null,
+    operatorAcknowledgedAt: r.operator_acknowledged_at ?? null,
+    operatorAcknowledgedBy: r.operator_acknowledged_by ?? null,
   };
 }
 
