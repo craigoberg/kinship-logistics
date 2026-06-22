@@ -26,6 +26,29 @@ export function DayCentrePage() {
   const issuesQ = useSiteIssues(session?.id ?? null);
   const redIssue =
     (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
+
+  // Cross-session: any open RED anywhere blocks a new Day Centre opening.
+  // Queryable even without today's session row, so we can show guidance
+  // BEFORE provisioning.
+  const openRedsQ = useQuery({
+    queryKey: ["site-issues", "open-reds-all"],
+    enabled: isReady && !!user,
+    staleTime: 5_000,
+    refetchInterval: 30_000,
+    queryFn: async () => {
+      const { data, error } = await supabase
+        .from("site_issues_register")
+        .select("id, session_id, severity, status, issue_description, workaround_plan, created_at")
+        .eq("severity", "red")
+        .eq("status", "open")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
+      return data ?? [];
+    },
+  });
+  const blockingReds = openRedsQ.data ?? [];
+  const hasBlockingRed = blockingReds.length > 0;
+
   const redEscalationQ = useQuery({
     queryKey: ["site-escalation", redIssue?.id ?? "none"],
     queryFn: () => (redIssue ? getEscalationBySourceIssue(redIssue.id) : Promise.resolve(null)),
