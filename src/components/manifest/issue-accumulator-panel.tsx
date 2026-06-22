@@ -159,18 +159,8 @@ export function IssueAccumulatorPanel({
     };
   }, [asset.id, dateStr]);
 
-  if (redClearance) {
-    return (
-      <RedHandshakeWaitingPanel
-        asset={asset}
-        clearance={redClearance}
-        issues={issues}
-        driverName={driverName}
-        onAuthorized={onCleared}
-        onBack={onBack}
-      />
-    );
-  }
+  // RED handshake waiting branch removed — verbal-consultation dialog now
+  // handles RED inline at the bottom of this component.
 
   const removeIssue = async (id: string) => {
     const target = issues.find((i) => i.id === id);
