@@ -101,10 +101,10 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       if (!/^\d{4,6}$/.test(openerPin))
         throw new Error("Enter your 4–6 digit Opener PIN.");
 
-      const leaderStaffId = session.openedById;
+      const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
         throw new Error(
-          "Session has no recorded opener — cannot complete leader sign-off.",
+          "No signed-in staff to authorise this action — please sign in again.",
         );
 
       const ok = await verifyStaffPin(leaderStaffId, openerPin);
