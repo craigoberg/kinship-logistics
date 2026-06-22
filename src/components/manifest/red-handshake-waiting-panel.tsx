@@ -316,6 +316,7 @@ function EscalationWaitingPanel({
   const [live, setLive] = useState<OperationalEscalation | null>(null);
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [verbalOpen, setVerbalOpen] = useState(false);
 
   useEffect(() => {
     const off = subscribeToEscalation(escalationId, (next) => setLive(next));
