@@ -1,7 +1,10 @@
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowRight, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { ClientTime } from "@/components/ui/client-time";
+
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import {
@@ -121,18 +124,62 @@ export function StartOfDayPanel({ sessionId }: Props) {
       )}
 
       {hasOpenRed && (
-        <div className="flex items-start gap-2 rounded-md border border-red-600/60 bg-red-600/10 p-3 text-sm text-red-800 dark:text-red-200">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-600" />
-          <p>
-            <span className="font-semibold">
-              {openRedIssues.length} unresolved RED issue
-              {openRedIssues.length === 1 ? "" : "s"}
-            </span>{" "}
-            in the register. The centre cannot be declared safe until every RED
-            is resolved in the Governance Hub.
-          </p>
-        </div>
+        <Card className="space-y-3 border-2 border-red-600/60 bg-red-600/10 p-4">
+          <div className="flex items-start gap-2">
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div className="space-y-1">
+              <div className="text-base font-bold text-red-800 dark:text-red-200">
+                Cannot open the Day Centre — unresolved RED issue
+                {openRedIssues.length === 1 ? "" : "s"}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                Only a Manager can clear a RED in the Governance Hub. Once
+                every RED listed below is resolved there, the Open Centre
+                workflow becomes available again.
+              </p>
+            </div>
+          </div>
+
+          <ul className="space-y-2">
+            {openRedIssues.map((i) => (
+              <li
+                key={i.id}
+                className="flex items-start gap-2 rounded-md border border-red-600/40 bg-background/60 p-3 text-sm"
+              >
+                <span className="mt-0.5 shrink-0 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
+                  RED
+                </span>
+                <div className="min-w-0 flex-1 space-y-1">
+                  <div className="break-words font-medium text-foreground">
+                    {i.issueDescription || "(no description)"}
+                  </div>
+                  {i.workaroundPlan && (
+                    <div className="text-xs text-muted-foreground">
+                      Workaround: {i.workaroundPlan}
+                    </div>
+                  )}
+                  <div className="text-[11px] text-muted-foreground">
+                    Logged <ClientTime iso={i.createdAt} />
+                    {i.status && i.status !== "open" ? ` · status: ${i.status}` : ""}
+                  </div>
+                </div>
+              </li>
+            ))}
+          </ul>
+
+          <Button
+            asChild
+            size="sm"
+            className="bg-red-600 hover:bg-red-700"
+          >
+            <Link to="/governance">
+              Open Governance Hub
+              <ArrowRight className="ml-1.5 h-4 w-4" />
+            </Link>
+          </Button>
+        </Card>
       )}
+
 
       {errorMessage && (
 
