@@ -177,7 +177,7 @@ export function DayCentrePage() {
                 <span className="rounded bg-destructive px-2 py-0.5 text-xs font-semibold text-destructive-foreground">
                   RED
                 </span>
-                <ClientTime value={r.created_at} className="text-xs text-muted-foreground" />
+                <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
               </div>
               <div className="mt-1 font-medium">{r.issue_description}</div>
               {r.workaround_plan ? (
