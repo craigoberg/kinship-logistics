@@ -143,6 +143,25 @@ export function GlobalEscalationInterceptor() {
     staleTime: 30_000,
   });
 
+  // Rehydration: any escalation already claimed by me where I still owe a
+  // proposal — re-open the consultation modal on every mount/refresh.
+  const myClaimed = useQuery({
+    queryKey: ["my-claimed-awaiting-proposal", currentStaffId ?? "unknown"],
+    queryFn: () =>
+      currentStaffId
+        ? listMyClaimedAwaitingProposal(currentStaffId)
+        : Promise.resolve([]),
+    enabled: !!currentStaffId,
+    refetchOnWindowFocus: true,
+    staleTime: 10_000,
+  });
+
+  useEffect(() => {
+    if (!consultTarget && myClaimed.data && myClaimed.data.length > 0) {
+      setConsultTarget(myClaimed.data[0]);
+    }
+  }, [myClaimed.data, consultTarget]);
+
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
@@ -160,6 +179,7 @@ export function GlobalEscalationInterceptor() {
     if (!currentStaffId) return;
     setQueue((prev) => prev.filter((e) => e.raisedBy !== currentStaffId));
   }, [currentStaffId]);
+
 
   // Realtime escalation pool.
   useEffect(() => {
