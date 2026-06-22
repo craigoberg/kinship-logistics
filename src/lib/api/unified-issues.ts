@@ -69,13 +69,19 @@ export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
         .select("*")
         .eq("status", "pending")
         .order("created_at", { ascending: false }),
+      // Escalations: keep visible across the three live phases so an
+      // approved-but-awaiting-operator-acknowledgment row does not silently
+      // vanish from the Hub before the on-site operator signs off.
       supabase
         .from("operational_escalations")
         .select("*")
-        .in("status", ["pending", "claimed"])
+        .or(
+          "status.in.(pending,claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
+        )
         .order("created_at", { ascending: false }),
       listComplianceAssets({ status: "active" }).catch(() => [] as ComplianceAsset[]),
     ]);
+
 
   const out: UnifiedIssue[] = [];
 
