@@ -15,12 +15,14 @@ import type {
   AssetDailyClearance,
   ClearanceIssueSeverity,
   NewClearanceItemInput,
+  OperationalEscalation,
   TransportAsset,
 } from "@/lib/data-store";
 import {
   DEFAULT_STAFF_UUID,
   getStaffId,
   insertAssetClearanceWithItems,
+  raiseOperationalEscalation,
   submitDriverAuthorization,
 } from "@/lib/data-store";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
@@ -76,6 +78,8 @@ interface Props {
   driverName: string;
   onCleared: () => void;
   onBack: () => void;
+  /** Optional: notify parent when a RED single-rail escalation is raised. */
+  onRedRaised?: (esc: OperationalEscalation) => void;
 }
 
 export function IssueAccumulatorPanel({
@@ -86,6 +90,7 @@ export function IssueAccumulatorPanel({
   driverName,
   onCleared,
   onBack,
+  onRedRaised,
 }: Props) {
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [draftSeverity, setDraftSeverity] =
@@ -202,6 +207,26 @@ export function IssueAccumulatorPanel({
 
       if (hasRed) {
         setRedClearance(bundle.clearance);
+        // Single-rail: feed the unified operational_escalations pipeline so the
+        // manager dashboard, Global Escalation Interceptor and ledger all light
+        // up from one source. Failure here must not block the driver — the
+        // clearance row is already persisted as awaiting_manager_review.
+        try {
+          const firstRed = issues.find((i) => i.severity === "red");
+          const esc = await raiseOperationalEscalation({
+            clearanceId: bundle.clearance.id,
+            driverName,
+            vehicleInfo: `${asset.name} · ${asset.regoPlate}`,
+            gateId: "pre_trip_red",
+            sourceKind: "bus_walkaround",
+            sourceIssueId: null,
+            raisedBy: driverStaffId,
+          });
+          if (firstRed) void firstRed;
+          onRedRaised?.(esc);
+        } catch (escErr) {
+          console.error("[IssueAccumulatorPanel] raise escalation failed", escErr);
+        }
         toast.warning("Awaiting manager joint review", {
           description:
             "A RED issue was logged. The Operations Manager has been notified.",
