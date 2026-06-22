@@ -291,11 +291,23 @@ function SiteDayProposalModal({
       toast.error("Cannot find the linked site session.");
       return;
     }
-    if (!escalation.claimedBy) {
-      console.debug("[propose] early-return: escalation.claimedBy missing");
-      setLastError("Escalation must be claimed before proposing a resolution.");
-      toast.error("Escalation must be claimed before proposing a resolution.");
-      return;
+    let resolvedClaimedBy: string | null = escalation.claimedBy ?? null;
+    if (!resolvedClaimedBy) {
+      console.debug("[propose] claimedBy missing on prop — refetching row");
+      const { data, error } = await supabase
+        .from("operational_escalations")
+        .select("claimed_by")
+        .eq("id", escalation.id)
+        .maybeSingle();
+      if (error) console.error("[propose] refetch error", error);
+      resolvedClaimedBy =
+        ((data?.claimed_by as string | null) ?? null) || null;
+      if (!resolvedClaimedBy) {
+        console.debug("[propose] early-return: claimedBy still missing after refetch");
+        setLastError("Escalation must be claimed before proposing a resolution.");
+        toast.error("Escalation must be claimed before proposing a resolution.");
+        return;
+      }
     }
 
     setSubmitting(decision);
@@ -305,7 +317,7 @@ function SiteDayProposalModal({
         sessionId,
         plan: notes.trim(),
         decision,
-        managerStaffId: escalation.claimedBy,
+        managerStaffId: resolvedClaimedBy,
         pin,
       });
 
