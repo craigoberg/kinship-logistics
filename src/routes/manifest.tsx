@@ -249,59 +249,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
     setStep("clearance");
   };
 
-  /* ------------------------------------------------------------------
-     🛡️ CRITICAL REHYDRATION SHIELD: Short circuit layout if locked
-     ------------------------------------------------------------------ */
-  if (globalEscalation && escalatedAsset) {
-    return (
-      <div className="flex-1 overflow-y-auto p-4">
-        <RedHandshakeWaitingPanel
-          asset={escalatedAsset}
-          driverName={driverName}
-          escalationId={globalEscalation.id}
-          onAuthorized={() => {
-            localStorage.removeItem("yada_global_escalation");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalEscalation(null);
-            setClearanceOk(true);
-            setStep("event");
-          }}
-          onBack={() => {
-            localStorage.removeItem("yada_global_escalation");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalEscalation(null);
-            setStep("vehicle");
-          }}
-        />
-      </div>
-    );
-  }
-
-  if (globalHandshake && escalatedAsset) {
-    return (
-      <div className="flex-1 overflow-y-auto p-4">
-        <RedHandshakeWaitingPanel
-          asset={escalatedAsset}
-          driverName={driverName}
-          clearance={globalHandshake.clearance}
-          issues={globalHandshake.issues}
-          onAuthorized={() => {
-            localStorage.removeItem("yada_global_handshake");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalHandshake(null);
-            setClearanceOk(true);
-            setStep("event");
-          }}
-          onBack={() => {
-            localStorage.removeItem("yada_global_handshake");
-            localStorage.removeItem("yada_global_escalation_asset");
-            setGlobalHandshake(null);
-            setStep("vehicle");
-          }}
-        />
-      </div>
-    );
-  }
+  // Multi-device handshake short-circuit branches removed.
 
   return (
     <div className="flex-1 overflow-y-auto p-4">
