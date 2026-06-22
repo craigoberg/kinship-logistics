@@ -129,22 +129,22 @@ export function IssueAccumulatorPanel({
           .order("created_at", { ascending: true });
         if (error) throw error;
         if (cancelled || !data) return;
-        const rehydrated: DraftIssue[] = data
-          .map((r) => {
-            const sev = incidentSevToClearance(r.severity as string);
-            if (!sev) return null;
-            const desc = String(r.description ?? "");
-            const text = desc.startsWith(PRE_TRIP_TAG)
-              ? desc.slice(PRE_TRIP_TAG.length).trim()
-              : desc;
-            return {
-              id: freshId(),
-              incidentId: String(r.id),
-              severity: sev,
-              text,
-            } satisfies DraftIssue;
-          })
-          .filter((x): x is DraftIssue => x !== null);
+        const rehydrated: DraftIssue[] = [];
+        for (const r of data) {
+          const sev = incidentSevToClearance(r.severity as string);
+          if (!sev) continue;
+          const desc = String(r.description ?? "");
+          const text = desc.startsWith(PRE_TRIP_TAG)
+            ? desc.slice(PRE_TRIP_TAG.length).trim()
+            : desc;
+          rehydrated.push({
+            id: freshId(),
+            incidentId: String(r.id),
+            severity: sev,
+            text,
+          });
+        }
+
         if (rehydrated.length > 0) {
           setIssues((prev) => (prev.length === 0 ? rehydrated : prev));
         }
