@@ -30,10 +30,43 @@ import {
   raiseOperationalEscalation,
 } from "@/lib/data-store";
 
+/**
+ * Reentrant Issue/Escalation modal — `context` selects the pipeline.
+ *
+ *   kind: "site-day"  → writes to site_issues_register, flips the session
+ *                       phase to escalated_lock on Red, raises a
+ *                       site_day_red escalation linked to the new row.
+ *   kind: "pre-trip"  → no site_session in scope. Green/Yellow emit a
+ *                       draft back to the caller for accumulation into
+ *                       asset_clearance_items at commit time. Red raises a
+ *                       bus_walkaround escalation immediately (classified
+ *                       "pre_trip_red" in the ledger receipt) and lifts
+ *                       the escalation id via onEscalated.
+ *
+ * Legacy `sessionId`-only call sites continue to work unchanged.
+ */
+export type AnomalyContext =
+  | { kind: "site-day"; sessionId: string }
+  | {
+      kind: "pre-trip";
+      asset: { id: string; name: string; regoPlate: string };
+      driverName: string;
+      dateStr: string;
+      onLogged?: (draft: {
+        severity: RygeSeverity;
+        description: string;
+        workaround: string | null;
+        owner: ResponsibilityOwner;
+      }) => void;
+      onEscalated?: (escalationId: string) => void;
+    };
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  sessionId: string;
+  /** Legacy shorthand for `{ kind: "site-day", sessionId }`. */
+  sessionId?: string;
+  context?: AnomalyContext;
   defaultSeverity?: RygeSeverity;
 }
 
@@ -97,17 +130,27 @@ export function LogAnomalyModal({
   open,
   onOpenChange,
   sessionId,
+  context: ctxProp,
   defaultSeverity,
 }: Props) {
-  if (!sessionId) {
-    throw new Error("LogAnomalyModal requires a non-empty sessionId");
-  }
-
-
+  // Resolve effective context. Default to site-day for backward compat.
+  const context: AnomalyContext = ctxProp
+    ? ctxProp
+    : sessionId
+      ? { kind: "site-day", sessionId }
+      : (() => {
+          throw new Error(
+            "LogAnomalyModal requires either `context` or `sessionId`.",
+          );
+        })();
 
   const queryClient = useQueryClient();
+  const storageKey =
+    context.kind === "site-day"
+      ? `site-day-anomaly:${context.sessionId}`
+      : `pre-trip-anomaly:${context.asset.id}:${context.dateStr}`;
   const form = usePersistedForm<AnomalyDraft>(
-    `site-day-anomaly:${sessionId}`,
+    storageKey,
     makeInitial(defaultSeverity ?? "yellow"),
   );
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
@@ -132,15 +175,49 @@ export function LogAnomalyModal({
     return errs;
   }, [descriptionOk, workaroundOk]);
 
-
   const mutation = useMutation({
     mutationFn: async () => {
-      // Yellow stores the opener's workaround; Green and Red store null
-      // (Red's workaround is supplied later by the responding Manager).
       const workaroundPlan =
         values.severity === "yellow" ? values.workaround.trim() : null;
+
+      // ---------- Pre-trip context: no site_session in scope ----------
+      if (context.kind === "pre-trip") {
+        // Non-Red issues are accumulated by the parent into asset_clearance_items
+        // at commit time. Just emit the draft.
+        if (values.severity !== "red") {
+          context.onLogged?.({
+            severity: values.severity,
+            description: values.description.trim(),
+            workaround: workaroundPlan,
+            owner: values.owner,
+          });
+          return { kind: "pre-trip", severity: values.severity } as const;
+        }
+
+        // Red: raise the bus_walkaround escalation immediately on the
+        // single-rail pipeline. Classification "pre_trip_red" is carried in
+        // the gate_id + raised_by metadata for downstream reporting.
+        const vehicleInfo = `${context.asset.name} · ${context.asset.regoPlate}`;
+        const esc = await raiseOperationalEscalation({
+          clearanceId: null,
+          driverName: context.driverName,
+          vehicleInfo,
+          gateId: "pre_trip_red",
+          sourceKind: "bus_walkaround",
+          sourceIssueId: null,
+        });
+        context.onEscalated?.(esc.id);
+        return {
+          kind: "pre-trip",
+          severity: "red" as RygeSeverity,
+          escalationId: esc.id,
+        } as const;
+      }
+
+      // ---------- Site-day context (default / legacy) ----------
+      const sId = context.sessionId;
       const payload: NewSiteIssue = {
-        sessionId,
+        sessionId: sId,
         severity: values.severity,
         issueDescription: values.description.trim(),
         workaroundPlan,
@@ -148,7 +225,7 @@ export function LogAnomalyModal({
       };
       const issue = await createIssue(payload);
       if (values.severity === "red") {
-        const next = await setPhase(sessionId, "escalated_lock");
+        const next = await setPhase(sId, "escalated_lock");
         queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
         const checkerName =
           getActiveUserProfile()?.fullName?.trim() || "Day Centre Checker";
@@ -170,55 +247,73 @@ export function LogAnomalyModal({
         }
         triggerEscalation({
           kind: "site_session",
-          sessionId,
+          sessionId: sId,
           issueId: issue.id,
           description: issue.issueDescription,
         });
       }
-      return issue;
+      return { kind: "site-day" as const, issue };
     },
-    onSuccess: (issue) => {
-      // Targeted invalidations (exact keys used by the parent panel/register)
-      queryClient.invalidateQueries({ queryKey: siteIssuesKey(sessionId) });
-      queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(sessionId) });
-      queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
-      queryClient.invalidateQueries({ queryKey: ["site-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["site-issues-active"] });
-      queryClient.invalidateQueries({ queryKey: ["site-day-anomalies"] });
-      queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
-      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
-      // Broad sweep — catches any query whose key starts with "site-issues"
-      // or "site-day", regardless of trailing sessionId/variant.
-      queryClient.invalidateQueries({
-        predicate: (q) => {
-          const k = q.queryKey?.[0];
-          return (
-            typeof k === "string" &&
-            (k.startsWith("site-issues") || k.startsWith("site-day"))
-          );
-        },
-      });
-      // Force an immediate refetch of the active issues list for this session.
-      queryClient.refetchQueries({ queryKey: siteIssuesKey(sessionId) });
-      reset();
-      onOpenChange(false);
-      if (issue.severity === "red") {
-        toast.error("Red anomaly logged — site escalated for Manager review.", {
-          description:
-            "Manager must complete the dual-PIN handshake before the centre can open.",
+    onSuccess: (result) => {
+      if (result.kind === "site-day") {
+        const issue = result.issue;
+        const sId = (context as Extract<AnomalyContext, { kind: "site-day" }>).sessionId;
+        // Targeted invalidations (exact keys used by the parent panel/register)
+        queryClient.invalidateQueries({ queryKey: siteIssuesKey(sId) });
+        queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(sId) });
+        queryClient.invalidateQueries({ queryKey: ["site-issues", sId] });
+        queryClient.invalidateQueries({ queryKey: ["site-issues"] });
+        queryClient.invalidateQueries({ queryKey: ["site-issues-active"] });
+        queryClient.invalidateQueries({ queryKey: ["site-day-anomalies"] });
+        queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+        queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+        queryClient.invalidateQueries({
+          predicate: (q) => {
+            const k = q.queryKey?.[0];
+            return (
+              typeof k === "string" &&
+              (k.startsWith("site-issues") || k.startsWith("site-day"))
+            );
+          },
         });
-      } else if (issue.severity === "yellow") {
-        toast.warning("Yellow anomaly logged.", {
-          description: "Workaround captured in the Issues Register.",
-        });
+        queryClient.refetchQueries({ queryKey: siteIssuesKey(sId) });
+        reset();
+        onOpenChange(false);
+        if (issue.severity === "red") {
+          toast.error("Red anomaly logged — site escalated for Manager review.", {
+            description:
+              "Manager must complete the dual-PIN handshake before the centre can open.",
+          });
+        } else if (issue.severity === "yellow") {
+          toast.warning("Yellow anomaly logged.", {
+            description: "Workaround captured in the Issues Register.",
+          });
+        } else {
+          toast.success("Note added to the Issues Register.");
+        }
       } else {
-        toast.success("Note added to the Issues Register.");
+        // pre-trip
+        reset();
+        onOpenChange(false);
+        if (result.severity === "red") {
+          toast.error("Red pre-trip issue raised — awaiting Manager handshake.", {
+            description:
+              "Bus is locked from dispatch until a Manager claims and resolves.",
+          });
+        } else if (result.severity === "yellow") {
+          toast.warning("Yellow pre-trip issue captured.", {
+            description: "Workaround will be filed with the clearance record.",
+          });
+        } else {
+          toast.success("Pre-trip note captured.");
+        }
       }
     },
     onError: (e: Error) => {
       toast.error("Could not save the anomaly", { description: e.message });
     },
   });
+
 
   const canSubmit = descriptionOk && workaroundOk && !mutation.isPending;
 
