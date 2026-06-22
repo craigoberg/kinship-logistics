@@ -76,6 +76,7 @@ import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-wa
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
 import { subscribeToEscalationPool } from "@/lib/data-store";
+import { supabase } from "@/integrations/supabase/client";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
