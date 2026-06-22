@@ -133,65 +133,128 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </div>
       )}
 
-      {hasOpenRed && (
+      {hasBlocking && (
         <Card className="space-y-3 border-2 border-red-600/60 bg-red-600/10 p-4">
           <div className="flex items-start gap-2">
             <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
             <div className="space-y-1">
               <div className="text-base font-bold text-red-800 dark:text-red-200">
-                Cannot open the Day Centre — unresolved RED issue
-                {openRedIssues.length === 1 ? "" : "s"}
+                Cannot open the Day Centre — unresolved issue
+                {blockingIssues.length === 1 ? "" : "s"} without an agreed
+                workaround
               </div>
               <p className="text-sm text-muted-foreground">
-                Only a Manager can clear a RED in the Governance Hub. Once
-                every RED listed below is resolved there, the Open Centre
-                workflow becomes available again.
+                RED items require a Manager-agreed workaround (or full
+                resolution) via the Governance Hub. YELLOW items require a
+                workaround recorded by the opener via Log Anomalies. Once every
+                blocking item below has an accepted workaround or is resolved,
+                the Open Centre workflow becomes available.
               </p>
             </div>
           </div>
 
           <ul className="space-y-2">
-            {openRedIssues.map((i) => (
-              <li
-                key={i.id}
-                className="flex items-start gap-2 rounded-md border border-red-600/40 bg-background/60 p-3 text-sm"
-              >
-                <span className="mt-0.5 shrink-0 rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">
-                  RED
-                </span>
-                <div className="min-w-0 flex-1 space-y-1">
-                  <div className="break-words font-medium text-foreground">
-                    {i.issueDescription || "(no description)"}
-                  </div>
-                  {i.workaroundPlan && (
-                    <div className="text-xs text-muted-foreground">
-                      Workaround: {i.workaroundPlan}
+            {blockingIssues.map((i) => {
+              const isRed = i.severity === "red";
+              return (
+                <li
+                  key={i.id}
+                  className={`flex items-start gap-2 rounded-md border bg-background/60 p-3 text-sm ${
+                    isRed ? "border-red-600/40" : "border-yellow-500/50"
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${
+                      isRed ? "bg-red-600" : "bg-yellow-600"
+                    }`}
+                  >
+                    {isRed ? "RED" : "YELLOW"}
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="break-words font-medium text-foreground">
+                      {i.issueDescription || "(no description)"}
                     </div>
-                  )}
-                  <div className="text-[11px] text-muted-foreground">
-                    Logged <ClientTime iso={i.createdAt} />
-                    {i.status && i.status !== "open" ? ` · status: ${i.status}` : ""}
+                    <div className="text-[11px] text-muted-foreground">
+                      Logged <ClientTime iso={i.createdAt} />
+                      {i.status && i.status !== "open"
+                        ? ` · status: ${i.status}`
+                        : ""}
+                    </div>
                   </div>
-                </div>
-              </li>
-            ))}
+                </li>
+              );
+            })}
           </ul>
 
-          <Button
-            asChild
-            size="sm"
-            className="bg-red-600 hover:bg-red-700"
-          >
-            <Link to="/governance">
-              Open Governance Hub
-              <ArrowRight className="ml-1.5 h-4 w-4" />
-            </Link>
-          </Button>
+          {blockingHasRed && (
+            <Button asChild size="sm" className="bg-red-600 hover:bg-red-700">
+              <Link to="/governance">
+                Open Governance Hub
+                <ArrowRight className="ml-1.5 h-4 w-4" />
+              </Link>
+            </Button>
+          )}
+        </Card>
+      )}
+
+      {carriedIssues.length > 0 && (
+        <Card className="space-y-3 border-2 border-yellow-500/60 bg-yellow-500/10 p-4">
+          <div className="flex items-start gap-2">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-yellow-600" />
+            <div className="space-y-1">
+              <div className="text-base font-bold text-yellow-800 dark:text-yellow-200">
+                Open issue{carriedIssues.length === 1 ? "" : "s"} carried with
+                agreed workaround{carriedIssues.length === 1 ? "" : "s"}
+              </div>
+              <p className="text-sm text-muted-foreground">
+                These items remain open but have an accepted workaround in
+                place, so the Open Centre workflow may proceed. Each will stay
+                visible in the Issues Register until fully resolved.
+              </p>
+            </div>
+          </div>
+
+          <ul className="space-y-2">
+            {carriedIssues.map((i) => {
+              const isRed = i.severity === "red";
+              return (
+                <li
+                  key={i.id}
+                  className={`flex items-start gap-2 rounded-md border bg-background/60 p-3 text-sm ${
+                    isRed ? "border-red-600/40" : "border-yellow-500/50"
+                  }`}
+                >
+                  <span
+                    className={`mt-0.5 shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold text-white ${
+                      isRed ? "bg-red-600" : "bg-yellow-600"
+                    }`}
+                  >
+                    {isRed ? "RED" : "YELLOW"}
+                  </span>
+                  <div className="min-w-0 flex-1 space-y-1">
+                    <div className="break-words font-medium text-foreground">
+                      {i.issueDescription || "(no description)"}
+                    </div>
+                    {i.workaroundPlan && (
+                      <div className="text-xs text-muted-foreground">
+                        Workaround: {i.workaroundPlan}
+                      </div>
+                    )}
+                    <div className="text-[11px] text-muted-foreground">
+                      Logged <ClientTime iso={i.createdAt} />
+                      {i.status && i.status !== "open"
+                        ? ` · status: ${i.status}`
+                        : ""}
+                    </div>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
         </Card>
       )}
 
 
-      {errorMessage && (
 
         <div className="flex items-start gap-2 rounded-md border border-destructive/50 bg-destructive/5 p-3 text-sm text-destructive">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
