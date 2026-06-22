@@ -32,8 +32,23 @@ interface Props {
   subjectLabel: string;
   /** Optional source escalation/issue id; embedded in metadata. */
   sourceId?: string | null;
-  /** Called after the ledger receipt has been successfully written. */
-  onAccepted: () => void;
+  /**
+   * Ledger `action_type` written for this verbal consultation. Defaults to
+   * the historical `VERBAL_AUTH_OVERRIDE` (high-trust escape hatch). The
+   * promoted single-user RED flow passes `RED_VERBAL_WORKAROUND`.
+   */
+  actionType?: string;
+  /** Optional title override for the canonical RED variant. */
+  titleOverride?: string;
+  /** Optional descriptive blurb for the canonical RED variant. */
+  descriptionOverride?: string;
+  /**
+   * Called after the ledger receipt has been successfully written. Receives
+   * the captured manager name and verbal plan so the caller can land an
+   * open ticket in the appropriate source register (site_issues_register /
+   * operational_incidents) with a `[VERBAL WORKAROUND]` prefix.
+   */
+  onAccepted: (payload: { managerName: string; reason: string }) => void;
 }
 
 /**
@@ -55,6 +70,9 @@ export function VerbalAuthOverrideDialog({
   ledgerCategory,
   subjectLabel,
   sourceId,
+  actionType = "VERBAL_AUTH_OVERRIDE",
+  titleOverride,
+  descriptionOverride,
   onAccepted,
 }: Props) {
   const MIN_REASON = 20;
@@ -83,7 +101,7 @@ export function VerbalAuthOverrideDialog({
         staff_id: operatorStaffId,
         category: ledgerCategory,
         severity: "RED",
-        action_type: "VERBAL_AUTH_OVERRIDE",
+        action_type: actionType,
         gps_lat: gps?.lat ?? null,
         gps_lng: gps?.lng ?? null,
         metadata: {
@@ -97,18 +115,25 @@ export function VerbalAuthOverrideDialog({
           gps_attempted: true,
           gps_captured: !!gps,
           source: "verbal_auth_override_dialog",
-          override_kind: "verbal",
+          override_kind:
+            actionType === "RED_VERBAL_WORKAROUND" ? "red_verbal_workaround" : "verbal",
         },
       });
+      return { managerName: managerName.trim(), reason: reason.trim() };
     },
-    onSuccess: () => {
-      toast.success("Verbal authorization recorded", {
-        description:
-          "An immutable ledger receipt was written. Governance Hub will flag this for retroactive sign-off.",
-      });
+    onSuccess: (payload) => {
+      toast.success(
+        actionType === "RED_VERBAL_WORKAROUND"
+          ? "Verbal workaround recorded"
+          : "Verbal authorization recorded",
+        {
+          description:
+            "An immutable ledger receipt was written. Governance Hub now shows this as an open verbal workaround.",
+        },
+      );
       reset();
       onOpenChange(false);
-      onAccepted();
+      onAccepted(payload);
     },
     onError: (e: Error) => {
       toast.error("Could not record verbal authorization", {
