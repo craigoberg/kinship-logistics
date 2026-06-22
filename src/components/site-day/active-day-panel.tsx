@@ -266,9 +266,50 @@ export function ActiveDayPanel({ session }: Props) {
         <LogAnomalyModal
           open={anomalyOpen}
           onOpenChange={setAnomalyOpen}
-          sessionId={session.id}
+          context={{
+            kind: "site-day",
+            sessionId: session.id,
+            onRedRequested: (description, owner) => {
+              setVerbalPending({ description, owner });
+            },
+          }}
         />
       )}
+
+      <VerbalAuthOverrideDialog
+        open={!!verbalPending}
+        onOpenChange={(o) => {
+          if (!o) setVerbalPending(null);
+        }}
+        ledgerCategory="CENTRE"
+        subjectLabel={`Day Centre · Session ${session.id.slice(0, 8)}`}
+        sourceId={session.id}
+        actionType="RED_VERBAL_WORKAROUND"
+        titleOverride="RED Verbal Consultation & Log"
+        descriptionOverride="A RED Day Centre anomaly was identified. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. The ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and the session keeps running."
+        onAccepted={async ({ managerName, reason }) => {
+          if (!verbalPending) return;
+          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          try {
+            await createIssue({
+              sessionId: session.id,
+              severity: "red",
+              issueDescription: prefixed,
+              workaroundPlan: reason,
+              owner: verbalPending.owner,
+            });
+            queryClient.invalidateQueries({ queryKey: siteIssuesKey(session.id) });
+            queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(session.id) });
+            queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+          } catch (err) {
+            console.error("[ActiveDayPanel] verbal-workaround issue insert failed", err);
+            toast.error("Verbal workaround logged to ledger, but Hub sync failed", {
+              description: (err as Error).message,
+            });
+          }
+          setVerbalPending(null);
+        }}
+      />
 
       <PinReauthDialog
         open={reauthOpen}
