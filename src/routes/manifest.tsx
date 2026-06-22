@@ -1652,6 +1652,14 @@ function CancelTripButton({ tripId }: { tripId: string }) {
 function EscalationRehydrationGate({ escalation }: { escalation: OperationalEscalation }) {
   const dateStr = useMemo(() => todayDateStr(), []);
 
+  // Defensive: `vehicleInfo` is free-text and can be null/empty for legacy
+  // rows. Guard every `.split` / lookup so this gate cannot crash the route
+  // (which would dump the user onto the global "This page didn't load" page).
+  const vehicleInfo = escalation.vehicleInfo ?? "";
+  const vehicleParts = vehicleInfo.split(" · ");
+  const vehicleName = vehicleParts[0] || "Vehicle";
+  const vehiclePlate = vehicleParts[1] || "—";
+
   const assetsQ = useQuery({
     queryKey: ["transport-assets"],
     queryFn: () => listTransportAssets(),
@@ -1660,10 +1668,9 @@ function EscalationRehydrationGate({ escalation }: { escalation: OperationalEsca
 
   const asset = useMemo<TransportAsset | null>(() => {
     const list = assetsQ.data ?? [];
-    return (
-      list.find((a) => `${a.name} · ${a.regoPlate}` === escalation.vehicleInfo) ?? null
-    );
-  }, [assetsQ.data, escalation.vehicleInfo]);
+    if (!vehicleInfo) return null;
+    return list.find((a) => `${a.name} · ${a.regoPlate}` === vehicleInfo) ?? null;
+  }, [assetsQ.data, vehicleInfo]);
 
   const issuesQ = useQuery({
     queryKey: ["manifest-escalation-issues", asset?.id, dateStr],
@@ -1712,14 +1719,12 @@ function EscalationRehydrationGate({ escalation }: { escalation: OperationalEsca
     );
   }
 
-  // Fall back to a synthetic asset so the panel still mounts even if the
-  // fleet lookup misses (e.g. asset deactivated mid-day).
   const safeAsset: TransportAsset =
     asset ??
     ({
       id: escalation.id,
-      name: escalation.vehicleInfo.split(" · ")[0] ?? "Vehicle",
-      regoPlate: escalation.vehicleInfo.split(" · ")[1] ?? "—",
+      name: vehicleName,
+      regoPlate: vehiclePlate,
       passengerCapacity: 0,
       isActive: true,
     } as unknown as TransportAsset);
@@ -1733,14 +1738,22 @@ function EscalationRehydrationGate({ escalation }: { escalation: OperationalEsca
   };
 
   return (
-    <RedHandshakeWaitingPanel
-      asset={safeAsset}
-      driverName={escalation.driverName}
-      escalationId={escalation.id}
-      escalation={escalation}
-      issues={issuesQ.data ?? []}
-      onAuthorized={handleClose}
-      onBack={handleClose}
-    />
+    <>
+      {/* Testing visibility strip — short escalation id + status + owner */}
+      <div className="mb-2 rounded border border-amber-500/40 bg-amber-500/10 px-2 py-1 text-[10px] font-mono text-amber-900 dark:text-amber-200">
+        ESC {escalation.id.slice(0, 8)} · {escalation.status}
+        {escalation.claimedBy ? ` · claimed by ${escalation.claimedBy.slice(0, 8)}` : " · unclaimed"}
+        {escalation.operatorAcknowledgedAt ? " · op-ack ✓" : ""}
+      </div>
+      <RedHandshakeWaitingPanel
+        asset={safeAsset}
+        driverName={escalation.driverName || "Driver"}
+        escalationId={escalation.id}
+        escalation={escalation}
+        issues={issuesQ.data ?? []}
+        onAuthorized={handleClose}
+        onBack={handleClose}
+      />
+    </>
   );
 }
