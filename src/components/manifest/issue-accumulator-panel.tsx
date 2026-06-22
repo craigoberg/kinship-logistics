@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClipboardCheck, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
 import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
 import { getActiveEscalation } from "@/lib/api/clearance";
+import { supabase } from "@/integrations/supabase/client";
 
 import type {
   AssetCheckpoint,
@@ -33,8 +34,12 @@ import { RedHandshakeWaitingPanel } from "./red-handshake-waiting-panel";
 const COMFORT_DECLARATION_TEXT =
   "I confirm that all issues have been cleanly recorded, appropriate workarounds are deployed, and I am personally comfortable, oriented, and acting in accordance with my signed Organization Onboarding Guidelines to operate safely today.";
 
+const PRE_TRIP_TAG = "[Pre-trip]";
+
 interface DraftIssue {
   id: string;
+  /** Backing operational_incidents.id when persisted (Green/Yellow). */
+  incidentId?: string;
   severity: ClearanceIssueSeverity;
   text: string;
 }
@@ -46,6 +51,21 @@ function freshId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 }
+
+function sevToIncident(s: ClearanceIssueSeverity): "sev2" | "sev3" | null {
+  if (s === "yellow") return "sev2";
+  if (s === "green") return "sev3";
+  return null;
+}
+
+function incidentSevToClearance(
+  s: string | null | undefined,
+): ClearanceIssueSeverity | null {
+  if (s === "sev2") return "yellow";
+  if (s === "sev3") return "green";
+  return null;
+}
+
 
 function severityChip(s: ClearanceIssueSeverity): {
   label: string;
@@ -91,6 +111,52 @@ export function IssueAccumulatorPanel({
   const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
   const hasRed = useMemo(() => issues.some((i) => i.severity === "red"), [issues]);
 
+  // Rehydrate Green/Yellow drafts from operational_incidents so a refresh
+  // mid-walkaround doesn't blank the panel. Filter to today's pending
+  // mechanical findings for this vehicle.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("operational_incidents")
+          .select("id, severity, description, created_at")
+          .eq("vehicle_id", asset.id)
+          .eq("status", "pending")
+          .eq("incident_type", "mechanical")
+          .in("severity", ["sev2", "sev3"])
+          .gte("created_at", `${dateStr}T00:00:00.000Z`)
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        if (cancelled || !data) return;
+        const rehydrated: DraftIssue[] = [];
+        for (const r of data) {
+          const sev = incidentSevToClearance(r.severity as string);
+          if (!sev) continue;
+          const desc = String(r.description ?? "");
+          const text = desc.startsWith(PRE_TRIP_TAG)
+            ? desc.slice(PRE_TRIP_TAG.length).trim()
+            : desc;
+          rehydrated.push({
+            id: freshId(),
+            incidentId: String(r.id),
+            severity: sev,
+            text,
+          });
+        }
+
+        if (rehydrated.length > 0) {
+          setIssues((prev) => (prev.length === 0 ? rehydrated : prev));
+        }
+      } catch (err) {
+        console.warn("[IssueAccumulatorPanel] rehydrate failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, dateStr]);
+
   if (redClearance) {
     return (
       <RedHandshakeWaitingPanel
@@ -104,8 +170,26 @@ export function IssueAccumulatorPanel({
     );
   }
 
-  const removeIssue = (id: string) =>
+  const removeIssue = async (id: string) => {
+    const target = issues.find((i) => i.id === id);
     setIssues((p) => p.filter((i) => i.id !== id));
+    if (target?.incidentId) {
+      try {
+        const { error } = await supabase
+          .from("operational_incidents")
+          .update({ status: "resolved" })
+          .eq("id", target.incidentId);
+        if (error) throw error;
+      } catch (err) {
+        console.warn(
+          "[IssueAccumulatorPanel] soft-resolve incident failed",
+          err,
+        );
+        toast.error("Removed locally but could not sync to Governance Hub.");
+      }
+    }
+  };
+
 
   const buildAccumulatedBlob = (list: DraftIssue[]): string =>
     list
@@ -325,18 +409,54 @@ export function IssueAccumulatorPanel({
           asset: { id: asset.id, name: asset.name, regoPlate: asset.regoPlate },
           driverName,
           dateStr,
-          onLogged: (draft) => {
+          onLogged: async (draft) => {
+            const severity = draft.severity as ClearanceIssueSeverity;
+            const text = draft.workaround
+              ? `${draft.description} — Workaround: ${draft.workaround}`
+              : draft.description;
+            const localId = freshId();
+            // Optimistic insert into the local stack first.
             setIssues((prev) => [
               ...prev,
-              {
-                id: freshId(),
-                severity: draft.severity as ClearanceIssueSeverity,
-                text: draft.workaround
-                  ? `${draft.description} — Workaround: ${draft.workaround}`
-                  : draft.description,
-              },
+              { id: localId, severity, text },
             ]);
+            // Write-ahead to operational_incidents so the Governance Hub
+            // sees Green/Yellow findings immediately and the panel can
+            // rehydrate after refresh. RED is excluded — it already went
+            // through raiseOperationalEscalation inside the modal.
+            const incidentSev = sevToIncident(severity);
+            if (!incidentSev) return;
+            try {
+              const { data, error } = await supabase
+                .from("operational_incidents")
+                .insert({
+                  incident_type: "mechanical",
+                  severity: incidentSev,
+                  description: `${PRE_TRIP_TAG} ${text}`,
+                  vehicle_id: asset.id,
+                  reported_by: driverName || "driver",
+                  status: "pending",
+                })
+                .select("id")
+                .single();
+              if (error) throw error;
+              const incidentId = String(data.id);
+              setIssues((prev) =>
+                prev.map((i) =>
+                  i.id === localId ? { ...i, incidentId } : i,
+                ),
+              );
+            } catch (err) {
+              console.error(
+                "[IssueAccumulatorPanel] write-ahead incident failed",
+                err,
+              );
+              toast.error("Logged locally but not synced to Governance Hub", {
+                description: (err as Error).message,
+              });
+            }
           },
+
           onEscalated: async () => {
             // Resolve the full escalation row so the parent can render the
             // handshake waiting panel without another round-trip.

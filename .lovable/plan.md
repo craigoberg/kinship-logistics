@@ -1,51 +1,69 @@
-## Manifest/Pre-Trip → Unified Issue/Escalation Engine (Final Wiring)
+## Problem
 
-Execute the five steps strictly in order. No file deletions this pass.
+Two related defects in the pre-trip Daily Walkaround:
 
-### 1. Database Schema Alignment
-- Re-run idempotent migration `docs/sql/2026-06-28_asset_clearance_columns_retest.sql` (already authored in prior turn) to add to `public.asset_daily_clearance`:
-  - `accumulated_issues text`
-  - `driver_comfort_declared boolean`
-  - `requires_manager_review boolean`
-  - dual-PIN handshake columns (`driver_auth_staff_id`, `manager_auth_pin_verified_at`)
-  - status check constraint + realtime publication
-- Force PostgREST schema cache reload (`NOTIFY pgrst, 'reload schema'`) so the frontend stops getting PGRST204.
+1. **Green/Yellow issues never reach the Governance Hub.** The Hub's Open Issues panel (`UnifiedIssuesPanel` → `listOpenUnifiedIssues`) reads from four sources: `site_issues_register`, `operational_incidents`, `operational_escalations`, and compliance asset renewals. Pre-trip findings live only in `asset_daily_clearance_items` (and only after the driver clicks **Lock In Declaration**), so the Hub has no visibility.
 
-### 2. Swap Manifest Route Engine
-- In `src/routes/manifest.tsx` → `IssueAccumulatorGate`:
-  - Remove the `IssueAccumulatorPanel` invocation that still wraps the legacy `DynamicOperationalForm` path.
-  - Mount `LogAnomalyModal` with `context={{ kind: "pre-trip", assetId, dateStr, driverStaffId }}` opened from a primary "Inspect vehicle" CTA.
-  - GREEN/YELLOW: accumulate into local draft array (namespaced storage key `pre-trip-anomaly:${assetId}:${dateStr}`), flushed into `asset_daily_clearance.accumulated_issues` on submit via `insertAssetClearanceWithItems`.
-  - RED: bypass clearance write; call `raiseOperationalEscalation({ gateId: "pre_trip_red", sourceKind: "bus_walkaround", raisedBy: driverStaffId, assetId })`. Screen swaps to `RedHandshakeWaitingPanel` via existing `getActiveEscalation` poll + `subscribeToEscalationPool` rehydration already wired in the route.
+2. **Drafts vanish on refresh.** `IssueAccumulatorPanel` stores added Green/Yellow issues in local `useState` only. Nothing is persisted until the final submit, so a re-render, refetch, or tab refresh wipes them.
 
-### 3. Active Issues Register at Top of Pre-Trip
-- Reuse existing unified hook `useUnifiedIssues` / `src/lib/api/unified-issues.ts`.
-- Mount a shared `<ActiveIssuesRegister vehicleAssetId={assetId} />` at the top of the manifest pre-trip screen, above the inspect CTA.
-  - If component does not yet exist as a standalone, extract it from `src/components/admin/unified-issues-panel.tsx` into `src/components/issue-engine/active-issues-register.tsx` with a `vehicleAssetId` filter prop. Admin panel re-uses the new shared component (no behaviour change).
-- Behaviour:
-  - Carried-over RED with active YELLOW workaround → register shows "Workaround in force"; primary checkout stays unlocked.
-  - Carried-over RED without workaround → checkout remains locked via existing escalation gate.
-  - Duplicate-suppression: when opening `LogAnomalyModal`, pass the active register entries; if driver selects a checkpoint/fault matching an existing unresolved entry, modal shows "Already reported — see register above" and blocks submission.
+RED handling is unaffected — it already writes through `operational_escalations` immediately.
 
-### 4. Unified UI Tokens
-- Audit textareas on `manifest.tsx`, `issue-accumulator-panel.tsx`, `log-anomaly-modal.tsx` (pre-trip branch), and `verbal-auth-override-dialog.tsx`. Replace any raw `<Textarea>` for description/workaround with `<CharacterCountedTextarea minLength={20} />` so we get:
-  - X/Y countdown
-  - Solid blue progress line
-  - Thick red border for missing required fields
-- Confirm `VerbalAuthOverrideDialog` is reachable from `RedHandshakeWaitingPanel` on the driver wait screen (trigger button "Manager unreachable — verbal override").
+## Approach — write-ahead through the single-rail `operational_incidents` table
 
-### 5. Preservation
-- `src/components/manifest/dynamic-operational-form.tsx` stays on disk, unimported by `manifest.tsx`. No deletion.
+Use the existing single-rail surface the Hub already understands. Each Green/Yellow finding is written to `operational_incidents` the instant the driver logs it, then rehydrated from there on mount.
 
-### Verification
-- Reproduce original failure: open `/manifest`, log a RED defect → expect 201 on `asset_daily_clearance`, new row in `operational_escalations`, screen swaps to `RedHandshakeWaitingPanel`.
-- GREEN-only submit clears the bus.
-- Active register populates from a seeded unresolved issue; duplicate report is blocked.
-- Build clean, no console PGRST204.
+### 1. Write-ahead on log
 
-### Files
-- Migration: re-run `docs/sql/2026-06-28_asset_clearance_columns_retest.sql` (+ append `NOTIFY pgrst, 'reload schema'` if missing).
-- Edit: `src/routes/manifest.tsx`, `src/components/manifest/issue-accumulator-panel.tsx`, `src/components/site-day/log-anomaly-modal.tsx` (duplicate-suppression prop), `src/components/manifest/red-handshake-waiting-panel.tsx` (verbal override CTA).
-- Create: `src/components/issue-engine/active-issues-register.tsx` (extracted shared component).
-- Refactor: `src/components/admin/unified-issues-panel.tsx` to consume the shared register.
-- Preserved: `src/components/manifest/dynamic-operational-form.tsx`.
+In `IssueAccumulatorPanel`'s `LogAnomalyModal.onLogged` handler (Green/Yellow branch only), after pushing to local state, insert into `operational_incidents`:
+
+- `incident_type: "mechanical"` (pre-trip walkaround is fleet/asset-scoped)
+- `severity: yellow → "sev2"`, `green → "sev3"`
+- `vehicle_id: asset.id`
+- `description`: `"[Pre-trip] {finding} — Workaround: {workaround}"` (workaround only if present)
+- `reported_by`: driver name
+- `status: "pending"` (default)
+
+Store the returned `id` on the `DraftIssue` so the local row and the DB row stay linked. Roll back the local push on insert failure and toast.
+
+### 2. Rehydrate on mount
+
+Add a query (or one-shot fetch in `useEffect`) keyed by `[asset.id, dateStr]`:
+
+```ts
+supabase.from("operational_incidents")
+  .select("*")
+  .eq("vehicle_id", asset.id)
+  .eq("status", "pending")
+  .gte("created_at", `${dateStr}T00:00:00Z`)
+  .in("severity", ["sev2","sev3"])
+```
+
+Map rows back to `DraftIssue[]` and seed the `issues` state. This makes the panel survive refresh.
+
+### 3. Lock-In Declaration is unchanged in effect
+
+`insertAssetClearanceWithItems` still writes the clearance + items + `accumulated_issues` blob. The pre-existing `operational_incidents` rows remain `pending` — they are the Hub's view of the finding and the Hub already has a working **Resolve** flow (`resolveUnifiedIssue` → ledger receipt + `status: "resolved"`). No new resolve UI needed.
+
+Optional polish (not required for the fix): include the inserted incident IDs in the clearance `accumulated_issues` blob or items' `notes` for cross-reference.
+
+### 4. Removing a draft before submit
+
+The trash-can button currently only removes from local state. Extend `removeIssue` to also `update({ status: "resolved" })` the corresponding `operational_incidents` row so the Hub doesn't show a phantom that the driver deleted before locking in.
+
+### 5. RED unchanged
+
+RED still goes straight through `raiseOperationalEscalation` inside `LogAnomalyModal`. We do NOT also write an `operational_incidents` row for RED — that would double-count it in the Hub feed (escalations branch already covers it).
+
+## Files to touch (build mode only)
+
+- `src/components/manifest/issue-accumulator-panel.tsx` — write-ahead in `onLogged`, rehydrate on mount, soft-resolve on `removeIssue`.
+- (Optional helper) a small wrapper in `src/lib/api/fleet.ts` or new `src/lib/api/pre-trip-findings.ts` for the insert/list/soft-resolve calls, to keep the component clean.
+
+No SQL migration required — `operational_incidents` already has every column we need.
+
+## Verification
+
+1. Reload `/manifest`, open the walkaround for any bus, add one Green and one Yellow finding → confirm they appear in `/governance` → Open Issues with source = **Incident**, severity badges Green/Yellow.
+2. Refresh `/manifest` mid-walkaround → confirm the Green/Yellow rows are still listed in the accumulator (rehydrated from DB).
+3. Click the trash icon on a draft → confirm it disappears from both the panel and the Hub.
+4. Click **Lock In Declaration** with the comfort PIN → confirm clearance saves and the Hub rows remain open and resolvable from the Hub's Resolve dialog (which writes the ledger receipt).
