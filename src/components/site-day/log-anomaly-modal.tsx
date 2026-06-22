@@ -23,12 +23,10 @@ import {
   type RygeSeverity,
 } from "@/lib/api/site-issues";
 import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
-import { setPhase } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
-import {
-  getActiveUserProfile,
-  raiseOperationalEscalation,
-} from "@/lib/data-store";
+// `raiseOperationalEscalation` + `setPhase` removed: RED no longer triggers a
+// multi-device handshake. The local operator now opens a VerbalAuthOverrideDialog
+// directly via the `onRedRequested` callback below.
 
 /**
  * Reentrant Issue/Escalation modal — `context` selects the pipeline.
@@ -46,7 +44,16 @@ import {
  * Legacy `sessionId`-only call sites continue to work unchanged.
  */
 export type AnomalyContext =
-  | { kind: "site-day"; sessionId: string }
+  | {
+      kind: "site-day";
+      sessionId: string;
+      /**
+       * Site-day RED: invoked instead of writing a site_issues_register row.
+       * The parent panel opens VerbalAuthOverrideDialog and, on acceptance,
+       * writes the `[VERBAL WORKAROUND]` open ticket itself.
+       */
+      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
+    }
   | {
       kind: "pre-trip";
       asset: { id: string; name: string; regoPlate: string };
@@ -58,7 +65,8 @@ export type AnomalyContext =
         workaround: string | null;
         owner: ResponsibilityOwner;
       }) => void;
-      onEscalated?: (escalationId: string) => void;
+      /** Pre-trip RED — parent opens VerbalAuthOverrideDialog. */
+      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
     };
 
 interface Props {
@@ -182,40 +190,33 @@ export function LogAnomalyModal({
 
       // ---------- Pre-trip context: no site_session in scope ----------
       if (context.kind === "pre-trip") {
-        // Non-Red issues are accumulated by the parent into asset_clearance_items
-        // at commit time. Just emit the draft.
-        if (values.severity !== "red") {
-          context.onLogged?.({
-            severity: values.severity,
-            description: values.description.trim(),
-            workaround: workaroundPlan,
-            owner: values.owner,
-          });
-          return { kind: "pre-trip", severity: values.severity } as const;
+        if (values.severity === "red") {
+          // Single-user verbal flow: hand off to the parent to open the
+          // VerbalAuthOverrideDialog. No DB writes here.
+          context.onRedRequested?.(values.description.trim(), values.owner);
+          return { kind: "pre-trip", severity: "red" as RygeSeverity } as const;
         }
 
-        // Red: raise the bus_walkaround escalation immediately on the
-        // single-rail pipeline. Classification "pre_trip_red" is carried in
-        // the gate_id + raised_by metadata for downstream reporting.
-        const vehicleInfo = `${context.asset.name} · ${context.asset.regoPlate}`;
-        const esc = await raiseOperationalEscalation({
-          clearanceId: null,
-          driverName: context.driverName,
-          vehicleInfo,
-          gateId: "pre_trip_red",
-          sourceKind: "bus_walkaround",
-          sourceIssueId: null,
+        context.onLogged?.({
+          severity: values.severity,
+          description: values.description.trim(),
+          workaround: workaroundPlan,
+          owner: values.owner,
         });
-        context.onEscalated?.(esc.id);
-        return {
-          kind: "pre-trip",
-          severity: "red" as RygeSeverity,
-          escalationId: esc.id,
-        } as const;
+        return { kind: "pre-trip", severity: values.severity } as const;
       }
 
       // ---------- Site-day context (default / legacy) ----------
       const sId = context.sessionId;
+
+      if (values.severity === "red") {
+        // Single-user verbal flow: parent opens VerbalAuthOverrideDialog and,
+        // on acceptance, writes the `[VERBAL WORKAROUND]` site_issues_register
+        // ticket. The session phase is NOT flipped to `escalated_lock`.
+        context.onRedRequested?.(values.description.trim(), values.owner);
+        return { kind: "site-day-red" as const };
+      }
+
       const payload: NewSiteIssue = {
         sessionId: sId,
         severity: values.severity,
@@ -224,34 +225,6 @@ export function LogAnomalyModal({
         owner: values.owner,
       };
       const issue = await createIssue(payload);
-      if (values.severity === "red") {
-        const next = await setPhase(sId, "escalated_lock");
-        queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
-        const checkerName =
-          getActiveUserProfile()?.fullName?.trim() || "Day Centre Checker";
-        try {
-          await raiseOperationalEscalation({
-            clearanceId: null,
-            driverName: checkerName,
-            vehicleInfo: `Day Centre · ${issue.issueDescription.slice(0, 80)}`,
-            gateId: "site_day_red",
-            sourceKind: "site_day_red",
-            sourceIssueId: issue.id,
-          });
-        } catch (err) {
-          // Issue is already persisted; surface but do not roll back.
-          console.error("[log-anomaly] escalation insert failed", err);
-          toast.warning(
-            "Red issue logged, but manager broadcast failed — notify a manager directly.",
-          );
-        }
-        triggerEscalation({
-          kind: "site_session",
-          sessionId: sId,
-          issueId: issue.id,
-          description: issue.issueDescription,
-        });
-      }
       return { kind: "site-day" as const, issue };
     },
     onSuccess: (result) => {
@@ -279,12 +252,7 @@ export function LogAnomalyModal({
         queryClient.refetchQueries({ queryKey: siteIssuesKey(sId) });
         reset();
         onOpenChange(false);
-        if (issue.severity === "red") {
-          toast.error("Red anomaly logged — site escalated for Manager review.", {
-            description:
-              "Manager must complete the dual-PIN handshake before the centre can open.",
-          });
-        } else if (issue.severity === "yellow") {
+        if (issue.severity === "yellow") {
           toast.warning("Yellow anomaly logged.", {
             description: "Workaround captured in the Issues Register.",
           });
