@@ -27,6 +27,12 @@ import {
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
 import { useSiteIssues } from "@/hooks/use-site-issues";
+import { useQuery } from "@tanstack/react-query";
+import {
+  fetchApprovedRedWorkarounds,
+  redHasAcceptedWorkaround,
+  effectiveWorkaroundText,
+} from "@/lib/site-day/red-workaround";
 
 interface Props {
   sessionId: string;
@@ -47,16 +53,6 @@ function formatServerError(e: unknown): string {
   return String(e);
 }
 
-function redHasAcceptedWorkaround(issue: {
-  status: string | null;
-  workaroundPlan: string | null;
-}): boolean {
-  return (
-    issue.status === "workaround_accepted" ||
-    !!issue.workaroundPlan?.trim()
-  );
-}
-
 export function StartOfDayPanel({ sessionId }: Props) {
   if (!sessionId) {
     throw new Error("StartOfDayPanel requires a non-empty sessionId");
@@ -75,14 +71,27 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issuesQ = useSiteIssues(sessionId);
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
+
+  // Pull manager-approved escalation workarounds as a fallback source of
+  // truth when the issue row itself wasn't updated by the acceptance flow.
+  const redIds = openIssues.filter((i) => i.severity === "red").map((i) => i.id);
+  const redIdsKey = redIds.join(",");
+  const escMapQ = useQuery({
+    queryKey: ["site-day-red-escalation-workarounds", redIdsKey],
+    queryFn: () => fetchApprovedRedWorkarounds(redIds),
+    enabled: redIds.length > 0,
+    staleTime: 5_000,
+  });
+  const escMap = escMapQ.data ?? null;
+
   const blockingIssues = openIssues.filter(
     (i) =>
-      (i.severity === "red" && !redHasAcceptedWorkaround(i)) ||
+      (i.severity === "red" && !redHasAcceptedWorkaround(i, escMap)) ||
       (i.severity === "yellow" && !i.workaroundPlan?.trim()),
   );
   const carriedIssues = openIssues.filter(
     (i) =>
-      (i.severity === "red" && redHasAcceptedWorkaround(i)) ||
+      (i.severity === "red" && redHasAcceptedWorkaround(i, escMap)) ||
       (i.severity === "yellow" && !!i.workaroundPlan?.trim()),
   );
   const hasBlocking = blockingIssues.length > 0;
@@ -245,9 +254,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
                     <div className="break-words font-medium text-foreground">
                       {i.issueDescription || "(no description)"}
                     </div>
-                    {i.workaroundPlan && (
+                    {effectiveWorkaroundText(i, escMap) && (
                       <div className="text-xs text-muted-foreground">
-                        Workaround: {i.workaroundPlan}
+                        Workaround: {effectiveWorkaroundText(i, escMap)}
                       </div>
                     )}
                     <div className="text-[11px] text-muted-foreground">

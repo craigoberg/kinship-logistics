@@ -18,19 +18,14 @@ import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 import { DayBlockingDiagnostic } from "@/components/dev/day-blocking-diagnostic";
+import {
+  fetchApprovedRedWorkarounds,
+  redHasAcceptedWorkaround,
+  effectiveWorkaroundText,
+} from "@/lib/site-day/red-workaround";
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
-}
-
-function redHasAcceptedWorkaround(issue: {
-  status: string | null;
-  workaround_plan: string | null;
-}): boolean {
-  return (
-    issue.status === "workaround_accepted" ||
-    !!issue.workaround_plan?.trim()
-  );
 }
 
 export function DayCentrePage() {
@@ -61,11 +56,17 @@ export function DayCentrePage() {
         .eq("severity", "red")
         .order("created_at", { ascending: false });
       if (error) throw error;
-      return data ?? [];
+      const rows = data ?? [];
+      const escMap = await fetchApprovedRedWorkarounds(
+        rows.filter((r) => r.status !== "resolved").map((r) => r.id),
+      );
+      return { rows, escMap };
     },
   });
-  const blockingReds = (openRedsQ.data ?? []).filter(
-    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue),
+  const allReds = openRedsQ.data?.rows ?? [];
+  const escMap = openRedsQ.data?.escMap ?? null;
+  const blockingReds = allReds.filter(
+    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue, escMap),
   );
   const hasBlockingRed = blockingReds.length > 0;
 
@@ -201,9 +202,9 @@ export function DayCentrePage() {
                 <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
               </div>
               <div className="mt-1 font-medium">{r.issue_description}</div>
-              {r.workaround_plan ? (
+              {effectiveWorkaroundText(r, escMap) ? (
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Workaround: {r.workaround_plan}
+                  Workaround: {effectiveWorkaroundText(r, escMap)}
                 </div>
               ) : null}
             </li>

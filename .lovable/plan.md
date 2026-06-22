@@ -1,49 +1,46 @@
-## Diagnostic plan
+**Do I know what the issue is?** Yes.
 
-### Goal
-Stop guessing why Start of Day is still blocked by showing exactly which data row is causing the block, what linked escalation/workaround state exists, and which rule the UI applied.
+The diagnostic proves the RED issue is still blocking because the manager escalation was marked `resolved_approved` with notes, but the original RED issue row stayed `status: open` and `workaround_plan: null`. The acceptance/writeback path didn’t update the issue row, likely because the browser-side database update matched/changed zero rows without surfacing a hard error.
 
-### What I’ll add
-1. **Test-only diagnostic panel on `/day`**
-   - Visible only in the existing test/dev environment wrapper.
-   - Shows:
-     - current site day session id + phase
-     - each RED issue for the session and cross-session guard
-     - issue `status`, `workaround_plan`, `resolved_at`
-     - linked escalation `status`, `resolution_notes`, `resolved_at`, `source_issue_id`
-     - final computed result: `BLOCKING` or `CARRIED WITH WORKAROUND`
+**Plan**
 
-2. **Explain the blocker in plain text**
-   - For each RED issue, display why it is blocking, e.g.:
-     - `Issue status is open and no workaround_plan is stored`
-     - `Linked escalation is resolved_approved but issue row was not updated`
-     - `Issue is resolved`
-     - `Workaround accepted`
+1. **Make the blocker rule resilient**
+   - Update the Day Centre blocking logic so a RED is treated as “workaround agreed” when either:
+     - the issue row says `workaround_accepted`, or
+     - the issue row has `workaround_plan`, or
+     - its linked escalation is `resolved_approved` and has `resolution_notes`.
+   - This immediately unblocks the existing case shown in the diagnostic while still blocking unresolved REDs and denied/no-workaround REDs.
 
-3. **Add temporary console diagnostics**
-   - Log one compact table when `/day` loads/refetches:
-     - issue id
-     - issue status
-     - workaround present
-     - linked escalation status
-     - linked escalation notes present
-     - computed blocking reason
+2. **Show carried RED workaround details correctly**
+   - When the workaround comes from the linked escalation, display those `resolution_notes` as the carried workaround text in Start of Day.
+   - Keep unresolved RED/YELLOW issues without workarounds in the blocking panel.
 
-4. **Use the diagnostic result to identify the real fix**
-   - Based on the network data you pasted, the likely mismatch is:
-     - the linked escalation is `resolved_approved` with notes
-     - but the original issue row is still `status: open` and `workaround_plan: null`
-   - The diagnostic will confirm whether the acceptance flow failed to copy the approved workaround back onto `site_issues_register`.
+3. **Fix the acceptance writeback path**
+   - Strengthen `acceptEscalationWorkaround` so the issue update verifies that a row was actually changed/read back.
+   - If writeback cannot update the linked RED issue, do not silently continue as if it worked; surface a clear error instead.
 
-### Likely follow-up fix after diagnosis
-If confirmed, update the RED blocking rule to treat a linked `resolved_approved` escalation with `resolution_notes` as an accepted workaround, and/or repair the acceptance path so it always updates the issue row to `workaround_accepted` with the agreed plan.
+4. **Refresh the affected query caches**
+   - Invalidate the all-RED blocker query, session issue query, escalation query, and diagnostic query after acceptance so hard refresh and live navigation agree.
 
-### Files likely involved
+5. **Keep the diagnostic temporarily**
+   - Update the diagnostic to report the new computed result as `CARRIED` for the exact case in the screenshot: escalation `resolved_approved` + notes, even if the issue row still says `open`.
+   - Once confirmed, the diagnostic can be removed in a follow-up.
+
+**Files to change**
+
 - `src/components/site-day/day-centre-page.tsx`
 - `src/components/site-day/start-of-day-panel.tsx`
-- optionally a small test-only diagnostic component under `src/components/dev/`
+- `src/lib/data-store.ts`
+- `src/components/dev/day-blocking-diagnostic.tsx`
 
-### Safety
-- No published-production visibility: diagnostics are wrapped in the existing test-only tooling.
-- No data rollback or issue mutation in the diagnostic step.
-- No change to RED/YELLOW business rules until the diagnostic confirms the mismatch.
+**Expected outcome**
+
+The current RED shown in your screenshot will be carried forward with its agreed workaround, and the Open Centre workflow will become available unless there is another RED/YELLOW with no agreed workaround.
+
+<presentation-actions>
+  <presentation-open-history>View History</presentation-open-history>
+</presentation-actions>
+
+<presentation-actions>
+<presentation-link url="https://docs.lovable.dev/tips-tricks/troubleshooting">Troubleshooting docs</presentation-link>
+</presentation-actions>
