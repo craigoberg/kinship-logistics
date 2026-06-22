@@ -65,10 +65,18 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const issuesQ = useSiteIssues(sessionId);
   const issues = issuesQ.data ?? [];
   const openIssues = issues.filter((i) => i.status !== "resolved");
-  const openRedIssues = openIssues.filter(
-    (i) => i.severity === "red" && i.status !== "workaround_accepted",
+  const blockingIssues = openIssues.filter(
+    (i) =>
+      (i.severity === "red" && i.status !== "workaround_accepted") ||
+      (i.severity === "yellow" && !i.workaroundPlan?.trim()),
   );
-  const hasOpenRed = openRedIssues.length > 0;
+  const carriedIssues = openIssues.filter(
+    (i) =>
+      (i.severity === "red" && i.status === "workaround_accepted") ||
+      (i.severity === "yellow" && !!i.workaroundPlan?.trim()),
+  );
+  const hasBlocking = blockingIssues.length > 0;
+  const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
 
 
 
