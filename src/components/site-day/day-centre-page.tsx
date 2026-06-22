@@ -202,9 +202,9 @@ export function DayCentrePage() {
                 <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
               </div>
               <div className="mt-1 font-medium">{r.issue_description}</div>
-              {r.workaround_plan ? (
+              {effectiveWorkaroundText(r, escMap) ? (
                 <div className="mt-1 text-xs text-muted-foreground">
-                  Workaround: {r.workaround_plan}
+                  Workaround: {effectiveWorkaroundText(r, escMap)}
                 </div>
               ) : null}
             </li>
