@@ -516,10 +516,9 @@ function SiteDayProposalModal({
             )}
           </div>
         )}
-
-        )}
       </DialogContent>
     </Dialog>
+
   );
 }
 
