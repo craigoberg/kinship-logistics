@@ -90,6 +90,7 @@ export function IssueAccumulatorPanel({
   driverName,
   onCleared,
   onBack,
+  onRedRaised,
 }: Props) {
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [draftSeverity, setDraftSeverity] =
