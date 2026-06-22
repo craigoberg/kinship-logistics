@@ -30,10 +30,43 @@ import {
   raiseOperationalEscalation,
 } from "@/lib/data-store";
 
+/**
+ * Reentrant Issue/Escalation modal — `context` selects the pipeline.
+ *
+ *   kind: "site-day"  → writes to site_issues_register, flips the session
+ *                       phase to escalated_lock on Red, raises a
+ *                       site_day_red escalation linked to the new row.
+ *   kind: "pre-trip"  → no site_session in scope. Green/Yellow emit a
+ *                       draft back to the caller for accumulation into
+ *                       asset_clearance_items at commit time. Red raises a
+ *                       bus_walkaround escalation immediately (classified
+ *                       "pre_trip_red" in the ledger receipt) and lifts
+ *                       the escalation id via onEscalated.
+ *
+ * Legacy `sessionId`-only call sites continue to work unchanged.
+ */
+export type AnomalyContext =
+  | { kind: "site-day"; sessionId: string }
+  | {
+      kind: "pre-trip";
+      asset: { id: string; name: string; regoPlate: string };
+      driverName: string;
+      dateStr: string;
+      onLogged?: (draft: {
+        severity: RygeSeverity;
+        description: string;
+        workaround: string | null;
+        owner: ResponsibilityOwner;
+      }) => void;
+      onEscalated?: (escalationId: string) => void;
+    };
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  sessionId: string;
+  /** Legacy shorthand for `{ kind: "site-day", sessionId }`. */
+  sessionId?: string;
+  context?: AnomalyContext;
   defaultSeverity?: RygeSeverity;
 }
 
