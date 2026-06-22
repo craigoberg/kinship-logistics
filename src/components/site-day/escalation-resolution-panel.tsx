@@ -364,7 +364,13 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
             Enter your 4–6 digit Opener PIN
           </span>
         )}
+        {!canAct && (
+          <span className="block text-[11px] font-semibold text-rose-600">
+            No signed-in staff detected — sign in again before accepting or rejecting.
+          </span>
+        )}
       </div>
+
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
         <Button
