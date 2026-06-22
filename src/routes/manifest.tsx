@@ -158,7 +158,6 @@ function ManifestPage() {
     staleTime: 5 * 60_000,
   });
 
-  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const userRole = typeof window !== "undefined" ? getActiveUserRole() : "driver";
   const currentDriverName = staffName(driverStaffId);
 
