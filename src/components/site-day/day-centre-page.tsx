@@ -27,6 +27,8 @@ export function DayCentrePage() {
   const { user, isReady } = useAuthReady();
   const profile = useMemo(() => getActiveUserProfile(), []);
   const userIsManager = isManagerRole(profile?.staffRole);
+  const isSignedIn = !!user || !!profile;
+  const reporterId = user?.id ?? profile?.staffId ?? "";
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
