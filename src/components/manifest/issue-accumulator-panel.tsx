@@ -78,6 +78,8 @@ interface Props {
   driverName: string;
   onCleared: () => void;
   onBack: () => void;
+  /** Optional: notify parent when a RED single-rail escalation is raised. */
+  onRedRaised?: (esc: OperationalEscalation) => void;
 }
 
 export function IssueAccumulatorPanel({
