@@ -25,22 +25,22 @@ export interface OperationalSchema {
   primaryActionText: string;
 }
 
-/** Canonical pre-trip schema mounted by `manifest.tsx`. */
+/** Canonical pre-trip schema mounted by `manifest.tsx`.
+ *
+ * NOTE: the passenger-manifest critical gate has been intentionally removed.
+ * At walkaround time the driver does NOT yet know the manifest — manifest
+ * verification happens later, after trip selection, via `EventPickAndStart`
+ * and `getTodayManifestSummary`. Pre-trip is a pure vehicle safety inspection
+ * using the Green / Yellow / Red issue framework. */
 export const PRE_TRIP_SCHEMA: OperationalSchema = {
   id: "pre-trip",
-  title: "Pre-Trip Driver Declaration",
+  title: "Pre-Trip Vehicle Safety Inspection",
   description:
-    "Walk the vehicle, log any faults below, then confirm the critical human checks before you roll.",
+    "Visually inspect the vehicle. Log any faults below as Green (note), Yellow (workaround) or Red (manager escalation) before you accept the bus.",
   infoBannerText:
-    "These critical gates are the human checks the office relies on. Tap each banner once you have personally verified it.",
-  criticalGates: [
-    {
-      id: "passenger-manifest",
-      label:
-        "I have sighted today's passenger manifest and confirmed every booked passenger is accounted for.",
-    },
-  ],
-  primaryActionText: "Safety Check Complete, Ready to Roll",
+    "Inspect the bus you are checking out. Raise anything you see — Green is a logged note, Yellow is a workaround you are happy to proceed with, Red requires Manager dual sign-off before dispatch.",
+  criticalGates: [],
+  primaryActionText: "Accept Bus & Continue to Trip Selection",
 };
 
 /** Human-friendly translation of the `gate_id` column on `operational_escalations`. */
