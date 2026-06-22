@@ -132,16 +132,23 @@ export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
 
   if (!escalationsRes.error) {
     for (const r of (escalationsRes.data ?? []) as Array<Record<string, unknown>>) {
+      const status = String(r.status ?? "pending");
+      const awaitingAck =
+        status === "resolved_approved" && r.operator_acknowledged_at == null;
       out.push({
         key: `escalation:${r.id as string}`,
         source: "escalation",
-        sourceLabel: SOURCE_LABELS.escalation,
+        sourceLabel: awaitingAck
+          ? `${SOURCE_LABELS.escalation} · Workaround — awaiting operator ack`
+          : SOURCE_LABELS.escalation,
         category: String(r.gate_id ?? "gate"),
         subCategory: (r.vehicle_info as string | null) ?? null,
         severity: "red",
         title: `${r.driver_name ?? "Driver"} · ${r.vehicle_info ?? ""}`.trim(),
-        description: `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"} (${r.vehicle_info ?? "vehicle"}). Status: ${r.status}.`,
-        status: String(r.status ?? "pending"),
+        description: awaitingAck
+          ? `Gate ${r.gate_id ?? "?"} — manager approved a workaround. Awaiting on-site operator (${r.driver_name ?? "driver"}) acknowledgment.`
+          : `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"} (${r.vehicle_info ?? "vehicle"}). Status: ${status}.`,
+        status,
         createdAt: String(r.created_at ?? new Date().toISOString()),
         sourceRowId: String(r.id),
         raw: r,
@@ -150,6 +157,7 @@ export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
   } else {
     console.warn("[unified-issues] operational_escalations failed", escalationsRes.error);
   }
+
 
   for (const a of assets) {
     const ryge = computeRyge(a);
@@ -237,14 +245,34 @@ export async function resolveUnifiedIssue(
       .eq("id", issue.sourceRowId);
     if (error) throw error;
   } else if (issue.source === "escalation") {
+    // Context-aware closure:
+    //   - Pre-trip (sourceKind = "bus_walkaround", no source_issue_id):
+    //     leave operator_acknowledged_at NULL so the driver's screen stays
+    //     locked on Phase 2 (Manager Authorized) and requires the driver's
+    //     PIN to finalize.
+    //   - Day Centre (sourceKind = "site_day_red" / source_issue_id set):
+    //     the on-site opener has already participated in the joint review,
+    //     so write operator_acknowledged_at NOW to drop the shield
+    //     immediately and avoid a permanent lockout.
+    const raw = (issue.raw ?? {}) as Record<string, unknown>;
+    const isDayCentreEscalation =
+      raw.source_kind === "site_day_red" ||
+      (raw.source_issue_id != null && String(raw.source_issue_id).length > 0);
+
+    const update: Record<string, unknown> = {
+      status: "resolved_approved",
+      resolved_at: nowIso,
+      resolved_by: staffId,
+      resolution_notes: note,
+    };
+    if (isDayCentreEscalation) {
+      update.operator_acknowledged_at = nowIso;
+      update.operator_acknowledged_by = staffId;
+    }
+
     const { error } = await supabase
       .from("operational_escalations")
-      .update({
-        status: "resolved_approved",
-        resolved_at: nowIso,
-        resolved_by: staffId,
-        resolution_notes: note,
-      })
+      .update(update)
       .eq("id", issue.sourceRowId);
     if (error) throw error;
   }
