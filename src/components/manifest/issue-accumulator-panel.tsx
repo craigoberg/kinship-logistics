@@ -388,11 +388,11 @@ export function IssueAccumulatorPanel({
       </Card>
 
       {/* Reentrant unified Issue/Escalation engine — pre-trip context.
-          Green/Yellow → emit DraftIssue to local accumulator.
-          Red          → modal raises a single-rail operational_escalations
-                         row directly; we then lift the full escalation row
-                         to the route via onRedRaised so RedHandshakeWaitingPanel
-                         renders. */}
+          Green/Yellow → accumulator + operational_incidents write-through.
+          Red          → open VerbalAuthOverrideDialog (single-user verbal
+                         consultation) and, on accept, write a sev1
+                         operational_incidents row with the canonical
+                         "[VERBAL WORKAROUND]" prefix. */}
       <LogAnomalyModal
         open={logOpen}
         onOpenChange={setLogOpen}
@@ -407,15 +407,10 @@ export function IssueAccumulatorPanel({
               ? `${draft.description} — Workaround: ${draft.workaround}`
               : draft.description;
             const localId = freshId();
-            // Optimistic insert into the local stack first.
             setIssues((prev) => [
               ...prev,
               { id: localId, severity, text },
             ]);
-            // Write-ahead to operational_incidents so the Governance Hub
-            // sees Green/Yellow findings immediately and the panel can
-            // rehydrate after refresh. RED is excluded — it already went
-            // through raiseOperationalEscalation inside the modal.
             const incidentSev = sevToIncident(severity);
             if (!incidentSev) return;
             try {
@@ -448,18 +443,62 @@ export function IssueAccumulatorPanel({
               });
             }
           },
-
-          onEscalated: async () => {
-            // Resolve the full escalation row so the parent can render the
-            // handshake waiting panel without another round-trip.
-            try {
-              const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
-              const esc = await getActiveEscalation(driverStaffId);
-              if (esc) onRedRaised?.(esc);
-            } catch (err) {
-              console.error("[IssueAccumulatorPanel] lift escalation failed", err);
-            }
+          onRedRequested: (description, owner) => {
+            setVerbalPending({ description, owner });
           },
+        }}
+      />
+
+      {/* Canonical RED path — Verbal Consultation & Log */}
+      <VerbalAuthOverrideDialog
+        open={!!verbalPending}
+        onOpenChange={(o) => {
+          if (!o) setVerbalPending(null);
+        }}
+        ledgerCategory="VEHICLE"
+        subjectLabel={`${asset.name} · ${asset.regoPlate}`}
+        sourceId={null}
+        actionType="RED_VERBAL_WORKAROUND"
+        titleOverride="RED Verbal Consultation & Log"
+        descriptionOverride="A RED anomaly was identified on the walkaround. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. This ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and your local workspace unblocks straight away."
+        onAccepted={async ({ managerName, reason }) => {
+          if (!verbalPending) return;
+          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          const localId = freshId();
+          setIssues((prev) => [
+            ...prev,
+            { id: localId, severity: "red", text: prefixed },
+          ]);
+          try {
+            const { data, error } = await supabase
+              .from("operational_incidents")
+              .insert({
+                incident_type: "mechanical",
+                severity: "sev1",
+                description: `${PRE_TRIP_TAG} ${prefixed}`,
+                vehicle_id: asset.id,
+                reported_by: driverName || "driver",
+                status: "pending",
+              })
+              .select("id")
+              .single();
+            if (error) throw error;
+            const incidentId = String(data.id);
+            setIssues((prev) =>
+              prev.map((i) =>
+                i.id === localId ? { ...i, incidentId } : i,
+              ),
+            );
+          } catch (err) {
+            console.error(
+              "[IssueAccumulatorPanel] verbal-workaround incident insert failed",
+              err,
+            );
+            toast.error("Verbal workaround logged to ledger, but Hub sync failed", {
+              description: (err as Error).message,
+            });
+          }
+          setVerbalPending(null);
         }}
       />
     </div>
