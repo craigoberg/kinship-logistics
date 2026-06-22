@@ -166,9 +166,9 @@ export function DayCentrePage() {
               {blockingReds.length > 1 ? "s" : ""}
             </div>
             <div className="text-muted-foreground">
-              Only a Manager can clear a RED in the Governance Hub. Once every
-              RED below is resolved there, the Open Centre workflow becomes
-              available again.
+              {userIsManager
+                ? "Only a Manager can clear a RED in the Governance Hub. Once every RED below is resolved there, the Open Centre workflow becomes available again."
+                : "A Manager must clear the open RED issue(s) in the Governance Hub before the Day Centre can open. Please speak with the on-duty Manager and ask them to review and resolve the issue(s) listed below."}
             </div>
           </div>
         </div>
