@@ -1,72 +1,154 @@
-# Permanent Architectural Guardrails
+# MASTER_GUARDRAILS.md — Core System Architecture & Operational Specification
 
-> These rules are non-negotiable. Every build, every PR, and every AI-assisted change must comply. Violations are blockers.
+> Status: Permanent System Directive. Every code modification, database migration, and AI-assisted build must strictly comply with this document. Violations are immediate blocking defects.
 
 ---
 
-## 1. Canonical Logged-In Derivation
+## 1. Core Platform Philosophies & High-Trust Data Models
 
-**Rule:** The only valid derivation of "signed in" across the entire application is:
+### 1.1 The Ledger Philosophy (public.operational_ledger)
 
-```ts
+The General Ledger is the single source of truth for all critical state changes.
+
+- Append-Only Structure: Never update or delete a ledger row under any circumstances. Administrative corrections or reversals must be written as entirely new entries with action_type = 'CORRECTION', referencing the original row id inside the metadata JSONB blob.
+- Compulsory Auditable Receipts: Every high-impact operational action (vehicle walkarounds, session handshakes, incident logging, escalation claims, medication events, or asset renewals) must generate an explicit ledger receipt. If the ledger write fails, the parent state mutation must abort entirely to prevent un-vouched operations.
+- GPS Enforcement: Every operational state change must attempt to capture active GPS coordinates via the canonical writeToLedger() wrapper. Coordinates will record as null if the browser session explicitly denies permissions, but skipping the capture attempt is strictly prohibited.
+- Evidence-Based Metadata: Every entry must carry structured JSONB payload context that can stand up independently to an NDIS audit trail.
+
+### 1.2 The RYGE Trust Model (Red / Yellow / Green / Escalation)
+
+The entire application surfaces operational health via a strict traffic-light visual language designed around clear operational thresholds:
+
+| State Severity        | Operational Rule                                                                       | Core System Action                                                                                           |
+| :-------------------- | :------------------------------------------------------------------------------------- | :----------------------------------------------------------------------------------------------------------- |
+| GREEN (Clear)         | Standard operating parameter. Fleet, staff, and session routes are completely healthy. | Normal operational paths proceed unhindered. Silence indicates a well-running day.                           |
+| YELLOW (Caution)      | Non-blocking anomaly, warning, or operational notice. Early warning indicator.         | Logged immediately to the General Ledger; demands visual monitoring but does not halt flow.                  |
+| RED (Grounded / Lock) | Absolute safety fault, critical compliance breach, or structural failure.              | Absolute, non-dismissible hard block. Shuts down corresponding routes, manifests, and panels until resolved. |
+
+- The Wheelchair Lift Exception: Certain mechanical vectors follow a managed Yellow Flag (Workaround) model. A reported lift issue defaults to a tracked YELLOW ledger warning that permits a documented manual workaround. If the workaround successfully completes the route, it remains yellow. If the workaround fails, it is promoted to a hard RED state, initiating the standard Escalation Loop.
+
+### 1.3 Manager-Only Risk Acceptance
+
+Only an authenticated profile with the explicit role of Manager or Coordinator can resolve a RED state.
+
+- No staff-level or driver-level overrides exist within the system.
+- Resolution requires structured justification notes, which are permanently receipted to the ledger.
+
+---
+
+## 2. Authentication & Session Guardrails
+
+### 2.1 Canonical Logged-In Derivation
+
+To prevent split-session synchronization errors—where a user appears authenticated in the application header but locked out by specific operational page components—a uniform session derivation is mandatory across all modules (Day Centre, Governance Hub, Manifest, Transport, Medication, Events, Finance, Admin):
+
+[CODE REGULATION]
 const isSignedIn = !!user || !!getActiveUserProfile();
-```
+[END CODE REGULATION]
 
-where `user` is the Supabase Auth `User` object (often `null` for staff PIN logins) and `profile` is the active staff profile returned by `getActiveUserProfile()`.
+- "user" represents the Supabase Auth User object, utilized predominantly for remote administrative sessions.
+- "getActiveUserProfile()" represents the active local staff profile resolved via the on-site PIN infrastructure.
+- Any conditional execution or layout routing that gates on !user instead of !isSignedIn is an immediate bug.
 
-**Reporter / Actor Identity:**
+### 2.2 Actor Identity Mapping
 
-```ts
+When identifying which entity executed a state mutation or signed off on an anomaly, actors must resolve identity uniformly via:
+
+[CODE REGULATION]
 const reporterId = user?.id ?? profile?.staffId ?? "";
-```
+[END CODE REGULATION]
 
-- `user?.id` is the fallback when a Supabase-authenticated session exists.
-- `profile?.staffId` is the fallback for staff PIN-authenticated sessions.
-
-**Scope:** This applies to **all** gated modules — Day Centre, Governance Hub, Manifest, Transport, Medication, Events, Finance, Admin, Sync, and any future modules. No module may implement its own variant (`!!user`, `!!profile` alone, `localStorage.getItem`, etc.).
-
-**Enforcement:** Any branch that gates on `!user` instead of `!isSignedIn` is a bug. Any PR that introduces a second `isSignedIn` implementation must be rejected.
+- Use profile.id or the staff profile's identifier as a fallback when a Supabase auth session is absent so the active opener is accurately attributed.
 
 ---
 
-## 2. Reusable Components Only
+## 3. The Single-Rail Escalation Matrix
 
-**Rule:** Duplicate code for PIN dialogues, escalation flows, or any cross-cutting UI pattern is forbidden.
+### 3.1 Architecture Rules
 
-**Canonical Locations:**
+All high-severity anomalies, RED states, and manager-level interventions must converge on a singular, unified architectural pathway. Fragmented alert schemas, parallel notification tables, or local-only component states are strictly forbidden.
 
-| Pattern | Canonical Component | Path |
-|---------|---------------------|------|
-| PIN re-authentication | `PinReauthDialog` | `src/components/auth/pin-reauth-dialog.tsx` |
-| Escalation lock / banner | `EscalationLockBanner`, `EscalationResolutionPanel` | `src/components/site-day/` |
-| Global escalation intercept | `GlobalEscalationInterceptor` | `src/components/dashboard/global-escalation-interceptor.tsx` |
-| Shared / global UI primitives | (future) | `src/components/shared/` |
+Flow Graph:
+[Subsystem Flags RED] ---> Inserts to public.operational_escalations
+---> Triggers Server-Side RPC (claim_operational_escalation)
+---> Broadcasts globally via a single Postgres Realtime Feed
 
-**Requirement:** If a PIN dialogue or escalation flow is needed in a new module, import and reuse the existing global component. Do not copy-paste or rewrite a local version. New cross-cutting components that do not belong in an existing domain folder must live under `src/components/shared/`.
-
-**Rationale:** UI Look-and-Feel Drift (inconsistent modals, mismatched validation, divergent PIN pads) undermines trust in a high-stakes operational system. A single source of truth for sensitive flows is mandatory.
+- Deduplication & Multi-Grounding: An asset (vehicle or facility room) is a single logical entity. If multiple concurrent RED errors are logged against the same target, the coordinator workspace deduplicates the active panel view to show only the latest active denial.
+- Atomic Super-Resolution: When a Manager acts on an escalation, the single resolving transaction must flip the primary record to resolved_approved and automatically mark all stale, older pending denials for that specific asset target as resolved_superseded. This guarantees assets cannot immediately re-ground themselves on historic, unresolved cache parameters.
+- The Claim Guarantee: Reusing the claim_operational_escalation RPC ensures atomic concurrency control. If two managers tap "Claim" at the same moment, the database locks the row cleanly; one wins, and the other's modal instantly vanishes globally without a race condition.
 
 ---
 
-## 3. Single-Rail Escalations
+## 4. Reusable Core UI Components & Design System Tokens
 
-**Rule:** All high-severity anomalies (RED states and anything requiring Manager intervention) must pass through **one** unified pipeline.
+To entirely eliminate Look-and-Feel drift and divergent input validation rules, all interfaces must import canonical UI primitives rather than reproducing isolated variants:
 
-**Pipeline:**
+### 4.1 Global Primitive Mappings
 
-1. **Table:** `operational_escalations`
-2. **Atomic Claim Rail:** `claimOperationalEscalation()` RPC (or equivalent atomic claim primitive)
-3. **Realtime Feed:** Single Postgres realtime subscription — no parallel alert pipelines, no duplicate toast streams, no secondary tables shadowing the same anomaly.
+- PIN Re-Authentication: Must explicitly use PinReauthDialog located within src/components/auth/pin-reauth-dialog.tsx.
+- Escalation Intercepts: Must explicitly utilize the global GlobalEscalationInterceptor located within src/components/dashboard/global-escalation-interceptor.tsx.
 
-**Prohibited:**
-- Ad-hoc `toast()` chains that bypass the escalation table.
-- Separate "alert" or "notification" tables that duplicate RED state.
-- Client-side-only escalation state that is not backed by `operational_escalations`.
+### 4.2 Textarea Validation & Character Tracking
 
-**Rationale:** The Single-Rail Escalation Convergence guarantee ensures that every critical anomaly has exactly one claimable record, one auditable resolution path, and one realtime stream. Parallel pipelines create race conditions, dropped alerts, and compliance gaps.
+- The 20-Character Rule: Every operational issue statement, fault description, resolution note, or escalation clearance text box across ALL modules must strictly enforce a minimum 20-character rule.
+- Visual Character Progress Tokens: The UI wrapping these textareas must explicitly render BOTH a live 'X/Y' character countdown counter AND a solid blue progress bar tracking across the absolute bottom edge of the input box as the user types.
+- Button Suppression: The primary 'Submit', 'Confirm', or 'Finalise' button for the form must remain completely greyed out and disabled until the character count reaches >= 20 and all other required data fields are populated.
+
+### 4.3 Required Field Visual Identifiers
+
+- High-Visibility Outlines: Do not rely on small red asterisks (\*) alone to mark mandatory inputs. Any required input field, dropdown, or textarea that is empty or invalid must be outlined with a prominent, thick red border to give the operator an unmistakable visual indication of what is missing.
+
+### 4.4 Mobile Checklist Targets (Fat-Finger Proofing)
+
+- Full-Width Rows: Standard, tiny native desktop checkboxes are strictly prohibited for operational checklists, safety gates, attendance logs, or roll-calls accessed via mobile devices or tablets.
+- Toggle Target Cards: Checklist items must be rendered as full-width, touch-friendly rows or button-cards. Tapping anywhere within the text boundary or row target must instantly toggle the entire button green (Checked/Active). Tapping it again must return the row to a neutral grey state.
+
+---
+
+## 5. Compliance Governance & Integrations
+
+### 5.1 Registry-Driven Compliance Architecture (public.compliance_assets)
+
+Every expiring metric—including vehicle registration renewals, insurance policies, staff health certificates, and council workspace audits—lives dynamically inside a single dynamic table public.compliance_assets.
+
+- Data-Only Category Extensions: Adding a new compliance category or altering an alert threshold is a database-only transaction. Modifying configuration bounds (yellow_days, red_days) or choosing a workflow modal key (vehicle_rego, staff_cert, etc.) automatically registers the new rule into the Governance Hub without requiring application redeployment.
+- Automated Footprints: A database trigger (log_compliance_asset_change) hooks directly into this engine, generating comprehensive before and after JSON snapshots straight to the operational_ledger on every manual data mutation.
+
+### 5.2 External Interfaces (SharePoint Sync)
+
+- All critical corporate compliance records, vehicle servicing slips, and certification PDFs exist externally on Microsoft SharePoint.
+- The application interacts with these structures natively using the Microsoft Graph API workspace connector. No local or temporary server disk storage may be used for audited asset documentation.
+
+### 5.3 User Interface Time Conventions
+
+- Display Layer Timezones: All user-facing dates and timestamps must interpret using the client browser's local timezone context. Timestamps must be wrapped inside the SSR-safe <ClientTime iso="{...}"/> component or the useClientFormattedDate hook found in src/components/ui/client-time.tsx to completely safeguard against React hydration mismatches. Never render raw toISOString() strings directly to users.
+- Storage Layer Timezones: All persistence vectors, database indices, and Supabase hooks strictly utilize UTC ISO string formats (new Date().toISOString()).
+
+---
+
+## 6. Upcoming Module Context (Future Horizons)
+
+When architecting or laying data foundations for upcoming features, you must automatically inject all existing guardrails (Session derivation, 20-character limits, thick red borders, and automated NDIS ledger writing):
+
+### 6.1 Continuous Improvement & Procedural Review Pipeline
+
+- Every closed escalation or resolved issue will eventually pipe into a secondary, asynchronous 'Continuous Improvement' audit queue.
+- This module will allow managers to conduct a delayed secondary sign-off to assess if procedural updates, policy modifications, or Permanent Corrective Actions are required.
+- All actions taken in this pipeline must follow the 'Write-Before-Update' rule, generating automated operational ledger receipts.
+
+---
+
+## 7. Access Control & Authorization Model
+
+### 7.1 Security Matrices
+
+The platform strictly segregates operational views based on profile state verification:
+
+- Manager Dashboard (/manager): Interactive, authenticated administrative space for escalation resolutions, ledger reviews, role mapping modifications, and roster changes. Access is restricted solely to the 'Manager' role.
+- Wall-View Dashboard: Read-only, large-format display for common-area screens. Consumes the same data layer via read-only server functions with zero write-capable endpoints exposed.
 
 ---
 
 ## Amendment Process
 
-These guardrails may only be amended by explicit project-owner approval documented in this file (dated signature line). AI-assisted edits must reference this file and confirm compliance before implementation.
+These guardrails may only be amended by explicit project-owner approval documented in this file via a dated signature line. AI-assisted edits must reference this file and confirm compliance before implementation.
