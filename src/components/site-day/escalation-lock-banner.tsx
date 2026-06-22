@@ -12,12 +12,12 @@ export function EscalationLockBanner({ session }: Props) {
       <ShieldAlert className="mt-0.5 h-6 w-6 shrink-0" />
       <div className="space-y-1">
         <div className="text-base font-bold uppercase tracking-wide">
-          Site Locked — Escalation in progress
+          Site Locked — Unresolved Red issue
         </div>
         <p className="text-sm">
-          A Red anomaly has put the Day Centre in <code>escalated_lock</code>.
-          Manager and on-site Leader must complete the dual-PIN handshake
-          before the centre can open or close orderly.
+          An unresolved Red issue is blocking the Day Centre. A Manager must
+          clear it in the Governance Hub before the open-centre workflow can
+          restart.
         </p>
         {session.openDeclaredAt && (
           <p className="text-xs opacity-80">

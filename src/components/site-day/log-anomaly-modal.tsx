@@ -113,8 +113,10 @@ export function LogAnomalyModal({
   const { values, setValues, reset, hasDraft, resumeDraft, discardDraft } =
     form;
 
-  const requiresWorkaround =
-    values.severity === "yellow" || values.severity === "red";
+  // Workaround is mandatory only for Yellow. Red issues are escalated and the
+  // Manager supplies the workaround / NO-GO reason during the handshake.
+  const requiresWorkaround = values.severity === "yellow";
+  const showWorkaround = requiresWorkaround;
   const descriptionOk = values.description.trim().length > 0;
   const workaroundOk =
     !requiresWorkaround || values.workaround.trim().length > 0;
@@ -123,16 +125,17 @@ export function LogAnomalyModal({
     const errs: string[] = [];
     if (!descriptionOk) errs.push("Issue Description is required.");
     if (!workaroundOk)
-      errs.push(
-        `${values.severity === "red" ? "Red" : "Yellow"} severity requires a Workaround Plan.`,
-      );
+      errs.push("Yellow severity requires a Workaround Plan.");
     return errs;
-  }, [descriptionOk, workaroundOk, values.severity]);
+  }, [descriptionOk, workaroundOk]);
+
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // Yellow stores the opener's workaround; Green and Red store null
+      // (Red's workaround is supplied later by the responding Manager).
       const workaroundPlan =
-        values.severity === "green" ? null : values.workaround.trim();
+        values.severity === "yellow" ? values.workaround.trim() : null;
       const payload: NewSiteIssue = {
         sessionId,
         severity: values.severity,
@@ -266,10 +269,11 @@ export function LogAnomalyModal({
                     type="button"
                     data-state={active ? "on" : "off"}
                     onClick={() => {
-                      if (chip.value === "green") {
-                        setValues({ severity: "green", workaround: "" });
+                      if (chip.value === "yellow") {
+                        setValues({ severity: "yellow" });
                       } else {
-                        setValues({ severity: chip.value });
+                        // Green and Red both clear any stale workaround draft.
+                        setValues({ severity: chip.value, workaround: "" });
                       }
                     }}
                     className={cn(
@@ -300,7 +304,7 @@ export function LogAnomalyModal({
             />
           </div>
 
-          {requiresWorkaround && (
+          {showWorkaround && (
             <div className="space-y-2">
               <Label
                 htmlFor="anomaly-work"
@@ -321,9 +325,17 @@ export function LogAnomalyModal({
               />
               {!workaroundOk && (
                 <p className="text-xs text-destructive">
-                  A workaround is mandatory for Yellow and Red anomalies.
+                  A workaround is mandatory for Yellow anomalies.
                 </p>
               )}
+            </div>
+          )}
+
+          {values.severity === "red" && (
+            <div className="rounded-md border border-red-600/40 bg-red-600/5 p-3 text-xs text-red-700 dark:text-red-300">
+              Red issues are escalated to a Manager. They will propose the
+              workaround or NO-GO reason during the handshake — you don't need
+              to fill one in here.
             </div>
           )}
 
