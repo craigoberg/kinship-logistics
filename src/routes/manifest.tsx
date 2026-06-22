@@ -75,6 +75,7 @@ import { DynamicOperationalForm } from "@/components/manifest/dynamic-operationa
 import { RedHandshakeWaitingPanel } from "@/components/manifest/red-handshake-waiting-panel";
 import { PRE_TRIP_SCHEMA } from "@/lib/operational-forms";
 import { getActiveEscalation, getAssetGroundedStatus } from "@/lib/api/clearance";
+import { subscribeToEscalationPool } from "@/lib/data-store";
 import { Button } from "@/components/ui/button";
 
 export const Route = createFileRoute("/manifest")({
