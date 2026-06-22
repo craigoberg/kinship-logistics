@@ -4633,6 +4633,7 @@ export async function rejectEscalationProposal(args: {
   sessionId: string;
   openerStaffId: string;
   pin: string;
+  reason?: string;
 }): Promise<void> {
   const ok = await verifyStaffPin(args.openerStaffId, args.pin);
   if (!ok) throw new Error("Opener PIN does not match.");
@@ -4658,7 +4659,13 @@ export async function rejectEscalationProposal(args: {
     .eq("id", args.sessionId);
   if (sessErr) throwPg("[rejectEscalationProposal:session]", sessErr);
 
-  const newNotes = `Opener rejected manager proposal: ${priorNotes || "(no prior notes)"}`;
+  const trimmedReason = (args.reason ?? "").trim();
+  const newNotes = [
+    `[REJECTED] ${trimmedReason || "(no reason given)"}`,
+    priorNotes ? `Manager proposal was: ${priorNotes}` : null,
+  ]
+    .filter(Boolean)
+    .join(" — ");
   const { error: escErr } = await supabase
     .from("operational_escalations")
     .update({
