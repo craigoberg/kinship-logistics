@@ -255,6 +255,73 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
   return next;
 }
 
+/**
+ * Reopen a previously closed Day Centre. Manager-authorised only.
+ *  - Allowed only when phase === 'closed_orderly' (a 'closed_no_go' hard lock
+ *    is NOT unwound by this path).
+ *  - Same row, flipped back to active_day; close_* fields cleared so the next
+ *    Close cycle can rewrite them cleanly and the DayClosedPanel disappears.
+ *  - Audit fact recorded as a single 'site_day.centre_reopened' ledger entry
+ *    (severity YELLOW) that carries the prior close stamp + manager reason.
+ *  - No attendance / issue / billing rows are mutated.
+ */
+export async function reopenSession(args: {
+  managerStaffId: string;
+  pin: string;
+  reason: string;
+}): Promise<SiteDaySession> {
+  const ok = await verifyStaffPin(args.managerStaffId, args.pin);
+  if (!ok) throw new Error("Manager PIN does not match.");
+
+  const date = todayIso();
+  const existing = await supabase
+    .from("site_day_sessions")
+    .select("*")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  if (!existing.data) throw new Error("No session row to reopen.");
+  const cur = rowToSession(existing.data as SiteDaySessionRow);
+  if (cur.phase !== "closed_orderly") {
+    throw new Error(
+      cur.phase === "closed_no_go"
+        ? "NO-GO sessions cannot be reopened from here — start a new session tomorrow."
+        : `Centre is not in a closed_orderly state (current: ${cur.phase}).`,
+    );
+  }
+
+  const priorCloseAt = cur.closeDeclaredAt;
+  const priorClosedBy = cur.closedById;
+
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      phase: "active_day",
+      closed_by_id: null,
+      close_declared_at: null,
+      close_leader_notes: null,
+    })
+    .eq("id", cur.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
+
+  await siteLedger(
+    "centre_reopened",
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      manager_staff_id: args.managerStaffId,
+      reason: args.reason,
+      prior_close_at: priorCloseAt,
+      prior_closed_by: priorClosedBy,
+    },
+    "YELLOW",
+  );
+  return next;
+}
+
 export async function setPhase(
   id: string,
   phase: SiteSessionPhase,
