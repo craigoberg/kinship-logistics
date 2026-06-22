@@ -236,14 +236,20 @@ function SiteDayProposalModal({
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState<null | "go" | "no_go">(null);
   const [attempted, setAttempted] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
 
+  // Only reset typed input when the modal actually closes or a different
+  // escalation id is opened — NOT on every realtime rehydrate of the same row.
+  const escId = escalation?.id ?? null;
   useEffect(() => {
-    if (!escalation) {
+    if (!escId) {
       setNotes("");
       setPin("");
       setAttempted(false);
+      setLastError(null);
     }
-  }, [escalation]);
+  }, [escId]);
+
 
   const notesValid = notes.trim().length >= 10;
   const pinValid = /^\d{4,6}$/.test(pin);
