@@ -415,20 +415,47 @@ export interface ManagerHandshakeArgs {
 export async function submitManagerHandshake(
   args: ManagerHandshakeArgs,
 ): Promise<SiteDaySession> {
+  console.debug("[submitManagerHandshake] called", {
+    sessionId: args.sessionId,
+    managerStaffId: args.managerStaffId,
+    decision: args.decision,
+    planLen: args.plan?.length ?? 0,
+    pinLen: args.pin?.length ?? 0,
+  });
   const ok = await verifyStaffPin(args.managerStaffId, args.pin);
+  console.debug("[submitManagerHandshake] pin verify result", { ok });
   if (!ok) throw new Error("Invalid manager PIN.");
+  const payload = {
+    manager_plan_text: args.plan,
+    manager_decision: args.decision,
+    manager_auth_staff_id: args.managerStaffId,
+    manager_auth_at: new Date().toISOString(),
+  };
+  console.debug("[submitManagerHandshake] update payload", payload);
   const { data, error } = await supabase
     .from("site_day_sessions")
-    .update({
-      manager_plan_text: args.plan,
-      manager_decision: args.decision,
-      manager_auth_staff_id: args.managerStaffId,
-      manager_auth_at: new Date().toISOString(),
-    })
+    .update(payload)
     .eq("id", args.sessionId)
     .select("*")
     .single();
-  if (error) throw error;
+  if (error) {
+    console.error("[submitManagerHandshake] update error", {
+      code: (error as { code?: string }).code,
+      message: error.message,
+      details: (error as { details?: string }).details,
+      hint: (error as { hint?: string }).hint,
+    });
+    throw error;
+  }
+  if (!data) {
+    console.error("[submitManagerHandshake] update returned no row", {
+      sessionId: args.sessionId,
+    });
+    throw new Error(
+      "Manager handshake did not update any row — session may not exist or RLS blocked the write.",
+    );
+  }
+  console.debug("[submitManagerHandshake] update returned row", data);
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "handshake_manager",
@@ -442,6 +469,7 @@ export async function submitManagerHandshake(
   );
   return next;
 }
+
 
 export interface LeaderHandshakeArgs {
   sessionId: string;
