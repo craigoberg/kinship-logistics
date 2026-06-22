@@ -80,9 +80,22 @@ export function DayCentrePage() {
     if (!isReady || !user) return;
     if (sessionQ.isLoading || sessionQ.isError) return;
     if (sessionQ.data) return;
+    // Do not auto-provision today's session while an unresolved RED is
+    // blocking. The Manager must clear it in the Governance Hub first.
+    if (openRedsQ.isLoading) return;
+    if (hasBlockingRed) return;
     bootstrappedRef.current = true;
     bootstrapMut.mutate();
-  }, [isReady, user, sessionQ.isLoading, sessionQ.isError, sessionQ.data, bootstrapMut]);
+  }, [
+    isReady,
+    user,
+    sessionQ.isLoading,
+    sessionQ.isError,
+    sessionQ.data,
+    openRedsQ.isLoading,
+    hasBlockingRed,
+    bootstrapMut,
+  ]);
 
   console.log("Current Session State:", {
     session: sessionQ.data,
