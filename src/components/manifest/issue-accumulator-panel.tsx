@@ -200,11 +200,13 @@ export function IssueAccumulatorPanel({
       return;
     }
     if (!/^\d{4}$/.test(driverPin)) {
-      toast.error("Enter your 4-digit onboarding PIN.");
+      setPinError("Incorrect PIN. Please try again.");
+      toast.error("Incorrect PIN. Please try again.");
       return;
     }
 
     setSubmitting(true);
+    setPinError(null);
     try {
       const items: NewClearanceItemInput[] = issues.map((i) => ({
         checkpointId: null,
@@ -246,8 +248,13 @@ export function IssueAccumulatorPanel({
       });
       onCleared();
     } catch (err) {
+      const msg = (err as Error).message;
+      if (/pin/i.test(msg)) {
+        setPinError("Incorrect PIN. Please try again.");
+        setDriverPin("");
+      }
       toast.error("Could not save clearance", {
-        description: (err as Error).message,
+        description: msg,
       });
     } finally {
       setSubmitting(false);
@@ -356,12 +363,21 @@ export function IssueAccumulatorPanel({
                 maxLength={4}
                 autoComplete="off"
                 value={driverPin}
-                onChange={(e) =>
-                  setDriverPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-                }
-                placeholder="••••"
-                className="h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums"
+                onChange={(e) => {
+                  setDriverPin(e.target.value.replace(/\D/g, "").slice(0, 4));
+                  if (pinError) setPinError(null);
+                }}
+                onFocus={() => pinError && setPinError(null)}
+                placeholder="----"
+                aria-invalid={!!pinError}
+                className={cn(
+                  "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums",
+                  pinError && "border-2 border-destructive focus-visible:ring-destructive",
+                )}
               />
+              {pinError && (
+                <p className="text-xs font-medium text-destructive">{pinError}</p>
+              )}
             </div>
           </div>
         )}

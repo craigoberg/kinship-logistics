@@ -40,14 +40,18 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
   const queryClient = useQueryClient();
   const [decision, setDecision] = useState<HandshakeDecision | "">("");
   const [pin, setPin] = useState("");
+  const [pinError, setPinError] = useState<string | null>(null);
 
   const waitingForManager = !session.managerAuthAt;
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (!decision) throw new Error("Choose GO or NO-GO.");
-      if (!/^\d{4,}$/.test(pin))
-        throw new Error("Enter your 4-digit Leader PIN.");
+      if (!/^\d{4,}$/.test(pin)) {
+        const msg = "Incorrect PIN. Please try again.";
+        setPinError(msg);
+        throw new Error(msg);
+      }
       const leaderStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       return submitLeaderHandshake({
         sessionId: session.id,
@@ -58,6 +62,7 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
     },
     onSuccess: (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
+      setPinError(null);
       if (next.phase === "active_day") {
         toast.success("Dual-PIN handshake complete — Centre is open.");
       } else {
@@ -68,8 +73,13 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
       }
     },
     onError: (e: Error) => {
+      const msg = e.message ?? "";
+      if (/pin/i.test(msg)) {
+        setPinError("Incorrect PIN. Please try again.");
+        setPin("");
+      }
       toast.error("Could not submit leader signature", {
-        description: e.message,
+        description: msg,
       });
     },
   });
@@ -182,12 +192,21 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
           maxLength={6}
           autoComplete="off"
           value={pin}
-          onChange={(e) =>
-            setPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-          }
-          placeholder="••••"
-          className="h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums"
+          onChange={(e) => {
+            setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+            if (pinError) setPinError(null);
+          }}
+          onFocus={() => pinError && setPinError(null)}
+          placeholder="----"
+          aria-invalid={!!pinError}
+          className={cn(
+            "h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums",
+            pinError && "border-2 border-destructive focus-visible:ring-destructive",
+          )}
         />
+        {pinError && (
+          <p className="text-xs font-medium text-destructive">{pinError}</p>
+        )}
       </div>
 
       <div className="flex justify-end">
