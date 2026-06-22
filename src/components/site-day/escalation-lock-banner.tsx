@@ -12,13 +12,6 @@ interface Props {
 }
 
 export function EscalationLockBanner({ session, escalation, redIssue }: Props) {
-  // Timer source-of-truth:
-  //   - "Waiting for Manager" runs from escalation.createdAt while the
-  //     escalation is still pending (no claim yet).
-  //   - Once a workaround has been accepted on the issue row, we show two
-  //     counters: time on the workaround + total time the issue has been open.
-  const waiting =
-    !!escalation && escalation.status === "pending" && !redIssue?.workaroundAcceptedAt;
   const onWorkaround = !!redIssue?.workaroundAcceptedAt;
 
   return (
@@ -29,11 +22,17 @@ export function EscalationLockBanner({ session, escalation, redIssue }: Props) {
           <div className="text-base font-bold uppercase tracking-wide">
             Site Locked — Unresolved Red issue
           </div>
-          {waiting && (
-            <ElapsedTimer
-              since={escalation!.createdAt}
-              label="Waiting for Manager"
-            />
+          {escalation && (
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 rounded border border-red-600/40 bg-red-600/5 px-2 py-1">
+              <ElapsedTimer since={escalation.createdAt} label="Open" />
+              {escalation.claimedAt && (
+                <ElapsedTimer
+                  since={escalation.claimedAt}
+                  label="Claimed"
+                  className="opacity-80"
+                />
+              )}
+            </div>
           )}
         </div>
 

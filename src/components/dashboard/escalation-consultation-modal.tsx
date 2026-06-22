@@ -414,10 +414,18 @@ function SiteDayProposalModal({
                 />
               )}
             </div>
-            <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
-              <Row label="Raised by" value={escalation.driverName || "—"} />
-              <Row label="Site" value={escalation.vehicleInfo || "Day Centre"} />
-            </div>
+            {(() => {
+              const raw = escalation.vehicleInfo || "Day Centre";
+              const [site, ...rest] = raw.split(" · ");
+              const reason = rest.join(" · ").trim();
+              return (
+                <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
+                  <Row label="Raised by" value={escalation.driverName || "—"} />
+                  <Row label="Site" value={site || "Day Centre"} />
+                  {reason && <Row label="Reason" value={reason} />}
+                </div>
+              );
+            })()}
 
             {sessionLoading && (
               <div className="flex items-center gap-2 text-xs text-muted-foreground">
