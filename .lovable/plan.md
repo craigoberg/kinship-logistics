@@ -1,71 +1,75 @@
-## What we're seeing
+## Goal
 
-Screenshot shows the inline red strip:
-> "Escalation must be claimed before proposing a resolution."
+Live `HH:MM:SS` timers on both the creator and acceptor screens, plus a static "total time" once an issue is fully closed. Add the one missing timestamp (`workaround_accepted_at`) so the timer math is honest for both RED and YELLOW flows.
 
-That string is only produced by the `!escalation.claimedBy` guard in `SiteDayProposalModal.propose()`. So at submit time, the `escalation` object held by the modal has `claimedBy = null` even though the user is the manager who claimed it (Buffy).
+## Timestamp model (after this change)
 
-## Root cause
+| Stage | Field | When written |
+|---|---|---|
+| Issue/escalation opened | `site_issues_register.created_at` (and `operational_escalations.created_at` for RED) | On insert |
+| Manager opened the alert (RED only, intermediate) | `operational_escalations.claimed_at` | On claim — kept for ops visibility, NOT used as the "workaround start" |
+| **Workaround accepted (NEW)** | `site_issues_register.workaround_accepted_at` | RED: when opener accepts the Manager GO proposal. YELLOW: at issue creation if a `workaround_plan` is supplied. |
+| Final fix recorded | `site_issues_register.resolved_at` (already exists) | Governance Hub close |
 
-In `src/components/dashboard/global-escalation-interceptor.tsx` → `handleClaim()`:
+Reports can then compute:
+- Time to workaround = `workaround_accepted_at − created_at`
+- Time on workaround = `resolved_at − workaround_accepted_at`
+- Total = `resolved_at − created_at`
 
-```ts
-const result = await claimOperationalEscalation(target.id, staffId);
-...
-setConsultTarget(result.escalation ?? target);
+No new column is needed on `operational_escalations`; the issue row is the system of record for the workaround lifecycle.
+
+## Technical Changes
+
+### 1. Migration `docs/sql/2026-06-23_site_issues_workaround_accepted_at.sql`
+```sql
+ALTER TABLE public.site_issues_register
+  ADD COLUMN IF NOT EXISTS workaround_accepted_at timestamptz;
+
+-- Backfill: any existing rows already at 'workaround_accepted' get NOW().
+UPDATE public.site_issues_register
+   SET workaround_accepted_at = COALESCE(workaround_accepted_at, updated_at, created_at)
+ WHERE status = 'workaround_accepted'
+   AND workaround_accepted_at IS NULL;
 ```
+No new RLS / GRANTs — column on existing table.
 
-`target` came from the **claimable** queue, where every row has `status="pending"` and `claimedBy=null`. When `result.escalation` is `undefined` (RPC payload shape mismatch — `payload.escalation ?? payload.row` is null), we fall back to `target`, so `consultTarget.claimedBy` stays `null`. The user can then sit on the modal for minutes; nothing ever populates `claimedBy`, and the propose guard fires.
+### 2. Write sites
 
-The rehydrate path (`listMyClaimedAwaitingProposal`) does set `claimedBy` correctly, which is why the *previous* attempt eventually worked — it was opened from rehydrate, not from a fresh claim.
+- `src/lib/data-store.ts` `acceptManagerWorkaroundProposal` (~line 4711): include `workaround_accepted_at: new Date().toISOString()` in the update alongside `status: 'workaround_accepted'` and `workaround_plan`.
+- `src/lib/api/site-issues.ts` insert (~line 131): when payload includes a non-empty `workaroundPlan` (YELLOW path), set `workaround_accepted_at: new Date().toISOString()`.
 
-## Fix
+### 3. Read sites (type + mapper)
 
-Two small, surgical changes — no schema, no RPC, no behaviour change beyond closing the gap.
+- `src/lib/api/site-issues.ts`: add `workaroundAcceptedAt: string | null` to `SiteIssue` and `workaround_accepted_at` to the row interface; map in `rowToIssue`.
 
-### 1. `global-escalation-interceptor.tsx` — guarantee `claimedBy` on consultTarget
+### 4. New UI primitive `src/components/ui/elapsed-timer.tsx`
+- Props: `since: string | null`, `until?: string | null` (freezes the value), `label?: string`, `className?: string`.
+- `setInterval(1000)`; cleared when unmounted or `until` becomes set.
+- Always renders `HH:MM:SS`; SSR-safe (`--:--:--` until mounted) mirroring `<ClientTime>`.
+- Also exports `formatElapsed(ms: number): string` for static displays.
+- Returns `null` if `since` is null.
 
-Replace the fallback assignment with a merge that always stamps the current claimer onto the row we hand to the modal:
+### 5. Creator screen — `src/components/site-day/escalation-lock-banner.tsx`
+- Waiting for manager: `<ElapsedTimer since={escalation.createdAt} label="Waiting for Manager" />`
+- After workaround accepted (`issue.workaroundAcceptedAt`): show two stacked counters
+  - `Workaround active — HH:MM:SS` (since `workaroundAcceptedAt`)
+  - `Total open — HH:MM:SS` (since `createdAt`)
 
-```ts
-const claimed = result.escalation ?? target;
-setConsultTarget({
-  ...claimed,
-  claimedBy: claimed.claimedBy ?? staffId,
-  claimedAt: claimed.claimedAt ?? new Date().toISOString(),
-  status: "claimed",
-});
-```
+### 6. Acceptor screen — `src/components/dashboard/escalation-consultation-modal.tsx`
+- Header chip row: `Open — HH:MM:SS` (since `escalation.createdAt`); when `claimedAt` is set, second chip `Claimed — HH:MM:SS` (since `claimedAt`). Purely additive, no logic changes.
 
-Also add a one-line `console.debug("[handleClaim] consultTarget set", { id, claimedBy, fromRpc: !!result.escalation })` so future regressions are visible.
-
-### 2. `escalation-consultation-modal.tsx` → `SiteDayProposalModal.propose()` — defensive refetch
-
-If `escalation.claimedBy` is still missing when the user clicks Propose, do one re-read of the row from `operational_escalations` before refusing:
-
-```ts
-if (!escalation.claimedBy) {
-  const { data } = await supabase
-    .from("operational_escalations")
-    .select("claimed_by")
-    .eq("id", escalation.id)
-    .maybeSingle();
-  const claimedBy = (data?.claimed_by as string | null) ?? null;
-  if (!claimedBy) { /* keep existing error */ return; }
-  // use claimedBy locally for the rest of this submit
-}
-```
-
-Then use the locally-resolved `claimedBy` for both `submitManagerHandshake({ managerStaffId })` and the ledger write. This makes the modal self-healing for any other path that hands it a stale row.
+### 7. Closed summary — `src/components/site-day/escalation-resolution-panel.tsx` (and any issues-register card showing a resolved issue)
+- When `issue.resolvedAt` is set, render static `Total time: {formatElapsed(resolvedAt − createdAt)}`. If `workaroundAcceptedAt` exists, also show `On workaround: {formatElapsed(resolvedAt − workaroundAcceptedAt)}`.
 
 ## Out of scope
+- No changes to RPCs, RLS, realtime wiring, or ledger entries.
+- No timestamp added to `operational_escalations` — `claimed_at` keeps its current "manager opened the alert" meaning.
 
-- The RPC return shape itself — we work around it client-side. If we later confirm the RPC returns the row under an unexpected key, we can normalise in `claimOperationalEscalation`, but that's a follow-up.
-- Tracing left in place from the previous fix stays as-is.
-
-## Verification
-
-1. New escalation → Buffy claims → console shows `[handleClaim] consultTarget set` with `claimedBy = <Buffy's id>`.
-2. Type plan + PIN → click Propose GO → handshake succeeds, no "must be claimed" strip.
-3. Leave modal idle 10 min, then submit → still succeeds (state retained from the fix).
-4. As a safety net: temporarily simulate `result.escalation = undefined` → defensive refetch still resolves `claimedBy` from the DB row.
+## Files touched
+- `docs/sql/2026-06-23_site_issues_workaround_accepted_at.sql` (new migration)
+- `src/lib/data-store.ts` (one update site)
+- `src/lib/api/site-issues.ts` (type + insert + mapper)
+- `src/components/ui/elapsed-timer.tsx` (new)
+- `src/components/site-day/escalation-lock-banner.tsx`
+- `src/components/dashboard/escalation-consultation-modal.tsx`
+- `src/components/site-day/escalation-resolution-panel.tsx`
