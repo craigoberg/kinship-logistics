@@ -1,54 +1,50 @@
-## Problem
+## Reopen Centre — Manager-authorised, audit-safe
 
-Right now, when Buffy (opener) **Accepts** the Manager's GO proposal on a RED escalation, the site session jumps straight to `active_day` ("Day Centre — Active"). That bypasses:
+### 1. New DB-layer function
 
-- the **mandated compliance checks** (which were never ticked), and
-- the explicit **Open Centre** button (which was never pressed).
+`src/lib/api/site-day-sessions.ts` — add `reopenSession({ managerStaffId, pin, reason })`:
 
-Agreeing a workaround for one RED should only clear that RED off the "blockers" list. The Centre must remain in **Start of Day** until *every* RED is cleared (resolved or workaround-accepted), all mandated checks are ticked, and the opener explicitly presses Open Centre.
+- Verifies the caller is **Manager-role** (`isActiveUserManager()` from `data-store`).
+- Verifies the supplied PIN against `managerStaffId` via `verifyStaffPin`.
+- Reads today's session; requires `phase === 'closed_orderly'` (NOT `closed_no_go` — a hard NO-GO can't be unwound by a reopen click; that path stays locked).
+- Updates the same row (no new row created):
+  - `phase = 'active_day'`
+  - `closed_by_id = null`, `close_declared_at = null`, `close_leader_notes = null` (so re-close can rewrite cleanly and the DayClosedPanel disappears).
+- Writes one ledger entry: `site_day.centre_reopened`, severity `YELLOW`, metadata `{ session_id, manager_staff_id, reason, prior_close_at, prior_closed_by }`.
 
-## Fix
+### 2. UI: "Reopen Centre" button + dialog
 
-### 1. Escalation Accept (GO) no longer opens the Centre
+`src/components/site-day/day-closed-panel.tsx`:
 
-`src/components/site-day/escalation-resolution-panel.tsx` — `acceptMutation`:
+- Show a `Reopen Centre` button **only when** `phase === 'closed_orderly'` (hidden for `closed_no_go`).
+- Opens a Dialog with the Guardrails styling:
+  - Manager PIN input — 4–6 digits, thick rose border + helper text on validation fail.
+  - Reason textarea — minimum 10 chars, live counter, thick rose border on validation fail.
+  - Confirm Reopen button disabled until both fields valid.
+- On success: toast "Centre reopened. Re-closing later will only flip newly finalised attendance rows."
 
-- **Remove** the call to `submitLeaderHandshake(...)` for the GO path. (That call is what flips phase → `active_day`.)
-- Instead, when manager's decision is **GO**:
-  1. Mark the source site_issue (`escalation.sourceIssueId`) with `status = 'workaround_accepted'` and persist the manager's plan text into `workaround_plan`.
-  2. Call `resolveOperationalEscalation({ approved: true, … })` to close the escalation row.
-  3. Revert the session: clear `manager_decision` / `manager_plan_text` / `manager_auth_*` and set `phase = 'open_pending'` (same shape as `rejectEscalationProposal` already does, just without the `[REJECTED]` note).
-  4. Write ledger receipt `site_day.red_workaround_accepted` (GREEN severity, includes opener + manager staff ids, source issue id, plan text).
-  5. Toast: *"Workaround accepted — complete mandated checks, then Open Centre."*
-- When manager's decision is **NO-GO**: keep existing behaviour (`submitLeaderHandshake` → `closed_no_go`).
+### 3. Idempotency review — no doubling, no reset
 
-### 2. Start-of-Day panel treats "workaround accepted" as cleared
+| Area | Current behaviour | Verdict |
+|---|---|---|
+| `site_day_sessions` row | Single row per `session_date`; open/close/reopen update the same row | No duplication |
+| `site_issues_register` | Keyed on `session_id`; never deleted on close | Preserved across reopen; not duplicated |
+| `attendance_roster_logs` | Not created or wiped by open/close; rows live independently of phase | Preserved; not duplicated |
+| `operational_ledger` | Each open/close/reopen writes exactly one event row | Correct — each event is a distinct audit fact |
+| MYOB Export | `finalizeTodaysBilling` already filters `exported_at IS NULL` so previously exported rows are skipped | Already idempotent against export |
+| `finalizeTodaysBilling` re-flip on re-close | Currently re-UPDATEs rows already at `audited_ready_for_billing` to the same value and returns them in the count | **Patch**: add `.eq('billing_state', 'pending_export')` (or the equivalent pre-finalised state) so re-close reports only the *newly* finalised rows. No behavioural change on first close. |
 
-`src/components/site-day/start-of-day-panel.tsx`:
+No new tables, no migrations.
 
-- Change `openRedIssues` filter from `status !== 'resolved'` to `status !== 'resolved' && status !== 'workaround_accepted'`. (RED with an accepted workaround no longer blocks Open Centre, but it stays visible in the register.)
-- Mandated checks + `Confirm & Open` AlertDialog remain unchanged → still mandatory.
+### 4. Files touched
 
-### 3. Issues Register card shows the "Workaround accepted" badge
+- `src/lib/api/site-day-sessions.ts` — add `reopenSession`.
+- `src/lib/api/myob-export.ts` — tighten `finalizeTodaysBilling` filter so a re-close doesn't re-count already-flipped rows.
+- `src/components/site-day/day-closed-panel.tsx` — Reopen button + Manager PIN/Reason dialog + mutation.
 
-`src/components/site-day/issues-register-card.tsx` (and `active-day-panel.tsx` / `issues-register` reuse): add a small green-outlined "Workaround accepted" badge next to RED issues whose `status === 'workaround_accepted'`, mirroring the existing "Resolved" badge styling.
+### 5. Verification
 
-### 4. New data-store helper
-
-`src/lib/data-store.ts` — add `acceptEscalationProposal(sessionId, escalationId, sourceIssueId, managerPlanText, openerStaffId)` that performs the four DB writes in step 1 above (issue update, escalation resolve, session revert, ledger). The escalation panel calls this single helper.
-
-### Out of scope
-
-- No DB migration. `site_issues_register.status` is already a free-text column; the new value `'workaround_accepted'` is additive. Hub/Governance code that filters on `status = 'open'` already treats anything non-open as not-open, which is the desired behaviour (it stops counting toward the "must clear" list).
-- No change to the Reject flow or to the rejection-awareness modal.
-- No change to NO-GO acceptance.
-- No change to the Manager handshake screen.
-
-### Verification
-
-After build:
-1. Open a session with a logged RED → centre is `open_pending`.
-2. Manager proposes GO with a plan; Opener Accepts with PIN.
-3. Phase stays `open_pending`; RED card shows "Workaround accepted"; mandated checks panel is still front-and-centre; green **Declare Site Safe & Compliant** button enables only after all checks are ticked.
-4. Pressing it opens the AlertDialog; confirming flips phase → `active_day` (existing path).
-5. NO-GO acceptance still closes the day immediately.
+1. Open → close → DayClosedPanel shows. Click Reopen, enter manager PIN + reason ≥10 chars → phase flips to `active_day`, ActiveDayPanel returns, ledger gains one `site_day.centre_reopened` event.
+2. Click Close Day again → toast reports the count of newly-finalised attendance rows only (not the previously flipped ones); MYOB export workspace shows each ready row once, not twice.
+3. Existing issues from before the first close are still listed; no duplicates.
+4. `closed_no_go` sessions do not show the Reopen button.

@@ -212,6 +212,7 @@ export async function finalizeTodaysBilling(): Promise<number> {
     .eq("roster_date", today)
     .neq("actual_status", "Pending")
     .is("exported_at", null)
+    .not("billing_state", "in", '("audited_ready_for_billing","exported")')
     .select("id");
   if (error) throw error;
   return (data ?? []).length;
