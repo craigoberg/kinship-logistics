@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { ClipboardCheck, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -12,6 +12,7 @@ import { cn } from "@/lib/utils";
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
 import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
 import { getActiveEscalation } from "@/lib/api/clearance";
+import { supabase } from "@/integrations/supabase/client";
 
 import type {
   AssetCheckpoint,
@@ -33,8 +34,12 @@ import { RedHandshakeWaitingPanel } from "./red-handshake-waiting-panel";
 const COMFORT_DECLARATION_TEXT =
   "I confirm that all issues have been cleanly recorded, appropriate workarounds are deployed, and I am personally comfortable, oriented, and acting in accordance with my signed Organization Onboarding Guidelines to operate safely today.";
 
+const PRE_TRIP_TAG = "[Pre-trip]";
+
 interface DraftIssue {
   id: string;
+  /** Backing operational_incidents.id when persisted (Green/Yellow). */
+  incidentId?: string;
   severity: ClearanceIssueSeverity;
   text: string;
 }
@@ -46,6 +51,21 @@ function freshId(): string {
     return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   }
 }
+
+function sevToIncident(s: ClearanceIssueSeverity): "sev2" | "sev3" | null {
+  if (s === "yellow") return "sev2";
+  if (s === "green") return "sev3";
+  return null;
+}
+
+function incidentSevToClearance(
+  s: string | null | undefined,
+): ClearanceIssueSeverity | null {
+  if (s === "sev2") return "yellow";
+  if (s === "sev3") return "green";
+  return null;
+}
+
 
 function severityChip(s: ClearanceIssueSeverity): {
   label: string;
