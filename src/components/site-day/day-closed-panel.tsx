@@ -16,9 +16,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { ClientTime } from "@/components/ui/client-time";
-import { reopenSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { reopenSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
+import { TestOnly } from "@/components/dev/test-only";
 import { cn } from "@/lib/utils";
 
 interface Props {
