@@ -254,9 +254,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
                     <div className="break-words font-medium text-foreground">
                       {i.issueDescription || "(no description)"}
                     </div>
-                    {i.workaroundPlan && (
+                    {effectiveWorkaroundText(i, escMap) && (
                       <div className="text-xs text-muted-foreground">
-                        Workaround: {i.workaroundPlan}
+                        Workaround: {effectiveWorkaroundText(i, escMap)}
                       </div>
                     )}
                     <div className="text-[11px] text-muted-foreground">
