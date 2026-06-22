@@ -4,6 +4,10 @@ import {
   type JsonValue,
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
+import {
+  listCheckpointsForAsset,
+  type AssetCheckpoint,
+} from "@/lib/data-store";
 
 export const SYSTEM_PARAMETERS_QUERY_KEY = ["system-parameters"] as const;
 
@@ -41,11 +45,45 @@ export function useSystemParameter<T extends JsonValue>(
 // All keep semantic fallbacks so the UI never blocks on a missing row.
 // ---------------------------------------------------------------------------
 
-export function useMandatedChecks(): string[] {
+export type MandatedCheckScope =
+  | { kind: "site_day" }
+  | { kind: "pre_trip"; assetId: string; vehicleCategory: string | null };
+
+/**
+ * Returns the user-facing labels for the operator's mandated visual checks.
+ *
+ * Registry-driven (MASTER_GUARDRAILS §5.1):
+ *   - `site_day` reads `system_parameters.site_management.mandated_compliance_checks`.
+ *   - `pre_trip` reads `asset_checkpoints` for the chosen vehicle (and its
+ *      `vehicle_category` + global 'all' fallback) so adding a new check is a
+ *      pure DB change with no app redeploy.
+ *
+ * The default (no-arg) call preserves backwards-compat with the original
+ * Start-of-Day hook signature.
+ */
+export function useMandatedChecks(scope?: MandatedCheckScope): string[] {
+  const isPreTrip = scope?.kind === "pre_trip";
   const value = useSystemParameter<JsonValue>(
     "site_management.mandated_compliance_checks",
     [] as unknown as JsonValue,
   );
+  const checkpointsQ = useQuery<AssetCheckpoint[]>({
+    queryKey: [
+      "asset-checkpoints",
+      isPreTrip ? scope.assetId : "none",
+      isPreTrip ? scope.vehicleCategory : "none",
+    ],
+    queryFn: () =>
+      isPreTrip
+        ? listCheckpointsForAsset(scope.assetId, scope.vehicleCategory)
+        : Promise.resolve([] as AssetCheckpoint[]),
+    enabled: isPreTrip,
+    staleTime: 5 * 60_000,
+  });
+
+  if (isPreTrip) {
+    return (checkpointsQ.data ?? []).map((c) => c.label);
+  }
   if (Array.isArray(value)) {
     return value.filter((v): v is string => typeof v === "string");
   }
