@@ -78,6 +78,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const claimedByName = managerNameQ.data ?? "the on-call Manager";
 
   const [openerPin, setOpenerPin] = useState("");
+  const [attempted, setAttempted] = useState(false);
 
   const acceptMutation = useMutation({
     mutationFn: async () => {
@@ -326,17 +327,31 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
           onChange={(e) =>
             setOpenerPin(e.target.value.replace(/\D/g, "").slice(0, 6))
           }
-          placeholder="••••"
-          className="h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums"
+          placeholder=""
+          className={
+            "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums" +
+            (attempted && !pinValid
+              ? " border-2 border-rose-600 focus-visible:ring-rose-600"
+              : "")
+          }
         />
+        {attempted && !pinValid && (
+          <span className="text-[11px] font-semibold text-rose-600">
+            Enter your 4–6 digit Opener PIN
+          </span>
+        )}
       </div>
 
       <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-between">
         <Button
           type="button"
           variant="outline"
-          disabled={busy || !pinValid}
-          onClick={() => rejectMutation.mutate()}
+          disabled={busy}
+          onClick={() => {
+            setAttempted(true);
+            if (!pinValid) return;
+            rejectMutation.mutate();
+          }}
           className="border-rose-600 text-rose-700 hover:bg-rose-600/10"
         >
           {rejectMutation.isPending && (
@@ -347,8 +362,12 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         </Button>
         <Button
           type="button"
-          disabled={busy || !pinValid}
-          onClick={() => acceptMutation.mutate()}
+          disabled={busy}
+          onClick={() => {
+            setAttempted(true);
+            if (!pinValid) return;
+            acceptMutation.mutate();
+          }}
           className={
             isGo
               ? "bg-emerald-600 hover:bg-emerald-700"
@@ -362,6 +381,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
           Accept Manager's {isGo ? "GO" : "NO-GO"}
         </Button>
       </div>
+
     </Card>
   );
 }

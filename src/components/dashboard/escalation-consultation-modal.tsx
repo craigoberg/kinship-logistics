@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 
@@ -24,6 +24,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { submitManagerHandshake } from "@/lib/api/site-day-sessions";
+import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
 interface Props {
   escalation: OperationalEscalation | null;
@@ -230,24 +231,34 @@ function SiteDayProposalModal({
   sessionLoading: boolean;
   onClose: () => void;
 }) {
+  const queryClient = useQueryClient();
   const [notes, setNotes] = useState("");
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState<null | "go" | "no_go">(null);
+  const [attempted, setAttempted] = useState(false);
 
   useEffect(() => {
     if (!escalation) {
       setNotes("");
       setPin("");
+      setAttempted(false);
     }
   }, [escalation]);
 
+  const notesValid = notes.trim().length >= 10;
+  const pinValid = /^\d{4,6}$/.test(pin);
+  const sessionMissing = !sessionLoading && !sessionId;
+  const showNotesError = attempted && !notesValid;
+  const showPinError = attempted && !pinValid;
+
   const propose = async (decision: "go" | "no_go") => {
     if (!escalation || submitting) return;
-    if (notes.trim().length < 10) {
+    setAttempted(true);
+    if (!notesValid) {
       toast.error("Plan / reason must be at least 10 characters.");
       return;
     }
-    if (!/^\d{4,6}$/.test(pin)) {
+    if (!pinValid) {
       toast.error("Enter your 4–6 digit Manager PIN.");
       return;
     }
@@ -263,7 +274,7 @@ function SiteDayProposalModal({
     setSubmitting(decision);
     try {
       // 1. Persist plan + decision on the site session (verifies PIN inside).
-      await submitManagerHandshake({
+      const nextSession = await submitManagerHandshake({
         sessionId,
         plan: notes.trim(),
         decision,
@@ -279,7 +290,19 @@ function SiteDayProposalModal({
         .eq("id", escalation.id);
       if (error) throw error;
 
-      // 3. Ledger — best-effort.
+      // 3. Push the fresh session row to the opener's cache + invalidate
+      //    related queries so Craig's "Awaiting Manager" panel flips to
+      //    Accept/Reject without waiting for the next poll.
+      queryClient.setQueryData(SITE_SESSION_QUERY_KEY, nextSession);
+      await Promise.all([
+        queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY }),
+        queryClient.invalidateQueries({ queryKey: ["site-escalation"] }),
+        queryClient.invalidateQueries({
+          queryKey: ["my-claimed-awaiting-proposal"],
+        }),
+      ]);
+
+      // 4. Ledger — best-effort.
       try {
         const gps = await tryGetGps();
         await writeToLedger({
@@ -351,12 +374,19 @@ function SiteDayProposalModal({
               </div>
             )}
 
+            {sessionMissing && (
+              <div className="rounded-md border-2 border-rose-600 bg-rose-600/10 p-2 text-xs font-semibold text-rose-700">
+                Linked site session could not be found — refresh and retry.
+              </div>
+            )}
+
             <div className="grid gap-1.5">
               <Label
                 htmlFor="esc-notes"
                 className="text-xs uppercase tracking-wide text-muted-foreground"
               >
-                Negotiated Action Plan / NO-GO Reason
+                Negotiated Action Plan / NO-GO Reason{" "}
+                <span className="text-rose-600">*</span>
               </Label>
               <Textarea
                 id="esc-notes"
@@ -364,7 +394,26 @@ function SiteDayProposalModal({
                 value={notes}
                 onChange={(e) => setNotes(e.target.value)}
                 placeholder="For GO: the agreed mitigations to open the centre safely. For NO-GO: why the centre must remain closed. Minimum 10 characters."
+                className={cn(
+                  showNotesError &&
+                    "border-2 border-rose-600 focus-visible:ring-rose-600",
+                )}
               />
+              <div className="flex items-center justify-between text-[11px]">
+                <span
+                  className={cn(
+                    "text-muted-foreground",
+                    showNotesError && "font-semibold text-rose-600",
+                  )}
+                >
+                  {notes.trim().length}/10 minimum
+                </span>
+                {showNotesError && (
+                  <span className="font-semibold text-rose-600">
+                    Required — add more detail
+                  </span>
+                )}
+              </div>
             </div>
 
             <div className="grid gap-1.5">
@@ -372,7 +421,7 @@ function SiteDayProposalModal({
                 htmlFor="mgr-pin"
                 className="text-xs uppercase tracking-wide text-muted-foreground"
               >
-                Manager PIN
+                Manager PIN <span className="text-rose-600">*</span>
               </Label>
               <Input
                 id="mgr-pin"
@@ -384,9 +433,18 @@ function SiteDayProposalModal({
                 onChange={(e) =>
                   setPin(e.target.value.replace(/\D/g, "").slice(0, 6))
                 }
-                placeholder="••••"
-                className="h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums"
+                placeholder=""
+                className={cn(
+                  "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums",
+                  showPinError &&
+                    "border-2 border-rose-600 focus-visible:ring-rose-600",
+                )}
               />
+              {showPinError && (
+                <span className="text-[11px] font-semibold text-rose-600">
+                  Enter your 4–6 digit Manager PIN
+                </span>
+              )}
             </div>
 
             <div className="grid gap-2 sm:grid-cols-2">
@@ -394,26 +452,30 @@ function SiteDayProposalModal({
                 type="button"
                 disabled={!!submitting || sessionLoading}
                 onClick={() => propose("go")}
-                className="h-14 w-full bg-emerald-600 text-base font-bold text-white hover:bg-emerald-700"
+                className="h-auto min-h-[3.25rem] w-full whitespace-normal break-words bg-emerald-600 px-3 py-2 text-center text-sm font-bold leading-tight text-white hover:bg-emerald-700 sm:text-base"
               >
                 {submitting === "go" ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <>
-                    <ShieldCheck className="mr-1.5 h-5 w-5" /> Propose GO — Send to Opener
-                  </>
+                  <span className="flex items-center justify-center gap-1.5">
+                    <ShieldCheck className="h-5 w-5 shrink-0" />
+                    <span>Propose GO — Send</span>
+                  </span>
                 )}
               </Button>
               <Button
                 type="button"
                 disabled={!!submitting || sessionLoading}
                 onClick={() => propose("no_go")}
-                className="h-14 w-full bg-rose-600 text-base font-bold text-white hover:bg-rose-700"
+                className="h-auto min-h-[3.25rem] w-full whitespace-normal break-words bg-rose-600 px-3 py-2 text-center text-sm font-bold leading-tight text-white hover:bg-rose-700 sm:text-base"
               >
                 {submitting === "no_go" ? (
                   <Loader2 className="h-5 w-5 animate-spin" />
                 ) : (
-                  <>🛑 Propose NO-GO — Send to Opener</>
+                  <span className="flex items-center justify-center gap-1.5">
+                    <span className="shrink-0">🛑</span>
+                    <span>Propose NO-GO — Send</span>
+                  </span>
                 )}
               </Button>
             </div>
@@ -434,3 +496,4 @@ function Row({ label, value }: { label: string; value: string }) {
     </div>
   );
 }
+

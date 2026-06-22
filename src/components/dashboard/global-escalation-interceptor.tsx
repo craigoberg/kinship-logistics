@@ -17,10 +17,78 @@ import {
   subscribeToEscalationPool,
   type OperationalEscalation,
 } from "@/lib/data-store";
+import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
+
+/**
+ * Returns escalations already claimed by the given manager that still need
+ * a proposal (manager hasn't sent GO/NO-GO yet). Used to rehydrate the
+ * consultation modal after a refresh.
+ */
+async function listMyClaimedAwaitingProposal(
+  staffId: string,
+): Promise<OperationalEscalation[]> {
+  const { data, error } = await supabase
+    .from("operational_escalations")
+    .select("*")
+    .eq("status", "claimed")
+    .eq("claimed_by", staffId)
+    .order("created_at", { ascending: true });
+  if (error) {
+    console.error("[listMyClaimedAwaitingProposal]", error);
+    return [];
+  }
+  // For site_day rows, only rehydrate when the manager has NOT yet
+  // submitted a proposal (manager_plan_text is null on the session).
+  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const results: OperationalEscalation[] = [];
+  for (const raw of rows) {
+    const escalation = {
+      id: raw.id as string,
+      clearanceId: (raw.clearance_id as string | null) ?? null,
+      driverName: (raw.driver_name as string) ?? "",
+      vehicleInfo: (raw.vehicle_info as string) ?? "",
+      gateId: (raw.gate_id as string) ?? "",
+      status: raw.status as OperationalEscalation["status"],
+      claimedBy: (raw.claimed_by as string | null) ?? null,
+      claimedAt: (raw.claimed_at as string | null) ?? null,
+      createdAt: raw.created_at as string,
+      updatedAt: raw.updated_at as string,
+      resolutionNotes: (raw.resolution_notes as string | null) ?? null,
+      resolvedBy: (raw.resolved_by as string | null) ?? null,
+      resolvedAt: (raw.resolved_at as string | null) ?? null,
+      sourceKind:
+        (raw.source_kind as OperationalEscalation["sourceKind"]) ??
+        "bus_walkaround",
+      sourceIssueId: (raw.source_issue_id as string | null) ?? null,
+      raisedBy: (raw.raised_by as string | null) ?? null,
+    } as OperationalEscalation;
+
+    if (escalation.sourceKind === "site_day_red" && escalation.sourceIssueId) {
+      const sess = await supabase
+        .from("site_issues_register")
+        .select("session_id")
+        .eq("id", escalation.sourceIssueId)
+        .maybeSingle();
+      const sessionId = (sess.data as { session_id?: string } | null)?.session_id;
+      if (!sessionId) continue;
+      const sd = await supabase
+        .from("site_day_sessions")
+        .select("manager_decision, manager_plan_text")
+        .eq("id", sessionId)
+        .maybeSingle();
+      const row = sd.data as
+        | { manager_decision: string | null; manager_plan_text: string | null }
+        | null;
+      if (row?.manager_decision || row?.manager_plan_text) continue;
+    }
+    results.push(escalation);
+  }
+  return results;
+}
 
 const HIDDEN_ROUTES = new Set<string>(["/manifest", "/auth"]);
 
@@ -75,6 +143,25 @@ export function GlobalEscalationInterceptor() {
     staleTime: 30_000,
   });
 
+  // Rehydration: any escalation already claimed by me where I still owe a
+  // proposal — re-open the consultation modal on every mount/refresh.
+  const myClaimed = useQuery({
+    queryKey: ["my-claimed-awaiting-proposal", currentStaffId ?? "unknown"],
+    queryFn: () =>
+      currentStaffId
+        ? listMyClaimedAwaitingProposal(currentStaffId)
+        : Promise.resolve([]),
+    enabled: !!currentStaffId,
+    refetchOnWindowFocus: true,
+    staleTime: 10_000,
+  });
+
+  useEffect(() => {
+    if (!consultTarget && myClaimed.data && myClaimed.data.length > 0) {
+      setConsultTarget(myClaimed.data[0]);
+    }
+  }, [myClaimed.data, consultTarget]);
+
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
@@ -92,6 +179,7 @@ export function GlobalEscalationInterceptor() {
     if (!currentStaffId) return;
     setQueue((prev) => prev.filter((e) => e.raisedBy !== currentStaffId));
   }, [currentStaffId]);
+
 
   // Realtime escalation pool.
   useEffect(() => {
