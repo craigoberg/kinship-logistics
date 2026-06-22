@@ -318,17 +318,6 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
             setStep("event");
           }}
           onBack={() => setStep("vehicle")}
-          onEscalated={(esc) => {
-            localStorage.setItem("yada_global_escalation", JSON.stringify(esc));
-            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
-            setGlobalEscalation(esc);
-          }}
-          onRedHandshake={(clearance, issues) => {
-            const bundleState = { clearance, issues };
-            localStorage.setItem("yada_global_handshake", JSON.stringify(bundleState));
-            localStorage.setItem("yada_global_escalation_asset", JSON.stringify(selectedAsset));
-            setGlobalHandshake(bundleState);
-          }}
         />
       )}
 
@@ -347,8 +336,6 @@ interface ClearanceGateProps {
   dateStr: string;
   onCleared: () => void;
   onBack: () => void;
-  onEscalated: (esc: OperationalEscalation) => void;
-  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
 }
 
 function ClearanceGate({
@@ -357,8 +344,6 @@ function ClearanceGate({
   dateStr,
   onCleared,
   onBack,
-  onEscalated,
-  onRedHandshake,
 }: ClearanceGateProps) {
   const existingQ = useQuery<AssetDailyClearance | null>({
     queryKey: ["asset-clearance", asset.id, dateStr],
@@ -438,8 +423,6 @@ function ClearanceGate({
       dateStr={dateStr}
       onPassed={onCleared}
       onBack={onBack}
-      onEscalated={onEscalated}
-      onRedHandshake={onRedHandshake}
     />
   );
 }
@@ -450,16 +433,12 @@ function IssueAccumulatorGate({
   dateStr,
   onPassed,
   onBack,
-  onEscalated,
-  onRedHandshake,
 }: {
   asset: TransportAsset;
   startOdometer: number;
   dateStr: string;
   onPassed: () => void;
   onBack: () => void;
-  onEscalated: (esc: OperationalEscalation) => void;
-  onRedHandshake: (clearance: AssetDailyClearance, issues: any[]) => void;
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
@@ -473,7 +452,6 @@ function IssueAccumulatorGate({
       driverName={driverName}
       onCleared={onPassed}
       onBack={onBack}
-      onRedRaised={onEscalated}
     />
   );
 }
