@@ -96,7 +96,7 @@ export function DayCentrePage() {
     bootstrapMut.mutate();
   }, [
     isReady,
-    user,
+    isSignedIn,
     sessionQ.isLoading,
     sessionQ.isError,
     sessionQ.data,
