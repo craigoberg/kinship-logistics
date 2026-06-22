@@ -76,7 +76,7 @@ export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
         .from("operational_escalations")
         .select("*")
         .or(
-          "status.in.(pending,claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
+          "and(status.eq.pending),and(status.eq.claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
         )
         .order("created_at", { ascending: false }),
       listComplianceAssets({ status: "active" }).catch(() => [] as ComplianceAsset[]),

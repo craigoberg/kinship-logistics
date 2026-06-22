@@ -1,5 +1,6 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { AlertTriangle, Loader2 } from "lucide-react";
+import { useQueryClient } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
@@ -21,12 +22,13 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ClientTime } from "@/components/ui/client-time";
-import { useUnifiedIssues } from "@/hooks/use-unified-issues";
+import { useUnifiedIssues, unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import type {
   UnifiedIssue,
   UnifiedIssueSource,
   UnifiedSeverity,
 } from "@/lib/api/unified-issues";
+import { subscribeToEscalationPool } from "@/lib/data-store";
 import { ResolveIssueDialog } from "./resolve-issue-dialog";
 
 interface Props {
@@ -60,12 +62,23 @@ function severityBadge(sev: UnifiedSeverity) {
 
 export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   const q = useUnifiedIssues();
+  const queryClient = useQueryClient();
   const [sourceFilter, setSourceFilter] = useState<UnifiedIssueSource | "all">("all");
   const [severityFilter, setSeverityFilter] = useState<"all" | "red" | "yellow" | "green">(
     "all",
   );
   const [search, setSearch] = useState("");
   const [resolving, setResolving] = useState<UnifiedIssue | null>(null);
+
+  // Realtime: any change to operational_escalations invalidates the unified
+  // feed so the Hub repopulates without depending on focus refetch or polling.
+  useEffect(() => {
+    const off = subscribeToEscalationPool(() => {
+      queryClient.invalidateQueries({ queryKey: unifiedIssuesKey });
+    });
+    return off;
+  }, [queryClient]);
+
 
   const all = q.data ?? [];
   const visible = useMemo(() => {
