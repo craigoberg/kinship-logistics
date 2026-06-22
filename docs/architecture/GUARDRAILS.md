@@ -149,6 +149,31 @@ The platform strictly segregates operational views based on profile state verifi
 
 ---
 
-## Amendment Process
+## 8. Global Exception & Severity Handshake Protocols
+
+To guarantee absolute operational alignment, every module (including Day Centre, Fleet Management, Transport, and Multi-Date Events) must strictly execute the RYGE exception lifecycle using a unified behavioral loop:
+
+### 8.1 The Two-Stage RED Escalation Handshake
+
+- Stage 1 (The Alert): When a staff member raises a RED severity issue, they must only provide a description of the problem. They must NEVER be prompted for a workaround plan or resolution at this stage. Submitting the alert places the local module session into a hard lock phase.
+- Stage 2 (The Manager Proposal): A Manager claims the alert via the Global Escalation Interceptor. Following an offline conversation, the Manager uses their own dashboard to input the negotiated action plan, designates a status parameter (GO / NO-GO), and signs off with their PIN.
+- Stage 3 (The Operator Handshake): The proposed plan is displayed on the original locked screen. The local operator must explicitly 'Accept' or 'Decline' the Manager's proposed plan, verifying the action with their own PIN.
+- Rejection Safeguard: If the operator declines the manager's proposal, the system remains hard-locked under the original RED state, requiring a new consultation loop.
+
+### 8.2 YELLOW Severity Workaround Life-Cycles
+
+- Unlike RED states, logging a YELLOW anomaly requires the on-site operator to input a good-faith operational workaround plan immediately upon discovery.
+- The module remains fully operational (unlocked) with a YELLOW flag active.
+- The active issue card remains visible within both the active module dashboard and the Governance Hub, displaying an 'Open - Workaround in Place' status badge.
+- The issue will only drop off the active operational dashboard on the subsequent calendar day IF it has been formally audited and marked resolved within the Governance Hub.
+
+### 8.3 GREEN Severity Operational Notices
+
+- GREEN alerts represent minor tracking updates that hold zero impact on active facility or vehicle operations.
+- GREEN notifications do not require a workaround statement and never interrupt user navigation. They seamlessly dispatch a background notice directly to the Governance Hub queue for standard administrative scheduling.
+
+  ***
+
+  ## Amendment Process
 
 These guardrails may only be amended by explicit project-owner approval documented in this file via a dated signature line. AI-assisted edits must reference this file and confirm compliance before implementation.
