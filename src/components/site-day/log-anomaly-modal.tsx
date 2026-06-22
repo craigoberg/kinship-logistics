@@ -115,17 +115,20 @@ export function LogAnomalyModal({
 
   // Workaround is mandatory only for Yellow. Red issues are escalated and the
   // Manager supplies the workaround / NO-GO reason during the handshake.
+  // MASTER_GUARDRAILS §4.2 — 20-character minimum on operational text.
+  const MIN_CHARS = 20;
   const requiresWorkaround = values.severity === "yellow";
   const showWorkaround = requiresWorkaround;
-  const descriptionOk = values.description.trim().length > 0;
+  const descriptionOk = values.description.trim().length >= MIN_CHARS;
   const workaroundOk =
-    !requiresWorkaround || values.workaround.trim().length > 0;
+    !requiresWorkaround || values.workaround.trim().length >= MIN_CHARS;
 
   const blockingErrors = useMemo(() => {
     const errs: string[] = [];
-    if (!descriptionOk) errs.push("Issue Description is required.");
+    if (!descriptionOk)
+      errs.push(`Issue Description must be at least ${MIN_CHARS} characters.`);
     if (!workaroundOk)
-      errs.push("Yellow severity requires a Workaround Plan.");
+      errs.push(`Yellow workaround must be at least ${MIN_CHARS} characters.`);
     return errs;
   }, [descriptionOk, workaroundOk]);
 
