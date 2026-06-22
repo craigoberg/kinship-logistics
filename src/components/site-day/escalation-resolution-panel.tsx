@@ -376,7 +376,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         <Button
           type="button"
           variant="outline"
-          disabled={busy || !pinValid}
+          disabled={busy || !pinValid || !canAct}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
@@ -394,7 +394,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         </Button>
         <Button
           type="button"
-          disabled={busy || !pinValid}
+          disabled={busy || !pinValid || !canAct}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
