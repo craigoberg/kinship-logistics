@@ -85,7 +85,7 @@ export function DayCentrePage() {
 
   useEffect(() => {
     if (bootstrappedRef.current) return;
-    if (!isReady || !user) return;
+    if (!isReady || !isSignedIn) return;
     if (sessionQ.isLoading || sessionQ.isError) return;
     if (sessionQ.data) return;
     // Do not auto-provision today's session while an unresolved RED is
