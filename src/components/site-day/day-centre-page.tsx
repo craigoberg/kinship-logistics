@@ -288,7 +288,7 @@ export function DayCentrePage() {
 
     switch (session.phase) {
       case "open_pending":
-        return <StartOfDayPanel sessionId={session.id} reportedBy={user?.id ?? ""} />;
+        return <StartOfDayPanel sessionId={session.id} reportedBy={reporterId} />;
       case "active_day":
         return <ActiveDayPanel session={session} />;
       case "closed_orderly":
