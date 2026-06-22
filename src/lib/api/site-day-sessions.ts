@@ -322,6 +322,66 @@ export async function reopenSession(args: {
   return next;
 }
 
+/**
+ * TEST-ONLY rewind. Flip today's session row back to `open_pending` and
+ * clear all open/close/handshake stamps so the Start of Day flow renders
+ * fresh. Does NOT touch issues, escalations, attendance, billing or other
+ * tables — only this row plus a single YELLOW ledger audit entry.
+ *
+ * UI for this action is gated by `IS_TEST_BUILD` so it never appears on
+ * published deployments.
+ */
+export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> {
+  const date = todayIso();
+  const existing = await supabase
+    .from("site_day_sessions")
+    .select("*")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (existing.error) throw existing.error;
+  if (!existing.data) throw new Error("No session row to reset.");
+  const prior = rowToSession(existing.data as SiteDaySessionRow);
+
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      phase: "open_pending",
+      opened_by_id: null,
+      open_declared_at: null,
+      open_leader_notes: null,
+      closed_by_id: null,
+      close_declared_at: null,
+      close_leader_notes: null,
+      manager_plan_text: null,
+      manager_decision: null,
+      manager_auth_staff_id: null,
+      manager_auth_at: null,
+      leader_decision: null,
+      leader_auth_staff_id: null,
+      leader_auth_at: null,
+    })
+    .eq("id", prior.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  const next = rowToSession(data as SiteDaySessionRow);
+
+  await siteLedger(
+    "reset_start_of_day",
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      prior_phase: prior.phase,
+      prior_open_at: prior.openDeclaredAt,
+      prior_close_at: prior.closeDeclaredAt,
+      reason: reason ?? null,
+      test_only: true,
+    },
+    "YELLOW",
+  );
+  return next;
+}
+
 export async function setPhase(
   id: string,
   phase: SiteSessionPhase,
