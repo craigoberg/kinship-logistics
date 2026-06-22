@@ -47,7 +47,7 @@ function AuthTerminal() {
   const submit = async (value: string) => {
     if (busy) return;
     if (!/^\d{4}$/.test(value)) {
-      setError("Enter your 4-digit PIN.");
+      setError("Incorrect PIN. Please try again.");
       return;
     }
     setBusy(true);
@@ -55,7 +55,7 @@ function AuthTerminal() {
     try {
       const profile = await loginWithPin(value);
       if (!profile) {
-        setError("PIN not recognised. Try again.");
+        setError("Incorrect PIN. Please try again.");
         setPin("");
         inputRef.current?.focus();
         return;
@@ -115,9 +115,13 @@ function AuthTerminal() {
               setError(null);
               if (next.length === 4) void submit(next);
             }}
-            className="h-16 text-center text-3xl tracking-[1.2em] font-mono"
-            placeholder="••••"
+            onFocus={() => setError(null)}
+            className={`h-16 text-center text-3xl tracking-[1.2em] font-mono ${
+              error ? "border-2 border-destructive focus-visible:ring-destructive" : ""
+            }`}
+            placeholder="----"
             aria-label="4-digit PIN"
+            aria-invalid={!!error}
             disabled={busy}
           />
           {error && (
