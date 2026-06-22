@@ -4705,14 +4705,20 @@ export async function acceptEscalationWorkaround(args: {
   const trimmedPlan = (args.planText ?? "").trim();
 
   if (args.sourceIssueId) {
-    const { error: issueErr } = await supabase
+    const { data: updatedRows, error: issueErr } = await supabase
       .from("site_issues_register")
       .update({
         status: "workaround_accepted",
         workaround_plan: trimmedPlan || null,
       })
-      .eq("id", args.sourceIssueId);
+      .eq("id", args.sourceIssueId)
+      .select("id, status, workaround_plan");
     if (issueErr) throwPg("[acceptEscalationWorkaround:issue]", issueErr);
+    if (!updatedRows || updatedRows.length === 0) {
+      throw new Error(
+        "Workaround could not be written back to the issue row — likely an RLS policy or stale issue id. The escalation will not be marked approved.",
+      );
+    }
   }
 
   const { error: escErr } = await supabase
