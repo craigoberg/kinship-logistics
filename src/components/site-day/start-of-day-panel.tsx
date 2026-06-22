@@ -20,6 +20,7 @@ import {
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { IssuesRegisterCard } from "./issues-register-card";
+import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 import {
   openSession,
   type SiteDaySession,
@@ -62,6 +63,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const queryClient = useQueryClient();
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [verbalOverrideOpen, setVerbalOverrideOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
@@ -385,6 +387,19 @@ export function StartOfDayPanel({ sessionId }: Props) {
             (Green note · Yellow workaround · Red escalation)
           </span>
         </Button>
+
+        {/* High-trust escape hatch when a Manager is unreachable digitally.
+            Writes an immutable VERBAL_AUTH_OVERRIDE ledger receipt. */}
+        {hasBlocking && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-10 w-full justify-center gap-2 text-xs text-amber-700 hover:bg-amber-500/10 hover:text-amber-800"
+            onClick={() => setVerbalOverrideOpen(true)}
+          >
+            ☎ Manager unreachable? Record a Verbal Authorization Override
+          </Button>
+        )}
       </div>
 
       {/* Confirm AlertDialog */}
@@ -424,6 +439,21 @@ export function StartOfDayPanel({ sessionId }: Props) {
         defaultSeverity={
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
+      />
+
+      {/* Verbal Authorization Override — high-trust escape hatch. */}
+      <VerbalAuthOverrideDialog
+        open={verbalOverrideOpen}
+        onOpenChange={setVerbalOverrideOpen}
+        ledgerCategory="CENTRE"
+        subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
+        sourceId={sessionId}
+        onAccepted={() => {
+          // Override is captured; let the operator try Open again.
+          // The blocking Red issue itself remains until Governance signs it
+          // off, but the audit trail records the verbal authorization.
+          setConfirmOpen(true);
+        }}
       />
     </section>
   );

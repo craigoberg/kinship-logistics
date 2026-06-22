@@ -12,7 +12,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
 import { usePersistedForm } from "@/hooks/use-persisted-form";
@@ -115,17 +115,20 @@ export function LogAnomalyModal({
 
   // Workaround is mandatory only for Yellow. Red issues are escalated and the
   // Manager supplies the workaround / NO-GO reason during the handshake.
+  // MASTER_GUARDRAILS §4.2 — 20-character minimum on operational text.
+  const MIN_CHARS = 20;
   const requiresWorkaround = values.severity === "yellow";
   const showWorkaround = requiresWorkaround;
-  const descriptionOk = values.description.trim().length > 0;
+  const descriptionOk = values.description.trim().length >= MIN_CHARS;
   const workaroundOk =
-    !requiresWorkaround || values.workaround.trim().length > 0;
+    !requiresWorkaround || values.workaround.trim().length >= MIN_CHARS;
 
   const blockingErrors = useMemo(() => {
     const errs: string[] = [];
-    if (!descriptionOk) errs.push("Issue Description is required.");
+    if (!descriptionOk)
+      errs.push(`Issue Description must be at least ${MIN_CHARS} characters.`);
     if (!workaroundOk)
-      errs.push("Yellow severity requires a Workaround Plan.");
+      errs.push(`Yellow workaround must be at least ${MIN_CHARS} characters.`);
     return errs;
   }, [descriptionOk, workaroundOk]);
 
@@ -288,47 +291,27 @@ export function LogAnomalyModal({
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label
-              htmlFor="anomaly-desc"
-              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Issue Description <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="anomaly-desc"
-              rows={3}
-              placeholder="e.g. Toilet 3 inoperable, locked out of service."
-              value={values.description}
-              onChange={(e) => setValues({ description: e.target.value })}
-            />
-          </div>
+          <CharacterCountedTextarea
+            label="Issue Description"
+            value={values.description}
+            onValueChange={(v) => setValues({ description: v })}
+            placeholder="e.g. Toilet 3 inoperable, locked out of service."
+            rows={3}
+            minChars={MIN_CHARS}
+            required
+          />
 
           {showWorkaround && (
-            <div className="space-y-2">
-              <Label
-                htmlFor="anomaly-work"
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                Workaround Plan <span className="text-destructive">*</span>
-              </Label>
-              <Textarea
-                id="anomaly-work"
-                rows={3}
-                placeholder="Required — e.g. Door locked, Toilets 1 & 2 in use, maintenance ticket #4421 raised."
-                value={values.workaround}
-                onChange={(e) => setValues({ workaround: e.target.value })}
-                className={cn(
-                  !workaroundOk &&
-                    "border-destructive focus-visible:ring-destructive",
-                )}
-              />
-              {!workaroundOk && (
-                <p className="text-xs text-destructive">
-                  A workaround is mandatory for Yellow anomalies.
-                </p>
-              )}
-            </div>
+            <CharacterCountedTextarea
+              label="Workaround Plan"
+              value={values.workaround}
+              onValueChange={(v) => setValues({ workaround: v })}
+              placeholder="Required — e.g. Door locked, Toilets 1 & 2 in use, maintenance ticket #4421 raised."
+              rows={3}
+              minChars={MIN_CHARS}
+              required
+              hint="Mandatory for Yellow anomalies"
+            />
           )}
 
           {values.severity === "red" && (
