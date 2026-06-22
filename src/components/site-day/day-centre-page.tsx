@@ -17,6 +17,7 @@ import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
+import { DayBlockingDiagnostic } from "@/components/dev/day-blocking-diagnostic";
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
@@ -313,5 +314,10 @@ export function DayCentrePage() {
     }
   };
 
-  return <div className="space-y-6">{renderPhase()}</div>;
+  return (
+    <div className="space-y-6">
+      <DayBlockingDiagnostic sessionId={session?.id ?? null} />
+      {renderPhase()}
+    </div>
+  );
 }
