@@ -1,10 +1,18 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useRouterState } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertOctagon } from "lucide-react";
+import { AlertOctagon, ShieldAlert } from "lucide-react";
 
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 
 import {
@@ -22,6 +30,50 @@ import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 import { EscalationConsultationModal } from "./escalation-consultation-modal";
+
+const ACK_STORAGE_KEY = "acknowledged-rejections-v1";
+
+function loadAckSet(): Set<string> {
+  if (typeof window === "undefined") return new Set();
+  try {
+    const raw = window.localStorage.getItem(ACK_STORAGE_KEY);
+    if (!raw) return new Set();
+    const arr = JSON.parse(raw) as unknown;
+    return Array.isArray(arr) ? new Set(arr.filter((x): x is string => typeof x === "string")) : new Set();
+  } catch {
+    return new Set();
+  }
+}
+
+function persistAckSet(set: Set<string>): void {
+  if (typeof window === "undefined") return;
+  try {
+    window.localStorage.setItem(ACK_STORAGE_KEY, JSON.stringify([...set]));
+  } catch {
+    /* ignore */
+  }
+}
+
+function isRejectionRow(row: OperationalEscalation, staffId: string | null): boolean {
+  if (!staffId) return false;
+  if (row.claimedBy !== staffId) return false;
+  if (row.status !== "resolved_denied") return false;
+  return !!row.resolutionNotes && row.resolutionNotes.trim().startsWith("[REJECTED]");
+}
+
+function parseRejectionNotes(notes: string | null): {
+  rejectedReason: string;
+  managerProposal: string;
+} {
+  const text = (notes ?? "").trim();
+  // Format: "[REJECTED] {reason} — Manager proposal was: {proposal}"
+  const rejectedMatch = text.match(/^\[REJECTED\]\s*([\s\S]*?)(?:\s+—\s+Manager proposal was:\s*([\s\S]*))?$/);
+  if (!rejectedMatch) return { rejectedReason: text, managerProposal: "" };
+  return {
+    rejectedReason: (rejectedMatch[1] ?? "").trim(),
+    managerProposal: (rejectedMatch[2] ?? "").trim(),
+  };
+}
 
 /**
  * Returns escalations already claimed by the given manager that still need
