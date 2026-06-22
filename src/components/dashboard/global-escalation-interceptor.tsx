@@ -489,6 +489,21 @@ export function GlobalEscalationInterceptor() {
         escalation={consultTarget}
         onClose={() => setConsultTarget(null)}
       />
+
+      <RejectionAwarenessModal
+        rejection={rejectedQueue[0] ?? null}
+        onAcknowledge={() => {
+          const row = rejectedQueue[0];
+          if (!row) return;
+          setAckSet((prev) => {
+            const next = new Set(prev);
+            next.add(row.id);
+            persistAckSet(next);
+            return next;
+          });
+          setRejectedQueue((prev) => prev.slice(1));
+        }}
+      />
     </>
   );
 }
