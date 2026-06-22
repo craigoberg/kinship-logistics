@@ -22,6 +22,16 @@ function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
 }
 
+function redHasAcceptedWorkaround(issue: {
+  status: string | null;
+  workaround_plan: string | null;
+}): boolean {
+  return (
+    issue.status === "workaround_accepted" ||
+    !!issue.workaround_plan?.trim()
+  );
+}
+
 export function DayCentrePage() {
   const queryClient = useQueryClient();
   const { user, isReady } = useAuthReady();
@@ -35,7 +45,7 @@ export function DayCentrePage() {
   const redIssue =
     (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
 
-  // Cross-session: any open RED anywhere blocks a new Day Centre opening.
+  // Cross-session: a RED only blocks opening if it has no agreed workaround.
   // Queryable even without today's session row, so we can show guidance
   // BEFORE provisioning.
   const openRedsQ = useQuery({
@@ -48,13 +58,15 @@ export function DayCentrePage() {
         .from("site_issues_register")
         .select("id, session_id, severity, status, issue_description, workaround_plan, created_at")
         .eq("severity", "red")
-        .eq("status", "open")
+        .neq("status", "resolved")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
   });
-  const blockingReds = openRedsQ.data ?? [];
+  const blockingReds = (openRedsQ.data ?? []).filter(
+    (issue) => !redHasAcceptedWorkaround(issue),
+  );
   const hasBlockingRed = blockingReds.length > 0;
 
   const redEscalationQ = useQuery({
@@ -88,8 +100,8 @@ export function DayCentrePage() {
     if (!isReady || !isSignedIn) return;
     if (sessionQ.isLoading || sessionQ.isError) return;
     if (sessionQ.data) return;
-    // Do not auto-provision today's session while an unresolved RED is
-    // blocking. The Manager must clear it in the Governance Hub first.
+    // Do not auto-provision today's session while a RED without an agreed
+    // workaround is blocking. REDs with accepted workarounds are carried.
     if (openRedsQ.isLoading) return;
     if (hasBlockingRed) return;
     bootstrappedRef.current = true;
@@ -155,8 +167,7 @@ export function DayCentrePage() {
   }
 
   // Blocking RED check — show BEFORE provisioning today's session. The
-  // Day Centre cannot open while any RED issue is still open in the
-  // Governance Hub. Only a Manager can clear it.
+  // Day Centre cannot open while any RED issue has no agreed workaround.
   if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
@@ -169,8 +180,8 @@ export function DayCentrePage() {
             </div>
             <div className="text-muted-foreground">
               {userIsManager
-                ? "Only a Manager can clear a RED in the Governance Hub. Once every RED below is resolved there, the Open Centre workflow becomes available again."
-                : "A Manager must clear the open RED issue(s) in the Governance Hub before the Day Centre can open. Please speak with the on-duty Manager and ask them to review and resolve the issue(s) listed below."}
+                ? "Only a Manager can clear a RED or agree a workaround in the Governance Hub. Once every RED below has a workaround or is resolved, the Open Centre workflow becomes available again."
+                : "A Manager must clear the open RED issue(s), or agree a workaround, before the Day Centre can open. Please speak with the on-duty Manager and ask them to review the issue(s) listed below."}
             </div>
           </div>
         </div>
@@ -207,8 +218,8 @@ export function DayCentrePage() {
         ) : (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-200">
             You do not have Manager access. Ask the on-duty Manager to open the
-            Governance Hub and resolve the RED issue above so the Day Centre
-            opening can continue.
+            Governance Hub and resolve the RED issue above, or agree a
+            workaround, so the Day Centre opening can continue.
           </div>
         )}
       </Card>
