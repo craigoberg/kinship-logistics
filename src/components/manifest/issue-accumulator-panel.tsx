@@ -111,6 +111,52 @@ export function IssueAccumulatorPanel({
   const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
   const hasRed = useMemo(() => issues.some((i) => i.severity === "red"), [issues]);
 
+  // Rehydrate Green/Yellow drafts from operational_incidents so a refresh
+  // mid-walkaround doesn't blank the panel. Filter to today's pending
+  // mechanical findings for this vehicle.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const { data, error } = await supabase
+          .from("operational_incidents")
+          .select("id, severity, description, created_at")
+          .eq("vehicle_id", asset.id)
+          .eq("status", "pending")
+          .eq("incident_type", "mechanical")
+          .in("severity", ["sev2", "sev3"])
+          .gte("created_at", `${dateStr}T00:00:00.000Z`)
+          .order("created_at", { ascending: true });
+        if (error) throw error;
+        if (cancelled || !data) return;
+        const rehydrated: DraftIssue[] = data
+          .map((r) => {
+            const sev = incidentSevToClearance(r.severity as string);
+            if (!sev) return null;
+            const desc = String(r.description ?? "");
+            const text = desc.startsWith(PRE_TRIP_TAG)
+              ? desc.slice(PRE_TRIP_TAG.length).trim()
+              : desc;
+            return {
+              id: freshId(),
+              incidentId: String(r.id),
+              severity: sev,
+              text,
+            } satisfies DraftIssue;
+          })
+          .filter((x): x is DraftIssue => x !== null);
+        if (rehydrated.length > 0) {
+          setIssues((prev) => (prev.length === 0 ? rehydrated : prev));
+        }
+      } catch (err) {
+        console.warn("[IssueAccumulatorPanel] rehydrate failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [asset.id, dateStr]);
+
   if (redClearance) {
     return (
       <RedHandshakeWaitingPanel
@@ -124,8 +170,26 @@ export function IssueAccumulatorPanel({
     );
   }
 
-  const removeIssue = (id: string) =>
+  const removeIssue = async (id: string) => {
+    const target = issues.find((i) => i.id === id);
     setIssues((p) => p.filter((i) => i.id !== id));
+    if (target?.incidentId) {
+      try {
+        const { error } = await supabase
+          .from("operational_incidents")
+          .update({ status: "resolved" })
+          .eq("id", target.incidentId);
+        if (error) throw error;
+      } catch (err) {
+        console.warn(
+          "[IssueAccumulatorPanel] soft-resolve incident failed",
+          err,
+        );
+        toast.error("Removed locally but could not sync to Governance Hub.");
+      }
+    }
+  };
+
 
   const buildAccumulatedBlob = (list: DraftIssue[]): string =>
     list
