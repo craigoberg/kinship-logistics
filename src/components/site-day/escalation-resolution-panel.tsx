@@ -25,6 +25,7 @@ import {
 } from "@/lib/api/site-day-sessions";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import {
+  acceptEscalationWorkaround,
   getActiveUserProfile,
   getEscalationBySourceIssue,
   getStaffDisplayName,
