@@ -175,9 +175,9 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       if (!escalation) throw new Error("No escalation to reject.");
       if (!/^\d{4,6}$/.test(openerPin))
         throw new Error("Enter your 4–6 digit Opener PIN.");
-      const leaderStaffId = session.openedById;
+      const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
-        throw new Error("Session has no recorded opener.");
+        throw new Error("No signed-in staff to authorise rejection — please sign in again.");
 
       await rejectEscalationProposal({
         escalationId: escalation.id,
