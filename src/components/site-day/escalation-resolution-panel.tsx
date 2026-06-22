@@ -112,33 +112,69 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       if (!ok)
         throw new Error("Opener PIN does not match the staff who opened the day.");
 
-      // 1. Leader handshake matching the manager's decision.
+      const planText =
+        session.managerPlanText ?? escalation.resolutionNotes ?? "";
+      const isGoDecision = session.managerDecision === "go";
+
+      if (isGoDecision) {
+        // GO with workaround: park the RED, revert phase to open_pending so
+        // the Opener still has to clear remaining REDs, tick mandated checks
+        // and press Open Centre. Does NOT open the day.
+        await acceptEscalationWorkaround({
+          escalationId: escalation.id,
+          sessionId: session.id,
+          sourceIssueId: escalation.sourceIssueId,
+          managerStaffId: escalation.claimedBy,
+          openerStaffId: leaderStaffId,
+          pin: openerPin,
+          planText,
+        });
+
+        try {
+          const gps = await tryGetGps();
+          await writeToLedger({
+            staff_id: leaderStaffId,
+            category: "CENTRE",
+            severity: "GREEN",
+            action_type: "site_day.red_workaround_accepted",
+            gps_lat: gps?.lat ?? null,
+            gps_lng: gps?.lng ?? null,
+            metadata: {
+              escalation_id: escalation.id,
+              session_id: session.id,
+              source_issue_id: escalation.sourceIssueId,
+              manager_staff_id: escalation.claimedBy,
+              opener_staff_id: leaderStaffId,
+              plan: planText,
+            },
+          });
+        } catch (e) {
+          console.warn("[EscalationResolutionPanel:accept] ledger failed", e);
+        }
+
+        return { approved: true };
+      }
+
+      // NO-GO: existing behaviour — leader handshake closes the day.
       const nextSession = await submitLeaderHandshake({
         sessionId: session.id,
         decision: session.managerDecision,
         leaderStaffId,
         pin: openerPin,
       });
-
-      // 2. Close out the escalation row.
       await resolveOperationalEscalation({
         id: escalation.id,
-        approved: session.managerDecision === "go",
+        approved: false,
         managerStaffId: escalation.claimedBy,
-        notes: session.managerPlanText ?? escalation.resolutionNotes ?? "",
+        notes: planText,
       });
-
-      // 3. Ledger receipt.
       try {
         const gps = await tryGetGps();
         await writeToLedger({
           staff_id: leaderStaffId,
           category: "CENTRE",
-          severity: session.managerDecision === "go" ? "GREEN" : "RED",
-          action_type:
-            session.managerDecision === "go"
-              ? "governance.escalation_resolved"
-              : "governance.escalation_no_go",
+          severity: "RED",
+          action_type: "governance.escalation_no_go",
           gps_lat: gps?.lat ?? null,
           gps_lng: gps?.lng ?? null,
           metadata: {
@@ -147,21 +183,25 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
             source_issue_id: escalation.sourceIssueId,
             manager_staff_id: escalation.claimedBy,
             opener_staff_id: leaderStaffId,
-            decision: session.managerDecision,
+            decision: "no_go",
           },
         });
       } catch (e) {
         console.warn("[EscalationResolutionPanel:accept] ledger failed", e);
       }
-
-      return { nextSession, approved: session.managerDecision === "go" };
-    },
-    onSuccess: ({ nextSession, approved }) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, nextSession);
+      return { approved: false };
+    },
+    onSuccess: ({ approved }) => {
+      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ["site-escalation"] });
+      queryClient.invalidateQueries({ queryKey: ["site-issues"] });
       setOpenerPin("");
       if (approved) {
-        toast.success("Manager plan accepted — Centre is open.");
+        toast.success("Workaround accepted", {
+          description:
+            "RED parked with an agreed workaround. Complete mandated checks, then press Open Centre.",
+        });
       } else {
         toast.error("NO-GO accepted — Centre will remain closed for the day.");
       }
@@ -170,6 +210,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       toast.error("Could not accept the proposal", { description: e.message });
     },
   });
+
 
   const rejectMutation = useMutation({
     mutationFn: async (reason: string) => {
