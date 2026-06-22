@@ -58,14 +58,13 @@ export function DayCentrePage() {
         .from("site_issues_register")
         .select("id, session_id, severity, status, issue_description, workaround_plan, created_at")
         .eq("severity", "red")
-        .neq("status", "resolved")
         .order("created_at", { ascending: false });
       if (error) throw error;
       return data ?? [];
     },
   });
   const blockingReds = (openRedsQ.data ?? []).filter(
-    (issue) => !redHasAcceptedWorkaround(issue),
+    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue),
   );
   const hasBlockingRed = blockingReds.length > 0;
 
