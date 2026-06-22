@@ -109,9 +109,39 @@ export const Route = createFileRoute("/manifest")({
 });
 
 function ManifestPage() {
-  const { escalation } = Route.useRouteContext();
+  const { escalation: initialEscalation } = Route.useRouteContext();
+  const queryClient = useQueryClient();
+  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
 
-  // 🛡️ CRITICAL REHYDRATION SHIELD: Block before any hooks if escalation is active
+  // 🛡️ LIVE DRIVER-SIDE REHYDRATION
+  // The route-context snapshot from `beforeLoad` is only correct at entry.
+  // If a manager remotely claims/raises an escalation for this driver
+  // while they're sitting on the manifest, re-poll + realtime-subscribe so
+  // the screen swaps to the handshake panel without a manual refresh.
+  const liveEscQ = useQuery({
+    queryKey: ["manifest-active-escalation", driverStaffId],
+    queryFn: () => getActiveEscalation(driverStaffId),
+    initialData: initialEscalation,
+    refetchInterval: 15_000,
+    refetchOnWindowFocus: true,
+    staleTime: 5_000,
+  });
+  useEffect(() => {
+    const off = subscribeToEscalationPool(({ row }) => {
+      // Only react when the row concerns the current driver — name match is
+      // the same heuristic getActiveEscalation uses.
+      const r = row as { driver_name?: string | null } | null;
+      if (!r) return;
+      queryClient.invalidateQueries({
+        queryKey: ["manifest-active-escalation", driverStaffId],
+      });
+    });
+    return off;
+  }, [driverStaffId, queryClient]);
+
+  const escalation = liveEscQ.data ?? null;
+
+  // 🛡️ CRITICAL REHYDRATION SHIELD: Block before any further hooks if escalation is active
   if (escalation) {
     return (
       <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background p-4">
