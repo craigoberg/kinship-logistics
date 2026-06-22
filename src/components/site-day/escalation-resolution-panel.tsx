@@ -78,6 +78,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const claimedByName = managerNameQ.data ?? "the on-call Manager";
 
   const [openerPin, setOpenerPin] = useState("");
+  const [attempted, setAttempted] = useState(false);
 
   const acceptMutation = useMutation({
     mutationFn: async () => {
