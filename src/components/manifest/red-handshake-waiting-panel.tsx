@@ -270,24 +270,64 @@ function EscalationWaitingPanel({
   asset,
   driverName,
   escalationId,
+  escalation,
+  issues,
   onAuthorized,
   onBack,
 }: {
   asset: TransportAsset;
   driverName: string;
   escalationId: string;
+  escalation: OperationalEscalation | null;
+  issues: DraftIssue[];
   onAuthorized: () => void;
   onBack: () => void;
 }) {
-  const [live, setLive] = useState<OperationalEscalation | null>(null);
+  const [live, setLive] = useState<OperationalEscalation | null>(escalation);
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [verbalOpen, setVerbalOpen] = useState(false);
+  const [sourceText, setSourceText] = useState<string | null>(null);
 
   useEffect(() => {
     const off = subscribeToEscalation(escalationId, (next) => setLive(next));
     return off;
   }, [escalationId]);
+
+  // Best-effort: fetch the originating issue description so the driver sees
+  // exactly what was sent to the office. Sourced from either
+  // operational_incidents (bus walkaround) or site_issues_register (site day).
+  useEffect(() => {
+    const sourceId = live?.sourceIssueId ?? escalation?.sourceIssueId ?? null;
+    const sourceKind = live?.sourceKind ?? escalation?.sourceKind ?? null;
+    if (!sourceId) {
+      setSourceText(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const table =
+          sourceKind === "site_day_red" ? "site_issues_register" : "operational_incidents";
+        const column = table === "site_issues_register" ? "issue_description" : "description";
+        const { data, error } = await supabase
+          .from(table)
+          .select(`${column}`)
+          .eq("id", sourceId)
+          .maybeSingle();
+        if (error) throw error;
+        if (cancelled) return;
+        const raw = (data as Record<string, unknown> | null)?.[column];
+        setSourceText(raw ? String(raw).replace(/^\[Pre-trip\]\s*/i, "") : null);
+      } catch (err) {
+        console.warn("[EscalationWaitingPanel] source-issue fetch failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [live?.sourceIssueId, live?.sourceKind, escalation?.sourceIssueId, escalation?.sourceKind]);
+
 
   const status = live?.status ?? "pending";
   const claimed = status === "claimed";
