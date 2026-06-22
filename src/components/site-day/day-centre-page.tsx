@@ -32,7 +32,7 @@ export function DayCentrePage() {
   // BEFORE provisioning.
   const openRedsQ = useQuery({
     queryKey: ["site-issues", "open-reds-all"],
-    enabled: isReady && !!user,
+    enabled: isReady,
     staleTime: 5_000,
     refetchInterval: 30_000,
     queryFn: async () => {
@@ -149,7 +149,7 @@ export function DayCentrePage() {
   // Blocking RED check — show BEFORE provisioning today's session. The
   // Day Centre cannot open while any RED issue is still open in the
   // Governance Hub. Only a Manager can clear it.
-  if (hasBlockingRed && !session) {
+  if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
         <div className="flex items-start gap-3">
@@ -200,8 +200,32 @@ export function DayCentrePage() {
   }
 
   if (!session) {
-    // No row yet and bootstrap hasn't started/finished — give the user an
-    // explicit recovery path instead of a silent spinner.
+    // Not signed in — show a clear sign-in prompt rather than a spinner.
+    if (isReady && !user) {
+      return (
+        <Card className="space-y-3 border-amber-500/40 bg-amber-500/5 p-5 text-sm">
+          <div className="flex items-start gap-3">
+            <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600" />
+            <div className="space-y-1">
+              <div className="text-base font-semibold">You are not signed in</div>
+              <div className="text-muted-foreground">
+                Sign in as the Site Opener to start the Day Centre opening
+                workflow. The Day Centre cannot be provisioned until you are
+                authenticated.
+              </div>
+            </div>
+          </div>
+          <Button asChild size="sm">
+            <Link to="/auth">
+              Go to Sign In
+              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        </Card>
+      );
+    }
+
+    // Signed in but bootstrap hasn't completed — show recovery path.
     return (
       <Card className="space-y-3 border-amber-500/40 bg-amber-500/5 p-4 text-sm">
         <div className="flex items-start gap-2 text-amber-900 dark:text-amber-200">
@@ -209,9 +233,7 @@ export function DayCentrePage() {
           <div className="space-y-1">
             <div className="font-medium">Provisioning today's session…</div>
             <div className="text-xs text-muted-foreground">
-              {isReady && user
-                ? "Tap Retry if this card does not clear in a few seconds."
-                : "Waiting for sign-in to complete."}
+              Tap Retry if this card does not clear in a few seconds.
             </div>
           </div>
         </div>
