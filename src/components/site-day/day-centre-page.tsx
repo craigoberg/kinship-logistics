@@ -195,12 +195,20 @@ export function DayCentrePage() {
           ))}
         </ul>
 
-        <Button asChild size="sm">
-          <Link to="/governance">
-            Open Governance Hub
-            <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
-          </Link>
-        </Button>
+        {userIsManager ? (
+          <Button asChild size="sm">
+            <Link to="/governance">
+              Open Governance Hub
+              <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
+            </Link>
+          </Button>
+        ) : (
+          <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-200">
+            You do not have Manager access. Ask the on-duty Manager to open the
+            Governance Hub and resolve the RED issue above so the Day Centre
+            opening can continue.
+          </div>
+        )}
       </Card>
     );
   }
