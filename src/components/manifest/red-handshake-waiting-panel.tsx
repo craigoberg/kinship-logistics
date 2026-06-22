@@ -37,8 +37,8 @@ interface Props {
   issues?: DraftIssue[];
   /** Office-pool escalation handshake (Sev 1 raised from a missing gate). */
   escalationId?: string;
-  /** Route-guard escalation object rendered directly before hooks. */
-  escalation?: any;
+  /** Full escalation row used to surface details + gate metadata. */
+  escalation?: OperationalEscalation | null;
 }
 
 function issueChip(
@@ -60,54 +60,6 @@ export function RedHandshakeWaitingPanel({
   escalationId,
   escalation,
 }: Props) {
-  // Realtime sync: auto-unlock the route-guard shield when the escalation resolves.
-  useEffect(() => {
-    if (!escalation) return;
-    const channel = supabase
-      .channel(`escalation-shield-${escalation.id}`)
-      .on(
-        "postgres_changes",
-        {
-          event: "UPDATE",
-          schema: "public",
-          table: "operational_escalations",
-          filter: `id=eq.${escalation.id}`,
-        },
-        () => {
-          window.location.reload();
-        }
-      )
-      .subscribe();
-
-    return () => {
-      channel.unsubscribe();
-    };
-  }, [escalation]);
-
-  // Route-guard escalation mode: block UI before any trip hooks run.
-  if (escalation) {
-    return (
-      <Card className="border-2 border-rose-600/70 bg-rose-600/5 p-5">
-        <div className="flex items-center gap-2 text-rose-700 dark:text-rose-300">
-          <ShieldAlert className="h-6 w-6" />
-          <h2 className="text-lg font-extrabold">Sev 1 Escalation — Office Review</h2>
-        </div>
-        <p className="mt-1 text-xs text-muted-foreground">
-          Active escalation in progress. Please wait for office authorization before proceeding.
-        </p>
-        <div className="mt-4 flex items-center gap-3 rounded-md border border-border bg-background/60 p-3">
-          <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
-          <div className="text-sm">
-            <div className="font-semibold">Awaiting office authorization</div>
-            <div className="text-xs text-muted-foreground">
-              Do not roll until the office returns a decision.
-            </div>
-          </div>
-        </div>
-      </Card>
-    );
-  }
-
   // Branch by mode. Escalation mode (Sev 1) is purely office-resolved; the
   // clearance mode is the original dual-PIN walkaround handshake.
   if (escalationId) {
@@ -116,6 +68,8 @@ export function RedHandshakeWaitingPanel({
         asset={asset!}
         driverName={driverName!}
         escalationId={escalationId}
+        escalation={escalation ?? null}
+        issues={issues ?? []}
         onAuthorized={onAuthorized!}
         onBack={onBack!}
       />
@@ -316,24 +270,64 @@ function EscalationWaitingPanel({
   asset,
   driverName,
   escalationId,
+  escalation,
+  issues,
   onAuthorized,
   onBack,
 }: {
   asset: TransportAsset;
   driverName: string;
   escalationId: string;
+  escalation: OperationalEscalation | null;
+  issues: DraftIssue[];
   onAuthorized: () => void;
   onBack: () => void;
 }) {
-  const [live, setLive] = useState<OperationalEscalation | null>(null);
+  const [live, setLive] = useState<OperationalEscalation | null>(escalation);
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [verbalOpen, setVerbalOpen] = useState(false);
+  const [sourceText, setSourceText] = useState<string | null>(null);
 
   useEffect(() => {
     const off = subscribeToEscalation(escalationId, (next) => setLive(next));
     return off;
   }, [escalationId]);
+
+  // Best-effort: fetch the originating issue description so the driver sees
+  // exactly what was sent to the office. Sourced from either
+  // operational_incidents (bus walkaround) or site_issues_register (site day).
+  useEffect(() => {
+    const sourceId = live?.sourceIssueId ?? escalation?.sourceIssueId ?? null;
+    const sourceKind = live?.sourceKind ?? escalation?.sourceKind ?? null;
+    if (!sourceId) {
+      setSourceText(null);
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const table =
+          sourceKind === "site_day_red" ? "site_issues_register" : "operational_incidents";
+        const column = table === "site_issues_register" ? "issue_description" : "description";
+        const { data, error } = await supabase
+          .from(table)
+          .select(`${column}`)
+          .eq("id", sourceId)
+          .maybeSingle();
+        if (error) throw error;
+        if (cancelled) return;
+        const raw = (data as Record<string, unknown> | null)?.[column];
+        setSourceText(raw ? String(raw).replace(/^\[Pre-trip\]\s*/i, "") : null);
+      } catch (err) {
+        console.warn("[EscalationWaitingPanel] source-issue fetch failed", err);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [live?.sourceIssueId, live?.sourceKind, escalation?.sourceIssueId, escalation?.sourceKind]);
+
 
   const status = live?.status ?? "pending";
   const claimed = status === "claimed";
@@ -531,6 +525,46 @@ function EscalationWaitingPanel({
         {asset.name} · {asset.regoPlate} · Driver {driverName}
       </p>
 
+      <div className="mt-4 rounded-md border border-border bg-background/60 p-3">
+        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+          What was reported
+        </div>
+        <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+          <dt className="text-muted-foreground">Vehicle</dt>
+          <dd className="font-medium">{live?.vehicleInfo ?? `${asset.name} · ${asset.regoPlate}`}</dd>
+          <dt className="text-muted-foreground">Failed gate</dt>
+          <dd className="font-medium">{live?.gateId ?? "—"}</dd>
+          <dt className="text-muted-foreground">Source</dt>
+          <dd className="font-medium">
+            {live?.sourceKind === "site_day_red" ? "Day Centre" : "Bus walkaround"}
+          </dd>
+        </dl>
+        {sourceText && (
+          <blockquote className="mt-2 border-l-2 border-rose-500/60 pl-3 text-sm italic">
+            {sourceText}
+          </blockquote>
+        )}
+        {issues.length > 0 && (
+          <ol className="mt-3 space-y-1.5">
+            {issues.map((i, idx) => {
+              const c = issueChip(i.severity);
+              return (
+                <li key={i.id} className="flex items-start gap-2 text-sm">
+                  <span
+                    className={cn(
+                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold",
+                      c.tone,
+                    )}
+                  >
+                    #{idx + 1} {c.label}
+                  </span>
+                  <span>{i.text}</span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
 
       <div className="mt-4 flex items-center gap-3 rounded-md border border-border bg-background/60 p-3">
         <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
@@ -550,6 +584,7 @@ function EscalationWaitingPanel({
         Do not roll until the office returns a decision. If this takes more than
         a few minutes, call the office on the direct line.
       </div>
+
 
       <Button
         type="button"

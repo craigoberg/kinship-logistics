@@ -40,12 +40,15 @@ export const getActiveEscalation = async (driverId: string) => {
   //
   //    `resolved_denied` and fully-acknowledged approvals fall through and
   //    return null so the manifest unblocks.
+  // NOTE: each branch is wrapped in its own `and(...)` so that the comma
+  // inside `status.in.(pending,claimed)` cannot collide with the top-level
+  // `.or()` separator (PostgREST grouping rule).
   const { data, error } = await supabase
     .from("operational_escalations")
     .select("*")
     .eq("driver_name", driverName)
     .or(
-      "status.in.(pending,claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
+      "and(status.eq.pending),and(status.eq.claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
     )
     .order("created_at", { ascending: false })
     .limit(1)
