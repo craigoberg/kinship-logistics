@@ -18,9 +18,15 @@ import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 
+function isManagerRole(staffRole: string | null | undefined): boolean {
+  return (staffRole ?? "").toLowerCase().includes("manager");
+}
+
 export function DayCentrePage() {
   const queryClient = useQueryClient();
   const { user, isReady } = useAuthReady();
+  const profile = useMemo(() => getActiveUserProfile(), []);
+  const userIsManager = isManagerRole(profile?.staffRole);
   const sessionQ = useSiteSession();
   const session = sessionQ.data ?? null;
   const issuesQ = useSiteIssues(session?.id ?? null);
