@@ -367,11 +367,13 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         <Button
           type="button"
           variant="outline"
-          disabled={busy}
+          disabled={busy || !pinValid}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
-            rejectMutation.mutate();
+            setRejectAttempted(false);
+            setRejectReason("");
+            setRejectOpen(true);
           }}
           className="border-rose-600 text-rose-700 hover:bg-rose-600/10"
         >
@@ -383,7 +385,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         </Button>
         <Button
           type="button"
-          disabled={busy}
+          disabled={busy || !pinValid}
           onClick={() => {
             setAttempted(true);
             if (!pinValid) return;
@@ -403,6 +405,87 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         </Button>
       </div>
 
+      <Dialog
+        open={rejectOpen}
+        onOpenChange={(o) => {
+          if (rejectMutation.isPending) return;
+          setRejectOpen(o);
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="h-5 w-5 text-rose-600" />
+              Reject Manager's Proposal
+            </DialogTitle>
+            <DialogDescription>
+              Tell the Manager why you're rejecting their {isGo ? "GO" : "NO-GO"} proposal.
+              The RED issue stays open in the Governance Hub.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="grid gap-1.5">
+            <Label
+              htmlFor="reject-reason"
+              className="text-xs uppercase tracking-wide text-muted-foreground"
+            >
+              Reason for rejection <span className="text-rose-600">*</span>
+            </Label>
+            <Textarea
+              id="reject-reason"
+              rows={4}
+              value={rejectReason}
+              onChange={(e) => setRejectReason(e.target.value)}
+              placeholder="Why the proposed plan is not acceptable. Minimum 10 characters."
+              className={cn(
+                showRejectReasonError &&
+                  "border-2 border-rose-600 focus-visible:ring-rose-600",
+              )}
+            />
+            <div className="flex items-center justify-between text-[11px]">
+              <span
+                className={cn(
+                  "text-muted-foreground",
+                  showRejectReasonError && "font-semibold text-rose-600",
+                )}
+              >
+                {rejectReason.trim().length}/10 minimum
+              </span>
+              {showRejectReasonError && (
+                <span className="font-semibold text-rose-600">
+                  Required — add more detail
+                </span>
+              )}
+            </div>
+          </div>
+
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              disabled={rejectMutation.isPending}
+              onClick={() => setRejectOpen(false)}
+            >
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              disabled={rejectMutation.isPending || !rejectReasonValid}
+              onClick={() => {
+                setRejectAttempted(true);
+                if (!rejectReasonValid) return;
+                rejectMutation.mutate(rejectReason.trim());
+              }}
+              className="bg-rose-600 text-white hover:bg-rose-700"
+            >
+              {rejectMutation.isPending && (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              )}
+              Confirm Reject
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 }
