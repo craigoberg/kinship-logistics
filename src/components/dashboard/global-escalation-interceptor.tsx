@@ -257,6 +257,11 @@ export function GlobalEscalationInterceptor() {
           setQueue((prev) => (prev.some((e) => e.id === row.id) ? prev : [...prev, row]));
         });
       } else if (type === "UPDATE") {
+        // Manager-awareness: detect Opener rejection of my proposal.
+        if (isRejectionRow(row, currentStaffId)) {
+          enqueueRejection(row);
+        }
+
         if (row.status !== "pending") {
           setQueue((prev) => prev.filter((e) => e.id !== row.id));
           return;
