@@ -50,13 +50,13 @@ function diagnose(issue: IssueRow, esc: EscalationRow | null): RowDiagnosis {
       reason: "Issue row has workaround_plan stored",
     };
   }
-  if (esc && esc.status === "resolved_approved") {
+  if (esc && esc.status === "resolved_approved" && esc.resolution_notes?.trim()) {
     return {
       issue,
       escalation: esc,
-      blocking: true,
+      blocking: false,
       reason:
-        "BLOCKING — linked escalation is resolved_approved but the issue row was NOT updated (status still 'open', workaround_plan still null). Acceptance flow did not write back.",
+        "CARRIED — linked escalation is resolved_approved with notes (fallback workaround source). Issue row was not updated, but Day Centre now treats this as carried.",
     };
   }
   return {
