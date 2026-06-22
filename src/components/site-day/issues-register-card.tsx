@@ -4,6 +4,7 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { ClientTime } from "@/components/ui/client-time";
+import { ElapsedTimer, formatElapsed } from "@/components/ui/elapsed-timer";
 import { type SiteIssue } from "@/lib/api/site-issues";
 
 interface Props {
@@ -95,6 +96,47 @@ export function IssuesRegisterCard({ issue }: Props) {
         <div className="rounded bg-muted/40 p-2 text-xs text-muted-foreground">
           <span className="font-semibold">Workaround:</span>{" "}
           {issue.workaroundPlan}
+        </div>
+      )}
+
+      {/* Live timer while still open on a workaround */}
+      {isWorkaroundAccepted && !isResolved && issue.workaroundAcceptedAt && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-emerald-700">
+          <ElapsedTimer
+            since={issue.workaroundAcceptedAt}
+            label="Workaround active"
+          />
+          <ElapsedTimer
+            since={issue.createdAt}
+            label="Total open"
+            className="opacity-70"
+          />
+        </div>
+      )}
+
+      {/* Frozen summary once resolved */}
+      {isResolved && issue.resolvedAt && (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
+          <span>
+            <span className="font-semibold">Total time:</span>{" "}
+            <span className="font-mono tabular-nums">
+              {formatElapsed(
+                new Date(issue.resolvedAt).getTime() -
+                  new Date(issue.createdAt).getTime(),
+              )}
+            </span>
+          </span>
+          {issue.workaroundAcceptedAt && (
+            <span>
+              <span className="font-semibold">On workaround:</span>{" "}
+              <span className="font-mono tabular-nums">
+                {formatElapsed(
+                  new Date(issue.resolvedAt).getTime() -
+                    new Date(issue.workaroundAcceptedAt).getTime(),
+                )}
+              </span>
+            </span>
+          )}
         </div>
       )}
     </Card>

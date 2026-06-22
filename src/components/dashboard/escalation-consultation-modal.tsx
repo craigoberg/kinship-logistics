@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
+import { ElapsedTimer } from "@/components/ui/elapsed-timer";
 
 import {
   resolveStaffIdWithFallback,
@@ -403,6 +404,16 @@ function SiteDayProposalModal({
 
         {escalation && (
           <div className="space-y-4">
+            <div className="flex flex-wrap items-center gap-x-4 gap-y-1 rounded-md border border-amber-500/40 bg-amber-500/5 px-3 py-2 text-amber-800 dark:text-amber-200">
+              <ElapsedTimer since={escalation.createdAt} label="Open" />
+              {escalation.claimedAt && (
+                <ElapsedTimer
+                  since={escalation.claimedAt}
+                  label="Claimed"
+                  className="opacity-80"
+                />
+              )}
+            </div>
             <div className="grid gap-2 rounded-md border border-border bg-muted/40 p-3 text-sm">
               <Row label="Raised by" value={escalation.driverName || "—"} />
               <Row label="Site" value={escalation.vehicleInfo || "Day Centre"} />

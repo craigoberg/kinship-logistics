@@ -4710,6 +4710,7 @@ export async function acceptEscalationWorkaround(args: {
       .update({
         status: "workaround_accepted",
         workaround_plan: trimmedPlan || null,
+        workaround_accepted_at: new Date().toISOString(),
       })
       .eq("id", args.sourceIssueId)
       .select("id, status, workaround_plan");

@@ -295,7 +295,11 @@ export function DayCentrePage() {
     if (isEscalationActive) {
       return (
         <div className="space-y-4">
-          <EscalationLockBanner session={session} />
+          <EscalationLockBanner
+            session={session}
+            escalation={redEscalation}
+            redIssue={redIssue}
+          />
           <EscalationResolutionPanel session={session} redIssue={redIssue} />
         </div>
       );

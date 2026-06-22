@@ -24,6 +24,7 @@ export interface SiteIssue {
   emailDispatchedAt: string | null;
   status: string;
   resolvedAt: string | null;
+  workaroundAcceptedAt: string | null;
   createdAt: string;
 }
 
@@ -41,6 +42,7 @@ interface SiteIssueRow {
   email_dispatched_at: string | null;
   status: string | null;
   resolved_at: string | null;
+  workaround_accepted_at: string | null;
   created_at: string;
 }
 
@@ -59,6 +61,7 @@ function rowToIssue(r: SiteIssueRow): SiteIssue {
     emailDispatchedAt: r.email_dispatched_at,
     status: r.status ?? "open",
     resolvedAt: r.resolved_at,
+    workaroundAcceptedAt: r.workaround_accepted_at ?? null,
     createdAt: r.created_at,
   };
 }
@@ -121,6 +124,7 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     severity: payload.severity,
     owner: payload.owner,
   });
+  const hasWorkaround = !!(payload.workaroundPlan && payload.workaroundPlan.trim());
   const { data, error } = await supabase
     .from("site_issues_register")
     .insert({
@@ -131,6 +135,7 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
       workaround_plan: payload.workaroundPlan,
       owner: payload.owner,
       status: "open",
+      workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
     })
     .select("*")
     .single();
