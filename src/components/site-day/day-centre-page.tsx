@@ -149,7 +149,7 @@ export function DayCentrePage() {
   // Blocking RED check — show BEFORE provisioning today's session. The
   // Day Centre cannot open while any RED issue is still open in the
   // Governance Hub. Only a Manager can clear it.
-  if (hasBlockingRed && !session) {
+  if (hasBlockingRed) {
     return (
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
         <div className="flex items-start gap-3">
