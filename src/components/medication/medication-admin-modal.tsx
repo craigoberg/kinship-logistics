@@ -149,10 +149,10 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
       if (!w1ok || !w2ok) {
         setPinError(
           !w1ok && !w2ok
-            ? "Both witness PINs are incorrect."
+            ? "Incorrect PIN. Please try again. (Both witness PINs)"
             : !w1ok
-              ? `Witness 1 PIN does not match ${w1?.fullName ?? "selected staff"}.`
-              : `Witness 2 PIN does not match ${w2?.fullName ?? "selected staff"}.`,
+              ? `Incorrect PIN. Please try again. (Witness 1 — ${w1?.fullName ?? "selected staff"})`
+              : `Incorrect PIN. Please try again. (Witness 2 — ${w2?.fullName ?? "selected staff"})`,
         );
         return;
       }
@@ -412,7 +412,7 @@ function WitnessBlock({
         inputMode="numeric"
         autoComplete="off"
         maxLength={4}
-        placeholder="••••"
+        placeholder="----"
         value={pinValue}
         onChange={(e) => onPinChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
         className="tracking-[0.5em] text-center font-mono"
