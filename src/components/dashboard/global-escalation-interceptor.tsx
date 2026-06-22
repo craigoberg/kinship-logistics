@@ -172,6 +172,19 @@ export function GlobalEscalationInterceptor() {
   const [claiming, setClaiming] = useState(false);
   const [consultTarget, setConsultTarget] = useState<OperationalEscalation | null>(null);
   const [tick, setTick] = useState(0);
+  const [ackSet, setAckSet] = useState<Set<string>>(() => loadAckSet());
+  const [rejectedQueue, setRejectedQueue] = useState<OperationalEscalation[]>([]);
+
+  const enqueueRejection = useCallback(
+    (row: OperationalEscalation) => {
+      setRejectedQueue((prev) => {
+        if (ackSet.has(row.id)) return prev;
+        if (prev.some((r) => r.id === row.id)) return prev;
+        return [...prev, row];
+      });
+    },
+    [ackSet],
+  );
 
   // Current staff id — used to suppress the Claim popup for the user who
   // actually raised the incident (no self-claim).
