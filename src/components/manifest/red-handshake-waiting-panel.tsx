@@ -6,9 +6,11 @@ import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
+import { ElapsedTimer } from "@/components/ui/elapsed-timer";
 import { cn } from "@/lib/utils";
 import { supabase } from "@/integrations/supabase/client";
 import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
+import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
 import type {
   AssetDailyClearance,
@@ -21,6 +23,7 @@ import {
   submitDriverAuthorization,
   subscribeToClearance,
   subscribeToEscalation,
+  verifyStaffPin,
 } from "@/lib/data-store";
 import type { DraftIssue } from "./issue-accumulator-panel";
 
