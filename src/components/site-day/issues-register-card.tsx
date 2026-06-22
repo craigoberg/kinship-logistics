@@ -79,6 +79,14 @@ export function IssuesRegisterCard({ issue }: Props) {
             <CheckCircle2 className="h-3 w-3" /> Resolved
           </Badge>
         )}
+        {isWorkaroundAccepted && (
+          <Badge
+            variant="outline"
+            className="gap-1 border-emerald-600/60 text-[10px] text-emerald-700"
+          >
+            <ShieldCheck className="h-3 w-3" /> Workaround accepted
+          </Badge>
+        )}
       </div>
 
       <div className="text-sm">{issue.issueDescription}</div>
