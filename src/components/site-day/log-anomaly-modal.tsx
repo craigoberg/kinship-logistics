@@ -214,10 +214,15 @@ export function LogAnomalyModal({
       return { kind: "site-day" as const, issue };
     },
     onSuccess: (result) => {
+      if (result.kind === "site-day-red") {
+        // Parent opens VerbalAuthOverrideDialog; just close the modal.
+        reset();
+        onOpenChange(false);
+        return;
+      }
       if (result.kind === "site-day") {
         const issue = result.issue;
         const sId = (context as Extract<AnomalyContext, { kind: "site-day" }>).sessionId;
-        // Targeted invalidations (exact keys used by the parent panel/register)
         queryClient.invalidateQueries({ queryKey: siteIssuesKey(sId) });
         queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(sId) });
         queryClient.invalidateQueries({ queryKey: ["site-issues", sId] });
@@ -245,14 +250,6 @@ export function LogAnomalyModal({
         } else {
           toast.success("Note added to the Issues Register.");
         }
-      if (result.kind === "site-day-red") {
-        // Parent will open VerbalAuthOverrideDialog; close this modal cleanly.
-        reset();
-        onOpenChange(false);
-        return;
-      }
-      if (result.kind === "site-day") {
-        // handled above
       } else {
         // pre-trip
         reset();
