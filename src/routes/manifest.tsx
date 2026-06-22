@@ -666,11 +666,14 @@ function WalkaroundChecklist({
       setOverrideUnlocked(true);
       setPinDialogOpen(false);
       setPinInput("");
+      setPinInputError(null);
       toast.success("Manager override accepted", {
         description: "Capacity mismatch unlocked — proceed with caution.",
       });
     } else {
-      toast.error("Invalid override PIN");
+      setPinInputError("Incorrect PIN. Please try again.");
+      setPinInput("");
+      toast.error("Incorrect PIN. Please try again.");
     }
   };
 
