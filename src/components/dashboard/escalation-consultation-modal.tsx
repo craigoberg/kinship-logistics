@@ -236,14 +236,20 @@ function SiteDayProposalModal({
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState<null | "go" | "no_go">(null);
   const [attempted, setAttempted] = useState(false);
+  const [lastError, setLastError] = useState<string | null>(null);
 
+  // Only reset typed input when the modal actually closes or a different
+  // escalation id is opened — NOT on every realtime rehydrate of the same row.
+  const escId = escalation?.id ?? null;
   useEffect(() => {
-    if (!escalation) {
+    if (!escId) {
       setNotes("");
       setPin("");
       setAttempted(false);
+      setLastError(null);
     }
-  }, [escalation]);
+  }, [escId]);
+
 
   const notesValid = notes.trim().length >= 10;
   const pinValid = /^\d{4,6}$/.test(pin);
@@ -252,21 +258,42 @@ function SiteDayProposalModal({
   const showPinError = attempted && !pinValid;
 
   const propose = async (decision: "go" | "no_go") => {
-    if (!escalation || submitting) return;
+    console.debug("[propose] entry", {
+      decision,
+      escalationId: escalation?.id,
+      sessionId,
+      claimedBy: escalation?.claimedBy,
+      notesLen: notes.trim().length,
+      pinLen: pin.length,
+      submitting,
+    });
+    if (!escalation || submitting) {
+      console.debug("[propose] early-return: no escalation or already submitting");
+      return;
+    }
     setAttempted(true);
+    setLastError(null);
     if (!notesValid) {
+      console.debug("[propose] early-return: notes invalid");
+      setLastError("Plan / reason must be at least 10 characters.");
       toast.error("Plan / reason must be at least 10 characters.");
       return;
     }
     if (!pinValid) {
+      console.debug("[propose] early-return: pin invalid");
+      setLastError("Enter your 4–6 digit Manager PIN.");
       toast.error("Enter your 4–6 digit Manager PIN.");
       return;
     }
     if (!sessionId) {
+      console.debug("[propose] early-return: sessionId missing");
+      setLastError("Cannot find the linked site session.");
       toast.error("Cannot find the linked site session.");
       return;
     }
     if (!escalation.claimedBy) {
+      console.debug("[propose] early-return: escalation.claimedBy missing");
+      setLastError("Escalation must be claimed before proposing a resolution.");
       toast.error("Escalation must be claimed before proposing a resolution.");
       return;
     }
@@ -330,13 +357,15 @@ function SiteDayProposalModal({
       );
       onClose();
     } catch (err) {
-      toast.error("Could not send proposal", {
-        description: (err as Error).message,
-      });
+      const msg = (err as Error).message;
+      console.error("[propose:caught]", err);
+      setLastError(msg);
+      toast.error("Could not send proposal", { description: msg });
     } finally {
       setSubmitting(null);
     }
   };
+
 
   const open = !!escalation;
 
@@ -479,10 +508,17 @@ function SiteDayProposalModal({
                 )}
               </Button>
             </div>
+
+            {lastError && (
+              <div className="rounded-md border border-rose-600 bg-rose-600/10 p-2 text-xs font-semibold text-rose-700">
+                {lastError}
+              </div>
+            )}
           </div>
         )}
       </DialogContent>
     </Dialog>
+
   );
 }
 
