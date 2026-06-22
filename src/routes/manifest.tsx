@@ -593,16 +593,15 @@ function IssueAccumulatorGate({
   const driverName = staffName(driverStaffId);
 
   return (
-    <DynamicOperationalForm
-      schema={PRE_TRIP_SCHEMA}
+    <IssueAccumulatorPanel
       asset={asset}
       startOdometer={startOdometer}
       dateStr={dateStr}
+      checkpoints={[]}
       driverName={driverName}
       onCleared={onPassed}
-      onEscalated={onEscalated}
-      onRedHandshake={onRedHandshake}
       onBack={onBack}
+      onRedRaised={onEscalated}
     />
   );
 }
