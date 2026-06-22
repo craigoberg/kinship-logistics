@@ -525,6 +525,46 @@ function EscalationWaitingPanel({
         {asset.name} · {asset.regoPlate} · Driver {driverName}
       </p>
 
+      <div className="mt-4 rounded-md border border-border bg-background/60 p-3">
+        <div className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
+          What was reported
+        </div>
+        <dl className="mt-2 grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-xs">
+          <dt className="text-muted-foreground">Vehicle</dt>
+          <dd className="font-medium">{live?.vehicleInfo ?? `${asset.name} · ${asset.regoPlate}`}</dd>
+          <dt className="text-muted-foreground">Failed gate</dt>
+          <dd className="font-medium">{live?.gateId ?? "—"}</dd>
+          <dt className="text-muted-foreground">Source</dt>
+          <dd className="font-medium">
+            {live?.sourceKind === "site_day_red" ? "Day Centre" : "Bus walkaround"}
+          </dd>
+        </dl>
+        {sourceText && (
+          <blockquote className="mt-2 border-l-2 border-rose-500/60 pl-3 text-sm italic">
+            {sourceText}
+          </blockquote>
+        )}
+        {issues.length > 0 && (
+          <ol className="mt-3 space-y-1.5">
+            {issues.map((i, idx) => {
+              const c = issueChip(i.severity);
+              return (
+                <li key={i.id} className="flex items-start gap-2 text-sm">
+                  <span
+                    className={cn(
+                      "shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold",
+                      c.tone,
+                    )}
+                  >
+                    #{idx + 1} {c.label}
+                  </span>
+                  <span>{i.text}</span>
+                </li>
+              );
+            })}
+          </ol>
+        )}
+      </div>
 
       <div className="mt-4 flex items-center gap-3 rounded-md border border-border bg-background/60 p-3">
         <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
@@ -544,6 +584,7 @@ function EscalationWaitingPanel({
         Do not roll until the office returns a decision. If this takes more than
         a few minutes, call the office on the direct line.
       </div>
+
 
       <Button
         type="button"
