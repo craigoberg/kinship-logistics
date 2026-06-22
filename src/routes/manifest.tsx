@@ -558,6 +558,7 @@ function WalkaroundChecklist({
   const [overrideUnlocked, setOverrideUnlocked] = useState(false);
   const [pinDialogOpen, setPinDialogOpen] = useState(false);
   const [pinInput, setPinInput] = useState("");
+  const [pinInputError, setPinInputError] = useState<string | null>(null);
 
   const submitMut = useMutation({
     mutationFn: async (input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean }) => {
