@@ -345,7 +345,7 @@ function SiteDayProposalModal({
       try {
         const gps = await tryGetGps();
         await writeToLedger({
-          staff_id: escalation.claimedBy,
+          staff_id: resolvedClaimedBy,
           category: "CENTRE",
           severity: decision === "go" ? "YELLOW" : "RED",
           action_type: "governance.escalation_manager_proposed",
