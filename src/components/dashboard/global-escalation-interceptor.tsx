@@ -390,7 +390,19 @@ export function GlobalEscalationInterceptor() {
             manager_staff_id: staffId,
           },
         });
-        setConsultTarget(result.escalation ?? target);
+        const claimed = result.escalation ?? target;
+        const merged = {
+          ...claimed,
+          claimedBy: claimed.claimedBy ?? staffId,
+          claimedAt: claimed.claimedAt ?? new Date().toISOString(),
+          status: "claimed" as const,
+        };
+        console.debug("[handleClaim] consultTarget set", {
+          id: merged.id,
+          claimedBy: merged.claimedBy,
+          fromRpc: !!result.escalation,
+        });
+        setConsultTarget(merged);
       } else {
         toast.info(
           `This incident has already been claimed by ${result.claimedByName ?? "another coordinator"}. Check the Exception Hub for active status updates.`,

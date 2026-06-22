@@ -1,51 +1,71 @@
-## Goal
+## What we're seeing
 
-Stop the Manager Propose modal from wiping the typed plan/PIN when the underlying escalation row rehydrates via realtime, and add lightweight tracing so the previous "nothing happened" no-op is diagnosable if it recurs.
+Screenshot shows the inline red strip:
+> "Escalation must be claimed before proposing a resolution."
 
-## Scope
+That string is only produced by the `!escalation.claimedBy` guard in `SiteDayProposalModal.propose()`. So at submit time, the `escalation` object held by the modal has `claimedBy = null` even though the user is the manager who claimed it (Buffy).
 
-Two files only. No schema, no RPC, no behaviour change to the happy path.
+## Root cause
 
-1. `src/components/dashboard/escalation-consultation-modal.tsx` (Manager Propose modal)
-2. `src/lib/api/site-day-sessions.ts` (`submitManagerHandshake`)
+In `src/components/dashboard/global-escalation-interceptor.tsx` → `handleClaim()`:
 
-## Changes
+```ts
+const result = await claimOperationalEscalation(target.id, staffId);
+...
+setConsultTarget(result.escalation ?? target);
+```
 
-### 1. Preserve typed input across rehydrates
+`target` came from the **claimable** queue, where every row has `status="pending"` and `claimedBy=null`. When `result.escalation` is `undefined` (RPC payload shape mismatch — `payload.escalation ?? payload.row` is null), we fall back to `target`, so `consultTarget.claimedBy` stays `null`. The user can then sit on the modal for minutes; nothing ever populates `claimedBy`, and the propose guard fires.
 
-- Treat `notes` and `pin` as user-owned local state that only resets when the modal **closes** (or the escalation `id` actually changes), not whenever the escalation row object reference changes from realtime.
-- Replace any effect that resets state on `[escalation]` with one keyed on `[escalation?.id, open]` and only clear when `open` flips to `false` or the id changes.
-- If a "draft restore" hook (e.g. seeding `notes` from `escalation.managerPlanText`) exists, only seed once per `(open=true, id)` transition — never overwrite a non-empty `notes` the user has already typed.
+The rehydrate path (`listMyClaimedAwaitingProposal`) does set `claimedBy` correctly, which is why the *previous* attempt eventually worked — it was opened from rehydrate, not from a fresh claim.
 
-### 2. Tracing on the submit path
+## Fix
 
-In the modal's `propose` handler, add `console.debug('[propose]', step, payload)` lines for each early return:
-- notes invalid / too short
-- pin missing / invalid format
-- session missing
-- `claimedBy` missing on escalation
-- pre-call snapshot of `{ escalationId, sessionId, staffId, notesLen, pinLen }`
+Two small, surgical changes — no schema, no RPC, no behaviour change beyond closing the gap.
 
-In `submitManagerHandshake`:
-- log PIN verify result
-- log update payload
-- log returned row from `.select()`
-- on Postgres error, `console.error('[submitManagerHandshake]', { code, message, details, hint })`
+### 1. `global-escalation-interceptor.tsx` — guarantee `claimedBy` on consultTarget
 
-In the modal's `catch` block, mirror the toast message via `console.error('[propose:caught]', err)` so it shows up in the log feed even when the toast is missed.
+Replace the fallback assignment with a merge that always stamps the current claimer onto the row we hand to the modal:
 
-### 3. Inline error strip (small)
+```ts
+const claimed = result.escalation ?? target;
+setConsultTarget({
+  ...claimed,
+  claimedBy: claimed.claimedBy ?? staffId,
+  claimedAt: claimed.claimedAt ?? new Date().toISOString(),
+  status: "claimed",
+});
+```
 
-Render a single red text line at the bottom of the modal showing the last failure reason; clears on next submit attempt. Guarantees the user sees *why* nothing happened without hunting in the toast stack.
+Also add a one-line `console.debug("[handleClaim] consultTarget set", { id, claimedBy, fromRpc: !!result.escalation })` so future regressions are visible.
+
+### 2. `escalation-consultation-modal.tsx` → `SiteDayProposalModal.propose()` — defensive refetch
+
+If `escalation.claimedBy` is still missing when the user clicks Propose, do one re-read of the row from `operational_escalations` before refusing:
+
+```ts
+if (!escalation.claimedBy) {
+  const { data } = await supabase
+    .from("operational_escalations")
+    .select("claimed_by")
+    .eq("id", escalation.id)
+    .maybeSingle();
+  const claimedBy = (data?.claimed_by as string | null) ?? null;
+  if (!claimedBy) { /* keep existing error */ return; }
+  // use claimedBy locally for the rest of this submit
+}
+```
+
+Then use the locally-resolved `claimedBy` for both `submitManagerHandshake({ managerStaffId })` and the ledger write. This makes the modal self-healing for any other path that hands it a stale row.
 
 ## Out of scope
 
-- No change to RLS, RPC, or the writeback shape.
-- No removal of the day-blocking diagnostic yet — keep until the next clean Manager Propose round-trip is observed.
-- The probable RLS / `verifyStaffPin` follow-ups from the prior plan are deferred until the new tracing actually fingers one of them.
+- The RPC return shape itself — we work around it client-side. If we later confirm the RPC returns the row under an unexpected key, we can normalise in `claimOperationalEscalation`, but that's a follow-up.
+- Tracing left in place from the previous fix stays as-is.
 
 ## Verification
 
-- Open the modal, type, wait for a realtime tick (or trigger one by another tab) → typed text remains.
-- Submit with bad PIN → red inline strip + `[submitManagerHandshake]` error in console.
-- Submit happy path → session row updates `manager_plan_text` / `manager_decision`, opener panel renders.
+1. New escalation → Buffy claims → console shows `[handleClaim] consultTarget set` with `claimedBy = <Buffy's id>`.
+2. Type plan + PIN → click Propose GO → handshake succeeds, no "must be claimed" strip.
+3. Leave modal idle 10 min, then submit → still succeeds (state retained from the fix).
+4. As a safety net: temporarily simulate `result.escalation = undefined` → defensive refetch still resolves `claimedBy` from the DB row.
