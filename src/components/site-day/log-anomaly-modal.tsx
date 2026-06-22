@@ -132,8 +132,10 @@ export function LogAnomalyModal({
 
   const mutation = useMutation({
     mutationFn: async () => {
+      // Yellow stores the opener's workaround; Green and Red store null
+      // (Red's workaround is supplied later by the responding Manager).
       const workaroundPlan =
-        values.severity === "green" ? null : values.workaround.trim();
+        values.severity === "yellow" ? values.workaround.trim() : null;
       const payload: NewSiteIssue = {
         sessionId,
         severity: values.severity,
