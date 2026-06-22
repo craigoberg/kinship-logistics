@@ -1,75 +1,29 @@
+
 ## Goal
+Make the mandated checks read as positive confirmations ("I've checked it AND it's OK / a Manager-approved workaround is in place"), and turn the Open Centre action into a single big, full-width button that lights up green only once every item is confirmed. Pure UI change — no schema, no API, no new business rules.
 
-Live `HH:MM:SS` timers on both the creator and acceptor screens, plus a static "total time" once an issue is fully closed. Add the one missing timestamp (`workaround_accepted_at`) so the timer math is honest for both RED and YELLOW flows.
+## Changes
 
-## Timestamp model (after this change)
+### 1. `src/components/site-day/mandated-checks-list.tsx`
+- Reword each row label to read as a confirmation. Display format per item:
+  - Bold line: `Confirm: {itemLabel}`
+  - Subline (muted, smaller): `Checked and OK, or a Manager-approved workaround is in place.`
+- Larger tap target (more vertical padding) since this is now the primary affirmation surface.
+- When ticked, give the row a subtle green tint (`bg-green-500/10 border-green-500/40`) so the user sees the page going green as they confirm.
+- Keep checkbox + check-circle behavior; keep controlled `ticked` / `onTickedChange` contract unchanged.
+- Section header reworded from "Mandated Compliance Checks" → "Confirm site is ready to open".
 
-| Stage | Field | When written |
-|---|---|---|
-| Issue/escalation opened | `site_issues_register.created_at` (and `operational_escalations.created_at` for RED) | On insert |
-| Manager opened the alert (RED only, intermediate) | `operational_escalations.claimed_at` | On claim — kept for ops visibility, NOT used as the "workaround start" |
-| **Workaround accepted (NEW)** | `site_issues_register.workaround_accepted_at` | RED: when opener accepts the Manager GO proposal. YELLOW: at issue creation if a `workaround_plan` is supplied. |
-| Final fix recorded | `site_issues_register.resolved_at` (already exists) | Governance Hub close |
-
-Reports can then compute:
-- Time to workaround = `workaround_accepted_at − created_at`
-- Time on workaround = `resolved_at − workaround_accepted_at`
-- Total = `resolved_at − created_at`
-
-No new column is needed on `operational_escalations`; the issue row is the system of record for the workaround lifecycle.
-
-## Technical Changes
-
-### 1. Migration `docs/sql/2026-06-23_site_issues_workaround_accepted_at.sql`
-```sql
-ALTER TABLE public.site_issues_register
-  ADD COLUMN IF NOT EXISTS workaround_accepted_at timestamptz;
-
--- Backfill: any existing rows already at 'workaround_accepted' get NOW().
-UPDATE public.site_issues_register
-   SET workaround_accepted_at = COALESCE(workaround_accepted_at, updated_at, created_at)
- WHERE status = 'workaround_accepted'
-   AND workaround_accepted_at IS NULL;
-```
-No new RLS / GRANTs — column on existing table.
-
-### 2. Write sites
-
-- `src/lib/data-store.ts` `acceptManagerWorkaroundProposal` (~line 4711): include `workaround_accepted_at: new Date().toISOString()` in the update alongside `status: 'workaround_accepted'` and `workaround_plan`.
-- `src/lib/api/site-issues.ts` insert (~line 131): when payload includes a non-empty `workaroundPlan` (YELLOW path), set `workaround_accepted_at: new Date().toISOString()`.
-
-### 3. Read sites (type + mapper)
-
-- `src/lib/api/site-issues.ts`: add `workaroundAcceptedAt: string | null` to `SiteIssue` and `workaround_accepted_at` to the row interface; map in `rowToIssue`.
-
-### 4. New UI primitive `src/components/ui/elapsed-timer.tsx`
-- Props: `since: string | null`, `until?: string | null` (freezes the value), `label?: string`, `className?: string`.
-- `setInterval(1000)`; cleared when unmounted or `until` becomes set.
-- Always renders `HH:MM:SS`; SSR-safe (`--:--:--` until mounted) mirroring `<ClientTime>`.
-- Also exports `formatElapsed(ms: number): string` for static displays.
-- Returns `null` if `since` is null.
-
-### 5. Creator screen — `src/components/site-day/escalation-lock-banner.tsx`
-- Waiting for manager: `<ElapsedTimer since={escalation.createdAt} label="Waiting for Manager" />`
-- After workaround accepted (`issue.workaroundAcceptedAt`): show two stacked counters
-  - `Workaround active — HH:MM:SS` (since `workaroundAcceptedAt`)
-  - `Total open — HH:MM:SS` (since `createdAt`)
-
-### 6. Acceptor screen — `src/components/dashboard/escalation-consultation-modal.tsx`
-- Header chip row: `Open — HH:MM:SS` (since `escalation.createdAt`); when `claimedAt` is set, second chip `Claimed — HH:MM:SS` (since `claimedAt`). Purely additive, no logic changes.
-
-### 7. Closed summary — `src/components/site-day/escalation-resolution-panel.tsx` (and any issues-register card showing a resolved issue)
-- When `issue.resolvedAt` is set, render static `Total time: {formatElapsed(resolvedAt − createdAt)}`. If `workaroundAcceptedAt` exists, also show `On workaround: {formatElapsed(resolvedAt − workaroundAcceptedAt)}`.
+### 2. `src/components/site-day/start-of-day-panel.tsx`
+- Replace the 2-button grid with a stacked layout:
+  - **Big full-width primary button** "Declare Site Safe & Open Day Centre"
+    - Same height/feel as today's `size="lg"` button but `w-full` and taller (e.g. `h-16 text-base`).
+    - Disabled (muted/grey) until `allChecked && !hasBlocking`.
+    - Turns solid green (`bg-green-600 hover:bg-green-700`) once enabled — reinforcing the "page goes all green" cue.
+    - Same confirm dialog + `openMut` flow as today (no logic change).
+  - **Secondary outline button below**, full-width, normal height: "Log Anomalies / Action Needed" (workarounds continue to be raised here — wording in the helper text reaffirms this).
+- Remove the "One or more mandated checks remain unticked…" warning banner *only if* it duplicates the new affirmation copy; otherwise soften its wording to: "Tick each confirmation above. If any item is **not** OK, use Log Anomalies to raise a Yellow workaround or Red escalation."
+- No changes to mutation, query, blocking-issue, or carried-issue logic.
 
 ## Out of scope
-- No changes to RPCs, RLS, realtime wiring, or ledger entries.
-- No timestamp added to `operational_escalations` — `claimed_at` keeps its current "manager opened the alert" meaning.
-
-## Files touched
-- `docs/sql/2026-06-23_site_issues_workaround_accepted_at.sql` (new migration)
-- `src/lib/data-store.ts` (one update site)
-- `src/lib/api/site-issues.ts` (type + insert + mapper)
-- `src/components/ui/elapsed-timer.tsx` (new)
-- `src/components/site-day/escalation-lock-banner.tsx`
-- `src/components/dashboard/escalation-consultation-modal.tsx`
-- `src/components/site-day/escalation-resolution-panel.tsx`
+- No DB / `system_parameters` changes — item text in `mandated_compliance_checks` stays as-is; the "Confirm: …" prefix and confirmation subline are added in the UI layer.
+- No changes to Log Anomalies, escalation, or ledger flows.

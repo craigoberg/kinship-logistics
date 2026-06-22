@@ -1,4 +1,4 @@
-import { CheckCircle2, ClipboardList, Info } from "lucide-react";
+import { CheckCircle2, ClipboardCheck, Info } from "lucide-react";
 import { useState } from "react";
 import { Checkbox } from "@/components/ui/checkbox";
 import { useMandatedChecks } from "@/hooks/use-system-parameters";
@@ -11,8 +11,9 @@ interface Props {
 /**
  * Visual checklist of mandated compliance items pulled from
  * `system_parameters.site_management.mandated_compliance_checks`.
- * Supports controlled mode via {ticked, onTickedChange} so a parent can
- * gate a submit button on completion.
+ * Each item is presented as a positive confirmation: the user is
+ * affirming they walked it, AND that it is OK (or a Manager-approved
+ * workaround is in place — logged separately via Log Anomalies).
  */
 export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
   const items = useMandatedChecks();
@@ -47,31 +48,40 @@ export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
   return (
     <div className="space-y-2">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        <ClipboardList className="h-3.5 w-3.5" />
-        Mandated Compliance Checks
+        <ClipboardCheck className="h-3.5 w-3.5" />
+        Confirm site is ready to open
       </div>
-      <ul className="space-y-1.5">
+      <ul className="space-y-2">
         {items.map((label, i) => {
           const on = value.has(i);
           return (
             <li
               key={`${i}-${label}`}
-              className="flex items-start gap-2.5 rounded-md border border-border/60 bg-card/40 px-3 py-2 text-sm"
+              className={`flex items-start gap-3 rounded-md border px-3 py-3 text-sm transition-colors ${
+                on
+                  ? "border-green-500/50 bg-green-500/10"
+                  : "border-border/60 bg-card/40"
+              }`}
             >
               <Checkbox
                 id={`mc-${i}`}
                 checked={on}
                 onCheckedChange={() => toggle(i)}
-                className="mt-0.5"
+                className="mt-0.5 h-5 w-5"
               />
               <label
                 htmlFor={`mc-${i}`}
-                className="flex-1 cursor-pointer leading-snug"
+                className="flex-1 cursor-pointer space-y-0.5 leading-snug"
               >
-                {label}
+                <div className="font-medium text-foreground">
+                  Confirm: {label}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Checked and OK, or a Manager-approved workaround is in place.
+                </div>
               </label>
               {on && (
-                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+                <CheckCircle2 className="mt-0.5 h-5 w-5 shrink-0 text-green-600" />
               )}
             </li>
           );
