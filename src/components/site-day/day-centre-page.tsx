@@ -1,14 +1,17 @@
 import { useEffect, useRef } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Loader2, RefreshCw } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import { AlertTriangle, ArrowRight, Loader2, RefreshCw, ShieldAlert } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { ClientTime } from "@/components/ui/client-time";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { getEscalationBySourceIssue } from "@/lib/data-store";
+import { supabase } from "@/integrations/supabase/client";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
