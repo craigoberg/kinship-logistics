@@ -269,10 +269,11 @@ export function LogAnomalyModal({
                     type="button"
                     data-state={active ? "on" : "off"}
                     onClick={() => {
-                      if (chip.value === "green") {
-                        setValues({ severity: "green", workaround: "" });
+                      if (chip.value === "yellow") {
+                        setValues({ severity: "yellow" });
                       } else {
-                        setValues({ severity: chip.value });
+                        // Green and Red both clear any stale workaround draft.
+                        setValues({ severity: chip.value, workaround: "" });
                       }
                     }}
                     className={cn(
