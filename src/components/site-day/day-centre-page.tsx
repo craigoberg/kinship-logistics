@@ -18,19 +18,14 @@ import { EscalationLockBanner } from "./escalation-lock-banner";
 import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 import { DayBlockingDiagnostic } from "@/components/dev/day-blocking-diagnostic";
+import {
+  fetchApprovedRedWorkarounds,
+  redHasAcceptedWorkaround,
+  effectiveWorkaroundText,
+} from "@/lib/site-day/red-workaround";
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
-}
-
-function redHasAcceptedWorkaround(issue: {
-  status: string | null;
-  workaround_plan: string | null;
-}): boolean {
-  return (
-    issue.status === "workaround_accepted" ||
-    !!issue.workaround_plan?.trim()
-  );
 }
 
 export function DayCentrePage() {
