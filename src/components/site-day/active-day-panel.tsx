@@ -16,7 +16,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { ClientTime } from "@/components/ui/client-time";
 import { useActiveSiteIssues } from "@/hooks/use-site-issues";
-import { closeSession, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { closeSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/site-day-sessions";
+import { TestOnly } from "@/components/dev/test-only";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
 import { IssuesRegisterCard } from "./issues-register-card";
