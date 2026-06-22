@@ -227,6 +227,58 @@ export function GlobalEscalationInterceptor() {
     }
   }, [myClaimed.data, consultTarget]);
 
+  // Baseline fetch: rejections by Opener of my proposals that I haven't
+  // acknowledged yet — catches any that arrived while I was offline.
+  const myRejectedQ = useQuery({
+    queryKey: ["my-rejected-awaiting-ack", currentStaffId ?? "unknown"],
+    queryFn: async (): Promise<OperationalEscalation[]> => {
+      if (!currentStaffId) return [];
+      const { data, error } = await supabase
+        .from("operational_escalations")
+        .select("*")
+        .eq("claimed_by", currentStaffId)
+        .eq("status", "resolved_denied")
+        .order("resolved_at", { ascending: true });
+      if (error) {
+        console.error("[myRejectedQ]", error);
+        return [];
+      }
+      return ((data ?? []) as Array<Record<string, unknown>>).map(
+        (raw) =>
+          ({
+            id: raw.id as string,
+            clearanceId: (raw.clearance_id as string | null) ?? null,
+            driverName: (raw.driver_name as string) ?? "",
+            vehicleInfo: (raw.vehicle_info as string) ?? "",
+            gateId: (raw.gate_id as string) ?? "",
+            status: raw.status as OperationalEscalation["status"],
+            claimedBy: (raw.claimed_by as string | null) ?? null,
+            claimedAt: (raw.claimed_at as string | null) ?? null,
+            createdAt: raw.created_at as string,
+            updatedAt: raw.updated_at as string,
+            resolutionNotes: (raw.resolution_notes as string | null) ?? null,
+            resolvedBy: (raw.resolved_by as string | null) ?? null,
+            resolvedAt: (raw.resolved_at as string | null) ?? null,
+            sourceKind:
+              (raw.source_kind as OperationalEscalation["sourceKind"]) ??
+              "bus_walkaround",
+            sourceIssueId: (raw.source_issue_id as string | null) ?? null,
+            raisedBy: (raw.raised_by as string | null) ?? null,
+          }) as OperationalEscalation,
+      );
+    },
+    enabled: !!currentStaffId,
+    refetchOnWindowFocus: true,
+    staleTime: 10_000,
+  });
+
+  useEffect(() => {
+    if (!myRejectedQ.data) return;
+    for (const row of myRejectedQ.data) {
+      if (isRejectionRow(row, currentStaffId)) enqueueRejection(row);
+    }
+  }, [myRejectedQ.data, currentStaffId, enqueueRejection]);
+
   useEffect(() => {
     if (baseline.data) {
       setQueue((prev) => {
