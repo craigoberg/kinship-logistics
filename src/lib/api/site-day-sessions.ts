@@ -392,7 +392,7 @@ export function subscribeToSiteSession(
   cb: (next: SiteDaySession) => void,
 ): () => void {
   const channel = supabase
-    .channel(`site-day-session-${sessionId}`)
+    .channel(`site-day-session-${sessionId}-${Math.random().toString(36).slice(2)}`)
     .on(
       "postgres_changes",
       {
