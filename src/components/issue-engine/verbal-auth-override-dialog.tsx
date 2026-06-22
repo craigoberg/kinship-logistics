@@ -159,12 +159,11 @@ export function VerbalAuthOverrideDialog({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />
-            Verbal Authorization Override
+            {titleOverride ?? "Verbal Authorization Override"}
           </DialogTitle>
           <DialogDescription>
-            Use this only if a Manager cannot complete the digital handshake.
-            Their verbal authorization is recorded as an immutable ledger
-            receipt and queued for retroactive sign-off in the Governance Hub.
+            {descriptionOverride ??
+              "Use this only if a Manager cannot complete the digital handshake. Their verbal authorization is recorded as an immutable ledger receipt and queued for retroactive sign-off in the Governance Hub."}
           </DialogDescription>
         </DialogHeader>
 
