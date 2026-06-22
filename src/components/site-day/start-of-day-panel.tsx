@@ -440,6 +440,21 @@ export function StartOfDayPanel({ sessionId }: Props) {
           mandatedItems.length > 0 && !allChecked ? "red" : "yellow"
         }
       />
+
+      {/* Verbal Authorization Override — high-trust escape hatch. */}
+      <VerbalAuthOverrideDialog
+        open={verbalOverrideOpen}
+        onOpenChange={setVerbalOverrideOpen}
+        ledgerCategory="CENTRE"
+        subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
+        sourceId={sessionId}
+        onAccepted={() => {
+          // Override is captured; let the operator try Open again.
+          // The blocking Red issue itself remains until Governance signs it
+          // off, but the audit trail records the verbal authorization.
+          setConfirmOpen(true);
+        }}
+      />
     </section>
   );
 }
