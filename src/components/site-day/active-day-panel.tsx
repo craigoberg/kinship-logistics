@@ -28,6 +28,10 @@ import { activeSiteIssuesKey, siteIssuesKey } from "@/hooks/use-site-issues";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { AttendanceRollPanel } from "./attendance-roll-panel";
+import { DayCentreClosureModal } from "./day-centre-closure-modal";
+
+
 
 interface Props {
   session: SiteDaySession;
@@ -131,8 +135,9 @@ export function ActiveDayPanel({ session }: Props) {
             size="sm"
             className="gap-1.5 bg-primary"
           >
-            <ClipboardCheck className="h-4 w-4" /> Close Day
+            <ClipboardCheck className="h-4 w-4" /> Initiate Day Centre Closure
           </Button>
+
           <TestOnly>
             <Button
               size="sm"
@@ -193,7 +198,10 @@ export function ActiveDayPanel({ session }: Props) {
         </Card>
       )}
 
+      <AttendanceRollPanel sessionId={session.id} />
+
       <div className="space-y-3">
+
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Issues Register {openIssues.length > 0 && `(${openIssues.length} open)`}
@@ -234,33 +242,12 @@ export function ActiveDayPanel({ session }: Props) {
         </div>
       </div>
 
-      <AlertDialog open={closeOpen} onOpenChange={setCloseOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Close the Day Centre?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Today's finalised attendance rows will flip to{" "}
-              <code>audited_ready_for_billing</code> and become available to the
-              MYOB Export workspace. This action is logged in the operational
-              ledger.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={closeMut.isPending}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                closeMut.mutate();
-              }}
-              disabled={closeMut.isPending}
-            >
-              {closeMut.isPending ? "Closing…" : "Confirm Close"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DayCentreClosureModal
+        open={closeOpen}
+        onOpenChange={setCloseOpen}
+        sessionId={session.id}
+      />
+
 
       {user && (
         <LogAnomalyModal
