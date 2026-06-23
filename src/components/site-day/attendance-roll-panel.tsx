@@ -44,6 +44,8 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   }, [participantsQ.data]);
 
   // One-shot auto-seed when the panel first mounts for the session.
+  // Surface failures as a toast so the next breakage is immediately visible
+  // rather than silently swallowed in the console.
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
@@ -54,7 +56,13 @@ export function AttendanceRollPanel({ sessionId }: Props) {
           qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
         }
       } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e);
         console.error("[AttendanceRollPanel] seed failed", e);
+        if (!cancelled) {
+          toast.error("Attendance roll could not initialise", {
+            description: msg,
+          });
+        }
       }
     })();
     return () => {
@@ -63,13 +71,19 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   }, [sessionId, qc]);
 
   // 60-second sweep — promotes overdue rows YELLOW → RED on the SAME issue row.
+  // Gate `enabled` on participantsQ.isSuccess so the very first fetch already
+  // has the participant name map captured by the sweep closure.
   const rollQ = useQuery({
     queryKey: ROLL_KEY(sessionId),
     queryFn: async () => {
       const rows = await listAttendanceRoll(sessionId);
       if (Object.keys(nameMap).length > 0) {
         await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
-          (e) => console.error("[AttendanceRollPanel] sweep failed", e),
+          (e) => {
+            const msg = e instanceof Error ? e.message : String(e);
+            console.error("[AttendanceRollPanel] sweep failed", e);
+            toast.error("Attendance overdue sweep failed", { description: msg });
+          },
         );
       }
       return rows;
@@ -77,7 +91,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
     refetchInterval: 60_000,
     refetchOnWindowFocus: false,
     staleTime: 30_000,
-    enabled: !!sessionId,
+    enabled: !!sessionId && participantsQ.isSuccess,
   });
 
   const toggleMut = useMutation({
