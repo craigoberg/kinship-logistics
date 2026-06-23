@@ -198,7 +198,10 @@ export function ActiveDayPanel({ session }: Props) {
         </Card>
       )}
 
+      <AttendanceRollPanel sessionId={session.id} />
+
       <div className="space-y-3">
+
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
             Issues Register {openIssues.length > 0 && `(${openIssues.length} open)`}
