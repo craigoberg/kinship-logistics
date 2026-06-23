@@ -135,8 +135,9 @@ export function ActiveDayPanel({ session }: Props) {
             size="sm"
             className="gap-1.5 bg-primary"
           >
-            <ClipboardCheck className="h-4 w-4" /> Close Day
+            <ClipboardCheck className="h-4 w-4" /> Initiate Day Centre Closure
           </Button>
+
           <TestOnly>
             <Button
               size="sm"
