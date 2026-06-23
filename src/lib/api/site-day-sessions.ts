@@ -4,6 +4,7 @@ import {
   verifyStaffPin,
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { getSydneyIsoDate } from "@/lib/operational-time";
 
 // ============================================================================
 // site_day_sessions — Day Centre open/close + dual-PIN site escalation.
@@ -86,11 +87,7 @@ function rowToSession(r: SiteDaySessionRow): SiteDaySession {
 }
 
 function todayIso(): string {
-  const d = new Date();
-  const year = d.getUTCFullYear();
-  const month = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const day = String(d.getUTCDate()).padStart(2, "0");
-  return `${year}-${month}-${day}`;
+  return getSydneyIsoDate();
 }
 
 /**

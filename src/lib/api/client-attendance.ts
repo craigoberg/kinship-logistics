@@ -10,6 +10,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { getSydneyDayIndex, getSydneyTimeTodayIso } from "@/lib/operational-time";
 
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
 export type AttendanceStatus =
@@ -94,11 +95,9 @@ const WEEKDAY_INDEX: Record<string, number> = {
 };
 
 function defaultExpectedToday(): string {
-  // 09:00 local — sensible Day Centre default. Threshold tunables remain
+  // 09:00 Sydney local — sensible Day Centre default. Threshold tunables remain
   // configurable via system_parameters.
-  const d = new Date();
-  d.setHours(9, 0, 0, 0);
-  return d.toISOString();
+  return getSydneyTimeTodayIso(9, 0);
 }
 
 function mapTransportToMethod(transportRule: string | null): ArrivalMethod {
@@ -132,8 +131,7 @@ export async function listAttendanceRoll(
 // ---------------------------------------------------------------------------
 
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
-  const today = new Date();
-  const dow = today.getDay();
+  const dow = getSydneyDayIndex();
   const expectedIso = defaultExpectedToday();
 
   const { data: scheds, error } = await supabase
