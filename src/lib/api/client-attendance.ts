@@ -82,9 +82,15 @@ function toRow(r: DbRow): ClientAttendanceRow {
   };
 }
 
+// Accept both full English weekday names ("Wednesday") AND the lookup-coded
+// values stored on participant_attendance_schedules ("DAY-WED"). Without the
+// DAY-XXX keys the filter below matches nothing and seeding silently inserts
+// zero rows.
 const WEEKDAY_INDEX: Record<string, number> = {
   Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3,
   Thursday: 4, Friday: 5, Saturday: 6,
+  "DAY-SUN": 0, "DAY-MON": 1, "DAY-TUE": 2, "DAY-WED": 3,
+  "DAY-THU": 4, "DAY-FRI": 5, "DAY-SAT": 6,
 };
 
 function defaultExpectedToday(): string {
