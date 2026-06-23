@@ -28,6 +28,10 @@ import { activeSiteIssuesKey, siteIssuesKey } from "@/hooks/use-site-issues";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { AttendanceRollPanel } from "./attendance-roll-panel";
+import { DayCentreClosureModal } from "./day-centre-closure-modal";
+
+
 
 interface Props {
   session: SiteDaySession;
