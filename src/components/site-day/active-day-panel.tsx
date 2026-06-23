@@ -242,33 +242,12 @@ export function ActiveDayPanel({ session }: Props) {
         </div>
       </div>
 
-      <AlertDialog open={closeOpen} onOpenChange={setCloseOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Close the Day Centre?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Today's finalised attendance rows will flip to{" "}
-              <code>audited_ready_for_billing</code> and become available to the
-              MYOB Export workspace. This action is logged in the operational
-              ledger.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={closeMut.isPending}>
-              Cancel
-            </AlertDialogCancel>
-            <AlertDialogAction
-              onClick={(e) => {
-                e.preventDefault();
-                closeMut.mutate();
-              }}
-              disabled={closeMut.isPending}
-            >
-              {closeMut.isPending ? "Closing…" : "Confirm Close"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DayCentreClosureModal
+        open={closeOpen}
+        onOpenChange={setCloseOpen}
+        sessionId={session.id}
+      />
+
 
       {user && (
         <LogAnomalyModal
