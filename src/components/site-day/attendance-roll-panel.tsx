@@ -326,6 +326,16 @@ export function AttendanceRollPanel({ sessionId }: Props) {
         }}
       />
 
+      <AddAttendeeModal
+        open={addOpen}
+        sessionId={sessionId}
+        onClose={(changed: boolean) => {
+          setAddOpen(false);
+          if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+        }}
+      />
+
+
     </div>
   );
 }
