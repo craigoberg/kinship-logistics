@@ -103,7 +103,9 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: unifiedIssuesKey });
-    qc.invalidateQueries({ queryKey: ["site-issue-timeline", issue.sourceRowId] });
+    qc.invalidateQueries({
+      queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
+    });
     qc.invalidateQueries({ queryKey: ["site-issues"] });
     qc.invalidateQueries({ queryKey: ["site-issues-active"] });
     qc.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
@@ -119,6 +121,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       },
     });
   };
+
 
   // Log Note & Update — append + (optionally) defer / escalate. No PIN.
   const logMut = useMutation({
