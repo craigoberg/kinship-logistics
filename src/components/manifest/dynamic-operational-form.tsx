@@ -48,6 +48,7 @@ import {
 } from "@/lib/data-store";
 import type { OperationalSchema } from "@/lib/operational-forms";
 import { triggerInspectionAlert } from "@/hooks/use-notification-router";
+import { emitMockSms } from "@/lib/notifications/mock-sms";
 
 const COMFORT_DECLARATION_TEXT =
   "I confirm that all issues have been cleanly recorded, appropriate workarounds are deployed, and I am personally comfortable, oriented, and acting in accordance with my signed Organization Onboarding Guidelines to operate safely today.";
@@ -235,6 +236,16 @@ export function DynamicOperationalForm({
         "🚨 Sev 1 Escalation Active. Broadcast signals and backup SMS alerts have been dispatched to the Office Pool.",
         { duration: 8000 },
       );
+      emitMockSms({
+        recipient: "Office Pool (managers on call)",
+        body:
+          `[🚨 SEV 1] ${asset.name} · ${asset.regoPlate} — driver ${driverName} ` +
+          `raised a Sev 1 escalation at gate "${firstUnverifiedGate.label}". ` +
+          `Please respond via Yada Connect immediately.`,
+        source: "manifest_sev1",
+        reason: "placeholder",
+        reference: `sev1-${esc?.id ?? "unknown"}`,
+      });
       onEscalated(esc);
     } catch {
       toast.error("Network error. Please contact the office via phone directly.");
