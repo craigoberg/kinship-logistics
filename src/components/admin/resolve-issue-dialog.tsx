@@ -23,12 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
 import {
   appendUpdateNote,
   COUNCIL_SEVERITY_OPTIONS,
   deferUnifiedIssue,
   escalateUnifiedIssueToCouncil,
+  listIssueNotes,
+  renderNoteLine,
   resolveUnifiedIssue,
   type CouncilSeverity,
   type UnifiedIssue,
@@ -37,6 +38,7 @@ import { unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { getActiveUserProfile } from "@/lib/data-store";
+
 
 interface Props {
   issue: UnifiedIssue;
