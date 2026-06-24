@@ -12,9 +12,9 @@ import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import {
   getSydneyDayIndex,
-  getSydneyTimeTodayIso,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
+
 
 
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
