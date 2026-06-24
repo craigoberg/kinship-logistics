@@ -71,7 +71,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const [councilSev, setCouncilSev] = useState<CouncilSeverity>("Sev 2");
   const [pinOpen, setPinOpen] = useState(false);
 
-  const isDayCentre = issue.source === "day_centre";
+  
 
   // Reset toggles whenever a fresh issue opens.
   useEffect(() => {
