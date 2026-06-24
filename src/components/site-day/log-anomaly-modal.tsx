@@ -13,7 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+// OWNER selection removed — ground-level anomalies always default to
+// `internal`. Council routing now happens in the Governance Hub.
 import { cn } from "@/lib/utils";
 import { usePersistedForm } from "@/hooks/use-persisted-form";
 import {
@@ -82,14 +83,16 @@ interface AnomalyDraft {
   severity: RygeSeverity;
   description: string;
   workaround: string;
-  owner: ResponsibilityOwner;
 }
+
+// All floor-logged anomalies are owned by the internal team. Council
+// routing is performed downstream from the Governance Hub.
+const DEFAULT_OWNER: ResponsibilityOwner = "internal";
 
 const makeInitial = (severity: RygeSeverity): AnomalyDraft => ({
   severity,
   description: "",
   workaround: "",
-  owner: "internal",
 });
 
 const SEVERITY_CHIPS: Array<{
@@ -179,7 +182,7 @@ export function LogAnomalyModal({
         if (values.severity === "red") {
           // Single-user verbal flow: hand off to the parent to open the
           // VerbalAuthOverrideDialog. No DB writes here.
-          context.onRedRequested?.(values.description.trim(), values.owner);
+          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
           return { kind: "pre-trip", severity: "red" as RygeSeverity } as const;
         }
 
@@ -187,7 +190,7 @@ export function LogAnomalyModal({
           severity: values.severity,
           description: values.description.trim(),
           workaround: workaroundPlan,
-          owner: values.owner,
+          owner: DEFAULT_OWNER,
         });
         return { kind: "pre-trip", severity: values.severity } as const;
       }
@@ -199,7 +202,7 @@ export function LogAnomalyModal({
         // Single-user verbal flow: parent opens VerbalAuthOverrideDialog and,
         // on acceptance, writes the `[VERBAL WORKAROUND]` site_issues_register
         // ticket. The session phase is NOT flipped to `escalated_lock`.
-        context.onRedRequested?.(values.description.trim(), values.owner);
+        context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
         return { kind: "site-day-red" as const };
       }
 
@@ -208,7 +211,7 @@ export function LogAnomalyModal({
         severity: values.severity,
         issueDescription: values.description.trim(),
         workaroundPlan,
-        owner: values.owner,
+        owner: DEFAULT_OWNER,
       };
       const issue = await createIssue(payload);
       return { kind: "site-day" as const, issue };
@@ -376,27 +379,9 @@ export function LogAnomalyModal({
             </div>
           )}
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Owner
-            </Label>
-            <RadioGroup
-              value={values.owner}
-              onValueChange={(v) =>
-                setValues({ owner: v as ResponsibilityOwner })
-              }
-              className="flex gap-4"
-            >
-              <label className="flex items-center gap-2 text-sm">
-                <RadioGroupItem value="internal" id="owner-int" />
-                Internal team
-              </label>
-              <label className="flex items-center gap-2 text-sm">
-                <RadioGroupItem value="council" id="owner-cnc" />
-                Council maintenance
-              </label>
-            </RadioGroup>
-          </div>
+          {/* OWNER selection removed. All ground-level anomalies are owned
+              by the internal team; Council routing happens from the
+              Governance Hub via "Escalate to Council". */}
 
           {blockingErrors.length > 0 && (
             <ul className="rounded-md border border-destructive/40 bg-destructive/5 p-2 text-xs text-destructive">
