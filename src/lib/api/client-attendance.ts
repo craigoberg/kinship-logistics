@@ -526,21 +526,44 @@ export interface MarkAbsentResult {
   prevSeverity: EscalationSeverity | null;
 }
 
+export interface MarkAbsentInput {
+  /** Short uppercase code, e.g. "SICK". Persisted in notes + ledger. */
+  reasonCode: string;
+  /** Human label, e.g. "Sick / unwell". */
+  reasonLabel: string;
+  /** Optional free-text detail typed by the operator. */
+  detail?: string | null;
+  /** Verified operator staff id (from PIN re-entry). Falls back if absent. */
+  operatorStaffId?: string | null;
+}
+
 export async function markAttendanceAbsent(
   row: ClientAttendanceRow,
+  input: MarkAbsentInput,
 ): Promise<MarkAbsentResult> {
-  const staffId = await resolveStaffIdWithFallback();
+  const verifiedStaffId =
+    input.operatorStaffId ?? (await resolveStaffIdWithFallback());
   const nowIso = new Date().toISOString();
 
+  const detail = (input.detail ?? "").trim();
+  const noteLine =
+    `[ABSENT:${input.reasonCode}] ${input.reasonLabel}` +
+    (detail ? ` — ${detail}` : "") +
+    ` (verified PIN @ ${nowIso})`;
+
+  // Keep the row visible on the roll (the sweeper already skips status='absent').
+  // We retain escalation_issue_id pointer on the row in case the issue stays
+  // open elsewhere, but clear the active severity so the card paints "absent",
+  // not yellow/red.
   const { data, error } = await supabase
     .from("client_attendance_log")
     .update({
       status: "absent",
       checked_in_at: null,
       checked_in_by: null,
-      escalation_issue_id: null,
       escalation_severity: null,
       escalation_raised_at: null,
+      notes: noteLine,
     })
     .eq("id", row.id)
     .select("*")
@@ -569,7 +592,7 @@ export async function markAttendanceAbsent(
   }
 
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: verifiedStaffId,
     category: "CLIENT",
     severity: "GREEN",
     action_type: "ATTENDANCE_MARKED_ABSENT",
@@ -581,7 +604,11 @@ export async function markAttendanceAbsent(
       participant_id: row.participantId,
       prev_severity: prevSeverity,
       closed_issue_id: closedIssueId,
-      reason: "Client confirmed absent for today.",
+      absence_reason_code: input.reasonCode,
+      absence_reason_label: input.reasonLabel,
+      absence_detail: detail || null,
+      operator_pin_verified: true,
+      reason: `Client absent (${input.reasonCode}): ${input.reasonLabel}.`,
     },
   });
 
