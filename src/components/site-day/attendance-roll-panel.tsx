@@ -214,9 +214,10 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     <span className="truncate text-base font-semibold">
                       {nameMap[r.participantId] ?? "Loading…"}
                     </span>
-                    <Badge variant="outline" className="text-[10px] uppercase">
+                    <Badge className="border border-slate-400 bg-white text-slate-900 text-[10px] uppercase">
                       {r.arrivalMethod.replace("_", " ")}
                     </Badge>
+
                     {isRed && (
                       <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
                         Escalated — Manager notified
