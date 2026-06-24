@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Select,
   SelectContent,
@@ -22,7 +23,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { supabase } from "@/integrations/supabase/client";
 import {
   appendUpdateNote,
@@ -35,14 +35,14 @@ import {
 } from "@/lib/api/unified-issues";
 import { unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
+import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   issue: UnifiedIssue;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }
-
-type Action = "append" | "resolve" | "defer" | "escalate";
 
 function defaultDeferIso(): string {
   // tomorrow 09:00 local, formatted for <input type="datetime-local">
@@ -53,18 +53,37 @@ function defaultDeferIso(): string {
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+function isManagerProfile(): boolean {
+  const profile = getActiveUserProfile();
+  if (!profile) return false;
+  const raw = (profile.staffRole ?? "").toLowerCase();
+  return raw.includes("manager");
+}
+
 export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const qc = useQueryClient();
   const [note, setNote] = useState("");
-  const [action, setAction] = useState<Action>("append");
+  const [deferOn, setDeferOn] = useState(false);
+  const [escalateOn, setEscalateOn] = useState(false);
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
   const [councilSev, setCouncilSev] = useState<CouncilSeverity>("Sev 2");
+  const [pinOpen, setPinOpen] = useState(false);
 
   const isDayCentre = issue.source === "day_centre";
 
-  // Live-poll the timeline for this row so concurrent operators see appends
-  // without manual reload. Cheap targeted read; only enabled while the
-  // dialog is open and the row is a day_centre issue.
+  // Reset toggles whenever a fresh issue opens.
+  useEffect(() => {
+    if (open) {
+      setNote("");
+      setDeferOn(false);
+      setEscalateOn(false);
+      setDeferAt(defaultDeferIso());
+      setCouncilSev("Sev 2");
+      setPinOpen(false);
+    }
+  }, [open, issue.sourceRowId]);
+
+  // Live-poll the timeline so concurrent operators see appends.
   const timelineQuery = useQuery({
     queryKey: ["site-issue-timeline", issue.sourceRowId],
     enabled: open && isDayCentre,
@@ -83,87 +102,93 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     },
   });
 
-  // Reset action when the source changes (escalation/incident → only resolve).
-  useEffect(() => {
-    if (!isDayCentre) setAction("resolve");
-  }, [isDayCentre]);
-
   const trimmed = note.trim().length;
   const noteOk = trimmed >= 10;
-  const deferOk =
-    action !== "defer" ||
+  const deferValid =
+    !deferOn ||
     (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
 
-  const mut = useMutation({
+  const invalidateAll = () => {
+    qc.invalidateQueries({ queryKey: unifiedIssuesKey });
+    qc.invalidateQueries({ queryKey: ["site-issue-timeline", issue.sourceRowId] });
+    qc.invalidateQueries({ queryKey: ["site-issues"] });
+    qc.invalidateQueries({ queryKey: ["site-issues-active"] });
+    qc.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+    qc.invalidateQueries({
+      predicate: (q) => {
+        const k = q.queryKey?.[0];
+        return (
+          typeof k === "string" &&
+          (k.startsWith("site-issues") ||
+            k.startsWith("site-day") ||
+            k.startsWith("governance"))
+        );
+      },
+    });
+  };
+
+  // Log Note & Update — append + (optionally) defer / escalate. No PIN.
+  const logMut = useMutation({
     mutationFn: async () => {
-      if (action === "append") {
-        await appendUpdateNote(issue, note);
-        return { kind: "append" as const };
-      }
-      if (action === "defer") {
+      if (deferOn) {
         const iso = new Date(deferAt).toISOString();
         await deferUnifiedIssue(issue, { untilIso: iso, note });
-        return { kind: "defer" as const };
+        return "defer" as const;
       }
-      if (action === "escalate") {
+      if (escalateOn) {
         await escalateUnifiedIssueToCouncil(issue, {
           councilSeverity: councilSev,
           note,
         });
-        return { kind: "escalate" as const };
+        return "escalate" as const;
       }
-      // Resolve. For day_centre issues, append the note to the timeline
-      // first so the history remains the source of truth — then close.
-      if (isDayCentre) {
-        try {
-          await appendUpdateNote(issue, note);
-        } catch {
-          // If append fails (e.g. concurrency), fall through to resolve;
-          // the resolution receipt itself captures the note in the ledger.
-        }
-      }
-      await resolveUnifiedIssue(issue, note);
-      return { kind: "resolve" as const };
+      await appendUpdateNote(issue, note);
+      return "append" as const;
     },
-    onSuccess: (r) => {
-      qc.invalidateQueries({ queryKey: unifiedIssuesKey });
-      qc.invalidateQueries({ queryKey: ["site-issue-timeline", issue.sourceRowId] });
-      qc.invalidateQueries({ queryKey: ["site-issues"] });
-      qc.invalidateQueries({ queryKey: ["site-issues-active"] });
-      qc.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
-      qc.invalidateQueries({
-        predicate: (q) => {
-          const k = q.queryKey?.[0];
-          return (
-            typeof k === "string" &&
-            (k.startsWith("site-issues") ||
-              k.startsWith("site-day") ||
-              k.startsWith("governance"))
-          );
-        },
-      });
+    onSuccess: (kind) => {
+      invalidateAll();
       setNote("");
-      if (r.kind === "append") {
+      if (kind === "append") {
         toast.success("Update appended to the timeline.");
         // Stay open so operators can keep adding updates.
         return;
       }
-      if (r.kind === "defer") {
+      if (kind === "defer") {
         toast.success("Issue deferred. Moved to the Awaiting tab.");
-      } else if (r.kind === "escalate") {
-        toast.success("Escalated to Council. Moved to the Awaiting tab.");
       } else {
-        toast.success("Issue resolved", {
-          description: "Receipt appended to the operational ledger (NDIS).",
-        });
+        toast.success("Escalated to Council. Moved to the Awaiting tab.");
       }
       onOpenChange(false);
     },
     onError: (e: Error) => toast.error("Action failed", { description: e.message }),
   });
 
-  const canSubmit =
-    noteOk && deferOk && !mut.isPending && (isDayCentre || action === "resolve");
+  // Resolve & Close — manager-gated. Append note atomically then resolve.
+  const resolveMut = useMutation({
+    mutationFn: async () => {
+      if (isDayCentre) {
+        try {
+          await appendUpdateNote(issue, note);
+        } catch {
+          // Resolution receipt itself captures the note in the ledger.
+        }
+      }
+      await resolveUnifiedIssue(issue, note);
+    },
+    onSuccess: () => {
+      invalidateAll();
+      setNote("");
+      toast.success("Issue resolved", {
+        description: "Receipt appended to the operational ledger (NDIS).",
+      });
+      onOpenChange(false);
+    },
+    onError: (e: Error) => toast.error("Resolution failed", { description: e.message }),
+  });
+
+  const busy = logMut.isPending || resolveMut.isPending;
+  const canLog = noteOk && deferValid && !busy;
+  const canResolve = noteOk && !busy;
 
   const timeline = useMemo(() => {
     const raw = String(
@@ -174,171 +199,207 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     return raw.trim();
   }, [timelineQuery.data, issue.raw]);
 
-  return (
-    <Dialog
-      open={open}
-      onOpenChange={(o) => {
-        if (mut.isPending) return;
-        if (!o) setNote("");
-        onOpenChange(o);
-      }}
-    >
-      <DialogContent className="sm:max-w-2xl">
-        <DialogHeader>
-          <DialogTitle>Manage issue</DialogTitle>
-          <DialogDescription>
-            Append timeline updates, resolve, defer, or escalate to Council.
-            Every action writes an NDIS-reportable receipt to the operational
-            ledger.
-          </DialogDescription>
-        </DialogHeader>
+  const handleResolveClick = () => {
+    if (!canResolve) return;
+    setPinOpen(true);
+  };
 
-        <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge variant="secondary">{issue.sourceLabel}</Badge>
-            <span className="font-mono text-xs">{issue.category}</span>
-            {issue.subCategory && (
-              <span className="text-xs text-muted-foreground">· {issue.subCategory}</span>
+  const handlePinAuthenticated = () => {
+    if (!isManagerProfile()) {
+      toast.error("Manager PIN required", {
+        description:
+          "Only manager-level operators can close issues. Resolution blocked.",
+      });
+      setPinOpen(false);
+      return;
+    }
+    setPinOpen(false);
+    resolveMut.mutate();
+  };
+
+  const noteLabel = deferOn
+    ? "Defer reason / next action"
+    : escalateOn
+      ? "Council escalation note"
+      : "Update note";
+
+  return (
+    <>
+      <Dialog
+        open={open}
+        onOpenChange={(o) => {
+          if (busy) return;
+          if (!o) setNote("");
+          onOpenChange(o);
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>Manage issue</DialogTitle>
+            <DialogDescription>
+              Append timeline updates, resolve, defer, or escalate to Council.
+              Every action writes an NDIS-reportable receipt to the operational
+              ledger.
+            </DialogDescription>
+          </DialogHeader>
+
+          <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">{issue.sourceLabel}</Badge>
+              <span className="font-mono text-xs">{issue.category}</span>
+              {issue.subCategory && (
+                <span className="text-xs text-muted-foreground">
+                  · {issue.subCategory}
+                </span>
+              )}
+            </div>
+            <div className="font-medium">{issue.title}</div>
+            {issue.description && (
+              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+                {issue.description}
+              </p>
             )}
           </div>
-          <div className="font-medium">{issue.title}</div>
-          {issue.description && (
-            <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-              {issue.description}
-            </p>
-          )}
-        </div>
 
-        {isDayCentre && (
-          <div className="space-y-1">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Timeline
+          {isDayCentre && (
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Timeline
+              </Label>
+              <div
+                className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
+                aria-readonly
+              >
+                {timeline.length === 0 ? (
+                  <span className="italic">No prior updates.</span>
+                ) : (
+                  timeline
+                )}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-2">
+            <Label htmlFor="resolution-note">
+              {noteLabel} <span className="text-destructive">*</span>
             </Label>
+            <Textarea
+              id="resolution-note"
+              rows={4}
+              placeholder="Min 10 chars — appended to the immutable timeline."
+              value={note}
+              onChange={(e) => setNote(e.target.value)}
+            />
             <div
-              className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
-              aria-readonly
+              className={`text-xs ${
+                trimmed < 10 ? "text-destructive" : "text-muted-foreground"
+              }`}
             >
-              {timeline.length === 0 ? (
-                <span className="italic">No prior updates.</span>
-              ) : (
-                timeline
+              {trimmed}/10 minimum
+            </div>
+          </div>
+
+          {/* Timeline Adjustments — optional progressive toggles */}
+          <div className="space-y-3 rounded-md border border-dashed bg-muted/10 p-3">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Timeline Adjustments (optional)
+            </Label>
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={deferOn}
+                  onCheckedChange={(v) => {
+                    const next = v === true;
+                    setDeferOn(next);
+                    if (next) setEscalateOn(false);
+                  }}
+                />
+                Defer / Set next action date
+              </label>
+              {deferOn && (
+                <div className="pl-6 space-y-1">
+                  <Label htmlFor="defer-at" className="text-xs">
+                    Next action date
+                  </Label>
+                  <Input
+                    id="defer-at"
+                    type="datetime-local"
+                    value={deferAt}
+                    onChange={(e) => setDeferAt(e.target.value)}
+                    className="[color-scheme:dark]"
+                  />
+                </div>
+              )}
+            </div>
+
+            <div className="space-y-2">
+              <label className="flex items-center gap-2 text-sm">
+                <Checkbox
+                  checked={escalateOn}
+                  onCheckedChange={(v) => {
+                    const next = v === true;
+                    setEscalateOn(next);
+                    if (next) setDeferOn(false);
+                  }}
+                />
+                Escalate to Council
+              </label>
+              {escalateOn && (
+                <div className="pl-6 space-y-1">
+                  <Label className="text-xs">Council severity</Label>
+                  <Select
+                    value={councilSev}
+                    onValueChange={(v) => setCouncilSev(v as CouncilSeverity)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {COUNCIL_SEVERITY_OPTIONS.map((o) => (
+                        <SelectItem key={o.value} value={o.value}>
+                          {o.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               )}
             </div>
           </div>
-        )}
 
-        {isDayCentre && (
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Action
-            </Label>
-            <RadioGroup
-              value={action}
-              onValueChange={(v) => setAction(v as Action)}
-              className="grid grid-cols-2 gap-2 text-sm"
+          <DialogFooter className="gap-2 sm:gap-2">
+            <Button
+              variant="secondary"
+              onClick={() => logMut.mutate()}
+              disabled={!canLog}
             >
-              <label className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <RadioGroupItem value="append" id="act-append" />
-                Append note only
-              </label>
-              <label className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <RadioGroupItem value="resolve" id="act-resolve" />
-                Resolve &amp; close
-              </label>
-              <label className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <RadioGroupItem value="defer" id="act-defer" />
-                Defer / Next action
-              </label>
-              <label className="flex items-center gap-2 rounded-md border px-2 py-1.5">
-                <RadioGroupItem value="escalate" id="act-escalate" />
-                Escalate to Council
-              </label>
-            </RadioGroup>
-          </div>
-        )}
-
-        {action === "defer" && (
-          <div className="space-y-1">
-            <Label htmlFor="defer-at" className="text-xs">
-              Next action date
-            </Label>
-            <Input
-              id="defer-at"
-              type="datetime-local"
-              value={deferAt}
-              onChange={(e) => setDeferAt(e.target.value)}
-              className="[color-scheme:dark]"
-            />
-          </div>
-        )}
-
-        {action === "escalate" && (
-          <div className="space-y-1">
-            <Label className="text-xs">Council severity</Label>
-            <Select
-              value={councilSev}
-              onValueChange={(v) => setCouncilSev(v as CouncilSeverity)}
+              {logMut.isPending && (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              )}
+              Log Note &amp; Update
+            </Button>
+            <Button
+              onClick={handleResolveClick}
+              disabled={!canResolve}
+              className="bg-emerald-600 hover:bg-emerald-700 text-white"
             >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {COUNCIL_SEVERITY_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        )}
+              {resolveMut.isPending && (
+                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+              )}
+              Resolve &amp; Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
-        <div className="space-y-2">
-          <Label htmlFor="resolution-note">
-            {action === "append"
-              ? "New update"
-              : action === "resolve"
-                ? "Resolution notes"
-                : action === "defer"
-                  ? "Defer reason / next action"
-                  : "Council escalation note"}{" "}
-            <span className="text-destructive">*</span>
-          </Label>
-          <Textarea
-            id="resolution-note"
-            rows={4}
-            placeholder="Min 10 chars — appended to the immutable timeline."
-            value={note}
-            onChange={(e) => setNote(e.target.value)}
-          />
-          <div
-            className={`text-xs ${trimmed < 10 ? "text-destructive" : "text-muted-foreground"}`}
-          >
-            {trimmed}/10 minimum
-          </div>
-        </div>
-
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => onOpenChange(false)}
-            disabled={mut.isPending}
-          >
-            Close
-          </Button>
-          <Button onClick={() => mut.mutate()} disabled={!canSubmit}>
-            {mut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-            {action === "append"
-              ? "Append update"
-              : action === "resolve"
-                ? "Resolve & log"
-                : action === "defer"
-                  ? "Defer issue"
-                  : "Escalate to Council"}
-          </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+      <PinReauthDialog
+        open={pinOpen}
+        onOpenChange={setPinOpen}
+        reason="Manager authorization required to close this issue."
+        onAuthenticated={handlePinAuthenticated}
+      />
+    </>
   );
 }
 
