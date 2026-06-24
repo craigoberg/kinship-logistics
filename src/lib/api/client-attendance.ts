@@ -99,11 +99,8 @@ const WEEKDAY_INDEX: Record<string, number> = {
   "DAY-THU": 4, "DAY-FRI": 5, "DAY-SAT": 6,
 };
 
-function defaultExpectedToday(): string {
-  // 09:00 Sydney local — sensible Day Centre default. Threshold tunables remain
-  // configurable via system_parameters.
-  return getSydneyTimeTodayIso(9, 0);
-}
+
+
 
 function mapTransportToMethod(transportRule: string | null): ArrivalMethod {
   const v = (transportRule ?? "").toLowerCase();
