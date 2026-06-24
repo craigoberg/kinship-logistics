@@ -476,11 +476,6 @@ export async function deferUnifiedIssue(
   issue: UnifiedIssue,
   args: { untilIso: string; note: string },
 ): Promise<void> {
-  if (issue.source !== "day_centre") {
-    throw new Error(
-      "Defer / Next Action is only available for Day Centre issues.",
-    );
-  }
   const note = args.note.trim();
   if (note.length < 10) {
     throw new Error("Defer note must be at least 10 characters.");
@@ -489,42 +484,34 @@ export async function deferUnifiedIssue(
     throw new Error("A valid next-action date is required.");
   }
 
-  const { data: current, error: readErr } = await supabase
-    .from("site_issues_register")
-    .select("update_log")
-    .eq("id", issue.sourceRowId)
-    .single();
-  if (readErr) throw readErr;
-  const priorLog = String(
-    (current as { update_log: string | null } | null)?.update_log ?? "",
-  );
-  const nextLog =
-    priorLog +
-    buildAppendEntry(`[DEFERRED until ${args.untilIso.slice(0, 16)}] ${note}`);
+  // 1) Always log a defer note to the central timeline (every source).
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: `[DEFERRED until ${args.untilIso.slice(0, 16)}] ${note}`,
+    kind: "defer",
+    metadata: { deferred_until: args.untilIso },
+  });
 
-  const { error: writeErr } = await supabase
-    .from("site_issues_register")
-    .update({
-      status: "deferred",
-      deferred_until: args.untilIso,
-      update_log: nextLog,
-    })
-    .eq("id", issue.sourceRowId)
-    .eq("update_log", priorLog);
-  if (writeErr) {
-    if (writeErr.code === "PGRST116") {
-      throw new Error(
-        "Timeline was updated by someone else — please reload and retry.",
-      );
-    }
-    throw writeErr;
+  // 2) For day_centre rows, also flip the row off the active list.
+  //    Other source tables don't carry a 'deferred' status today — the
+  //    timeline note is the audit trail.
+  if (issue.source === "day_centre") {
+    const { error: writeErr } = await supabase
+      .from("site_issues_register")
+      .update({
+        status: "deferred",
+        deferred_until: args.untilIso,
+      })
+      .eq("id", issue.sourceRowId);
+    if (writeErr) throw writeErr;
   }
 
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
   await writeToLedger({
     staff_id: staffId,
-    category: "CENTRE",
+    category: issue.source === "day_centre" ? "CENTRE" : "VEHICLE",
     severity: severityToLedger(issue.severity),
     action_type: "governance.issue_deferred",
     gps_lat: gps?.lat ?? null,
@@ -539,62 +526,46 @@ export async function deferUnifiedIssue(
 }
 
 /**
- * Escalate an issue to Council with a chosen Council Severity. Flips
- * status to `awaiting_external` so the row drops off the active Hub
- * list and surfaces in the Awaiting tab.
+ * Escalate an issue to Council with a chosen Council Severity. For
+ * day_centre rows, also flips status to `awaiting_external` so the row
+ * drops off the active Hub list and surfaces in the Awaiting tab. For
+ * other sources, logs the council escalation note + ledger receipt only.
  */
 export async function escalateUnifiedIssueToCouncil(
   issue: UnifiedIssue,
   args: { councilSeverity: CouncilSeverity; note: string },
 ): Promise<void> {
-  if (issue.source !== "day_centre") {
-    throw new Error(
-      "Escalate to Council is only available for Day Centre issues.",
-    );
-  }
   const note = args.note.trim();
   if (note.length < 10) {
     throw new Error("Council escalation note must be at least 10 characters.");
   }
 
-  const { data: current, error: readErr } = await supabase
-    .from("site_issues_register")
-    .select("update_log")
-    .eq("id", issue.sourceRowId)
-    .single();
-  if (readErr) throw readErr;
-  const priorLog = String(
-    (current as { update_log: string | null } | null)?.update_log ?? "",
-  );
-  const nextLog =
-    priorLog +
-    buildAppendEntry(`[ESCALATED TO COUNCIL · ${args.councilSeverity}] ${note}`);
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: `[ESCALATED TO COUNCIL · ${args.councilSeverity}] ${note}`,
+    kind: "escalate",
+    metadata: { council_severity: args.councilSeverity },
+  });
 
-  const { error: writeErr } = await supabase
-    .from("site_issues_register")
-    .update({
-      status: "awaiting_external",
-      council_severity: args.councilSeverity,
-      council_sla_category: args.councilSeverity,
-      owner: "council",
-      update_log: nextLog,
-    })
-    .eq("id", issue.sourceRowId)
-    .eq("update_log", priorLog);
-  if (writeErr) {
-    if (writeErr.code === "PGRST116") {
-      throw new Error(
-        "Timeline was updated by someone else — please reload and retry.",
-      );
-    }
-    throw writeErr;
+  if (issue.source === "day_centre") {
+    const { error: writeErr } = await supabase
+      .from("site_issues_register")
+      .update({
+        status: "awaiting_external",
+        council_severity: args.councilSeverity,
+        council_sla_category: args.councilSeverity,
+        owner: "council",
+      })
+      .eq("id", issue.sourceRowId);
+    if (writeErr) throw writeErr;
   }
 
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
   await writeToLedger({
     staff_id: staffId,
-    category: "CENTRE",
+    category: issue.source === "day_centre" ? "CENTRE" : "VEHICLE",
     severity: severityToLedger(issue.severity),
     action_type: "governance.council_escalated",
     gps_lat: gps?.lat ?? null,
@@ -607,3 +578,4 @@ export async function escalateUnifiedIssueToCouncil(
     },
   });
 }
+
