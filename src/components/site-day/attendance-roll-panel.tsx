@@ -194,36 +194,52 @@ export function AttendanceRollPanel({ sessionId }: Props) {
       <ul className="space-y-2">
         {rows.map((r) => {
           const isIn = r.status === "checked_in";
-          const isRed = r.escalationSeverity === "red" && !isIn;
-          const isYellow = r.escalationSeverity === "yellow" && !isIn && !isRed;
-          // WCAG: on Green/Yellow tinted surfaces, force solid charcoal so
-          // text + timestamp both clear AA contrast.
+          const isAbsent = r.status === "absent";
+          const isRed = !isAbsent && r.escalationSeverity === "red" && !isIn;
+          const isYellow =
+            !isAbsent && r.escalationSeverity === "yellow" && !isIn && !isRed;
+          // Parse the [ABSENT:CODE] tag we wrote into notes for the badge.
+          const absentMatch = isAbsent && r.notes
+            ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
+            : null;
+          const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
+          // WCAG: on Green/Yellow/Absent tinted surfaces, force solid charcoal
+          // so text + timestamp both clear AA contrast.
           const subTextCls =
-            isIn || isYellow ? "text-slate-900/80" : "text-muted-foreground";
+            isIn || isYellow || isAbsent
+              ? "text-slate-900/80"
+              : "text-muted-foreground";
           return (
             <li key={r.id}>
               <button
                 type="button"
-                onClick={() => toggleMut.mutate(r)}
-                disabled={toggleMut.isPending}
+                onClick={() => !isAbsent && toggleMut.mutate(r)}
+                disabled={toggleMut.isPending || isAbsent}
                 aria-pressed={isIn}
                 className={cn(
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
-                  "transition-colors active:scale-[0.99] disabled:opacity-70",
+                  "transition-colors active:scale-[0.99] disabled:opacity-100",
                   isIn &&
                     "border-green-600 bg-green-50 hover:bg-green-100 text-slate-900",
-                  !isIn && !isRed && !isYellow &&
+                  !isIn && !isRed && !isYellow && !isAbsent &&
                     "border-border bg-card hover:bg-muted/60",
                   isYellow &&
                     "border-amber-500 bg-amber-50 hover:bg-amber-100 text-slate-900",
                   isRed &&
                     "border-2 border-destructive bg-destructive/10 hover:bg-destructive/15 text-destructive",
+                  isAbsent &&
+                    "border-slate-400 bg-slate-200/70 text-slate-900 cursor-default",
                 )}
               >
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <span className="truncate text-base font-semibold">
+                    <span
+                      className={cn(
+                        "truncate text-base font-semibold",
+                        isAbsent && "line-through decoration-slate-500/60",
+                      )}
+                    >
                       {nameMap[r.participantId] ?? "Loading…"}
                     </span>
                     <Badge className="border border-slate-400 bg-white text-slate-900 text-[10px] uppercase">
@@ -238,6 +254,11 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     {isYellow && (
                       <Badge className="bg-amber-500 text-white text-[10px] uppercase">
                         Overdue
+                      </Badge>
+                    )}
+                    {isAbsent && (
+                      <Badge className="bg-slate-600 text-white text-[10px] uppercase">
+                        Absent · {absentLabel}
                       </Badge>
                     )}
                   </div>
@@ -255,6 +276,9 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                           options={{ hour: "2-digit", minute: "2-digit" }}
                         />
                       </>
+                    )}
+                    {isAbsent && (
+                      <> · Not attending today (PIN verified)</>
                     )}
                   </div>
                 </div>
@@ -289,7 +313,9 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       "rounded-full p-2",
                       isIn
                         ? "bg-green-600 text-white"
-                        : "bg-muted text-muted-foreground",
+                        : isAbsent
+                          ? "bg-slate-400 text-white"
+                          : "bg-muted text-muted-foreground",
                     )}
                     aria-hidden
                   >
