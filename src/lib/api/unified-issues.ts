@@ -5,7 +5,7 @@ import {
   listComplianceAssets,
   type ComplianceAsset,
 } from "@/lib/api/compliance-assets";
-import { getActiveUserProfile, resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback } from "@/lib/data-store";
 
 export type UnifiedIssueSource =
   | "day_centre"
