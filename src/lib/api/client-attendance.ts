@@ -14,6 +14,7 @@ import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
+import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
 
 
@@ -25,12 +26,14 @@ export type AttendanceStatus =
   | "absent"
   | "accounted";
 export type EscalationSeverity = "yellow" | "red";
+export type DepartureVector = "bus" | "family" | "independent";
 
 export interface ClientAttendanceRow {
   id: string;
   sessionId: string;
   participantId: string;
   expectedArrivalAt: string;
+  expectedDepartureAt: string | null;
   arrivalMethod: ArrivalMethod;
   checkedInAt: string | null;
   checkedInBy: string | null;
@@ -41,6 +44,10 @@ export interface ClientAttendanceRow {
   escalationSeverity: EscalationSeverity | null;
   escalationRaisedAt: string | null;
   redSmsDispatchedAt: string | null;
+  departureIssueId: string | null;
+  departureSeverity: EscalationSeverity | null;
+  departureRaisedAt: string | null;
+  departureRedSmsDispatchedAt: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +58,7 @@ interface DbRow {
   session_id: string;
   participant_id: string;
   expected_arrival_at: string;
+  expected_departure_at: string | null;
   arrival_method: ArrivalMethod;
   checked_in_at: string | null;
   checked_in_by: string | null;
@@ -61,6 +69,10 @@ interface DbRow {
   escalation_severity: EscalationSeverity | null;
   escalation_raised_at: string | null;
   red_sms_dispatched_at: string | null;
+  departure_issue_id: string | null;
+  departure_severity: EscalationSeverity | null;
+  departure_raised_at: string | null;
+  departure_red_sms_dispatched_at: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -72,6 +84,7 @@ function toRow(r: DbRow): ClientAttendanceRow {
     sessionId: r.session_id,
     participantId: r.participant_id,
     expectedArrivalAt: r.expected_arrival_at,
+    expectedDepartureAt: r.expected_departure_at ?? null,
     arrivalMethod: r.arrival_method,
     checkedInAt: r.checked_in_at,
     checkedInBy: r.checked_in_by,
@@ -82,6 +95,10 @@ function toRow(r: DbRow): ClientAttendanceRow {
     escalationSeverity: r.escalation_severity,
     escalationRaisedAt: r.escalation_raised_at,
     redSmsDispatchedAt: r.red_sms_dispatched_at,
+    departureIssueId: r.departure_issue_id ?? null,
+    departureSeverity: r.departure_severity ?? null,
+    departureRaisedAt: r.departure_raised_at ?? null,
+    departureRedSmsDispatchedAt: r.departure_red_sms_dispatched_at ?? null,
     notes: r.notes,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -135,15 +152,23 @@ export async function listAttendanceRoll(
 // back to 09:00 Sydney when the clock value is null or malformed.
 // ---------------------------------------------------------------------------
 
-const SCHEDULE_CLOCK_FIELDS = [
-  "arrival_time",
+const SCHEDULE_ARRIVAL_FIELDS = [
   "expected_arrival_time",
+  "arrival_time",
   "start_time",
   "pickup_time",
 ] as const;
+const SCHEDULE_DEPARTURE_FIELDS = [
+  "expected_departure_time",
+  "departure_time",
+  "end_time",
+] as const;
 
-function readScheduleClock(row: Record<string, unknown>): string | null {
-  for (const f of SCHEDULE_CLOCK_FIELDS) {
+function readScheduleClock(
+  row: Record<string, unknown>,
+  fields: readonly string[],
+): string | null {
+  for (const f of fields) {
     const v = row[f];
     if (typeof v === "string" && v.length > 0) return v.slice(0, 5);
   }
@@ -152,6 +177,23 @@ function readScheduleClock(row: Record<string, unknown>): string | null {
 
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
   const dow = getSydneyDayIndex();
+
+  // Tier 2 — facility-wide master defaults for today's weekday. Returns
+  // null when the centre_operating_hours table has not been provisioned yet,
+  // in which case the seeder falls through to the Tier 3 system baseline
+  // (09:00 / 15:00) via sydneyTimeTodayFromClock(null).
+  let masterOpen: string | null = null;
+  let masterClose: string | null = null;
+  try {
+    const today = await getTodayCentreHours(dow);
+    if (today) {
+      masterOpen = today.openTime || null;
+      masterClose = today.closeTime || null;
+    }
+  } catch (e) {
+    // Non-fatal — table may not exist yet. Tier 3 baseline still works.
+    console.warn("[client-attendance] centre_operating_hours read failed", e);
+  }
 
   // SELECT * so we pick up an optional clock column if one is ever added
   // to participant_attendance_schedules without requiring another code change.
@@ -166,14 +208,24 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
   );
   if (!todays.length) return 0;
 
-  const payload = todays.map((s: Record<string, unknown>) => ({
-    session_id: sessionId,
-    participant_id: s.participant_id as string,
-    expected_arrival_at: sydneyTimeTodayFromClock(readScheduleClock(s)),
-    arrival_method: mapTransportToMethod(
-      (s.transport_required as string | null) ?? null,
-    ),
-  }));
+  const payload = todays.map((s: Record<string, unknown>) => {
+    // 3-tier priority ladder.
+    const arrivalOverride = readScheduleClock(s, SCHEDULE_ARRIVAL_FIELDS);
+    const departureOverride = readScheduleClock(s, SCHEDULE_DEPARTURE_FIELDS);
+    const arrivalClock = arrivalOverride ?? masterOpen; // null → Tier 3 baseline
+    const departureClock = departureOverride ?? masterClose;
+    return {
+      session_id: sessionId,
+      participant_id: s.participant_id as string,
+      expected_arrival_at: sydneyTimeTodayFromClock(arrivalClock),
+      expected_departure_at: sydneyTimeTodayFromClock(
+        departureClock ?? "15:00",
+      ),
+      arrival_method: mapTransportToMethod(
+        (s.transport_required as string | null) ?? null,
+      ),
+    };
+  });
 
   const { data: inserted, error: insErr } = await supabase
     .from("client_attendance_log")
@@ -900,6 +952,375 @@ async function fireRedSmsPipeline(
       source: "attendance_red",
       reason: "pipeline_error",
       reference: `att-red-${attendanceId}`,
+    });
+  }
+}
+
+// ===========================================================================
+// SYMMETRICAL DEPARTURE ESCALATION ENGINE
+//   • sweepOverdueDepartures — single-row YELLOW→RED on the departure rail.
+//   • checkOutParticipant   — Bus/Family/Independent tap with auto-healing.
+//   • autoCloseYellowDepartureIssue — mirror of autoCloseYellowIssue.
+//   • fireRedDepartureSmsPipeline   — mirror of fireRedSmsPipeline.
+// ===========================================================================
+
+async function autoCloseYellowDepartureIssue(
+  row: ClientAttendanceRow,
+  reason: string,
+  staffId: string,
+): Promise<AutoCloseOutcome> {
+  if (!row.departureIssueId) return { kind: "no_issue" };
+  const issueId = row.departureIssueId;
+
+  const { data: issue, error } = await supabase
+    .from("site_issues_register")
+    .select("id, severity, status")
+    .eq("id", issueId)
+    .maybeSingle();
+  if (error || !issue) {
+    console.error("[client-attendance] could not load linked departure issue", error);
+    return { kind: "no_issue" };
+  }
+
+  if (issue.status !== "open") {
+    await supabase
+      .from("client_attendance_log")
+      .update({
+        departure_issue_id: null,
+        departure_severity: null,
+        departure_raised_at: null,
+      })
+      .eq("id", row.id);
+    return { kind: "already_closed", issueId };
+  }
+
+  if (issue.severity === "red") {
+    return { kind: "red_left_open", issueId };
+  }
+
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from("site_issues_register")
+    .update({ status: "resolved", resolved_at: nowIso })
+    .eq("id", issueId);
+
+  await supabase
+    .from("client_attendance_log")
+    .update({
+      departure_issue_id: null,
+      departure_severity: null,
+      departure_raised_at: null,
+    })
+    .eq("id", row.id);
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_DEPARTURE_YELLOW_AUTO_CLOSED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: row.id,
+      issue_id: issueId,
+      participant_id: row.participantId,
+      reason, // ≥10 char Compliance Shield receipt
+    },
+  });
+  return { kind: "yellow_closed", issueId };
+}
+
+export interface CheckOutResult {
+  row: ClientAttendanceRow;
+  vector: DepartureVector;
+  departureAutoCloseOutcome: AutoCloseOutcome["kind"];
+}
+
+export async function checkOutParticipant(
+  row: ClientAttendanceRow,
+  vector: DepartureVector,
+): Promise<CheckOutResult> {
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      status: "checked_out" as AttendanceStatus,
+      checked_out_at: nowIso,
+      checked_out_by: staffId,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_CHECKOUT",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      departure_vector: vector,
+      expected_departure_at: row.expectedDepartureAt,
+    },
+  });
+
+  // Symmetrical auto-healing on the departure rail.
+  const outcome = await autoCloseYellowDepartureIssue(
+    row,
+    `System Auto-Close: Client departed safely via ${vector}.`,
+    staffId,
+  );
+
+  if (outcome.kind === "red_left_open") {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "CLIENT",
+      severity: "RED",
+      action_type: "ATTENDANCE_DEPARTURE_RED_CHECKOUT_WHILE_OPEN",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: {
+        attendance_id: row.id,
+        issue_id: outcome.issueId,
+        participant_id: row.participantId,
+        departure_vector: vector,
+        reason:
+          "Client departed; RED departure issue remains open for manager review.",
+      },
+    });
+  }
+
+  // Re-read so the returned row reflects any cleared departure_* fields.
+  let finalRow = toRow(data as DbRow);
+  if (outcome.kind === "yellow_closed" || outcome.kind === "already_closed") {
+    const { data: refreshed } = await supabase
+      .from("client_attendance_log")
+      .select("*")
+      .eq("id", row.id)
+      .single();
+    if (refreshed) finalRow = toRow(refreshed as DbRow);
+  }
+
+  return { row: finalRow, vector, departureAutoCloseOutcome: outcome.kind };
+}
+
+export async function sweepOverdueDepartures(
+  sessionId: string,
+  yellowMins: number,
+  redMins: number,
+  participantNames: Record<string, string>,
+): Promise<SweepResult> {
+  const roll = await listAttendanceRoll(sessionId);
+  const now = Date.now();
+  let yellowRaised = 0;
+  let redRaised = 0;
+
+  for (const r of roll) {
+    if (r.status !== "checked_in") continue;
+    if (r.checkedOutAt) continue;
+    if (!r.expectedDepartureAt) continue;
+    const expected = Date.parse(r.expectedDepartureAt);
+    if (!Number.isFinite(expected)) continue;
+    const overdueMins = Math.floor((now - expected) / 60_000);
+    if (overdueMins < yellowMins) continue;
+
+    const pName = participantNames[r.participantId] ?? "Client";
+    const wantRed = overdueMins >= redMins;
+
+    // No departure issue yet — raise YELLOW (or RED if already past).
+    if (!r.departureIssueId) {
+      const description = `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min (expected ${new Date(r.expectedDepartureAt).toLocaleTimeString()}).`;
+      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+      const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
+
+      const { data: issue, error: issueErr } = await supabase
+        .from("site_issues_register")
+        .insert({
+          session_id: sessionId,
+          reported_by: userId,
+          severity: insertSeverity,
+          issue_description: description,
+          workaround_plan: null,
+          owner: "internal",
+          status: "open",
+        })
+        .select("id")
+        .single();
+      if (issueErr) {
+        console.error("[client-attendance] departure yellow insert failed", issueErr);
+        continue;
+      }
+
+      await supabase
+        .from("client_attendance_log")
+        .update({
+          departure_issue_id: issue.id as string,
+          departure_severity: insertSeverity,
+          departure_raised_at: new Date().toISOString(),
+        })
+        .eq("id", r.id);
+
+      const staffId = await resolveStaffIdWithFallback();
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: wantRed ? "RED" : "YELLOW",
+        action_type: wantRed
+          ? "ATTENDANCE_DEPARTURE_RED_ESCALATED"
+          : "ATTENDANCE_DEPARTURE_YELLOW_RAISED",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: r.id,
+          issue_id: issue.id,
+          participant_id: r.participantId,
+          overdue_mins: overdueMins,
+          threshold_mins: wantRed ? redMins : yellowMins,
+          rail: "departure",
+        },
+      });
+      if (wantRed) {
+        await fireRedDepartureSmsPipeline(
+          r.id,
+          pName,
+          r.expectedDepartureAt,
+          sessionId,
+        );
+        redRaised += 1;
+      } else {
+        yellowRaised += 1;
+      }
+      continue;
+    }
+
+    // YELLOW departure row already exists — mutate SAME id to RED if due.
+    if (wantRed && r.departureSeverity !== "red") {
+      const { error: upErr } = await supabase
+        .from("site_issues_register")
+        .update({
+          severity: "red",
+          issue_description: `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min — escalated to RED.`,
+        })
+        .eq("id", r.departureIssueId);
+      if (upErr) {
+        console.error("[client-attendance] departure red mutate failed", upErr);
+        continue;
+      }
+      await supabase
+        .from("client_attendance_log")
+        .update({ departure_severity: "red" })
+        .eq("id", r.id);
+
+      const staffId = await resolveStaffIdWithFallback();
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: "RED",
+        action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: r.id,
+          issue_id: r.departureIssueId,
+          participant_id: r.participantId,
+          overdue_mins: overdueMins,
+          rail: "departure",
+        },
+      });
+      await fireRedDepartureSmsPipeline(
+        r.id,
+        pName,
+        r.expectedDepartureAt,
+        sessionId,
+      );
+      redRaised += 1;
+    }
+  }
+
+  return { yellowRaised, redRaised };
+}
+
+async function fireRedDepartureSmsPipeline(
+  attendanceId: string,
+  participantName: string,
+  expectedDepartureAt: string,
+  sessionId: string,
+): Promise<void> {
+  const { emitMockSms } = await import("@/lib/notifications/mock-sms");
+  try {
+    const res = await fetch("/api/internal/departure-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        attendanceId,
+        participantName,
+        expectedDepartureAt,
+        sessionId,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      sent?: number;
+      reason?: string;
+      recipients?: string[];
+      message?: string;
+      reference?: string;
+    };
+    if (!res.ok) {
+      console.error("[client-attendance] departure SMS non-OK", res.status, json);
+      emitMockSms({
+        recipient: "unknown",
+        body: `[RED DEPARTURE] ${participantName} — server route returned ${res.status}.`,
+        source: "attendance_red",
+        reason: "pipeline_non_ok",
+        reference: `dep-red-${attendanceId}`,
+      });
+      return;
+    }
+    const recipients = json.recipients ?? [];
+    const message =
+      json.message ??
+      `[RED DEPARTURE] ${participantName} has not been checked out — expected ${expectedDepartureAt}.`;
+    const reason = json.reason ?? "unknown";
+    if (recipients.length === 0) {
+      emitMockSms({
+        recipient: "(no recipients resolved)",
+        body: message,
+        source: "attendance_red",
+        reason,
+        reference: json.reference,
+      });
+    } else {
+      for (const to of recipients) {
+        emitMockSms({
+          recipient: to,
+          body: message,
+          source: "attendance_red",
+          reason,
+          reference: json.reference,
+        });
+      }
+    }
+    await supabase
+      .from("client_attendance_log")
+      .update({ departure_red_sms_dispatched_at: new Date().toISOString() })
+      .eq("id", attendanceId);
+  } catch (e) {
+    console.error("[client-attendance] departure SMS pipeline threw", e);
+    emitMockSms({
+      recipient: "unknown",
+      body: `[RED DEPARTURE] ${participantName} — pipeline threw before send.`,
+      source: "attendance_red",
+      reason: "pipeline_error",
+      reference: `dep-red-${attendanceId}`,
     });
   }
 }

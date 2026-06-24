@@ -18,12 +18,14 @@ import {
   listAttendanceRoll,
   seedRollFromSchedules,
   sweepOverdueArrivals,
+  sweepOverdueDepartures,
   toggleCheckIn,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
+import { CheckOutPopover } from "./check-out-popover";
 
 interface Props {
   sessionId: string;
@@ -35,6 +37,14 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   const qc = useQueryClient();
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const redMins = useSystemParameter<number>("attendance_red_threshold_mins", 60);
+  const depYellowMins = useSystemParameter<number>(
+    "attendance_departure_yellow_threshold_mins",
+    30,
+  );
+  const depRedMins = useSystemParameter<number>(
+    "attendance_departure_red_threshold_mins",
+    60,
+  );
 
   const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -83,10 +93,20 @@ export function AttendanceRollPanel({ sessionId }: Props) {
         await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
           (e) => {
             const msg = e instanceof Error ? e.message : String(e);
-            console.error("[AttendanceRollPanel] sweep failed", e);
+            console.error("[AttendanceRollPanel] arrival sweep failed", e);
             toast.error("Attendance overdue sweep failed", { description: msg });
           },
         );
+        await sweepOverdueDepartures(
+          sessionId,
+          depYellowMins,
+          depRedMins,
+          nameMap,
+        ).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[AttendanceRollPanel] departure sweep failed", e);
+          toast.error("Departure overdue sweep failed", { description: msg });
+        });
       }
       return rows;
     },
@@ -194,10 +214,19 @@ export function AttendanceRollPanel({ sessionId }: Props) {
       <ul className="space-y-2">
         {rows.map((r) => {
           const isIn = r.status === "checked_in";
+          const isOut = r.status === "checked_out";
           const isAbsent = r.status === "absent";
-          const isRed = !isAbsent && r.escalationSeverity === "red" && !isIn;
+          // Departure rail takes precedence over arrival rail when the
+          // participant is already checked in (arrival rail is, by
+          // definition, satisfied at that point).
+          const depRed = r.departureSeverity === "red" && isIn;
+          const depYellow = r.departureSeverity === "yellow" && isIn && !depRed;
+          const isRed =
+            !isAbsent && !isOut &&
+            ((r.escalationSeverity === "red" && !isIn) || depRed);
           const isYellow =
-            !isAbsent && r.escalationSeverity === "yellow" && !isIn && !isRed;
+            !isAbsent && !isOut && !isRed &&
+            ((r.escalationSeverity === "yellow" && !isIn) || depYellow);
           // Parse the [ABSENT:CODE] tag we wrote into notes for the badge.
           const absentMatch = isAbsent && r.notes
             ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
@@ -206,23 +235,23 @@ export function AttendanceRollPanel({ sessionId }: Props) {
           // WCAG: on Green/Yellow/Absent tinted surfaces, force solid charcoal
           // so text + timestamp both clear AA contrast.
           const subTextCls =
-            isIn || isYellow || isAbsent
+            isIn || isYellow || isAbsent || isOut
               ? "text-slate-900/80"
               : "text-muted-foreground";
           return (
             <li key={r.id}>
               <button
                 type="button"
-                onClick={() => !isAbsent && toggleMut.mutate(r)}
-                disabled={toggleMut.isPending || isAbsent}
+                onClick={() => !isAbsent && !isOut && toggleMut.mutate(r)}
+                disabled={toggleMut.isPending || isAbsent || isOut}
                 aria-pressed={isIn}
                 className={cn(
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
                   "transition-colors active:scale-[0.99] disabled:opacity-100",
-                  isIn &&
+                  isIn && !isYellow && !isRed &&
                     "border-green-600 bg-green-50 hover:bg-green-100 text-slate-900",
-                  !isIn && !isRed && !isYellow && !isAbsent &&
+                  !isIn && !isRed && !isYellow && !isAbsent && !isOut &&
                     "border-border bg-card hover:bg-muted/60",
                   isYellow &&
                     "border-amber-500 bg-amber-50 hover:bg-amber-100 text-slate-900",
@@ -230,6 +259,8 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     "border-2 border-destructive bg-destructive/10 hover:bg-destructive/15 text-destructive",
                   isAbsent &&
                     "border-slate-400 bg-slate-200/70 text-slate-900 cursor-default",
+                  isOut &&
+                    "border-slate-400 bg-slate-100 text-slate-900 cursor-default",
                 )}
               >
                 <div className="min-w-0 flex-1">
@@ -237,7 +268,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     <span
                       className={cn(
                         "truncate text-base font-semibold",
-                        isAbsent && "line-through decoration-slate-500/60",
+                        (isAbsent || isOut) && "line-through decoration-slate-500/60",
                       )}
                     >
                       {nameMap[r.participantId] ?? "Loading…"}
@@ -246,12 +277,22 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       {r.arrivalMethod.replace("_", " ")}
                     </Badge>
 
-                    {isRed && (
+                    {depRed && (
+                      <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
+                        Departure Escalated — Manager notified
+                      </Badge>
+                    )}
+                    {depYellow && (
+                      <Badge className="bg-amber-500 text-white text-[10px] uppercase">
+                        Departure Overdue
+                      </Badge>
+                    )}
+                    {isRed && !depRed && (
                       <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
                         Escalated — Manager notified
                       </Badge>
                     )}
-                    {isYellow && (
+                    {isYellow && !depYellow && (
                       <Badge className="bg-amber-500 text-white text-[10px] uppercase">
                         Overdue
                       </Badge>
@@ -261,6 +302,11 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                         Absent · {absentLabel}
                       </Badge>
                     )}
+                    {isOut && (
+                      <Badge className="bg-slate-600 text-white text-[10px] uppercase">
+                        Checked out
+                      </Badge>
+                    )}
                   </div>
                   <div className={cn("mt-0.5 text-xs", subTextCls)}>
                     Expected{" "}
@@ -268,11 +314,29 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       iso={r.expectedArrivalAt}
                       options={{ hour: "2-digit", minute: "2-digit" }}
                     />
+                    {r.expectedDepartureAt && (
+                      <>
+                        {" "}→{" "}
+                        <ClientTime
+                          iso={r.expectedDepartureAt}
+                          options={{ hour: "2-digit", minute: "2-digit" }}
+                        />
+                      </>
+                    )}
                     {r.checkedInAt && (
                       <>
-                        {" "}· Checked in{" "}
+                        {" "}· In{" "}
                         <ClientTime
                           iso={r.checkedInAt}
+                          options={{ hour: "2-digit", minute: "2-digit" }}
+                        />
+                      </>
+                    )}
+                    {r.checkedOutAt && (
+                      <>
+                        {" "}· Out{" "}
+                        <ClientTime
+                          iso={r.checkedOutAt}
                           options={{ hour: "2-digit", minute: "2-digit" }}
                         />
                       </>
@@ -283,6 +347,15 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                   </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                  {isIn && !isOut && (
+                    <CheckOutPopover
+                      row={r}
+                      participantName={nameMap[r.participantId] ?? "client"}
+                      onCheckedOut={() =>
+                        qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) })
+                      }
+                    />
+                  )}
                   <span
                     role="button"
                     tabIndex={0}
@@ -304,7 +377,6 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       "border border-slate-300 bg-white hover:bg-slate-100",
                       "text-slate-900 shadow-sm",
                     )}
-
                   >
                     <Clock className="h-4 w-4" />
                   </span>
@@ -313,7 +385,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       "rounded-full p-2",
                       isIn
                         ? "bg-green-600 text-white"
-                        : isAbsent
+                        : isAbsent || isOut
                           ? "bg-slate-400 text-white"
                           : "bg-muted text-muted-foreground",
                     )}
