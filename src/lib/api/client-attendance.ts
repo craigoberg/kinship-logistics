@@ -14,6 +14,7 @@ import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
+import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
 
 
