@@ -514,6 +514,161 @@ export async function markAccounted(
 }
 
 // ---------------------------------------------------------------------------
+// Mark Absent — operator confirms a client will not attend today. Removes
+// them from the overdue queue (status='absent'; sweeper already skips this
+// status) and closes any active YELLOW *or* RED issue tied to the row with
+// a uniform resolution note. Writes a permanent ledger receipt.
+// ---------------------------------------------------------------------------
+
+export interface MarkAbsentResult {
+  row: ClientAttendanceRow;
+  closedIssueId: string | null;
+  prevSeverity: EscalationSeverity | null;
+}
+
+export async function markAttendanceAbsent(
+  row: ClientAttendanceRow,
+): Promise<MarkAbsentResult> {
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      status: "absent",
+      checked_in_at: null,
+      checked_in_by: null,
+      escalation_issue_id: null,
+      escalation_severity: null,
+      escalation_raised_at: null,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  let closedIssueId: string | null = null;
+  const prevSeverity = row.escalationSeverity;
+
+  if (row.escalationIssueId) {
+    const { data: issue } = await supabase
+      .from("site_issues_register")
+      .select("id, status")
+      .eq("id", row.escalationIssueId)
+      .maybeSingle();
+    if (issue && issue.status === "open") {
+      const { error: closeErr } = await supabase
+        .from("site_issues_register")
+        .update({
+          status: "resolved",
+          resolved_at: nowIso,
+        })
+        .eq("id", row.escalationIssueId);
+      if (!closeErr) closedIssueId = row.escalationIssueId;
+    }
+  }
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_MARKED_ABSENT",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      prev_severity: prevSeverity,
+      closed_issue_id: closedIssueId,
+      reason: "Client confirmed absent for today.",
+    },
+  });
+
+  return { row: toRow(data as DbRow), closedIssueId, prevSeverity };
+}
+
+// ---------------------------------------------------------------------------
+// Add Attendee — unscheduled walk-in. Eligible list = active participants
+// not already on today's roll. Inject creates a fresh row checked-in NOW.
+// ---------------------------------------------------------------------------
+
+export interface EligibleAttendee {
+  id: string;
+  fullName: string;
+}
+
+export async function listEligibleAddAttendees(
+  sessionId: string,
+): Promise<EligibleAttendee[]> {
+  const [{ data: parts, error: pErr }, { data: roll, error: rErr }] =
+    await Promise.all([
+      supabase
+        .from("participants")
+        .select("id, full_name, status")
+        .eq("status", "active"),
+      supabase
+        .from("client_attendance_log")
+        .select("participant_id")
+        .eq("session_id", sessionId),
+    ]);
+  if (pErr) throw pErr;
+  if (rErr) throw rErr;
+  const taken = new Set(
+    (roll ?? []).map((r) => (r as { participant_id: string }).participant_id),
+  );
+  return (parts ?? [])
+    .filter((p) => !taken.has((p as { id: string }).id))
+    .map((p) => ({
+      id: (p as { id: string }).id,
+      fullName: (p as { full_name: string }).full_name,
+    }))
+    .sort((a, b) => a.fullName.localeCompare(b.fullName));
+}
+
+export async function addWalkInAttendee(
+  sessionId: string,
+  participantId: string,
+): Promise<ClientAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .insert({
+      session_id: sessionId,
+      participant_id: participantId,
+      expected_arrival_at: nowIso,
+      arrival_method: "walk_in" as ArrivalMethod,
+      status: "checked_in" as AttendanceStatus,
+      checked_in_at: nowIso,
+      checked_in_by: staffId,
+    })
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "INFO",
+    action_type: "ATTENDANCE_WALKIN_ADDED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: (data as DbRow).id,
+      session_id: sessionId,
+      participant_id: participantId,
+      reason: "Unscheduled walk-in added to today's roll.",
+    },
+  });
+
+  return toRow(data as DbRow);
+}
+
+
+
+// ---------------------------------------------------------------------------
 // Single-row escalator — sweep called every 60s by useQuery refetchInterval.
 //   • YELLOW → insert one site_issues_register row, persist its id on the
 //     attendance row in escalation_issue_id.
