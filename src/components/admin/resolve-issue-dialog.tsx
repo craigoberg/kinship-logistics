@@ -156,16 +156,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onError: (e: Error) => toast.error("Action failed", { description: e.message }),
   });
 
-  // Resolve & Close — manager-gated. Append note atomically then resolve.
+  // Resolve & Close — manager-gated. resolveUnifiedIssue now logs the
+  // closing note to the central Hub timeline, so no separate append.
   const resolveMut = useMutation({
     mutationFn: async () => {
-      if (isDayCentre) {
-        try {
-          await appendUpdateNote(issue, note);
-        } catch {
-          // Resolution receipt itself captures the note in the ledger.
-        }
-      }
       await resolveUnifiedIssue(issue, note);
     },
     onSuccess: () => {
@@ -182,6 +176,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const busy = logMut.isPending || resolveMut.isPending;
   const canLog = noteOk && deferValid && !busy;
   const canResolve = noteOk && !busy;
+
 
   const timeline = useMemo(() => {
     const raw = String(
