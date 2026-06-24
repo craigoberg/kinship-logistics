@@ -178,14 +178,11 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const canResolve = noteOk && !busy;
 
 
-  const timeline = useMemo(() => {
-    const raw = String(
-      timelineQuery.data ??
-        (issue.raw as { update_log?: string | null } | null)?.update_log ??
-        "",
-    );
-    return raw.trim();
-  }, [timelineQuery.data, issue.raw]);
+  const timelineLines = useMemo(() => {
+    const notes = timelineQuery.data ?? [];
+    return notes.map(renderNoteLine);
+  }, [timelineQuery.data]);
+
 
   const handleResolveClick = () => {
     if (!canResolve) return;
