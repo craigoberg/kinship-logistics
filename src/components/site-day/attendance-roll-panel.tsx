@@ -5,7 +5,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Clock, Loader2, Users, Bus } from "lucide-react";
+import { AlertTriangle, Check, Clock, Loader2, Users, Bus, UserPlus } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -23,6 +23,7 @@ import {
 } from "@/lib/api/client-attendance";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
+import { AddAttendeeModal } from "./add-attendee-modal";
 
 interface Props {
   sessionId: string;
@@ -37,6 +38,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
 
   const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
 
   const participantsQ = useQuery({
     queryKey: ["participants", "all-for-roll"],
@@ -143,6 +145,16 @@ export function AttendanceRollPanel({ sessionId }: Props) {
           {rollQ.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
+          <Button
+            type="button"
+            variant="secondary"
+            size="sm"
+            onClick={() => setAddOpen(true)}
+            className="h-8 gap-1.5"
+          >
+            <UserPlus className="h-4 w-4" />
+            + Add Attendee
+          </Button>
           {hasUnarrived && (
             <Button
               type="button"
