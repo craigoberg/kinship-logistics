@@ -1107,6 +1107,8 @@ export interface AttendanceSchedule {
   dayOfWeek: WeekDay;
   serviceType: string;
   transportRule: string;
+  expectedArrivalTime: string;   // HH:MM (Sydney local)
+  expectedDepartureTime: string; // HH:MM (Sydney local)
   active: boolean;
   createdAt: string;
 }
@@ -1117,8 +1119,15 @@ interface AttendanceScheduleRow {
   day_of_week: string;
   service_type: string;
   transport_required: string;
+  expected_arrival_time: string | null;
+  expected_departure_time: string | null;
   active: boolean;
   created_at: string;
+}
+
+function clip5(v: string | null | undefined, fallback: string): string {
+  if (typeof v !== "string" || v.length === 0) return fallback;
+  return v.slice(0, 5);
 }
 
 function rowToAttendanceSchedule(r: AttendanceScheduleRow): AttendanceSchedule {
@@ -1128,6 +1137,8 @@ function rowToAttendanceSchedule(r: AttendanceScheduleRow): AttendanceSchedule {
     dayOfWeek: r.day_of_week as WeekDay,
     serviceType: r.service_type,
     transportRule: r.transport_required,
+    expectedArrivalTime: clip5(r.expected_arrival_time, "09:00"),
+    expectedDepartureTime: clip5(r.expected_departure_time, "15:00"),
     active: r.active,
     createdAt: r.created_at,
   };
@@ -1151,6 +1162,8 @@ export interface NewAttendanceSchedule {
   dayOfWeek: WeekDay;
   serviceType: string;
   transportRule: string;
+  expectedArrivalTime?: string;
+  expectedDepartureTime?: string;
 }
 
 export async function insertAttendanceSchedule(
@@ -1161,6 +1174,8 @@ export async function insertAttendanceSchedule(
     day_of_week: input.dayOfWeek,
     service_type: input.serviceType,
     transport_required: input.transportRule,
+    expected_arrival_time: input.expectedArrivalTime ?? "09:00",
+    expected_departure_time: input.expectedDepartureTime ?? "15:00",
     active: true,
   };
   const { data, error } = await supabase
@@ -1625,6 +1640,8 @@ export interface AttendanceSchedulePatch {
   dayOfWeek?: WeekDay;
   serviceType?: string;
   transportRule?: string;
+  expectedArrivalTime?: string;
+  expectedDepartureTime?: string;
   active?: boolean;
 }
 
@@ -1636,6 +1653,10 @@ export async function updateAttendanceSchedule(
   if (patch.dayOfWeek !== undefined) row.day_of_week = patch.dayOfWeek;
   if (patch.serviceType !== undefined) row.service_type = patch.serviceType;
   if (patch.transportRule !== undefined) row.transport_required = patch.transportRule;
+  if (patch.expectedArrivalTime !== undefined)
+    row.expected_arrival_time = patch.expectedArrivalTime;
+  if (patch.expectedDepartureTime !== undefined)
+    row.expected_departure_time = patch.expectedDepartureTime;
   if (patch.active !== undefined) row.active = patch.active;
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
