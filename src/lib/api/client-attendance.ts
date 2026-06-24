@@ -133,28 +133,49 @@ export async function listAttendanceRoll(
 // ---------------------------------------------------------------------------
 // Auto-seed from participant_attendance_schedules.
 // Idempotent: ON CONFLICT (session_id, participant_id) DO NOTHING.
+// Per-row expected_arrival_at is derived from the schedule's clock value
+// (if the column exists) via sydneyTimeTodayFromClock(); the helper falls
+// back to 09:00 Sydney when the clock value is null or malformed.
 // ---------------------------------------------------------------------------
+
+const SCHEDULE_CLOCK_FIELDS = [
+  "arrival_time",
+  "expected_arrival_time",
+  "start_time",
+  "pickup_time",
+] as const;
+
+function readScheduleClock(row: Record<string, unknown>): string | null {
+  for (const f of SCHEDULE_CLOCK_FIELDS) {
+    const v = row[f];
+    if (typeof v === "string" && v.length > 0) return v.slice(0, 5);
+  }
+  return null;
+}
 
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
   const dow = getSydneyDayIndex();
-  const expectedIso = defaultExpectedToday();
 
+  // SELECT * so we pick up an optional clock column if one is ever added
+  // to participant_attendance_schedules without requiring another code change.
   const { data: scheds, error } = await supabase
     .from("participant_attendance_schedules")
-    .select("participant_id, day_of_week, transport_required, active");
+    .select("*");
   if (error) throw error;
 
   const todays = (scheds ?? []).filter(
-    (s) =>
-      s.active && WEEKDAY_INDEX[s.day_of_week as string] === dow,
+    (s: Record<string, unknown>) =>
+      s.active === true && WEEKDAY_INDEX[String(s.day_of_week)] === dow,
   );
   if (!todays.length) return 0;
 
-  const payload = todays.map((s) => ({
+  const payload = todays.map((s: Record<string, unknown>) => ({
     session_id: sessionId,
     participant_id: s.participant_id as string,
-    expected_arrival_at: expectedIso,
-    arrival_method: mapTransportToMethod(s.transport_required as string | null),
+    expected_arrival_at: sydneyTimeTodayFromClock(readScheduleClock(s)),
+    arrival_method: mapTransportToMethod(
+      (s.transport_required as string | null) ?? null,
+    ),
   }));
 
   const { data: inserted, error: insErr } = await supabase
@@ -169,7 +190,93 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
 }
 
 // ---------------------------------------------------------------------------
+// Context-aware YELLOW auto-close helper.
+//   • Closes the linked site_issues_register row ONLY if its current severity
+//     is 'yellow' AND status is 'open'.
+//   • Clears the attendance row's escalation_* fields so the card returns to
+//     a clean Green state.
+//   • Writes the ≥10-char Compliance Shield receipt to operational_ledger.
+// RED rows are never auto-closed — they remain open for manual manager review.
+// Returns { kind } describing what was done so callers can ledger the result.
+// ---------------------------------------------------------------------------
+
+type AutoCloseOutcome =
+  | { kind: "yellow_closed"; issueId: string }
+  | { kind: "red_left_open"; issueId: string }
+  | { kind: "no_issue" }
+  | { kind: "already_closed"; issueId: string };
+
+async function autoCloseYellowIssue(
+  row: ClientAttendanceRow,
+  reason: string,
+  staffId: string,
+): Promise<AutoCloseOutcome> {
+  if (!row.escalationIssueId) return { kind: "no_issue" };
+  const issueId = row.escalationIssueId;
+
+  const { data: issue, error } = await supabase
+    .from("site_issues_register")
+    .select("id, severity, status")
+    .eq("id", issueId)
+    .maybeSingle();
+  if (error || !issue) {
+    console.error("[client-attendance] could not load linked issue", error);
+    return { kind: "no_issue" };
+  }
+
+  if (issue.status !== "open") {
+    // Already resolved earlier; still clear stale escalation pointer.
+    await supabase
+      .from("client_attendance_log")
+      .update({
+        escalation_issue_id: null,
+        escalation_severity: null,
+        escalation_raised_at: null,
+      })
+      .eq("id", row.id);
+    return { kind: "already_closed", issueId };
+  }
+
+  if (issue.severity === "red") {
+    return { kind: "red_left_open", issueId };
+  }
+
+  // YELLOW + open → auto-close.
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from("site_issues_register")
+    .update({ status: "resolved", resolved_at: nowIso })
+    .eq("id", issueId);
+
+  await supabase
+    .from("client_attendance_log")
+    .update({
+      escalation_issue_id: null,
+      escalation_severity: null,
+      escalation_raised_at: null,
+    })
+    .eq("id", row.id);
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_YELLOW_AUTO_CLOSED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: row.id,
+      issue_id: issueId,
+      participant_id: row.participantId,
+      reason, // ≥10 chars — Compliance Shield receipt.
+    },
+  });
+  return { kind: "yellow_closed", issueId };
+}
+
+// ---------------------------------------------------------------------------
 // Check in / out (tap toggles from the Section 4.4 mobile cards).
+// On check-IN, applies the YELLOW vs RED context-aware closure rules.
 // ---------------------------------------------------------------------------
 
 export async function toggleCheckIn(
@@ -205,8 +312,185 @@ export async function toggleCheckIn(
       expected_arrival_at: row.expectedArrivalAt,
     },
   });
+
+  // Context-aware closure: only on the check-IN direction, never on undo.
+  let finalRow = toRow(data as DbRow);
+  if (!isCheckedIn) {
+    const outcome = await autoCloseYellowIssue(
+      row,
+      "System Auto-Close: Client arrived safely.",
+      staffId,
+    );
+    if (outcome.kind === "red_left_open") {
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: "RED",
+        action_type: "ATTENDANCE_RED_CHECKIN_WHILE_OPEN",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: row.id,
+          issue_id: outcome.issueId,
+          participant_id: row.participantId,
+          reason:
+            "Client arrived; RED issue remains open for manager review.",
+        },
+      });
+    } else if (
+      outcome.kind === "yellow_closed" ||
+      outcome.kind === "already_closed"
+    ) {
+      // Re-read so the returned row reflects the cleared escalation fields.
+      const { data: refreshed } = await supabase
+        .from("client_attendance_log")
+        .select("*")
+        .eq("id", row.id)
+        .single();
+      if (refreshed) finalRow = toRow(refreshed as DbRow);
+    }
+  }
+  return finalRow;
+}
+
+// ---------------------------------------------------------------------------
+// Per-card "Adjust Expected Time" — operator pushes a single client's
+// expected arrival forward/backward. If the new time pulls the row back
+// inside the YELLOW threshold and the linked issue is still YELLOW + open,
+// auto-close it. RED is never auto-cleared by a time adjustment.
+// ---------------------------------------------------------------------------
+
+export async function updateExpectedArrival(
+  row: ClientAttendanceRow,
+  hhmm: string,
+  yellowThresholdMins: number,
+): Promise<ClientAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
+  const newIso = sydneyTimeTodayFromClock(hhmm);
+  const prevIso = row.expectedArrivalAt;
+
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({ expected_arrival_at: newIso })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "INFO",
+    action_type: "ATTENDANCE_EXPECTED_TIME_ADJUSTED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: row.id,
+      participant_id: row.participantId,
+      previous_expected_at: prevIso,
+      new_expected_at: newIso,
+      reason: "Operator adjusted expected arrival time.",
+    },
+  });
+
+  // Did the new time pull the row back inside the YELLOW threshold?
+  const overdueMins = Math.floor((Date.now() - Date.parse(newIso)) / 60_000);
+  if (overdueMins < yellowThresholdMins) {
+    await autoCloseYellowIssue(
+      row,
+      "Expected time adjusted; client no longer overdue.",
+      staffId,
+    );
+    const { data: refreshed } = await supabase
+      .from("client_attendance_log")
+      .select("*")
+      .eq("id", row.id)
+      .single();
+    if (refreshed) return toRow(refreshed as DbRow);
+  }
   return toRow(data as DbRow);
 }
+
+// ---------------------------------------------------------------------------
+// Bulk Defer Group — operator advances expected_arrival_at for every
+// un-arrived passenger matching an arrival_method (e.g. all 'bus' clients
+// when the pickup hits traffic). YELLOW issues clearing the threshold are
+// auto-closed; RED is left for manual manager review.
+// ---------------------------------------------------------------------------
+
+export interface BulkDeferResult {
+  deferredCount: number;
+  yellowsAutoCleared: number;
+}
+
+export async function bulkDeferGroup(
+  sessionId: string,
+  method: ArrivalMethod,
+  minutes: number,
+  yellowThresholdMins: number,
+): Promise<BulkDeferResult> {
+  if (!Number.isFinite(minutes) || minutes === 0) {
+    return { deferredCount: 0, yellowsAutoCleared: 0 };
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const roll = await listAttendanceRoll(sessionId);
+  const targets = roll.filter(
+    (r) =>
+      r.arrivalMethod === method &&
+      r.status !== "checked_in" &&
+      r.status !== "checked_out" &&
+      r.status !== "accounted",
+  );
+  if (!targets.length) return { deferredCount: 0, yellowsAutoCleared: 0 };
+
+  const updates = targets.map((r) => {
+    const next = new Date(Date.parse(r.expectedArrivalAt) + minutes * 60_000)
+      .toISOString();
+    return { id: r.id, next, prev: r.expectedArrivalAt };
+  });
+
+  for (const u of updates) {
+    await supabase
+      .from("client_attendance_log")
+      .update({ expected_arrival_at: u.next })
+      .eq("id", u.id);
+  }
+
+  let yellowsAutoCleared = 0;
+  for (const r of targets) {
+    const u = updates.find((x) => x.id === r.id)!;
+    const overdueMins = Math.floor((Date.now() - Date.parse(u.next)) / 60_000);
+    if (overdueMins < yellowThresholdMins && r.escalationIssueId) {
+      const outcome = await autoCloseYellowIssue(
+        r,
+        "Bulk Defer cleared overdue window for this client.",
+        staffId,
+      );
+      if (outcome.kind === "yellow_closed") yellowsAutoCleared += 1;
+    }
+  }
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "YELLOW",
+    action_type: "ATTENDANCE_BULK_DEFER",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      session_id: sessionId,
+      arrival_method: method,
+      minutes,
+      affected_count: updates.length,
+      affected_ids: updates.map((u) => u.id),
+      yellows_auto_cleared: yellowsAutoCleared,
+      reason: `Bulk deferred ${updates.length} ${method} passenger(s) by ${minutes} minutes.`,
+    },
+  });
+
+  return { deferredCount: updates.length, yellowsAutoCleared };
+}
+
 
 export async function markAccounted(
   rowId: string,
