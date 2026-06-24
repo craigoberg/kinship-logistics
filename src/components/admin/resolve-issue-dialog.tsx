@@ -85,24 +85,15 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     }
   }, [open, issue.sourceRowId]);
 
-  // Live-poll the timeline so concurrent operators see appends.
+  // Live-poll the central Hub timeline for ANY source.
   const timelineQuery = useQuery({
-    queryKey: ["site-issue-timeline", issue.sourceRowId],
-    enabled: open && isDayCentre,
+    queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
+    enabled: open,
     refetchInterval: 8_000,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("site_issues_register")
-        .select("update_log")
-        .eq("id", issue.sourceRowId)
-        .single();
-      if (error) throw error;
-      return String(
-        (data as { update_log: string | null } | null)?.update_log ?? "",
-      );
-    },
+    queryFn: () => listIssueNotes(issue.source, issue.sourceRowId),
   });
+
 
   const trimmed = note.trim().length;
   const noteOk = trimmed >= 10;
