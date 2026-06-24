@@ -194,7 +194,7 @@ export function AddAttendanceScheduleModal({
                   setArrivalTime(e.target.value);
                   setDirty(true);
                 }}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+                className="w-full rounded-md border border-input bg-input px-3 py-2 text-sm text-foreground [color-scheme:dark]"
               />
             </div>
             <div className="space-y-2">
@@ -212,7 +212,7 @@ export function AddAttendanceScheduleModal({
                   setDepartureTime(e.target.value);
                   setDirty(true);
                 }}
-                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+                className="w-full rounded-md border border-input bg-input px-3 py-2 text-sm text-foreground [color-scheme:dark]"
               />
             </div>
           </div>
