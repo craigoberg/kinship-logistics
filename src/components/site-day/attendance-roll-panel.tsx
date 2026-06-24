@@ -3,12 +3,13 @@
 // Tap toggles GREEN (Checked In) ↔ GREY (Expected). All timestamps render
 // inside the canonical <ClientTime /> primitive.
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Check, Loader2, Users } from "lucide-react";
+import { AlertTriangle, Check, Clock, Loader2, Users, Bus } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
 import { cn } from "@/lib/utils";
 import { listParticipants } from "@/lib/data-store";
@@ -20,6 +21,8 @@ import {
   toggleCheckIn,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
+import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 
 interface Props {
   sessionId: string;
@@ -32,6 +35,9 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const redMins = useSystemParameter<number>("attendance_red_threshold_mins", 60);
 
+  const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
+
   const participantsQ = useQuery({
     queryKey: ["participants", "all-for-roll"],
     queryFn: listParticipants,
@@ -43,9 +49,6 @@ export function AttendanceRollPanel({ sessionId }: Props) {
     return map;
   }, [participantsQ.data]);
 
-  // One-shot auto-seed when the panel first mounts for the session.
-  // Surface failures as a toast so the next breakage is immediately visible
-  // rather than silently swallowed in the console.
   useEffect(() => {
     if (!sessionId) return;
     let cancelled = false;
@@ -70,9 +73,6 @@ export function AttendanceRollPanel({ sessionId }: Props) {
     };
   }, [sessionId, qc]);
 
-  // 60-second sweep — promotes overdue rows YELLOW → RED on the SAME issue row.
-  // Gate `enabled` on participantsQ.isSuccess so the very first fetch already
-  // has the participant name map captured by the sweep closure.
   const rollQ = useQuery({
     queryKey: ROLL_KEY(sessionId),
     queryFn: async () => {
@@ -121,10 +121,13 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   const rows = rollQ.data ?? [];
   const checkedIn = rows.filter((r) => r.status === "checked_in").length;
   const overdue = rows.filter((r) => r.escalationSeverity !== null && !r.checkedInAt);
+  const hasUnarrived = rows.some(
+    (r) => r.status !== "checked_in" && r.status !== "accounted",
+  );
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-2">
         <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           Attendance Roll{" "}
           <span className="ml-1 font-mono normal-case text-muted-foreground/70">
@@ -136,9 +139,23 @@ export function AttendanceRollPanel({ sessionId }: Props) {
             )})
           </span>
         </h3>
-        {rollQ.isFetching && (
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
-        )}
+        <div className="flex items-center gap-2">
+          {rollQ.isFetching && (
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
+          )}
+          {hasUnarrived && (
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={() => setBulkOpen(true)}
+              className="h-8 gap-1.5"
+            >
+              <Bus className="h-4 w-4" />
+              Bulk Defer Group
+            </Button>
+          )}
+        </div>
       </div>
 
       {rollQ.isError && (
@@ -167,6 +184,10 @@ export function AttendanceRollPanel({ sessionId }: Props) {
           const isIn = r.status === "checked_in";
           const isRed = r.escalationSeverity === "red" && !isIn;
           const isYellow = r.escalationSeverity === "yellow" && !isIn && !isRed;
+          // WCAG: on Green/Yellow tinted surfaces, force solid charcoal so
+          // text + timestamp both clear AA contrast.
+          const subTextCls =
+            isIn || isYellow ? "text-slate-900/80" : "text-muted-foreground";
           return (
             <li key={r.id}>
               <button
@@ -175,22 +196,21 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                 disabled={toggleMut.isPending}
                 aria-pressed={isIn}
                 className={cn(
-                  // §4.4 — full-width, large touch target (min 56px)
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
                   "transition-colors active:scale-[0.99] disabled:opacity-70",
                   isIn &&
-                    "border-green-600 bg-green-50 hover:bg-green-100 text-green-900",
+                    "border-green-600 bg-green-50 hover:bg-green-100 text-slate-900",
                   !isIn && !isRed && !isYellow &&
                     "border-border bg-card hover:bg-muted/60",
                   isYellow &&
-                    "border-amber-500 bg-amber-50 hover:bg-amber-100 text-amber-900",
+                    "border-amber-500 bg-amber-50 hover:bg-amber-100 text-slate-900",
                   isRed &&
                     "border-2 border-destructive bg-destructive/10 hover:bg-destructive/15 text-destructive",
                 )}
               >
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
+                  <div className="flex items-center gap-2 flex-wrap">
                     <span className="truncate text-base font-semibold">
                       {nameMap[r.participantId] ?? "Loading…"}
                     </span>
@@ -208,7 +228,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                       </Badge>
                     )}
                   </div>
-                  <div className="mt-0.5 text-xs text-muted-foreground">
+                  <div className={cn("mt-0.5 text-xs", subTextCls)}>
                     Expected{" "}
                     <ClientTime
                       iso={r.expectedArrivalAt}
@@ -225,22 +245,72 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     )}
                   </div>
                 </div>
-                <div
-                  className={cn(
-                    "shrink-0 rounded-full p-2",
-                    isIn
-                      ? "bg-green-600 text-white"
-                      : "bg-muted text-muted-foreground",
-                  )}
-                  aria-hidden
-                >
-                  <Check className="h-5 w-5" />
+                <div className="flex items-center gap-2 shrink-0">
+                  <span
+                    role="button"
+                    tabIndex={0}
+                    aria-label={`Adjust expected time for ${nameMap[r.participantId] ?? "client"}`}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setAdjustRow(r);
+                    }}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.stopPropagation();
+                        e.preventDefault();
+                        setAdjustRow(r);
+                      }
+                    }}
+                    className={cn(
+                      "inline-flex items-center justify-center rounded-md p-2",
+                      "min-h-11 min-w-11 cursor-pointer",
+                      "border border-border bg-background/80 hover:bg-muted",
+                      "text-slate-900",
+                    )}
+                  >
+                    <Clock className="h-4 w-4" />
+                  </span>
+                  <div
+                    className={cn(
+                      "rounded-full p-2",
+                      isIn
+                        ? "bg-green-600 text-white"
+                        : "bg-muted text-muted-foreground",
+                    )}
+                    aria-hidden
+                  >
+                    <Check className="h-5 w-5" />
+                  </div>
                 </div>
               </button>
             </li>
           );
         })}
       </ul>
+
+      <AdjustExpectedTimeModal
+        row={adjustRow}
+        yellowThresholdMins={yellowMins}
+        participantName={
+          adjustRow ? (nameMap[adjustRow.participantId] ?? "Client") : ""
+        }
+        onClose={(changed) => {
+          setAdjustRow(null);
+          if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+        }}
+      />
+
+      <BulkDeferGroupModal
+        open={bulkOpen}
+        sessionId={sessionId}
+        rows={rows}
+        nameMap={nameMap}
+        yellowThresholdMins={yellowMins}
+        onClose={(changed) => {
+          setBulkOpen(false);
+          if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+        }}
+      />
     </div>
   );
 }
