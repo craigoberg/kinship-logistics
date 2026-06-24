@@ -177,7 +177,47 @@ export function AddAttendanceScheduleModal({
               placeholder="Select transport option"
             />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label
+                htmlFor="sched-arrival"
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Expected arrival time
+              </Label>
+              <input
+                id="sched-arrival"
+                type="time"
+                value={arrivalTime}
+                onChange={(e) => {
+                  setArrivalTime(e.target.value);
+                  setDirty(true);
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="sched-departure"
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Expected departure time
+              </Label>
+              <input
+                id="sched-departure"
+                type="time"
+                value={departureTime}
+                onChange={(e) => {
+                  setDepartureTime(e.target.value);
+                  setDirty(true);
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+              />
+            </div>
+          </div>
         </div>
+
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
