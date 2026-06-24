@@ -37,6 +37,14 @@ export function AttendanceRollPanel({ sessionId }: Props) {
   const qc = useQueryClient();
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const redMins = useSystemParameter<number>("attendance_red_threshold_mins", 60);
+  const depYellowMins = useSystemParameter<number>(
+    "attendance_departure_yellow_threshold_mins",
+    30,
+  );
+  const depRedMins = useSystemParameter<number>(
+    "attendance_departure_red_threshold_mins",
+    60,
+  );
 
   const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
