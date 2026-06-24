@@ -152,15 +152,23 @@ export async function listAttendanceRoll(
 // back to 09:00 Sydney when the clock value is null or malformed.
 // ---------------------------------------------------------------------------
 
-const SCHEDULE_CLOCK_FIELDS = [
-  "arrival_time",
+const SCHEDULE_ARRIVAL_FIELDS = [
   "expected_arrival_time",
+  "arrival_time",
   "start_time",
   "pickup_time",
 ] as const;
+const SCHEDULE_DEPARTURE_FIELDS = [
+  "expected_departure_time",
+  "departure_time",
+  "end_time",
+] as const;
 
-function readScheduleClock(row: Record<string, unknown>): string | null {
-  for (const f of SCHEDULE_CLOCK_FIELDS) {
+function readScheduleClock(
+  row: Record<string, unknown>,
+  fields: readonly string[],
+): string | null {
+  for (const f of fields) {
     const v = row[f];
     if (typeof v === "string" && v.length > 0) return v.slice(0, 5);
   }
@@ -169,6 +177,23 @@ function readScheduleClock(row: Record<string, unknown>): string | null {
 
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
   const dow = getSydneyDayIndex();
+
+  // Tier 2 — facility-wide master defaults for today's weekday. Returns
+  // null when the centre_operating_hours table has not been provisioned yet,
+  // in which case the seeder falls through to the Tier 3 system baseline
+  // (09:00 / 15:00) via sydneyTimeTodayFromClock(null).
+  let masterOpen: string | null = null;
+  let masterClose: string | null = null;
+  try {
+    const today = await getTodayCentreHours(dow);
+    if (today) {
+      masterOpen = today.openTime || null;
+      masterClose = today.closeTime || null;
+    }
+  } catch (e) {
+    // Non-fatal — table may not exist yet. Tier 3 baseline still works.
+    console.warn("[client-attendance] centre_operating_hours read failed", e);
+  }
 
   // SELECT * so we pick up an optional clock column if one is ever added
   // to participant_attendance_schedules without requiring another code change.
@@ -183,14 +208,24 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
   );
   if (!todays.length) return 0;
 
-  const payload = todays.map((s: Record<string, unknown>) => ({
-    session_id: sessionId,
-    participant_id: s.participant_id as string,
-    expected_arrival_at: sydneyTimeTodayFromClock(readScheduleClock(s)),
-    arrival_method: mapTransportToMethod(
-      (s.transport_required as string | null) ?? null,
-    ),
-  }));
+  const payload = todays.map((s: Record<string, unknown>) => {
+    // 3-tier priority ladder.
+    const arrivalOverride = readScheduleClock(s, SCHEDULE_ARRIVAL_FIELDS);
+    const departureOverride = readScheduleClock(s, SCHEDULE_DEPARTURE_FIELDS);
+    const arrivalClock = arrivalOverride ?? masterOpen; // null → Tier 3 baseline
+    const departureClock = departureOverride ?? masterClose;
+    return {
+      session_id: sessionId,
+      participant_id: s.participant_id as string,
+      expected_arrival_at: sydneyTimeTodayFromClock(arrivalClock),
+      expected_departure_at: sydneyTimeTodayFromClock(
+        departureClock ?? "15:00",
+      ),
+      arrival_method: mapTransportToMethod(
+        (s.transport_required as string | null) ?? null,
+      ),
+    };
+  });
 
   const { data: inserted, error: insErr } = await supabase
     .from("client_attendance_log")
