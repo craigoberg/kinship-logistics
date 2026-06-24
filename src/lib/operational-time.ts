@@ -115,3 +115,25 @@ export function getSydneyTimeTodayIso(
   const { year, month, day } = dateParts(date);
   return sydneyLocalTimeToUtcIso({ year, month, day, hour, minute });
 }
+
+/**
+ * Combine today's Sydney calendar date with a "HH:MM" local clock string and
+ * return the corresponding UTC ISO instant. Falls back to 09:00 when the
+ * supplied clock value is null, empty, or malformed.
+ */
+export function sydneyTimeTodayFromClock(
+  hhmm: string | null | undefined,
+  date: Date = new Date(),
+): string {
+  const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm ?? "").trim());
+  const hour = m ? Math.min(23, Math.max(0, Number(m[1]))) : 9;
+  const minute = m ? Math.min(59, Math.max(0, Number(m[2]))) : 0;
+  return getSydneyTimeTodayIso(hour, minute, date);
+}
+
+/** Format a UTC ISO instant as Sydney-local "HH:MM" (24h) for <input type="time">. */
+export function isoToSydneyClock(iso: string): string {
+  const parts = DATE_TIME_PART_FORMATTER.formatToParts(new Date(iso));
+  const v = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
+  return `${v("hour")}:${v("minute")}`;
+}
