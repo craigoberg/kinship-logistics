@@ -348,71 +348,123 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Browser-local stamp in DD-MM-YYYY HH:MM. */
+/** Browser-local stamp in dd-mm-yy/hh:mm. */
 function formatStamp(d: Date): string {
-  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${d.getFullYear()} ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${yy}/${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
-function buildAppendEntry(note: string): string {
-  const profile = getActiveUserProfile();
-  const name = profile?.fullName?.trim() || "Unknown";
-  return `\n\n[${formatStamp(new Date())}] ${name}: ${note.trim()}`;
+export interface HubIssueNote {
+  id: string;
+  source: UnifiedIssueSource;
+  sourceRowId: string;
+  note: string;
+  kind: "append" | "defer" | "escalate" | "resolve";
+  stampedAt: string;
+  staffId: string | null;
+  metadata: Record<string, unknown> | null;
 }
 
 /**
- * Atomic append of a single timeline entry against site_issues_register.
- * Uses optimistic concurrency (`.eq("update_log", priorLog)`) so two
- * simultaneous appends fail loudly instead of silently overwriting.
- * Returns the new full update_log string.
+ * Read every timeline note for a Hub issue (any source), oldest → newest.
+ */
+export async function listIssueNotes(
+  source: UnifiedIssueSource,
+  sourceRowId: string,
+): Promise<HubIssueNote[]> {
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("*")
+    .eq("source", source)
+    .eq("source_row_id", sourceRowId)
+    .order("stamped_at", { ascending: true });
+  if (error) {
+    console.warn("[unified-issues] listIssueNotes failed", error);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    source: r.source as UnifiedIssueSource,
+    sourceRowId: String(r.source_row_id),
+    note: String(r.note ?? ""),
+    kind: (r.kind as HubIssueNote["kind"]) ?? "append",
+    stampedAt: String(r.stamped_at),
+    staffId: (r.staff_id as string | null) ?? null,
+    metadata: (r.metadata as Record<string, unknown> | null) ?? null,
+  }));
+}
+
+/** Render a single note as `[dd-mm-yy/hh:mm]: text`. */
+export function renderNoteLine(n: HubIssueNote): string {
+  return `[${formatStamp(new Date(n.stampedAt))}]: ${n.note}`;
+}
+
+async function insertHubNote(args: {
+  source: UnifiedIssueSource;
+  sourceRowId: string;
+  note: string;
+  kind: HubIssueNote["kind"];
+  metadata?: Record<string, unknown> | null;
+}): Promise<void> {
+  const staffId = await resolveStaffIdWithFallback().catch(() => null);
+  const { error } = await supabase.from("hub_issue_notes").insert({
+    source: args.source,
+    source_row_id: args.sourceRowId,
+    note: args.note.trim(),
+    kind: args.kind,
+    staff_id: staffId,
+    metadata: args.metadata ?? null,
+  });
+  if (error) throw error;
+}
+
+/**
+ * Append a timeline note for ANY Hub source. Inserts into the central
+ * `hub_issue_notes` table (append-only, no row contention).
  *
- * NOTE: Timeline mutations are only supported for `day_centre` source
- * issues today — they're the only rows that carry the `update_log`
- * column.
+ * For `day_centre` rows we ALSO mirror the entry into the legacy
+ * `site_issues_register.update_log` column so existing day-centre views
+ * that read that column keep working during the transition.
  */
 export async function appendUpdateNote(
   issue: UnifiedIssue,
   note: string,
-): Promise<string> {
-  if (issue.source !== "day_centre") {
-    throw new Error(
-      "Timeline updates are only available for Day Centre issues.",
-    );
-  }
+): Promise<void> {
   const trimmed = note.trim();
   if (trimmed.length < 10) {
     throw new Error("Update note must be at least 10 characters.");
   }
 
-  const { data: current, error: readErr } = await supabase
-    .from("site_issues_register")
-    .select("update_log")
-    .eq("id", issue.sourceRowId)
-    .single();
-  if (readErr) throw readErr;
-  const priorLog = String(
-    (current as { update_log: string | null } | null)?.update_log ?? "",
-  );
-  const nextLog = priorLog + buildAppendEntry(trimmed);
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: trimmed,
+    kind: "append",
+  });
 
-  const { data: updated, error: writeErr } = await supabase
-    .from("site_issues_register")
-    .update({ update_log: nextLog })
-    .eq("id", issue.sourceRowId)
-    .eq("update_log", priorLog)
-    .select("update_log")
-    .single();
-  if (writeErr) {
-    if (writeErr.code === "PGRST116") {
-      throw new Error(
-        "Timeline was updated by someone else — please reload and retry.",
+  // Backward-compat mirror for day_centre's existing column.
+  if (issue.source === "day_centre") {
+    try {
+      const { data: current } = await supabase
+        .from("site_issues_register")
+        .select("update_log")
+        .eq("id", issue.sourceRowId)
+        .single();
+      const prior = String(
+        (current as { update_log: string | null } | null)?.update_log ?? "",
       );
+      const stamp = formatStamp(new Date());
+      const next = `${prior}\n[${stamp}]: ${trimmed}`.trim();
+      await supabase
+        .from("site_issues_register")
+        .update({ update_log: next })
+        .eq("id", issue.sourceRowId);
+    } catch (err) {
+      console.warn("[unified-issues] legacy update_log mirror failed", err);
     }
-    throw writeErr;
   }
-  return String(
-    (updated as { update_log: string | null } | null)?.update_log ?? nextLog,
-  );
 }
+
 
 /**
  * Defer an issue with a "next action" date. The row drops off the
