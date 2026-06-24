@@ -955,3 +955,372 @@ async function fireRedSmsPipeline(
     });
   }
 }
+
+// ===========================================================================
+// SYMMETRICAL DEPARTURE ESCALATION ENGINE
+//   • sweepOverdueDepartures — single-row YELLOW→RED on the departure rail.
+//   • checkOutParticipant   — Bus/Family/Independent tap with auto-healing.
+//   • autoCloseYellowDepartureIssue — mirror of autoCloseYellowIssue.
+//   • fireRedDepartureSmsPipeline   — mirror of fireRedSmsPipeline.
+// ===========================================================================
+
+async function autoCloseYellowDepartureIssue(
+  row: ClientAttendanceRow,
+  reason: string,
+  staffId: string,
+): Promise<AutoCloseOutcome> {
+  if (!row.departureIssueId) return { kind: "no_issue" };
+  const issueId = row.departureIssueId;
+
+  const { data: issue, error } = await supabase
+    .from("site_issues_register")
+    .select("id, severity, status")
+    .eq("id", issueId)
+    .maybeSingle();
+  if (error || !issue) {
+    console.error("[client-attendance] could not load linked departure issue", error);
+    return { kind: "no_issue" };
+  }
+
+  if (issue.status !== "open") {
+    await supabase
+      .from("client_attendance_log")
+      .update({
+        departure_issue_id: null,
+        departure_severity: null,
+        departure_raised_at: null,
+      })
+      .eq("id", row.id);
+    return { kind: "already_closed", issueId };
+  }
+
+  if (issue.severity === "red") {
+    return { kind: "red_left_open", issueId };
+  }
+
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from("site_issues_register")
+    .update({ status: "resolved", resolved_at: nowIso })
+    .eq("id", issueId);
+
+  await supabase
+    .from("client_attendance_log")
+    .update({
+      departure_issue_id: null,
+      departure_severity: null,
+      departure_raised_at: null,
+    })
+    .eq("id", row.id);
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_DEPARTURE_YELLOW_AUTO_CLOSED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      attendance_id: row.id,
+      issue_id: issueId,
+      participant_id: row.participantId,
+      reason, // ≥10 char Compliance Shield receipt
+    },
+  });
+  return { kind: "yellow_closed", issueId };
+}
+
+export interface CheckOutResult {
+  row: ClientAttendanceRow;
+  vector: DepartureVector;
+  departureAutoCloseOutcome: AutoCloseOutcome["kind"];
+}
+
+export async function checkOutParticipant(
+  row: ClientAttendanceRow,
+  vector: DepartureVector,
+): Promise<CheckOutResult> {
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = new Date().toISOString();
+
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      status: "checked_out" as AttendanceStatus,
+      checked_out_at: nowIso,
+      checked_out_by: staffId,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_CHECKOUT",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      departure_vector: vector,
+      expected_departure_at: row.expectedDepartureAt,
+    },
+  });
+
+  // Symmetrical auto-healing on the departure rail.
+  const outcome = await autoCloseYellowDepartureIssue(
+    row,
+    `System Auto-Close: Client departed safely via ${vector}.`,
+    staffId,
+  );
+
+  if (outcome.kind === "red_left_open") {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "CLIENT",
+      severity: "RED",
+      action_type: "ATTENDANCE_DEPARTURE_RED_CHECKOUT_WHILE_OPEN",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: {
+        attendance_id: row.id,
+        issue_id: outcome.issueId,
+        participant_id: row.participantId,
+        departure_vector: vector,
+        reason:
+          "Client departed; RED departure issue remains open for manager review.",
+      },
+    });
+  }
+
+  // Re-read so the returned row reflects any cleared departure_* fields.
+  let finalRow = toRow(data as DbRow);
+  if (outcome.kind === "yellow_closed" || outcome.kind === "already_closed") {
+    const { data: refreshed } = await supabase
+      .from("client_attendance_log")
+      .select("*")
+      .eq("id", row.id)
+      .single();
+    if (refreshed) finalRow = toRow(refreshed as DbRow);
+  }
+
+  return { row: finalRow, vector, departureAutoCloseOutcome: outcome.kind };
+}
+
+export async function sweepOverdueDepartures(
+  sessionId: string,
+  yellowMins: number,
+  redMins: number,
+  participantNames: Record<string, string>,
+): Promise<SweepResult> {
+  const roll = await listAttendanceRoll(sessionId);
+  const now = Date.now();
+  let yellowRaised = 0;
+  let redRaised = 0;
+
+  for (const r of roll) {
+    if (r.status !== "checked_in") continue;
+    if (r.checkedOutAt) continue;
+    if (!r.expectedDepartureAt) continue;
+    const expected = Date.parse(r.expectedDepartureAt);
+    if (!Number.isFinite(expected)) continue;
+    const overdueMins = Math.floor((now - expected) / 60_000);
+    if (overdueMins < yellowMins) continue;
+
+    const pName = participantNames[r.participantId] ?? "Client";
+    const wantRed = overdueMins >= redMins;
+
+    // No departure issue yet — raise YELLOW (or RED if already past).
+    if (!r.departureIssueId) {
+      const description = `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min (expected ${new Date(r.expectedDepartureAt).toLocaleTimeString()}).`;
+      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+      const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
+
+      const { data: issue, error: issueErr } = await supabase
+        .from("site_issues_register")
+        .insert({
+          session_id: sessionId,
+          reported_by: userId,
+          severity: insertSeverity,
+          issue_description: description,
+          workaround_plan: null,
+          owner: "internal",
+          status: "open",
+        })
+        .select("id")
+        .single();
+      if (issueErr) {
+        console.error("[client-attendance] departure yellow insert failed", issueErr);
+        continue;
+      }
+
+      await supabase
+        .from("client_attendance_log")
+        .update({
+          departure_issue_id: issue.id as string,
+          departure_severity: insertSeverity,
+          departure_raised_at: new Date().toISOString(),
+        })
+        .eq("id", r.id);
+
+      const staffId = await resolveStaffIdWithFallback();
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: wantRed ? "RED" : "YELLOW",
+        action_type: wantRed
+          ? "ATTENDANCE_DEPARTURE_RED_ESCALATED"
+          : "ATTENDANCE_DEPARTURE_YELLOW_RAISED",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: r.id,
+          issue_id: issue.id,
+          participant_id: r.participantId,
+          overdue_mins: overdueMins,
+          threshold_mins: wantRed ? redMins : yellowMins,
+          rail: "departure",
+        },
+      });
+      if (wantRed) {
+        await fireRedDepartureSmsPipeline(
+          r.id,
+          pName,
+          r.expectedDepartureAt,
+          sessionId,
+        );
+        redRaised += 1;
+      } else {
+        yellowRaised += 1;
+      }
+      continue;
+    }
+
+    // YELLOW departure row already exists — mutate SAME id to RED if due.
+    if (wantRed && r.departureSeverity !== "red") {
+      const { error: upErr } = await supabase
+        .from("site_issues_register")
+        .update({
+          severity: "red",
+          issue_description: `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min — escalated to RED.`,
+        })
+        .eq("id", r.departureIssueId);
+      if (upErr) {
+        console.error("[client-attendance] departure red mutate failed", upErr);
+        continue;
+      }
+      await supabase
+        .from("client_attendance_log")
+        .update({ departure_severity: "red" })
+        .eq("id", r.id);
+
+      const staffId = await resolveStaffIdWithFallback();
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: "RED",
+        action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: r.id,
+          issue_id: r.departureIssueId,
+          participant_id: r.participantId,
+          overdue_mins: overdueMins,
+          rail: "departure",
+        },
+      });
+      await fireRedDepartureSmsPipeline(
+        r.id,
+        pName,
+        r.expectedDepartureAt,
+        sessionId,
+      );
+      redRaised += 1;
+    }
+  }
+
+  return { yellowRaised, redRaised };
+}
+
+async function fireRedDepartureSmsPipeline(
+  attendanceId: string,
+  participantName: string,
+  expectedDepartureAt: string,
+  sessionId: string,
+): Promise<void> {
+  const { emitMockSms } = await import("@/lib/notifications/mock-sms");
+  try {
+    const res = await fetch("/api/internal/departure-sms", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        attendanceId,
+        participantName,
+        expectedDepartureAt,
+        sessionId,
+      }),
+    });
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      sent?: number;
+      reason?: string;
+      recipients?: string[];
+      message?: string;
+      reference?: string;
+    };
+    if (!res.ok) {
+      console.error("[client-attendance] departure SMS non-OK", res.status, json);
+      emitMockSms({
+        recipient: "unknown",
+        body: `[RED DEPARTURE] ${participantName} — server route returned ${res.status}.`,
+        source: "attendance_red",
+        reason: "pipeline_non_ok",
+        reference: `dep-red-${attendanceId}`,
+      });
+      return;
+    }
+    const recipients = json.recipients ?? [];
+    const message =
+      json.message ??
+      `[RED DEPARTURE] ${participantName} has not been checked out — expected ${expectedDepartureAt}.`;
+    const reason = json.reason ?? "unknown";
+    if (recipients.length === 0) {
+      emitMockSms({
+        recipient: "(no recipients resolved)",
+        body: message,
+        source: "attendance_red",
+        reason,
+        reference: json.reference,
+      });
+    } else {
+      for (const to of recipients) {
+        emitMockSms({
+          recipient: to,
+          body: message,
+          source: "attendance_red",
+          reason,
+          reference: json.reference,
+        });
+      }
+    }
+    await supabase
+      .from("client_attendance_log")
+      .update({ departure_red_sms_dispatched_at: new Date().toISOString() })
+      .eq("id", attendanceId);
+  } catch (e) {
+    console.error("[client-attendance] departure SMS pipeline threw", e);
+    emitMockSms({
+      recipient: "unknown",
+      body: `[RED DEPARTURE] ${participantName} — pipeline threw before send.`,
+      source: "attendance_red",
+      reason: "pipeline_error",
+      reference: `dep-red-${attendanceId}`,
+    });
+  }
+}
