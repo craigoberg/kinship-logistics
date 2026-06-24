@@ -10,7 +10,12 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
-import { getSydneyDayIndex, getSydneyTimeTodayIso } from "@/lib/operational-time";
+import {
+  getSydneyDayIndex,
+  getSydneyTimeTodayIso,
+  sydneyTimeTodayFromClock,
+} from "@/lib/operational-time";
+
 
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
 export type AttendanceStatus =
