@@ -52,11 +52,60 @@ function incidentSevToUnified(sev: string | null | undefined): UnifiedSeverity {
   return null;
 }
 
+export type UnifiedIssueTab = "active" | "awaiting";
+
 /**
  * Fetch every open operational issue across the four source tables in
  * parallel and normalise them to a single shape for the Governance Hub.
+ *
+ * tab = "active"   → open / pending rows (current default behaviour).
+ * tab = "awaiting" → site_issues_register rows whose status is
+ *                    `deferred` or `awaiting_external` (escalated to
+ *                    Council). Renewals + escalations are omitted from
+ *                    this tab — they have their own resolution surfaces.
  */
-export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
+export async function listOpenUnifiedIssues(
+  options: { tab?: UnifiedIssueTab } = {},
+): Promise<UnifiedIssue[]> {
+  const tab: UnifiedIssueTab = options.tab ?? "active";
+
+  if (tab === "awaiting") {
+    const { data, error } = await supabase
+      .from("site_issues_register")
+      .select("*")
+      .in("status", ["deferred", "awaiting_external"])
+      .order("created_at", { ascending: false });
+    if (error) {
+      console.warn("[unified-issues] awaiting tab fetch failed", error);
+      return [];
+    }
+    const out: UnifiedIssue[] = [];
+    for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+      const sev = (r.severity as UnifiedSeverity) ?? null;
+      const status = String(r.status ?? "open");
+      const label =
+        status === "deferred" ? "Day Centre · Deferred" : "Day Centre · Council";
+      out.push({
+        key: `day_centre:${r.id as string}`,
+        source: "day_centre",
+        sourceLabel: label,
+        category: sev ? sev.toUpperCase() : "NOTE",
+        subCategory:
+          status === "awaiting_external"
+            ? (r.council_severity as string | null) ?? "Council"
+            : (r.deferred_until as string | null) ?? "Deferred",
+        severity: sev,
+        title: String(r.issue_description ?? "Day Centre anomaly").slice(0, 120),
+        description: String(r.issue_description ?? ""),
+        status,
+        createdAt: String(r.created_at ?? new Date().toISOString()),
+        sourceRowId: String(r.id),
+        raw: r,
+      });
+    }
+    return out;
+  }
+
   const [siteIssuesRes, incidentsRes, escalationsRes, assets] =
     await Promise.all([
       supabase
@@ -183,6 +232,7 @@ export async function listOpenUnifiedIssues(): Promise<UnifiedIssue[]> {
   out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return out;
 }
+
 
 /**
  * Mark a unified issue as resolved at its source AND write an
