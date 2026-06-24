@@ -9,12 +9,13 @@ import {
 import { AdminLookupWorkspace } from "@/components/admin/admin-lookup-workspace";
 import { SystemParameterWorkspace } from "@/components/admin/system-parameter-workspace";
 import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
+import { CentreOperatingHoursWorkspace } from "@/components/admin/centre-operating-hours-workspace";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "parameters" | "access";
+type AdminTab = "lookups" | "parameters" | "hours" | "access";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
@@ -33,6 +34,7 @@ function AdminPage() {
         <TabsList>
           <TabsTrigger value="lookups">Lookups</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
+          <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
           <TabsTrigger value="access">Menu Access</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
@@ -40,6 +42,9 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
+        </TabsContent>
+        <TabsContent value="hours">
+          <CentreOperatingHoursWorkspace />
         </TabsContent>
         <TabsContent value="access">
           <MenuAccessMatrix />
