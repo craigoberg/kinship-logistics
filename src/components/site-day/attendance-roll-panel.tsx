@@ -294,7 +294,7 @@ export function AttendanceRollPanel({ sessionId }: Props) {
         participantName={
           adjustRow ? (nameMap[adjustRow.participantId] ?? "Client") : ""
         }
-        onClose={(changed) => {
+        onClose={(changed: boolean) => {
           setAdjustRow(null);
           if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
         }}
@@ -306,11 +306,12 @@ export function AttendanceRollPanel({ sessionId }: Props) {
         rows={rows}
         nameMap={nameMap}
         yellowThresholdMins={yellowMins}
-        onClose={(changed) => {
+        onClose={(changed: boolean) => {
           setBulkOpen(false);
           if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
         }}
       />
+
     </div>
   );
 }
