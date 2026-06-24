@@ -69,9 +69,20 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
         }
         recipients = Array.from(new Set(recipients));
 
+        const expectedLocal = new Date(body.expectedAt).toLocaleTimeString();
+        const message = `[RED] ${body.participantName} missing from Day Centre — expected ${expectedLocal}. Please confirm whereabouts.`;
+        const reference = `att-red-${body.attendanceId}`;
+
         if (recipients.length === 0) {
           console.warn("[attendance-sms] no recipients resolved");
-          return Response.json({ ok: true, sent: 0, reason: "no_recipients" });
+          return Response.json({
+            ok: true,
+            sent: 0,
+            reason: "no_recipients",
+            recipients,
+            message,
+            reference,
+          });
         }
 
         const LOVABLE_API_KEY = process.env.LOVABLE_API_KEY;
@@ -86,11 +97,10 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
             sent: 0,
             reason: "gatewayapi_not_configured",
             recipients,
+            message,
+            reference,
           });
         }
-
-        const expectedLocal = new Date(body.expectedAt).toLocaleTimeString();
-        const message = `[RED] ${body.participantName} missing from Day Centre — expected ${expectedLocal}. Please confirm whereabouts.`;
 
         let sent = 0;
         for (const to of recipients) {
@@ -108,7 +118,7 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
                   sender: "DayCentre",
                   recipient: Number(to),
                   message,
-                  reference: `att-red-${body.attendanceId}`,
+                  reference,
                 }),
               },
             );
@@ -121,7 +131,15 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
             console.error("[attendance-sms] dispatch threw", e);
           }
         }
-        return Response.json({ ok: true, sent, total: recipients.length });
+        return Response.json({
+          ok: true,
+          sent,
+          total: recipients.length,
+          reason: "real_send",
+          recipients,
+          message,
+          reference,
+        });
       },
     },
   },

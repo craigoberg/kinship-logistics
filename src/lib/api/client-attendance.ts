@@ -655,16 +655,56 @@ async function fireRedSmsPipeline(
   expectedAt: string,
   sessionId: string,
 ): Promise<void> {
+  // Lazy import keeps this file safe in non-DOM contexts; emitter is SSR-guarded.
+  const { emitMockSms } = await import("@/lib/notifications/mock-sms");
   try {
     const res = await fetch("/api/internal/attendance-sms", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ attendanceId, participantName, expectedAt, sessionId }),
     });
-    const json = await res.json().catch(() => ({}));
+    const json = (await res.json().catch(() => ({}))) as {
+      ok?: boolean;
+      sent?: number;
+      reason?: string;
+      recipients?: string[];
+      message?: string;
+      reference?: string;
+    };
     if (!res.ok) {
       console.error("[client-attendance] SMS pipeline non-OK", res.status, json);
+      emitMockSms({
+        recipient: "unknown",
+        body: `[RED] ${participantName} — server route returned ${res.status}.`,
+        source: "attendance_red",
+        reason: "pipeline_non_ok",
+        reference: `att-red-${attendanceId}`,
+      });
       return;
+    }
+    const recipients = json.recipients ?? [];
+    const message =
+      json.message ??
+      `[RED] ${participantName} missing from Day Centre — expected ${expectedAt}.`;
+    const reason = json.reason ?? "unknown";
+    if (recipients.length === 0) {
+      emitMockSms({
+        recipient: "(no recipients resolved)",
+        body: message,
+        source: "attendance_red",
+        reason,
+        reference: json.reference,
+      });
+    } else {
+      for (const to of recipients) {
+        emitMockSms({
+          recipient: to,
+          body: message,
+          source: "attendance_red",
+          reason,
+          reference: json.reference,
+        });
+      }
     }
     await supabase
       .from("client_attendance_log")
@@ -672,5 +712,12 @@ async function fireRedSmsPipeline(
       .eq("id", attendanceId);
   } catch (e) {
     console.error("[client-attendance] SMS pipeline threw", e);
+    emitMockSms({
+      recipient: "unknown",
+      body: `[RED] ${participantName} — pipeline threw before send.`,
+      source: "attendance_red",
+      reason: "pipeline_error",
+      reference: `att-red-${attendanceId}`,
+    });
   }
 }
