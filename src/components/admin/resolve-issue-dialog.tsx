@@ -150,10 +150,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       setNote("");
       if (kind === "append") {
         toast.success("Update appended to the timeline.");
-        // Stay open so operators can keep adding updates.
-        return;
-      }
-      if (kind === "defer") {
+      } else if (kind === "defer") {
         toast.success("Issue deferred. Moved to the Awaiting tab.");
       } else {
         toast.success("Escalated to Council. Moved to the Awaiting tab.");
