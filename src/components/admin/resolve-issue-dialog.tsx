@@ -23,12 +23,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { supabase } from "@/integrations/supabase/client";
 import {
   appendUpdateNote,
   COUNCIL_SEVERITY_OPTIONS,
   deferUnifiedIssue,
   escalateUnifiedIssueToCouncil,
+  listIssueNotes,
+  renderNoteLine,
   resolveUnifiedIssue,
   type CouncilSeverity,
   type UnifiedIssue,
@@ -37,6 +38,7 @@ import { unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { getActiveUserProfile } from "@/lib/data-store";
+
 
 interface Props {
   issue: UnifiedIssue;
@@ -69,7 +71,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const [councilSev, setCouncilSev] = useState<CouncilSeverity>("Sev 2");
   const [pinOpen, setPinOpen] = useState(false);
 
-  const isDayCentre = issue.source === "day_centre";
+  
 
   // Reset toggles whenever a fresh issue opens.
   useEffect(() => {
@@ -83,24 +85,15 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     }
   }, [open, issue.sourceRowId]);
 
-  // Live-poll the timeline so concurrent operators see appends.
+  // Live-poll the central Hub timeline for ANY source.
   const timelineQuery = useQuery({
-    queryKey: ["site-issue-timeline", issue.sourceRowId],
-    enabled: open && isDayCentre,
+    queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
+    enabled: open,
     refetchInterval: 8_000,
     refetchOnWindowFocus: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("site_issues_register")
-        .select("update_log")
-        .eq("id", issue.sourceRowId)
-        .single();
-      if (error) throw error;
-      return String(
-        (data as { update_log: string | null } | null)?.update_log ?? "",
-      );
-    },
+    queryFn: () => listIssueNotes(issue.source, issue.sourceRowId),
   });
+
 
   const trimmed = note.trim().length;
   const noteOk = trimmed >= 10;
@@ -110,7 +103,9 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const invalidateAll = () => {
     qc.invalidateQueries({ queryKey: unifiedIssuesKey });
-    qc.invalidateQueries({ queryKey: ["site-issue-timeline", issue.sourceRowId] });
+    qc.invalidateQueries({
+      queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
+    });
     qc.invalidateQueries({ queryKey: ["site-issues"] });
     qc.invalidateQueries({ queryKey: ["site-issues-active"] });
     qc.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
@@ -126,6 +121,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       },
     });
   };
+
 
   // Log Note & Update — append + (optionally) defer / escalate. No PIN.
   const logMut = useMutation({
@@ -160,16 +156,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onError: (e: Error) => toast.error("Action failed", { description: e.message }),
   });
 
-  // Resolve & Close — manager-gated. Append note atomically then resolve.
+  // Resolve & Close — manager-gated. resolveUnifiedIssue now logs the
+  // closing note to the central Hub timeline, so no separate append.
   const resolveMut = useMutation({
     mutationFn: async () => {
-      if (isDayCentre) {
-        try {
-          await appendUpdateNote(issue, note);
-        } catch {
-          // Resolution receipt itself captures the note in the ledger.
-        }
-      }
       await resolveUnifiedIssue(issue, note);
     },
     onSuccess: () => {
@@ -187,14 +177,12 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const canLog = noteOk && deferValid && !busy;
   const canResolve = noteOk && !busy;
 
-  const timeline = useMemo(() => {
-    const raw = String(
-      timelineQuery.data ??
-        (issue.raw as { update_log?: string | null } | null)?.update_log ??
-        "",
-    );
-    return raw.trim();
-  }, [timelineQuery.data, issue.raw]);
+
+  const timelineLines = useMemo(() => {
+    const notes = timelineQuery.data ?? [];
+    return notes.map(renderNoteLine);
+  }, [timelineQuery.data]);
+
 
   const handleResolveClick = () => {
     if (!canResolve) return;
@@ -258,23 +246,22 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
             )}
           </div>
 
-          {isDayCentre && (
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Timeline
-              </Label>
-              <div
-                className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
-                aria-readonly
-              >
-                {timeline.length === 0 ? (
-                  <span className="italic">No prior updates.</span>
-                ) : (
-                  timeline
-                )}
-              </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Timeline
+            </Label>
+            <div
+              className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
+              aria-readonly
+            >
+              {timelineLines.length === 0 ? (
+                <span className="italic">No prior updates.</span>
+              ) : (
+                timelineLines.join("\n")
+              )}
             </div>
-          )}
+          </div>
+
 
           <div className="space-y-2">
             <Label htmlFor="resolution-note">
