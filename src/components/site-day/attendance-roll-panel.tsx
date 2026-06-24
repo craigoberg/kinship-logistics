@@ -18,12 +18,14 @@ import {
   listAttendanceRoll,
   seedRollFromSchedules,
   sweepOverdueArrivals,
+  sweepOverdueDepartures,
   toggleCheckIn,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
+import { CheckOutPopover } from "./check-out-popover";
 
 interface Props {
   sessionId: string;
