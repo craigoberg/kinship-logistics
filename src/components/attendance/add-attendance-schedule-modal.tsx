@@ -43,6 +43,8 @@ export function AddAttendanceScheduleModal({
   const [dayLabel, setDayLabel] = useState<string>("");
   const [serviceType, setServiceType] = useState("");
   const [transportRule, setTransportRule] = useState("");
+  const [arrivalTime, setArrivalTime] = useState("09:00");
+  const [departureTime, setDepartureTime] = useState("15:00");
   const [dirty, setDirty] = useState(false);
   const insert = useInsertAttendanceSchedule();
   const update = useUpdateAttendanceSchedule();
@@ -54,12 +56,16 @@ export function AddAttendanceScheduleModal({
       setDayLabel(editing.dayOfWeek);
       setServiceType(editing.serviceType);
       setTransportRule(editing.transportRule);
+      setArrivalTime(editing.expectedArrivalTime || "09:00");
+      setDepartureTime(editing.expectedDepartureTime || "15:00");
       setDirty(false);
     } else if (!open) {
       setDayOfWeek("");
       setDayLabel("");
       setServiceType("");
       setTransportRule("");
+      setArrivalTime("09:00");
+      setDepartureTime("15:00");
       setDirty(false);
     }
   }, [open, editing]);
@@ -67,7 +73,9 @@ export function AddAttendanceScheduleModal({
   const valid =
     dayOfWeek.length > 0 &&
     serviceType.trim().length > 0 &&
-    transportRule.trim().length > 0;
+    transportRule.trim().length > 0 &&
+    /^\d{2}:\d{2}$/.test(arrivalTime) &&
+    /^\d{2}:\d{2}$/.test(departureTime);
   const canSubmit = dirty && valid && !mutation.isPending;
   const dayDisplay = dayLabel || dayOfWeek;
 
@@ -81,6 +89,8 @@ export function AddAttendanceScheduleModal({
             dayOfWeek: dayOfWeek as WeekDay,
             serviceType: serviceType.trim(),
             transportRule: transportRule.trim(),
+            expectedArrivalTime: arrivalTime,
+            expectedDepartureTime: departureTime,
           },
         });
         toast.success("Operational schedule updated", {
@@ -92,6 +102,8 @@ export function AddAttendanceScheduleModal({
           dayOfWeek: dayOfWeek as WeekDay,
           serviceType: serviceType.trim(),
           transportRule: transportRule.trim(),
+          expectedArrivalTime: arrivalTime,
+          expectedDepartureTime: departureTime,
         });
         toast.success("Operational schedule added", {
           description: `${dayDisplay} · ${serviceType.trim()} for ${participantName}.`,
@@ -165,7 +177,47 @@ export function AddAttendanceScheduleModal({
               placeholder="Select transport option"
             />
           </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label
+                htmlFor="sched-arrival"
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Expected arrival time
+              </Label>
+              <input
+                id="sched-arrival"
+                type="time"
+                value={arrivalTime}
+                onChange={(e) => {
+                  setArrivalTime(e.target.value);
+                  setDirty(true);
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label
+                htmlFor="sched-departure"
+                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+              >
+                Expected departure time
+              </Label>
+              <input
+                id="sched-departure"
+                type="time"
+                value={departureTime}
+                onChange={(e) => {
+                  setDepartureTime(e.target.value);
+                  setDirty(true);
+                }}
+                className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm text-slate-900"
+              />
+            </div>
+          </div>
         </div>
+
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>

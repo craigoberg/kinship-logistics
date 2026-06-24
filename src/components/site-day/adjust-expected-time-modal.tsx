@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
+import { Loader2, UserX } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import {
+  markAttendanceAbsent,
   updateExpectedArrival,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
@@ -37,7 +38,7 @@ export function AdjustExpectedTimeModal({
     if (row) setHhmm(isoToSydneyClock(row.expectedArrivalAt));
   }, [row]);
 
-  const mut = useMutation({
+  const updateMut = useMutation({
     mutationFn: async () => {
       if (!row) throw new Error("No row");
       return updateExpectedArrival(row, hhmm, yellowThresholdMins);
@@ -53,8 +54,29 @@ export function AdjustExpectedTimeModal({
     },
   });
 
+  const absentMut = useMutation({
+    mutationFn: async () => {
+      if (!row) throw new Error("No row");
+      return markAttendanceAbsent(row);
+    },
+    onSuccess: (res) => {
+      const closed = res.closedIssueId
+        ? ` Closed ${res.prevSeverity?.toUpperCase() ?? "active"} anomaly.`
+        : "";
+      toast.success(`${participantName} marked absent for today.`, {
+        description: `Removed from overdue queue.${closed}`,
+      });
+      onClose(true);
+    },
+    onError: (e: Error) => {
+      toast.error("Could not mark absent", { description: e.message });
+    },
+  });
+
+  const busy = updateMut.isPending || absentMut.isPending;
+
   return (
-    <Dialog open={!!row} onOpenChange={(o) => !o && !mut.isPending && onClose(false)}>
+    <Dialog open={!!row} onOpenChange={(o) => !o && !busy && onClose(false)}>
       <DialogContent className="sm:max-w-sm">
         <DialogHeader>
           <DialogTitle>Adjust Expected Time</DialogTitle>
@@ -74,16 +96,42 @@ export function AdjustExpectedTimeModal({
             className="w-full rounded-md border border-input bg-background px-3 py-2 text-base text-slate-900"
           />
         </div>
+
+        <div className="mt-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3">
+          <div className="mb-2 text-xs font-semibold uppercase tracking-wide text-destructive">
+            Or record this client as absent
+          </div>
+          <p className="mb-2 text-xs text-muted-foreground">
+            Removes them from the overdue queue and auto-closes any active
+            YELLOW or RED anomaly with the note
+            “Client confirmed absent for today.”
+          </p>
+          <Button
+            type="button"
+            variant="destructive"
+            className="w-full gap-2"
+            disabled={busy}
+            onClick={() => absentMut.mutate()}
+          >
+            {absentMut.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <UserX className="h-4 w-4" />
+            )}
+            Mark Absent for Today
+          </Button>
+        </div>
+
         <DialogFooter>
           <Button
             variant="ghost"
             onClick={() => onClose(false)}
-            disabled={mut.isPending}
+            disabled={busy}
           >
             Cancel
           </Button>
-          <Button onClick={() => mut.mutate()} disabled={mut.isPending}>
-            {mut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          <Button onClick={() => updateMut.mutate()} disabled={busy}>
+            {updateMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
             Update
           </Button>
         </DialogFooter>
