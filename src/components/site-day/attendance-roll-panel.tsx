@@ -93,10 +93,20 @@ export function AttendanceRollPanel({ sessionId }: Props) {
         await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
           (e) => {
             const msg = e instanceof Error ? e.message : String(e);
-            console.error("[AttendanceRollPanel] sweep failed", e);
+            console.error("[AttendanceRollPanel] arrival sweep failed", e);
             toast.error("Attendance overdue sweep failed", { description: msg });
           },
         );
+        await sweepOverdueDepartures(
+          sessionId,
+          depYellowMins,
+          depRedMins,
+          nameMap,
+        ).catch((e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[AttendanceRollPanel] departure sweep failed", e);
+          toast.error("Departure overdue sweep failed", { description: msg });
+        });
       }
       return rows;
     },
