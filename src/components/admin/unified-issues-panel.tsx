@@ -14,6 +14,12 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+  TabsContent,
+} from "@/components/ui/tabs";
+import {
   Table,
   TableBody,
   TableCell,
@@ -26,11 +32,10 @@ import { useUnifiedIssues } from "@/hooks/use-unified-issues";
 import type {
   UnifiedIssue,
   UnifiedIssueSource,
+  UnifiedIssueTab,
   UnifiedSeverity,
 } from "@/lib/api/unified-issues";
-// Realtime escalation-pool subscription removed — single-rail is now
-// asynchronous and refreshes via explicit query invalidation on writes.
-import { ResolveIssueDialog } from "./resolve-issue-dialog";
+import { ManageIssueDialog } from "./resolve-issue-dialog";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
@@ -61,15 +66,23 @@ function severityBadge(sev: UnifiedSeverity) {
   return <span className="text-xs text-muted-foreground">—</span>;
 }
 
-export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
-  const q = useUnifiedIssues();
-  const [sourceFilter, setSourceFilter] = useState<UnifiedIssueSource | "all">("all");
-  const [severityFilter, setSeverityFilter] = useState<"all" | "red" | "yellow" | "green">(
+function IssuesTable({
+  tab,
+  onManage,
+  onManageRenewal,
+}: {
+  tab: UnifiedIssueTab;
+  onManage: (i: UnifiedIssue) => void;
+  onManageRenewal?: (assetId: string) => void;
+}) {
+  const q = useUnifiedIssues(tab);
+  const [sourceFilter, setSourceFilter] = useState<UnifiedIssueSource | "all">(
     "all",
   );
+  const [severityFilter, setSeverityFilter] = useState<
+    "all" | "red" | "yellow" | "green"
+  >("all");
   const [search, setSearch] = useState("");
-  const [resolving, setResolving] = useState<UnifiedIssue | null>(null);
-
 
   const all = q.data ?? [];
   const visible = useMemo(() => {
@@ -89,14 +102,17 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          Central queue for every open operational issue — walkthrough anomalies,
-          incidents, gate escalations, and overdue renewals.
+          {tab === "active"
+            ? "Central queue for every open operational issue — walkthrough anomalies, incidents, gate escalations, and overdue renewals."
+            : "Issues currently parked: deferred for a future action or awaiting a Council response."}
         </p>
         <div className="flex items-center gap-2">
           {q.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
-          <Badge variant="secondary">{all.length} open</Badge>
+          <Badge variant="secondary">
+            {all.length} {tab === "active" ? "open" : "awaiting"}
+          </Badge>
         </div>
       </div>
 
@@ -183,7 +199,9 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
             ) : visible.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={6} className="text-center text-muted-foreground">
-                  No open issues match the current filters.
+                  {tab === "active"
+                    ? "No open issues match the current filters."
+                    : "Nothing deferred or awaiting Council."}
                 </TableCell>
               </TableRow>
             ) : (
@@ -234,8 +252,8 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
                         Manage
                       </Button>
                     ) : (
-                      <Button size="sm" onClick={() => setResolving(i)}>
-                        Resolve
+                      <Button size="sm" onClick={() => onManage(i)}>
+                        Manage
                       </Button>
                     )}
                   </TableCell>
@@ -245,13 +263,43 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
           </TableBody>
         </Table>
       </div>
+    </div>
+  );
+}
 
-      {resolving && (
-        <ResolveIssueDialog
-          issue={resolving}
+export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
+  const [managing, setManaging] = useState<UnifiedIssue | null>(null);
+  const [tab, setTab] = useState<UnifiedIssueTab>("active");
+
+  return (
+    <div className="space-y-4">
+      <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
+        <TabsList>
+          <TabsTrigger value="active">Active</TabsTrigger>
+          <TabsTrigger value="awaiting">Awaiting / Deferred</TabsTrigger>
+        </TabsList>
+        <TabsContent value="active" className="mt-4">
+          <IssuesTable
+            tab="active"
+            onManage={setManaging}
+            onManageRenewal={onManageRenewal}
+          />
+        </TabsContent>
+        <TabsContent value="awaiting" className="mt-4">
+          <IssuesTable
+            tab="awaiting"
+            onManage={setManaging}
+            onManageRenewal={onManageRenewal}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {managing && (
+        <ManageIssueDialog
+          issue={managing}
           open
           onOpenChange={(o) => {
-            if (!o) setResolving(null);
+            if (!o) setManaging(null);
           }}
         />
       )}
