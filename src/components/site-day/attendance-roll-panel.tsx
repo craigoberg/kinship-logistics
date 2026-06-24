@@ -214,9 +214,10 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     <span className="truncate text-base font-semibold">
                       {nameMap[r.participantId] ?? "Loading…"}
                     </span>
-                    <Badge variant="outline" className="text-[10px] uppercase">
+                    <Badge className="border border-slate-400 bg-white text-slate-900 text-[10px] uppercase">
                       {r.arrivalMethod.replace("_", " ")}
                     </Badge>
+
                     {isRed && (
                       <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
                         Escalated — Manager notified
@@ -264,9 +265,10 @@ export function AttendanceRollPanel({ sessionId }: Props) {
                     className={cn(
                       "inline-flex items-center justify-center rounded-md p-2",
                       "min-h-11 min-w-11 cursor-pointer",
-                      "border border-border bg-background/80 hover:bg-muted",
-                      "text-slate-900",
+                      "border border-slate-300 bg-white hover:bg-slate-100",
+                      "text-slate-900 shadow-sm",
                     )}
+
                   >
                     <Clock className="h-4 w-4" />
                   </span>
