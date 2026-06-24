@@ -25,12 +25,14 @@ export type AttendanceStatus =
   | "absent"
   | "accounted";
 export type EscalationSeverity = "yellow" | "red";
+export type DepartureVector = "bus" | "family" | "independent";
 
 export interface ClientAttendanceRow {
   id: string;
   sessionId: string;
   participantId: string;
   expectedArrivalAt: string;
+  expectedDepartureAt: string | null;
   arrivalMethod: ArrivalMethod;
   checkedInAt: string | null;
   checkedInBy: string | null;
@@ -41,6 +43,10 @@ export interface ClientAttendanceRow {
   escalationSeverity: EscalationSeverity | null;
   escalationRaisedAt: string | null;
   redSmsDispatchedAt: string | null;
+  departureIssueId: string | null;
+  departureSeverity: EscalationSeverity | null;
+  departureRaisedAt: string | null;
+  departureRedSmsDispatchedAt: string | null;
   notes: string | null;
   createdAt: string;
   updatedAt: string;
@@ -51,6 +57,7 @@ interface DbRow {
   session_id: string;
   participant_id: string;
   expected_arrival_at: string;
+  expected_departure_at: string | null;
   arrival_method: ArrivalMethod;
   checked_in_at: string | null;
   checked_in_by: string | null;
@@ -61,6 +68,10 @@ interface DbRow {
   escalation_severity: EscalationSeverity | null;
   escalation_raised_at: string | null;
   red_sms_dispatched_at: string | null;
+  departure_issue_id: string | null;
+  departure_severity: EscalationSeverity | null;
+  departure_raised_at: string | null;
+  departure_red_sms_dispatched_at: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
@@ -72,6 +83,7 @@ function toRow(r: DbRow): ClientAttendanceRow {
     sessionId: r.session_id,
     participantId: r.participant_id,
     expectedArrivalAt: r.expected_arrival_at,
+    expectedDepartureAt: r.expected_departure_at ?? null,
     arrivalMethod: r.arrival_method,
     checkedInAt: r.checked_in_at,
     checkedInBy: r.checked_in_by,
@@ -82,6 +94,10 @@ function toRow(r: DbRow): ClientAttendanceRow {
     escalationSeverity: r.escalation_severity,
     escalationRaisedAt: r.escalation_raised_at,
     redSmsDispatchedAt: r.red_sms_dispatched_at,
+    departureIssueId: r.departure_issue_id ?? null,
+    departureSeverity: r.departure_severity ?? null,
+    departureRaisedAt: r.departure_raised_at ?? null,
+    departureRedSmsDispatchedAt: r.departure_red_sms_dispatched_at ?? null,
     notes: r.notes,
     createdAt: r.created_at,
     updatedAt: r.updated_at,

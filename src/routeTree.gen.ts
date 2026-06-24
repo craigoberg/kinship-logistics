@@ -20,6 +20,7 @@ import { Route as DayRouteImport } from './routes/day'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiInternalDepartureSmsRouteImport } from './routes/api/internal/departure-sms'
 import { Route as ApiInternalAttendanceSmsRouteImport } from './routes/api/internal/attendance-sms'
 
 const TransportRoute = TransportRouteImport.update({
@@ -77,6 +78,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalDepartureSmsRoute = ApiInternalDepartureSmsRouteImport.update({
+  id: '/api/internal/departure-sms',
+  path: '/api/internal/departure-sms',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ApiInternalAttendanceSmsRoute =
   ApiInternalAttendanceSmsRouteImport.update({
     id: '/api/internal/attendance-sms',
@@ -97,6 +103,7 @@ export interface FileRoutesByFullPath {
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
+  '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -111,6 +118,7 @@ export interface FileRoutesByTo {
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
+  '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -126,6 +134,7 @@ export interface FileRoutesById {
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
+  '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -142,6 +151,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/transport'
     | '/api/internal/attendance-sms'
+    | '/api/internal/departure-sms'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -156,6 +166,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/transport'
     | '/api/internal/attendance-sms'
+    | '/api/internal/departure-sms'
   id:
     | '__root__'
     | '/'
@@ -170,6 +181,7 @@ export interface FileRouteTypes {
     | '/sync'
     | '/transport'
     | '/api/internal/attendance-sms'
+    | '/api/internal/departure-sms'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -185,6 +197,7 @@ export interface RootRouteChildren {
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
   ApiInternalAttendanceSmsRoute: typeof ApiInternalAttendanceSmsRoute
+  ApiInternalDepartureSmsRoute: typeof ApiInternalDepartureSmsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -266,6 +279,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/departure-sms': {
+      id: '/api/internal/departure-sms'
+      path: '/api/internal/departure-sms'
+      fullPath: '/api/internal/departure-sms'
+      preLoaderRoute: typeof ApiInternalDepartureSmsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/internal/attendance-sms': {
       id: '/api/internal/attendance-sms'
       path: '/api/internal/attendance-sms'
@@ -289,6 +309,7 @@ const rootRouteChildren: RootRouteChildren = {
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,
   ApiInternalAttendanceSmsRoute: ApiInternalAttendanceSmsRoute,
+  ApiInternalDepartureSmsRoute: ApiInternalDepartureSmsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
