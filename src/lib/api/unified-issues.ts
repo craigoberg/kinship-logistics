@@ -250,11 +250,21 @@ export async function resolveUnifiedIssue(
   if (note.length < 10) {
     throw new Error("Resolution note must be at least 10 characters.");
   }
+
+  // Central timeline: always log the resolution note (every source incl. renewals).
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: `[RESOLVED] ${note}`,
+    kind: "resolve",
+  });
+
   if (issue.source === "renewal") {
-    throw new Error(
-      "Renewals are resolved via the Compliance Asset editor, not the unified panel.",
-    );
+    // Renewals don't have a destructive flip here — the Compliance Asset
+    // editor owns the lifecycle. The timeline note + ledger receipt below
+    // are the audit artefacts.
   }
+
 
   const nowIso = new Date().toISOString();
   const staffId = await resolveStaffIdWithFallback();
