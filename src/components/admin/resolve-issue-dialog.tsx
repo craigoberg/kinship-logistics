@@ -246,23 +246,22 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
             )}
           </div>
 
-          {isDayCentre && (
-            <div className="space-y-1">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Timeline
-              </Label>
-              <div
-                className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
-                aria-readonly
-              >
-                {timeline.length === 0 ? (
-                  <span className="italic">No prior updates.</span>
-                ) : (
-                  timeline
-                )}
-              </div>
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Timeline
+            </Label>
+            <div
+              className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
+              aria-readonly
+            >
+              {timelineLines.length === 0 ? (
+                <span className="italic">No prior updates.</span>
+              ) : (
+                timelineLines.join("\n")
+              )}
             </div>
-          )}
+          </div>
+
 
           <div className="space-y-2">
             <Label htmlFor="resolution-note">
