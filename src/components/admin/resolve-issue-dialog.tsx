@@ -28,6 +28,7 @@ import {
   COUNCIL_SEVERITY_OPTIONS,
   deferUnifiedIssue,
   escalateUnifiedIssueToCouncil,
+  forceAckEscalation,
   listIssueNotes,
   renderNoteLine,
   resolveUnifiedIssue,
