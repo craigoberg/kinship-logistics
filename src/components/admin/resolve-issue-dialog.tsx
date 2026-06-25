@@ -377,6 +377,23 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">
+            {isAwaitingOperatorAck && (
+              <Button
+                variant="destructive"
+                onClick={() => forceAckMut.mutate()}
+                disabled={!canForceAck}
+                title={
+                  isManagerProfile()
+                    ? "Manager-only: clear stranded awaiting-ack rows"
+                    : "Manager sign-in required"
+                }
+              >
+                {forceAckMut.isPending && (
+                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
+                )}
+                Force-ack (Manager)
+              </Button>
+            )}
             <Button
               variant="secondary"
               onClick={() => logMut.mutate()}
@@ -398,6 +415,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
               Resolve &amp; Close
             </Button>
           </DialogFooter>
+
         </DialogContent>
       </Dialog>
 
