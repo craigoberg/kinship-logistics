@@ -174,9 +174,32 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onError: (e: Error) => toast.error("Resolution failed", { description: e.message }),
   });
 
-  const busy = logMut.isPending || resolveMut.isPending;
+  const forceAckMut = useMutation({
+    mutationFn: async () => {
+      await forceAckEscalation(issue, { reason: note });
+    },
+    onSuccess: () => {
+      invalidateAll();
+      setNote("");
+      toast.success("Escalation force-acknowledged", {
+        description: "Removed from the awaiting list. Receipt logged.",
+      });
+      onOpenChange(false);
+    },
+    onError: (e: Error) =>
+      toast.error("Force-ack failed", { description: e.message }),
+  });
+
+  const busy = logMut.isPending || resolveMut.isPending || forceAckMut.isPending;
   const canLog = noteOk && deferValid && !busy;
   const canResolve = noteOk && !busy;
+
+  const raw = (issue.raw ?? {}) as Record<string, unknown>;
+  const isAwaitingOperatorAck =
+    issue.source === "escalation" &&
+    raw.status === "resolved_approved" &&
+    raw.operator_acknowledged_at == null;
+  const canForceAck = isAwaitingOperatorAck && isManagerProfile() && noteOk && !busy;
 
 
   const timelineLines = useMemo(() => {
