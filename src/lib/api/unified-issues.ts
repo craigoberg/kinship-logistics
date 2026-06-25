@@ -495,10 +495,13 @@ export async function deferUnifiedIssue(
   }
 
   // 1) Always log a defer note to the central timeline (every source).
+  //    Display the defer target in LOCAL dd-mm-yy/hh:mm so it matches the
+  //    timeline stamp format and avoids surprising the operator with UTC.
+  const deferStampLocal = formatStamp(new Date(args.untilIso));
   await insertHubNote({
     source: issue.source,
     sourceRowId: issue.sourceRowId,
-    note: `[DEFERRED until ${args.untilIso.slice(0, 16)}] ${note}`,
+    note: `[DEFERRED until ${deferStampLocal}] ${note}`,
     kind: "defer",
     metadata: { deferred_until: args.untilIso },
   });
