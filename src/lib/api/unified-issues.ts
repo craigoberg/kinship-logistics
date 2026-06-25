@@ -240,7 +240,161 @@ export async function listOpenUnifiedIssues(
     });
   }
 
-  out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  // Filter out any issue whose latest timeline note is a still-live defer.
+  const filtered = out.filter((i) => {
+    const k = `${i.source}:${i.sourceRowId}`;
+    const d = deferState.get(k);
+    return !(d && d.deferredUntil.getTime() > Date.now());
+  });
+
+  filtered.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+  return filtered;
+}
+
+// ---------------------------------------------------------------------------
+// Cross-source deferral helpers (read latest hub_issue_notes per issue)
+// ---------------------------------------------------------------------------
+
+interface LiveDefer {
+  deferredUntil: Date;
+  note: string;
+  stampedAt: string;
+}
+
+/**
+ * Build a map of `${source}:${sourceRowId}` → live defer state by reading
+ * the latest note per issue from `hub_issue_notes`. An issue is "live
+ * deferred" only when its LATEST note is kind='defer' (any later
+ * append/resolve note cancels the defer).
+ */
+async function fetchLatestDeferStateMap(): Promise<Map<string, LiveDefer>> {
+  const map = new Map<string, LiveDefer>();
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("source, source_row_id, note, kind, stamped_at, metadata")
+    .order("stamped_at", { ascending: false })
+    .limit(2000);
+  if (error) {
+    console.warn("[unified-issues] fetchLatestDeferStateMap failed", error);
+    return map;
+  }
+  const seen = new Set<string>();
+  for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+    const key = `${String(r.source)}:${String(r.source_row_id)}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    if (r.kind !== "defer") continue;
+    const meta = (r.metadata as Record<string, unknown> | null) ?? null;
+    const untilStr = meta && typeof meta.deferred_until === "string"
+      ? (meta.deferred_until as string)
+      : null;
+    if (!untilStr) continue;
+    const until = new Date(untilStr);
+    if (Number.isNaN(until.getTime())) continue;
+    map.set(key, {
+      deferredUntil: until,
+      note: String(r.note ?? ""),
+      stampedAt: String(r.stamped_at),
+    });
+  }
+  return map;
+}
+
+/**
+ * Fetch incident / escalation / renewal rows that are currently
+ * live-deferred (latest note is a defer with future deferred_until) and
+ * surface them in the Awaiting / Deferred tab.
+ */
+async function fetchDeferredNonDayCentreIssues(
+  deferState: Map<string, LiveDefer>,
+): Promise<UnifiedIssue[]> {
+  const now = Date.now();
+  const targets: Array<{ source: UnifiedIssueSource; id: string; until: Date }> = [];
+  for (const [key, d] of deferState.entries()) {
+    if (d.deferredUntil.getTime() <= now) continue;
+    const [src, id] = key.split(":", 2);
+    if (src === "day_centre") continue; // handled via site_issues_register.status
+    targets.push({ source: src as UnifiedIssueSource, id, until: d.deferredUntil });
+  }
+  if (targets.length === 0) return [];
+
+  const incidentIds = targets.filter((t) => t.source === "incident").map((t) => t.id);
+  const escalationIds = targets.filter((t) => t.source === "escalation").map((t) => t.id);
+  const renewalIds = targets.filter((t) => t.source === "renewal").map((t) => t.id);
+
+  const [incRes, escRes, renRes] = await Promise.all([
+    incidentIds.length
+      ? supabase.from("operational_incidents").select("*").in("id", incidentIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    escalationIds.length
+      ? supabase.from("operational_escalations").select("*").in("id", escalationIds)
+      : Promise.resolve({ data: [] as Array<Record<string, unknown>>, error: null }),
+    renewalIds.length
+      ? listComplianceAssets({ status: "active" })
+          .then((assets) => ({ data: assets.filter((a) => renewalIds.includes(a.id)), error: null }))
+          .catch(() => ({ data: [] as ComplianceAsset[], error: null }))
+      : Promise.resolve({ data: [] as ComplianceAsset[], error: null }),
+  ]);
+
+  const fmt = (d: Date) => formatStamp(d);
+  const out: UnifiedIssue[] = [];
+
+  for (const r of (incRes.data ?? []) as Array<Record<string, unknown>>) {
+    const sev = incidentSevToUnified(r.severity as string | null);
+    const meta = deferState.get(`incident:${r.id}`)!;
+    out.push({
+      key: `incident:${r.id as string}`,
+      source: "incident",
+      sourceLabel: `${SOURCE_LABELS.incident} · Deferred`,
+      category: String(r.incident_type ?? "incident").replace("_", " "),
+      subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
+      severity: sev,
+      title: String(r.description ?? "Operational incident").slice(0, 120),
+      description: String(r.description ?? ""),
+      status: String(r.status ?? "pending"),
+      createdAt: String(r.created_at ?? new Date().toISOString()),
+      sourceRowId: String(r.id),
+      eventId: (r.event_id as string | null) ?? null,
+      raw: r,
+    });
+  }
+
+  for (const r of (escRes.data ?? []) as Array<Record<string, unknown>>) {
+    const meta = deferState.get(`escalation:${r.id}`)!;
+    out.push({
+      key: `escalation:${r.id as string}`,
+      source: "escalation",
+      sourceLabel: `${SOURCE_LABELS.escalation} · Deferred`,
+      category: String(r.gate_id ?? "gate"),
+      subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
+      severity: "red",
+      title: `${r.driver_name ?? "Driver"} · ${r.vehicle_info ?? ""}`.trim(),
+      description: `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"}. Status: ${r.status ?? "pending"}.`,
+      status: String(r.status ?? "pending"),
+      createdAt: String(r.created_at ?? new Date().toISOString()),
+      sourceRowId: String(r.id),
+      raw: r,
+    });
+  }
+
+  for (const a of renRes.data as ComplianceAsset[]) {
+    const meta = deferState.get(`renewal:${a.id}`)!;
+    out.push({
+      key: `renewal:${a.id}`,
+      source: "renewal",
+      sourceLabel: `${SOURCE_LABELS.renewal} · Deferred`,
+      category: a.category,
+      subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
+      severity: computeRyge(a),
+      title: a.name,
+      description: (a.description ?? "") + (a.expiry_date ? ` (expires ${a.expiry_date})` : ""),
+      status: a.status,
+      createdAt: a.updated_at,
+      sourceRowId: a.id,
+      raw: a,
+    });
+  }
+
   return out;
 }
 
