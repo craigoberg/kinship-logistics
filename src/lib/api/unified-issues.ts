@@ -69,6 +69,12 @@ export async function listOpenUnifiedIssues(
 ): Promise<UnifiedIssue[]> {
   const tab: UnifiedIssueTab = options.tab ?? "active";
 
+  // Latest note per (source, source_row_id), used to detect "currently
+  // deferred" issues for any source (incident / escalation / renewal /
+  // day_centre). A defer is "live" when the latest note is kind='defer'
+  // and metadata.deferred_until is in the future.
+  const deferState = await fetchLatestDeferStateMap();
+
   if (tab === "awaiting") {
     const { data, error } = await supabase
       .from("site_issues_register")
@@ -77,7 +83,6 @@ export async function listOpenUnifiedIssues(
       .order("created_at", { ascending: false });
     if (error) {
       console.warn("[unified-issues] awaiting tab fetch failed", error);
-      return [];
     }
     const out: UnifiedIssue[] = [];
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
@@ -103,6 +108,12 @@ export async function listOpenUnifiedIssues(
         raw: r,
       });
     }
+
+    // Cross-source deferrals: surface any non-day_centre issue whose
+    // latest timeline note is a still-live defer.
+    const extras = await fetchDeferredNonDayCentreIssues(deferState);
+    out.push(...extras);
+    out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     return out;
   }
 
