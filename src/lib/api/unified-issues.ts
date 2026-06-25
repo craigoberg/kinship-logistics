@@ -640,6 +640,44 @@ export async function appendUpdateNote(
   }
 }
 
+/**
+ * Manager-only force-acknowledge for stranded "awaiting operator ack"
+ * escalations. Writes operator_acknowledged_at/by directly and appends
+ * a FORCE-ACK note to the central Hub timeline so the Compliance Shield
+ * ledger records who dismissed it and why. Does NOT touch the normal
+ * driver-PIN handshake on live pre-trip escalations.
+ */
+export async function forceAckEscalation(
+  issue: UnifiedIssue,
+  args: { reason: string },
+): Promise<void> {
+  if (issue.source !== "escalation") {
+    throw new Error("Force-ack only applies to escalation rows.");
+  }
+  const reason = args.reason.trim();
+  if (reason.length < 10) {
+    throw new Error("Force-ack reason must be at least 10 characters.");
+  }
+  const nowIso = new Date().toISOString();
+  const staffId = await resolveStaffIdWithFallback();
+
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: `[FORCE-ACK]: ${reason}`,
+    kind: "append",
+  });
+
+  const { error } = await supabase
+    .from("operational_escalations")
+    .update({
+      operator_acknowledged_at: nowIso,
+      operator_acknowledged_by: staffId,
+    })
+    .eq("id", issue.sourceRowId);
+  if (error) throw error;
+}
+
 
 /**
  * Defer an issue with a "next action" date. The row drops off the
