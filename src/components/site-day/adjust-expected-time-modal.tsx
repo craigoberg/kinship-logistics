@@ -59,13 +59,21 @@ export function AdjustExpectedTimeModal({
   const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
 
+  // Reset internal state only when the modal transitions from closed -> open
+  // for a NEW row id. A background refetch that returns a fresh `row` object
+  // with the same id must NOT wipe the operator's typed PIN / notes / time.
+  const openedForRef = useRef<string | null>(null);
   useEffect(() => {
-    if (row) {
-      setHhmm(isoToSydneyClock(row.expectedArrivalAt));
+    const rowId = row?.id ?? null;
+    if (rowId && openedForRef.current !== rowId) {
+      openedForRef.current = rowId;
+      setHhmm(isoToSydneyClock(row!.expectedArrivalAt));
       setReasonCode("");
       setDetail("");
       setPin("");
       setPinError(null);
+    } else if (!rowId) {
+      openedForRef.current = null;
     }
   }, [row]);
 
