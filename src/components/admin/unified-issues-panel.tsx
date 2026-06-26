@@ -47,7 +47,6 @@ const SOURCE_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }
   { value: "day_centre", label: "Day Centre" },
   { value: "incident", label: "Incident" },
   { value: "escalation", label: "Escalation" },
-  { value: "renewal", label: "Renewal" },
 ];
 
 const SOURCE_BADGE: Record<UnifiedIssueSource, string> = {
