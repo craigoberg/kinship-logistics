@@ -112,9 +112,25 @@ export function AttendanceRollPanel({ sessionId }: Props) {
       return rows;
     },
     refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     staleTime: 30_000,
     enabled: !!sessionId && participantsQ.isSuccess,
+  });
+
+  // Realtime push — silently refresh the roll when the underlying log row
+  // changes. Keeps the screen live without nuking any open modal state.
+  useRealtimeInvalidate({
+    table: "client_attendance_log",
+    filter: sessionId ? `session_id=eq.${sessionId}` : undefined,
+    queryKeys: [ROLL_KEY(sessionId)],
+    enabled: !!sessionId,
+  });
+  useRealtimeInvalidate({
+    table: "site_issues_register",
+    filter: sessionId ? `session_id=eq.${sessionId}` : undefined,
+    queryKeys: [ROLL_KEY(sessionId)],
+    enabled: !!sessionId,
   });
 
   const toggleMut = useMutation({
