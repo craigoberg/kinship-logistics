@@ -163,14 +163,52 @@ function parseISODate(iso: string): Date | null {
   return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
 }
 
-export function computeRyge(asset: ComplianceAsset, today: Date = new Date()): Ryge {
+export const SHORT_CYCLE_TYPES = new Set([
+  "facility_drill",
+  "operational_check",
+  "monthly_review",
+  "two_man_bus_walkaround",
+]);
+
+export interface ComplianceThresholds {
+  yellowDays: number;
+  redDays: number;
+}
+
+export function thresholdsForAsset(
+  assetType: string | undefined | null,
+  params: { default: number; shortCycle: number },
+): ComplianceThresholds {
+  const isShort = !!assetType && SHORT_CYCLE_TYPES.has(assetType.toLowerCase());
+  const yellow = isShort ? params.shortCycle : params.default;
+  // Red defaults to ~1/4 of yellow (min 1) so RED is always less than YELLOW.
+  const red = Math.max(1, Math.floor(yellow / 4));
+  return { yellowDays: yellow, redDays: red };
+}
+
+export function computeRyge(
+  asset: ComplianceAsset,
+  paramsOrToday?: { default: number; shortCycle: number } | Date,
+  maybeToday?: Date,
+): Ryge {
+  // Backwards-compat: old signature was computeRyge(asset, today?).
+  const params =
+    paramsOrToday && !(paramsOrToday instanceof Date)
+      ? paramsOrToday
+      : { default: 30, shortCycle: 7 };
+  const today =
+    paramsOrToday instanceof Date ? paramsOrToday : (maybeToday ?? new Date());
+
   if (!asset.expiry_date) return "green";
   const expiry = parseISODate(asset.expiry_date);
   if (!expiry) return "green";
   const startOfToday = new Date(today.getFullYear(), today.getMonth(), today.getDate());
   const days = Math.round((expiry.getTime() - startOfToday.getTime()) / 86_400_000);
-  const red = asset.config.red_days ?? 7;
-  const yellow = asset.config.yellow_days ?? 30;
+
+  const t = thresholdsForAsset(asset.type, params);
+  // Per-asset config overrides still win when explicitly set.
+  const red = asset.config.red_days ?? t.redDays;
+  const yellow = asset.config.yellow_days ?? t.yellowDays;
   if (days <= red) return "red";
   if (days <= yellow) return "yellow";
   return "green";
