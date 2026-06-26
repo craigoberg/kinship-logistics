@@ -49,7 +49,9 @@ export function DayCentrePage() {
     queryKey: ["site-issues", "open-reds-all"],
     enabled: isReady,
     staleTime: 5_000,
-    refetchInterval: 30_000,
+    // BMS fallback poll only — realtime hook below pushes most updates.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("site_issues_register")
