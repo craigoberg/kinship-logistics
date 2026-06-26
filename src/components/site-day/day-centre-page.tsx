@@ -9,6 +9,7 @@ import { ClientTime } from "@/components/ui/client-time";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { getActiveUserProfile, getEscalationBySourceIssue } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
