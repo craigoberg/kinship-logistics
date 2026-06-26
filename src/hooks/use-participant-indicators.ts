@@ -47,12 +47,14 @@ export const EMPTY_INDICATORS: ParticipantIndicators = {
 
 export function useParticipantDirectoryIndicators() {
   return useQuery({
-    queryKey: ["participant-directory-indicators", "v2-daily-grid"],
+    queryKey: ["participant-directory-indicators", "v3-split-transport"],
     queryFn: async (): Promise<Map<string, ParticipantIndicators>> => {
       const [schedRes, medRes] = await Promise.all([
         supabase
           .from("participant_attendance_schedules")
-          .select("participant_id, day_of_week, transport_required, active")
+          .select(
+            "participant_id, day_of_week, transport_required, inbound_transport, outbound_transport, active",
+          )
           .eq("active", true),
         supabase
           .from("participant_medication_schedules")
@@ -78,17 +80,17 @@ export function useParticipantDirectoryIndicators() {
         return cur;
       };
 
-      // 1) Attendance + transport per day
+      // 1) Attendance + transport per day (inbound / outbound may diverge).
       for (const row of schedRes.data ?? []) {
         const id = row.participant_id as string | null;
         const dow = row.day_of_week as string | null;
         if (!id || !dow) continue;
         const entry = ensure(id);
         entry.hasSchedule = true;
-        const method = mapTransport(row.transport_required);
-        // Schema currently stores a single transport vector per schedule row;
-        // mirror it to inbound + outbound until a separate field exists.
-        entry.schedule[dow] = { inbound: method, outbound: method };
+        const legacy = row.transport_required as string | null;
+        const inbound = mapTransport(row.inbound_transport ?? legacy);
+        const outbound = mapTransport(row.outbound_transport ?? legacy);
+        entry.schedule[dow] = { inbound, outbound };
       }
 
       // 2) Medication: aggregate scheduled vs PRN flags, then map to attendance days.
