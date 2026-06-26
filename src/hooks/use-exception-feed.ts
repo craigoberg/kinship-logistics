@@ -20,6 +20,37 @@ import {
   type ComplianceAsset,
   type ComplianceActionModule,
 } from "@/lib/api/compliance-assets";
+import { supabase } from "@/integrations/supabase/client";
+import { getSydneyIsoDate } from "@/lib/operational-time";
+
+// Presence-gated medication alerts: dashboard must NOT surface a med
+// exception for a participant who isn't physically in our custody. We
+// load today's client_attendance_log once and only yield exceptions for
+// participants whose attendance status is strictly 'checked_in'.
+async function fetchTodaysCheckedInParticipants(): Promise<Set<string>> {
+  const date = getSydneyIsoDate();
+  const sessionRes = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (sessionRes.error) throw sessionRes.error;
+  const sessionId = sessionRes.data?.id as string | undefined;
+  if (!sessionId) return new Set();
+  const logRes = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, status")
+    .eq("session_id", sessionId);
+  if (logRes.error) throw logRes.error;
+  const out = new Set<string>();
+  for (const r of logRes.data ?? []) {
+    const row = r as { participant_id: string | null; status: string | null };
+    if (row.status === "checked_in" && row.participant_id) {
+      out.add(row.participant_id);
+    }
+  }
+  return out;
+}
 
 export type Severity = "critical" | "warning" | "info";
 
