@@ -34,6 +34,7 @@ import {
 import { ClientTime } from "@/components/ui/client-time";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile, listStaffRegistry, verifyStaffPin, type StaffMember } from "@/lib/data-store";
 import {
   ACTION_MODULES,
