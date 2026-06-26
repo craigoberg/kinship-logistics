@@ -1,5 +1,6 @@
 import { useEffect, useState, type ReactNode } from "react";
-import { Link, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
+import { useQueryClient } from "@tanstack/react-query";
 import { LogOut, ShieldOff } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
 import { BottomNav, NAV_ITEMS } from "./bottom-nav";
@@ -16,18 +17,6 @@ function roleLabel(role: string | null | undefined): string {
   if (role === "driver") return "Driver";
   // Future roles: assistant_manager, guardian, support_worker, dashboard
   return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-
-function handleLogout() {
-  try {
-    localStorage.clear();
-    sessionStorage.clear();
-    void supabase.auth.signOut();
-  } catch {
-    // ignore cleanup errors
-  }
-  window.location.href = "/auth";
 }
 
 /**
@@ -72,10 +61,24 @@ function SiteNoGoBanner() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const current = NAV_ITEMS.find((n) =>
     n.exact ? pathname === n.to : pathname.startsWith(n.to),
   );
   const title = current?.label ?? "Yada Connect";
+
+  const handleLogout = () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      void supabase.auth.signOut();
+    } catch {
+      // ignore cleanup errors
+    }
+    queryClient.clear();
+    void navigate({ to: "/auth", replace: true });
+  };
 
   // Read profile on the client only — avoids SSR/CSR hydration mismatch
   // because localStorage isn't available on the server.

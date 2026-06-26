@@ -22,6 +22,7 @@ import {
   toggleCheckIn,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
@@ -111,9 +112,25 @@ export function AttendanceRollPanel({ sessionId }: Props) {
       return rows;
     },
     refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     staleTime: 30_000,
     enabled: !!sessionId && participantsQ.isSuccess,
+  });
+
+  // Realtime push — silently refresh the roll when the underlying log row
+  // changes. Keeps the screen live without nuking any open modal state.
+  useRealtimeInvalidate({
+    table: "client_attendance_log",
+    filter: sessionId ? `session_id=eq.${sessionId}` : undefined,
+    queryKeys: [ROLL_KEY(sessionId)],
+    enabled: !!sessionId,
+  });
+  useRealtimeInvalidate({
+    table: "site_issues_register",
+    filter: sessionId ? `session_id=eq.${sessionId}` : undefined,
+    queryKeys: [ROLL_KEY(sessionId)],
+    enabled: !!sessionId,
   });
 
   const toggleMut = useMutation({

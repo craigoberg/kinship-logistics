@@ -9,6 +9,7 @@ import { ClientTime } from "@/components/ui/client-time";
 import { SITE_SESSION_QUERY_KEY, useSiteSession } from "@/hooks/use-site-session";
 import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
 import { getActiveUserProfile, getEscalationBySourceIssue } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
@@ -48,7 +49,9 @@ export function DayCentrePage() {
     queryKey: ["site-issues", "open-reds-all"],
     enabled: isReady,
     staleTime: 5_000,
-    refetchInterval: 30_000,
+    // BMS fallback poll only — realtime hook below pushes most updates.
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
     queryFn: async () => {
       const { data, error } = await supabase
         .from("site_issues_register")
@@ -76,6 +79,14 @@ export function DayCentrePage() {
     enabled: !!redIssue,
     staleTime: 5_000,
   });
+
+  // BMS-style silent updates: realtime push for the RED feed used to gate
+  // session opening. Polling above stays as a fallback if the socket drops.
+  useRealtimeInvalidate({
+    table: "site_issues_register",
+    queryKeys: [["site-issues", "open-reds-all"]],
+  });
+
 
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.

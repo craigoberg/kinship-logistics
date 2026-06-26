@@ -1,5 +1,5 @@
 // Force rebuild version 2.4 - Full Integrated Guard
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
@@ -76,6 +76,7 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -93,6 +94,8 @@ export const Route = createFileRoute("/manifest")({
 
 function ManifestPage() {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+  const navigate = useNavigate();
+  const manifestQueryClient = useQueryClient();
 
   // Multi-device handshake rehydration removed — RED issues now resolve
   // locally via VerbalAuthOverrideDialog inside IssueAccumulatorPanel. No
@@ -112,9 +115,16 @@ function ManifestPage() {
 
   const handleGlobalLogout = () => {
     if (typeof window !== "undefined") {
-      localStorage.clear();
-      window.location.href = "/auth";
+      try {
+        localStorage.clear();
+        sessionStorage.clear();
+        void supabase.auth.signOut();
+      } catch {
+        // ignore cleanup errors
+      }
     }
+    manifestQueryClient.clear();
+    void navigate({ to: "/auth", replace: true });
   };
 
   const isLoading = isTripLoading || assetsQ.isLoading;
