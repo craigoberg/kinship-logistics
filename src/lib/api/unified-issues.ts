@@ -217,26 +217,10 @@ export async function listOpenUnifiedIssues(
   }
 
 
-  for (const a of assets) {
-    const ryge = computeRyge(a);
-    if (ryge === "green") continue;
-    out.push({
-      key: `renewal:${a.id}`,
-      source: "renewal",
-      sourceLabel: SOURCE_LABELS.renewal,
-      category: a.category,
-      subCategory: a.type,
-      severity: ryge,
-      title: a.name,
-      description:
-        (a.description ?? "") +
-        (a.expiry_date ? ` (expires ${a.expiry_date})` : ""),
-      status: a.status,
-      createdAt: a.updated_at,
-      sourceRowId: a.id,
-      raw: a,
-    });
-  }
+  // Compliance renewals intentionally excluded from the active feed —
+  // they live exclusively in the Governance Hub's "Compliance Assets" tab.
+
+
 
   // Filter out any issue whose latest timeline note is a still-live defer.
   const filtered = out.filter((i) => {
