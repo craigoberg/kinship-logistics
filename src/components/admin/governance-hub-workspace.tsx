@@ -31,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ClientTime } from "@/components/ui/client-time";
+import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
