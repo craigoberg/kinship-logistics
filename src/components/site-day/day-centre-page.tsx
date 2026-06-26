@@ -80,6 +80,14 @@ export function DayCentrePage() {
     staleTime: 5_000,
   });
 
+  // BMS-style silent updates: realtime push for the RED feed used to gate
+  // session opening. Polling above stays as a fallback if the socket drops.
+  useRealtimeInvalidate({
+    table: "site_issues_register",
+    queryKeys: [["site-issues", "open-reds-all"]],
+  });
+
+
   // One-shot bootstrap: if no row exists for today, provision exactly one
   // so every child component reads the same session_id.
   const bootstrappedRef = useRef(false);
