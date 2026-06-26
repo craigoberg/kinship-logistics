@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ClientTime } from "@/components/ui/client-time";
+import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { useUnifiedIssues, unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import type {
@@ -184,7 +184,7 @@ function IssuesTable({
               <TableHead>Source</TableHead>
               <TableHead>Severity</TableHead>
               <TableHead>Issue</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="w-[160px] whitespace-nowrap">Created</TableHead>
               <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
@@ -232,8 +232,8 @@ function IssuesTable({
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground tabular-nums py-3">
-                    <ClientTime iso={i.createdAt} />
+                  <TableCell className="w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
+                    <FormattedDateTime value={i.createdAt} />
                   </TableCell>
                   <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (

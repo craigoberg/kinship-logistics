@@ -31,7 +31,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ClientTime } from "@/components/ui/client-time";
+import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
@@ -49,6 +49,15 @@ import {
 import { UnifiedIssuesPanel } from "./unified-issues-panel";
 
 const COMPLIANCE_ASSETS_KEY = ["compliance-assets"] as const;
+
+const CATEGORY_BADGE: Record<string, string> = {
+  INSURANCE: "bg-sky-600 text-white",
+  EQUIPMENT: "bg-orange-600 text-white",
+  FACILITY: "bg-violet-600 text-white",
+  VEHICLE: "bg-slate-600 text-white",
+  STAFF: "bg-emerald-600 text-white",
+};
+const DEFAULT_CATEGORY_BADGE = "bg-muted text-foreground";
 
 function rygeBadge(asset: ComplianceAsset, params: { default: number; shortCycle: number }) {
   const r = computeRyge(asset, params);
@@ -154,46 +163,51 @@ export function GovernanceHubWorkspace() {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[140px] whitespace-nowrap">Category</TableHead>
               <TableHead>Asset</TableHead>
-              <TableHead>Category / Type</TableHead>
-              <TableHead>Action module</TableHead>
-              <TableHead>Expiry</TableHead>
-              <TableHead>RYGE</TableHead>
-              <TableHead>Updated</TableHead>
+              <TableHead className="w-[100px]">RYGE</TableHead>
+              <TableHead className="w-[110px] whitespace-nowrap">Expiry</TableHead>
+              <TableHead className="w-[160px] whitespace-nowrap">Updated</TableHead>
               <TableHead className="w-28" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {listQ.isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
                   No assets.
                 </TableCell>
               </TableRow>
             ) : (
               visible.map((a) => (
                 <TableRow key={a.id}>
+                  <TableCell className="w-[140px] whitespace-nowrap">
+                    <Badge
+                      className={
+                        CATEGORY_BADGE[a.category.toUpperCase()] ?? DEFAULT_CATEGORY_BADGE
+                      }
+                    >
+                      {a.category}
+                    </Badge>
+                  </TableCell>
                   <TableCell>
                     <div className="font-medium">{a.name}</div>
                     {a.description && (
                       <div className="text-xs text-muted-foreground">{a.description}</div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs">
-                    <div className="font-mono">{a.category}</div>
-                    <div className="text-muted-foreground">{a.type}</div>
+                  <TableCell className="w-[100px]">{rygeBadge(a, warningDays)}</TableCell>
+                  <TableCell className="w-[110px] whitespace-nowrap tabular-nums text-sm">
+                    <FormattedDate value={a.expiry_date} />
                   </TableCell>
-                  <TableCell className="font-mono text-xs">{a.action_module}</TableCell>
-                  <TableCell className="text-sm tabular-nums">{a.expiry_date ?? "—"}</TableCell>
-                  <TableCell>{rygeBadge(a, warningDays)}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    <ClientTime iso={a.updated_at} />
+                  <TableCell className="w-[160px] whitespace-nowrap tabular-nums text-xs text-muted-foreground">
+                    <FormattedDateTime value={a.updated_at} />
                   </TableCell>
                   <TableCell className="text-right">
                     {canEdit && (
