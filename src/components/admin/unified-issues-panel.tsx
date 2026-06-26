@@ -27,7 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { ClientTime } from "@/components/ui/client-time";
+import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { useUnifiedIssues, unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import type {
