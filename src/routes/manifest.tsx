@@ -76,6 +76,7 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
+import { supabase } from "@/integrations/supabase/client";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
