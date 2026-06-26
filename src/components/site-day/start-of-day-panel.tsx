@@ -23,6 +23,7 @@ import { IssuesRegisterCard } from "./issues-register-card";
 import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 import {
   openSession,
+  countActiveSchedulesForToday,
   type SiteDaySession,
 } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
