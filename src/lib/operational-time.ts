@@ -137,3 +137,35 @@ export function isoToSydneyClock(iso: string): string {
   const v = (t: string) => parts.find((p) => p.type === t)?.value ?? "00";
   return `${v("hour")}:${v("minute")}`;
 }
+
+// ---------------------------------------------------------------------------
+// Canonical app-wide date/time formatters (project standard).
+//   Date:      dd-MM-yy           e.g. 26-06-26
+//   Time:      HH:mm              e.g. 14:30
+//   Date/Time: dd-MM-yy / HH:mm   e.g. 26-06-26 / 14:30
+// Pure helpers — use browser-local time. Render via a client-only span when
+// embedded in SSR'd markup to avoid hydration mismatches.
+// ---------------------------------------------------------------------------
+
+import { format as dfFormat } from "date-fns";
+
+function toSafeDate(input: string | Date | null | undefined): Date | null {
+  if (input === null || input === undefined || input === "") return null;
+  const d = input instanceof Date ? input : new Date(input);
+  return Number.isFinite(d.getTime()) ? d : null;
+}
+
+export function formatDateStandard(input: string | Date | null | undefined): string {
+  const d = toSafeDate(input);
+  return d ? dfFormat(d, "dd-MM-yy") : "—";
+}
+
+export function formatTimeStandard(input: string | Date | null | undefined): string {
+  const d = toSafeDate(input);
+  return d ? dfFormat(d, "HH:mm") : "—";
+}
+
+export function formatDateTimeStandard(input: string | Date | null | undefined): string {
+  const d = toSafeDate(input);
+  return d ? dfFormat(d, "dd-MM-yy / HH:mm") : "—";
+}
