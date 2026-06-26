@@ -273,6 +273,26 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   const [managing, setManaging] = useState<UnifiedIssue | null>(null);
   const [tab, setTab] = useState<UnifiedIssueTab>("active");
 
+  // BMS-style live updates: silently invalidate the unified-issues feed when
+  // any of the underlying Hub tables change. The 60s polling on the query
+  // itself remains as a fallback if the socket drops.
+  useRealtimeInvalidate({
+    table: "site_issues_register",
+    queryKeys: [unifiedIssuesKey],
+  });
+  useRealtimeInvalidate({
+    table: "operational_escalations",
+    queryKeys: [unifiedIssuesKey],
+  });
+  useRealtimeInvalidate({
+    table: "operational_incidents",
+    queryKeys: [unifiedIssuesKey],
+  });
+  useRealtimeInvalidate({
+    table: "hub_issue_notes",
+    queryKeys: [unifiedIssuesKey],
+  });
+
   return (
     <div className="space-y-4">
       <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
@@ -298,6 +318,9 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
 
       {managing && (
         <ManageIssueDialog
+          // Stable key — guarantees React never recycles the dialog (and its
+          // textarea state) across different issues mid-typing.
+          key={managing.key}
           issue={managing}
           open
           onOpenChange={(o) => {
