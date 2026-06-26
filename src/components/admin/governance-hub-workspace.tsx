@@ -66,6 +66,7 @@ export function GovernanceHubWorkspace() {
     staleTime: 60_000,
   });
   const canEdit = permissionQ.data === true;
+  const warningDays = useComplianceWarningDays();
 
   const [statusFilter, setStatusFilter] = useState<ComplianceStatus>("active");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
