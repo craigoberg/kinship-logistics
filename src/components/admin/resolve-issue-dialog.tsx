@@ -109,23 +109,9 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
 
   const invalidateAll = () => {
-    qc.invalidateQueries({ queryKey: unifiedIssuesKey });
-    qc.invalidateQueries({
-      queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
-    });
-    qc.invalidateQueries({ queryKey: ["site-issues"] });
-    qc.invalidateQueries({ queryKey: ["site-issues-active"] });
-    qc.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
-    qc.invalidateQueries({
-      predicate: (q) => {
-        const k = q.queryKey?.[0];
-        return (
-          typeof k === "string" &&
-          (k.startsWith("site-issues") ||
-            k.startsWith("site-day") ||
-            k.startsWith("governance"))
-        );
-      },
+    invalidateIssueCaches(qc, {
+      source: issue.source,
+      sourceRowId: issue.sourceRowId,
     });
   };
 
