@@ -121,10 +121,20 @@ export function useMedicationScheduleExceptions() {
     queryFn: () => listParticipants(),
     staleTime: 60_000,
   });
+  // Presence gate — only participants currently checked in today qualify
+  // for a dashboard medication alert. Absent/expected/checked-out are
+  // silently suppressed; underlying medication records are untouched.
+  const presenceQ = useQuery({
+    queryKey: ["med-alerts-presence-gate", getSydneyIsoDate()],
+    queryFn: () => fetchTodaysCheckedInParticipants(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
 
   const schedules: MedicationSchedule[] = schedulesQ.data ?? [];
   const logs: ComplianceLog[] = logsQ.data ?? [];
   const participants: Participant[] = participantsQ.data ?? [];
+  const checkedIn: Set<string> = presenceQ.data ?? new Set();
 
   const rows = useMemo<MedicationScheduleExceptionRow[]>(() => {
     const now = new Date();
@@ -134,6 +144,8 @@ export function useMedicationScheduleExceptions() {
     return schedules
       .filter((s): s is MedicationSchedule & { participantId: string } => !!s.participantId)
       .map((s): MedicationScheduleExceptionRow | null => {
+        // Presence gate — drop silently when not physically in custody.
+        if (!checkedIn.has(s.participantId)) return null;
         if (isAdministered(s, logs)) return null;
         const scheduledTime = s.expectedTime.slice(0, 5);
         const scheduledMinutes = timeToMinutes(scheduledTime);
@@ -162,11 +174,15 @@ export function useMedicationScheduleExceptions() {
       })
       .filter((r): r is MedicationScheduleExceptionRow => r !== null)
       .sort((a, b) => timeToMinutes(a.scheduledTime) - timeToMinutes(b.scheduledTime));
-  }, [schedules, logs, participants]);
+  }, [schedules, logs, participants, checkedIn]);
 
   return {
     data: rows,
-    isLoading: schedulesQ.isLoading || logsQ.isLoading || participantsQ.isLoading,
+    isLoading:
+      schedulesQ.isLoading ||
+      logsQ.isLoading ||
+      participantsQ.isLoading ||
+      presenceQ.isLoading,
   };
 }
 
