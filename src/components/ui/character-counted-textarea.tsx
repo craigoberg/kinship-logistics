@@ -84,7 +84,7 @@ export const CharacterCountedTextarea = forwardRef<
           maxLength={maxChars}
           onChange={(e) => onValueChange(e.target.value)}
           className={cn(
-            "pb-6",
+            "pb-6 placeholder:text-slate-400 placeholder:italic",
             showRedOutline &&
               "border-2 border-destructive focus-visible:ring-destructive",
             className,

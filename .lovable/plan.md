@@ -1,37 +1,31 @@
-## Problem
+## Global Placeholder Styling Standard
 
-The Hub keeps showing rows tagged `Escalation · Workaround — awaiting operator ack` (status `resolved_approved`, `operator_acknowledged_at IS NULL`). These are test escalations from the old manager-approval flow. They can't be cleared from the UI because the only way to drop `operator_acknowledged_at` is the driver's PIN handshake on the original device, which is no longer available for these test rows. `resolveUnifiedIssue` deliberately leaves the ack NULL for non-Day-Centre escalations (see `src/lib/api/unified-issues.ts` lines 472–502), so re-resolving them does nothing.
+Establish a permanent visual distinction between placeholder prompts and real user input across every form field.
 
-## Plan
+### New global standard
+- Placeholders: `placeholder:text-slate-400 placeholder:italic`
+- Real input text: solid, non-italic, high-contrast (`text-foreground`, inherits from base classes — unchanged)
 
-### 1. One-off SQL cleanup (clears the current backlog)
+### Changes
 
-New migration `docs/sql/2026-07-14c_ack_stale_escalations.sql`:
+1. **`src/components/ui/input.tsx`**
+   - Append `placeholder:text-slate-400 placeholder:italic` to the className.
+   - Leave the existing `placeholder:text-muted-foreground` in place is redundant — replace it with the new slate-400 italic styling to avoid conflict.
+   - Actual text styling untouched (inherits `text-base`/`text-foreground`).
 
-```sql
--- Force-acknowledge any escalation that was already manager-approved
--- but never received the on-site operator PIN ack. This clears stale
--- test rows from the Governance Hub. Safe because status is already
--- resolved_approved — no live shield is being dropped on a real incident.
-UPDATE public.operational_escalations
-SET    operator_acknowledged_at = COALESCE(operator_acknowledged_at, now()),
-       operator_acknowledged_by = COALESCE(operator_acknowledged_by, resolved_by)
-WHERE  status = 'resolved_approved'
-  AND  operator_acknowledged_at IS NULL;
-```
+2. **`src/components/ui/textarea.tsx`**
+   - Same swap: replace `placeholder:text-muted-foreground` with `placeholder:text-slate-400 placeholder:italic`.
 
-User runs this once in the Supabase SQL editor. The three Toyota Coaster rows in the screenshot disappear from the Hub immediately.
+3. **`src/components/ui/character-counted-textarea.tsx`**
+   - This component already forwards to the base `Textarea`, so it inherits the new placeholder styling automatically. No edit required for behavior, but I will add an explicit `placeholder:text-slate-400 placeholder:italic` to its passed `className` to make the standard self-documenting at the call site (and to guarantee correctness even if a consumer overrides classes).
 
-### 2. Manager-only "Force dismiss" path (prevents recurrence)
+### Non-goals
+- No changes to actual text color, weight, or font-style.
+- No changes to focus states, borders, or the red-outline required-field treatment in `CharacterCountedTextarea`.
+- No edits to consumer components — they all flow through these three primitives.
 
-In `resolve-issue-dialog.tsx`, when the issue is an `escalation` row already in `resolved_approved` + awaiting ack, show a single "Force-acknowledge (Manager)" button alongside Log Note. It writes `operator_acknowledged_at = now()` / `operator_acknowledged_by = staffId` to `operational_escalations` and appends a ledger note `[FORCE-ACK by <staff>]: <reason>`. Gate behind `has_role(..., 'admin')` check already used elsewhere; require a non-empty reason (≥10 chars) so the Compliance Shield ledger entry is valid.
+### Verification
+- Visually check Manage Issue dialog textarea, Login/PIN inputs, and Add Attendance Schedule modal: empty state should show italic slate-400 prompt; typed text should be solid high-contrast.
+- Confirm no other component re-implements a raw `<input>`/`<textarea>` that bypasses these primitives (spot-check via the file list — all form fields in the project use these wrappers).
 
-No change to the normal pre-trip driver-ack flow — that still requires the driver PIN.
-
-### Files touched
-
-- new `docs/sql/2026-07-14c_ack_stale_escalations.sql` (one-time backlog clear)
-- `src/lib/api/unified-issues.ts` — add `forceAckEscalation({ id, staffId, reason })`
-- `src/components/admin/resolve-issue-dialog.tsx` — render Force-ack button when `source === 'escalation'` and status is `resolved_approved` awaiting ack, manager-only
-
-After step 1 the screenshot list clears; step 2 is the future-proof control so this can't strand rows again.
+This becomes the permanent design standard: any future input or textarea must route through these primitives so the placeholder/real-text distinction is enforced by default.
