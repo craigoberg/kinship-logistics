@@ -34,6 +34,7 @@ import {
 import { ClientTime } from "@/components/ui/client-time";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile, listStaffRegistry, verifyStaffPin, type StaffMember } from "@/lib/data-store";
 import {
   ACTION_MODULES,
@@ -49,8 +50,8 @@ import { UnifiedIssuesPanel } from "./unified-issues-panel";
 
 const COMPLIANCE_ASSETS_KEY = ["compliance-assets"] as const;
 
-function rygeBadge(asset: ComplianceAsset) {
-  const r = computeRyge(asset);
+function rygeBadge(asset: ComplianceAsset, params: { default: number; shortCycle: number }) {
+  const r = computeRyge(asset, params);
   if (r === "red") return <Badge className="bg-destructive text-destructive-foreground">RED</Badge>;
   if (r === "yellow") return <Badge className="bg-yellow-500 text-black">YELLOW</Badge>;
   return <Badge className="bg-emerald-600 text-white">GREEN</Badge>;
@@ -65,6 +66,7 @@ export function GovernanceHubWorkspace() {
     staleTime: 60_000,
   });
   const canEdit = permissionQ.data === true;
+  const warningDays = useComplianceWarningDays();
 
   const [statusFilter, setStatusFilter] = useState<ComplianceStatus>("active");
   const [categoryFilter, setCategoryFilter] = useState<string>("all");
@@ -189,7 +191,7 @@ export function GovernanceHubWorkspace() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{a.action_module}</TableCell>
                   <TableCell className="text-sm tabular-nums">{a.expiry_date ?? "—"}</TableCell>
-                  <TableCell>{rygeBadge(a)}</TableCell>
+                  <TableCell>{rygeBadge(a, warningDays)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <ClientTime iso={a.updated_at} />
                   </TableCell>

@@ -47,7 +47,6 @@ const SOURCE_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }
   { value: "day_centre", label: "Day Centre" },
   { value: "incident", label: "Incident" },
   { value: "escalation", label: "Escalation" },
-  { value: "renewal", label: "Renewal" },
 ];
 
 const SOURCE_BADGE: Record<UnifiedIssueSource, string> = {
@@ -183,7 +182,6 @@ function IssuesTable({
           <TableHeader>
             <TableRow>
               <TableHead>Source</TableHead>
-              <TableHead>Category / Sub</TableHead>
               <TableHead>Severity</TableHead>
               <TableHead>Issue</TableHead>
               <TableHead>Created</TableHead>
@@ -193,13 +191,13 @@ function IssuesTable({
           <TableBody>
             {q.isLoading ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-3">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                <TableCell colSpan={5} className="text-center text-muted-foreground py-3">
                   {tab === "active"
                     ? "No open issues match the current filters."
                     : "Nothing deferred or awaiting Council."}
@@ -208,17 +206,11 @@ function IssuesTable({
             ) : (
               visible.map((i) => (
                 <TableRow key={i.key}>
-                  <TableCell>
+                  <TableCell className="py-3">
                     <Badge className={SOURCE_BADGE[i.source]}>{i.sourceLabel}</Badge>
                   </TableCell>
-                  <TableCell className="text-xs">
-                    <div className="font-mono">{i.category}</div>
-                    {i.subCategory && (
-                      <div className="text-muted-foreground">{i.subCategory}</div>
-                    )}
-                  </TableCell>
-                  <TableCell>{severityBadge(i.severity)}</TableCell>
-                  <TableCell className="max-w-[28rem]">
+                  <TableCell className="py-3">{severityBadge(i.severity)}</TableCell>
+                  <TableCell className="max-w-[28rem] py-3">
                     <div className="font-medium truncate">{i.title}</div>
                     {i.source === "escalation" && (() => {
                       const r = i.raw as {
@@ -240,10 +232,10 @@ function IssuesTable({
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground tabular-nums">
+                  <TableCell className="text-xs text-muted-foreground tabular-nums py-3">
                     <ClientTime iso={i.createdAt} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (
                       <Button
                         size="sm"

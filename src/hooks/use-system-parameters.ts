@@ -124,6 +124,20 @@ export function useNoShowThresholdMinutes(): number {
   );
 }
 
+/**
+ * Dynamic Yellow lead-time defaults for the Compliance Governance engine.
+ * Short-cycle assets (e.g. facility_drill, two_man_bus_walkaround) need a
+ * tighter window than annual renewals like vehicle rego or staff certs.
+ */
+export function useComplianceWarningDays(): { default: number; shortCycle: number } {
+  const def = useSystemParameter<number>("compliance_warning_days_default", 30);
+  const shortCycle = useSystemParameter<number>(
+    "compliance_warning_days_short_cycle",
+    7,
+  );
+  return { default: def, shortCycle };
+}
+
 export function useCouncilEmailTo(): string {
   return useSystemParameter<string>("site_management.council_email_to", "");
 }

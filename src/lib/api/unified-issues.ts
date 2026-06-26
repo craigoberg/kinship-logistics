@@ -117,30 +117,28 @@ export async function listOpenUnifiedIssues(
     return out;
   }
 
-  const [siteIssuesRes, incidentsRes, escalationsRes, assets] =
-    await Promise.all([
-      supabase
-        .from("site_issues_register")
-        .select("*")
-        .eq("status", "open")
-        .order("created_at", { ascending: false }),
-      supabase
-        .from("operational_incidents")
-        .select("*")
-        .eq("status", "pending")
-        .order("created_at", { ascending: false }),
-      // Escalations: keep visible across the three live phases so an
-      // approved-but-awaiting-operator-acknowledgment row does not silently
-      // vanish from the Hub before the on-site operator signs off.
-      supabase
-        .from("operational_escalations")
-        .select("*")
-        .or(
-          "and(status.eq.pending),and(status.eq.claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
-        )
-        .order("created_at", { ascending: false }),
-      listComplianceAssets({ status: "active" }).catch(() => [] as ComplianceAsset[]),
-    ]);
+  const [siteIssuesRes, incidentsRes, escalationsRes] = await Promise.all([
+    supabase
+      .from("site_issues_register")
+      .select("*")
+      .eq("status", "open")
+      .order("created_at", { ascending: false }),
+    supabase
+      .from("operational_incidents")
+      .select("*")
+      .eq("status", "pending")
+      .order("created_at", { ascending: false }),
+    // Escalations: keep visible across the three live phases so an
+    // approved-but-awaiting-operator-acknowledgment row does not silently
+    // vanish from the Hub before the on-site operator signs off.
+    supabase
+      .from("operational_escalations")
+      .select("*")
+      .or(
+        "and(status.eq.pending),and(status.eq.claimed),and(status.eq.resolved_approved,operator_acknowledged_at.is.null)",
+      )
+      .order("created_at", { ascending: false }),
+  ]);
 
 
   const out: UnifiedIssue[] = [];
@@ -219,26 +217,10 @@ export async function listOpenUnifiedIssues(
   }
 
 
-  for (const a of assets) {
-    const ryge = computeRyge(a);
-    if (ryge === "green") continue;
-    out.push({
-      key: `renewal:${a.id}`,
-      source: "renewal",
-      sourceLabel: SOURCE_LABELS.renewal,
-      category: a.category,
-      subCategory: a.type,
-      severity: ryge,
-      title: a.name,
-      description:
-        (a.description ?? "") +
-        (a.expiry_date ? ` (expires ${a.expiry_date})` : ""),
-      status: a.status,
-      createdAt: a.updated_at,
-      sourceRowId: a.id,
-      raw: a,
-    });
-  }
+  // Compliance renewals intentionally excluded from the active feed —
+  // they live exclusively in the Governance Hub's "Compliance Assets" tab.
+
+
 
   // Filter out any issue whose latest timeline note is a still-live defer.
   const filtered = out.filter((i) => {
