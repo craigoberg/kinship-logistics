@@ -105,6 +105,18 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const hasBlocking = blockingIssues.length > 0;
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
 
+  // Empty-Day Opening Shield — if no participants are rostered for today's
+  // Sydney weekday code, the centre is not expected to open. The Open Centre
+  // button still works (manager may run an administrative day), but the panel
+  // renders a passive "no roster" notice instead of pretending there's a
+  // missed-open anomaly.
+  const rosterCountQ = useQuery({
+    queryKey: ["centre-empty-day-shield", new Date().toDateString()],
+    queryFn: () => countActiveSchedulesForToday(),
+    staleTime: 60_000,
+  });
+  const isEmptyDay = (rosterCountQ.data ?? null) === 0;
+
 
 
   const openMut = useMutation({
