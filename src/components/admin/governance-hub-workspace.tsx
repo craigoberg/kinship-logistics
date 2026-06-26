@@ -191,7 +191,7 @@ export function GovernanceHubWorkspace() {
                   </TableCell>
                   <TableCell className="font-mono text-xs">{a.action_module}</TableCell>
                   <TableCell className="text-sm tabular-nums">{a.expiry_date ?? "—"}</TableCell>
-                  <TableCell>{rygeBadge(a)}</TableCell>
+                  <TableCell>{rygeBadge(a, warningDays)}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
                     <ClientTime iso={a.updated_at} />
                   </TableCell>
