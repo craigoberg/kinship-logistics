@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
-import { format } from "date-fns";
 import { toast } from "sonner";
-import { CalendarIcon, Loader2, ShieldCheck } from "lucide-react";
+import { Loader2, ShieldCheck } from "lucide-react";
 
 import {
   Dialog,
@@ -14,8 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DatePicker } from "@/components/ui/date-picker";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
@@ -352,30 +350,14 @@ function DateField({
   return (
     <div className="grid gap-1.5">
       <Label className="text-sm font-semibold">{label}</Label>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            className={cn(
-              "h-9 w-full justify-start text-left text-sm font-normal",
-              !value && "text-muted-foreground",
-            )}
-          >
-            <CalendarIcon className="mr-2 h-4 w-4" />
-            {value ? format(value, "dd/MM/yyyy") : "Select a date"}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={value}
-            onSelect={onChange}
-            disabled={disabledFn}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
+      <DatePicker
+        value={value}
+        onChange={onChange}
+        placeholder="Select a date"
+        disabledDates={disabledFn}
+        dateFormat="dd/MM/yyyy"
+        className="h-9 text-sm"
+      />
       <span className="text-[11px] text-muted-foreground">{helper}</span>
     </div>
   );
