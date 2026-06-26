@@ -61,10 +61,24 @@ function SiteNoGoBanner() {
 
 export function AppShell({ children }: { children: ReactNode }) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const navigate = useNavigate();
+  const queryClient = useQueryClient();
   const current = NAV_ITEMS.find((n) =>
     n.exact ? pathname === n.to : pathname.startsWith(n.to),
   );
   const title = current?.label ?? "Yada Connect";
+
+  const handleLogout = () => {
+    try {
+      localStorage.clear();
+      sessionStorage.clear();
+      void supabase.auth.signOut();
+    } catch {
+      // ignore cleanup errors
+    }
+    queryClient.clear();
+    void navigate({ to: "/auth", replace: true });
+  };
 
   // Read profile on the client only — avoids SSR/CSR hydration mismatch
   // because localStorage isn't available on the server.
