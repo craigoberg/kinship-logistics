@@ -77,6 +77,7 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
