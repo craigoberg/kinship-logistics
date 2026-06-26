@@ -153,6 +153,18 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </p>
       </div>
 
+      {/* Empty-Day Opening Shield — passive notice, no anomaly raised. */}
+      {isEmptyDay && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 p-3 text-sm text-blue-900 dark:text-blue-200">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+          <p>
+            <span className="font-semibold">No participants rostered today.</span>{" "}
+            The centre is not expected to open — no missed-open anomaly will be
+            raised. Open below only if running an unscheduled administrative day.
+          </p>
+        </div>
+      )}
+
       {/* MandatedChecksList */}
       <div className="rounded-lg border border-border bg-card/40 p-4">
         <MandatedChecksList ticked={ticked} onTickedChange={setTicked} />
