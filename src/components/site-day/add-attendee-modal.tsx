@@ -49,7 +49,7 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
   });
 
   const { data: indicators } = useParticipantDirectoryIndicators();
-  const expectsMeds = !!(selected && indicators?.get(selected.id)?.meds);
+  const expectsMeds = !!(selected && indicators?.get(selected.id)?.hasMeds);
 
   const addMut = useMutation({
     mutationFn: async () => {
