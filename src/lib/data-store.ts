@@ -1106,7 +1106,10 @@ export interface AttendanceSchedule {
   participantId: string;
   dayOfWeek: WeekDay;
   serviceType: string;
+  /** Legacy single-vector field; kept in sync with `inboundTransport`. */
   transportRule: string;
+  inboundTransport: string;
+  outboundTransport: string;
   expectedArrivalTime: string;   // HH:MM (Sydney local)
   expectedDepartureTime: string; // HH:MM (Sydney local)
   active: boolean;
@@ -1119,6 +1122,8 @@ interface AttendanceScheduleRow {
   day_of_week: string;
   service_type: string;
   transport_required: string;
+  inbound_transport: string | null;
+  outbound_transport: string | null;
   expected_arrival_time: string | null;
   expected_departure_time: string | null;
   active: boolean;
@@ -1131,12 +1136,16 @@ function clip5(v: string | null | undefined, fallback: string): string {
 }
 
 function rowToAttendanceSchedule(r: AttendanceScheduleRow): AttendanceSchedule {
+  const inbound = r.inbound_transport ?? r.transport_required;
+  const outbound = r.outbound_transport ?? r.transport_required;
   return {
     id: r.id,
     participantId: r.participant_id,
     dayOfWeek: r.day_of_week as WeekDay,
     serviceType: r.service_type,
     transportRule: r.transport_required,
+    inboundTransport: inbound,
+    outboundTransport: outbound,
     expectedArrivalTime: clip5(r.expected_arrival_time, "09:00"),
     expectedDepartureTime: clip5(r.expected_departure_time, "15:00"),
     active: r.active,
@@ -1161,7 +1170,10 @@ export interface NewAttendanceSchedule {
   participantId: string;
   dayOfWeek: WeekDay;
   serviceType: string;
-  transportRule: string;
+  /** Optional legacy single-vector value; defaults to `inboundTransport`. */
+  transportRule?: string;
+  inboundTransport: string;
+  outboundTransport: string;
   expectedArrivalTime?: string;
   expectedDepartureTime?: string;
 }
@@ -1169,11 +1181,15 @@ export interface NewAttendanceSchedule {
 export async function insertAttendanceSchedule(
   input: NewAttendanceSchedule,
 ): Promise<AttendanceSchedule> {
+  const inbound = input.inboundTransport;
+  const outbound = input.outboundTransport;
   const payload = {
     participant_id: input.participantId,
     day_of_week: input.dayOfWeek,
     service_type: input.serviceType,
-    transport_required: input.transportRule,
+    transport_required: input.transportRule ?? inbound,
+    inbound_transport: inbound,
+    outbound_transport: outbound,
     expected_arrival_time: input.expectedArrivalTime ?? "09:00",
     expected_departure_time: input.expectedDepartureTime ?? "15:00",
     active: true,
@@ -1640,6 +1656,8 @@ export interface AttendanceSchedulePatch {
   dayOfWeek?: WeekDay;
   serviceType?: string;
   transportRule?: string;
+  inboundTransport?: string;
+  outboundTransport?: string;
   expectedArrivalTime?: string;
   expectedDepartureTime?: string;
   active?: boolean;
@@ -1652,7 +1670,18 @@ export async function updateAttendanceSchedule(
   const row: Partial<AttendanceScheduleRow> = {};
   if (patch.dayOfWeek !== undefined) row.day_of_week = patch.dayOfWeek;
   if (patch.serviceType !== undefined) row.service_type = patch.serviceType;
-  if (patch.transportRule !== undefined) row.transport_required = patch.transportRule;
+  if (patch.inboundTransport !== undefined) {
+    row.inbound_transport = patch.inboundTransport;
+    // Mirror inbound into the legacy single-vector column so seeders that
+    // still read `transport_required` keep matching the morning trip.
+    row.transport_required = patch.inboundTransport;
+  }
+  if (patch.outboundTransport !== undefined) {
+    row.outbound_transport = patch.outboundTransport;
+  }
+  if (patch.transportRule !== undefined && patch.inboundTransport === undefined) {
+    row.transport_required = patch.transportRule;
+  }
   if (patch.expectedArrivalTime !== undefined)
     row.expected_arrival_time = patch.expectedArrivalTime;
   if (patch.expectedDepartureTime !== undefined)

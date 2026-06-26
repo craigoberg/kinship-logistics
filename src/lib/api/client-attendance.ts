@@ -222,7 +222,9 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
         departureClock ?? "15:00",
       ),
       arrival_method: mapTransportToMethod(
-        (s.transport_required as string | null) ?? null,
+        (s.inbound_transport as string | null) ??
+          (s.transport_required as string | null) ??
+          null,
       ),
     };
   });
