@@ -504,30 +504,14 @@ function DateField({
   return (
     <div className="grid gap-1.5">
       <Label className="text-sm font-semibold">{label}</Label>
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="outline"
-            className={cn(
-              "h-9 w-full justify-start text-left text-sm font-normal",
-              !value && "text-muted-foreground",
-            )}
-          >
-            <CalendarIcon className="mr-2 h-4 w-4" />
-            {value ? format(value, "dd/MM/yyyy") : "Select a date"}
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent className="w-auto p-0" align="start">
-          <Calendar
-            mode="single"
-            selected={value}
-            onSelect={onChange}
-            disabled={disabledFn}
-            initialFocus
-          />
-        </PopoverContent>
-      </Popover>
+      <DatePicker
+        value={value}
+        onChange={onChange}
+        placeholder="Select a date"
+        disabledDates={disabledFn}
+        dateFormat="dd/MM/yyyy"
+        className="h-9 text-sm"
+      />
       <span className="text-[11px] text-muted-foreground">{helper}</span>
     </div>
   );
