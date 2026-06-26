@@ -22,6 +22,7 @@ import {
   toggleCheckIn,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
