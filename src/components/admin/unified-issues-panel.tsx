@@ -232,8 +232,8 @@ function IssuesTable({
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground tabular-nums py-3">
-                    <ClientTime iso={i.createdAt} />
+                  <TableCell className="w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
+                    <FormattedDateTime value={i.createdAt} />
                   </TableCell>
                   <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (
