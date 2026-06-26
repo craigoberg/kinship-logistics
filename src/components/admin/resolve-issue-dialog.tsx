@@ -35,8 +35,6 @@ import {
   type CouncilSeverity,
   type UnifiedIssue,
 } from "@/lib/api/unified-issues";
-import { unifiedIssuesKey } from "@/hooks/use-unified-issues";
-import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { getActiveUserProfile } from "@/lib/data-store";
