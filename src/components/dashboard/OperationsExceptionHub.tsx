@@ -1,12 +1,10 @@
 import { useEffect, useState } from "react";
-import { format } from "date-fns";
 import { Link } from "@tanstack/react-router";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertOctagon,
   AlertTriangle,
-  CalendarIcon,
   CheckCircle2,
   Pill,
   ShieldAlert,
@@ -22,8 +20,7 @@ import { ClientTime } from "@/components/ui/client-time";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Calendar } from "@/components/ui/calendar";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
 import {
   listClearancesAwaitingManagerReview,
