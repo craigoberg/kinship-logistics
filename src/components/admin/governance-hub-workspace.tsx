@@ -50,6 +50,15 @@ import { UnifiedIssuesPanel } from "./unified-issues-panel";
 
 const COMPLIANCE_ASSETS_KEY = ["compliance-assets"] as const;
 
+const CATEGORY_BADGE: Record<string, string> = {
+  INSURANCE: "bg-sky-600 text-white",
+  EQUIPMENT: "bg-orange-600 text-white",
+  FACILITY: "bg-violet-600 text-white",
+  VEHICLE: "bg-slate-600 text-white",
+  STAFF: "bg-emerald-600 text-white",
+};
+const DEFAULT_CATEGORY_BADGE = "bg-muted text-foreground";
+
 function rygeBadge(asset: ComplianceAsset, params: { default: number; shortCycle: number }) {
   const r = computeRyge(asset, params);
   if (r === "red") return <Badge className="bg-destructive text-destructive-foreground">RED</Badge>;
