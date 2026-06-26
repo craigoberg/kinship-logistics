@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, ArrowRight, Info, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { ClientTime } from "@/components/ui/client-time";
 
 import { Button } from "@/components/ui/button";
@@ -23,6 +23,7 @@ import { IssuesRegisterCard } from "./issues-register-card";
 import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
 import {
   openSession,
+  countActiveSchedulesForToday,
   type SiteDaySession,
 } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
@@ -104,6 +105,18 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const hasBlocking = blockingIssues.length > 0;
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
 
+  // Empty-Day Opening Shield — if no participants are rostered for today's
+  // Sydney weekday code, the centre is not expected to open. The Open Centre
+  // button still works (manager may run an administrative day), but the panel
+  // renders a passive "no roster" notice instead of pretending there's a
+  // missed-open anomaly.
+  const rosterCountQ = useQuery({
+    queryKey: ["centre-empty-day-shield", new Date().toDateString()],
+    queryFn: () => countActiveSchedulesForToday(),
+    staleTime: 60_000,
+  });
+  const isEmptyDay = (rosterCountQ.data ?? null) === 0;
+
 
 
   const openMut = useMutation({
@@ -139,6 +152,18 @@ export function StartOfDayPanel({ sessionId }: Props) {
           our Issues Register.
         </p>
       </div>
+
+      {/* Empty-Day Opening Shield — passive notice, no anomaly raised. */}
+      {isEmptyDay && (
+        <div className="flex items-start gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 p-3 text-sm text-blue-900 dark:text-blue-200">
+          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+          <p>
+            <span className="font-semibold">No participants rostered today.</span>{" "}
+            The centre is not expected to open — no missed-open anomaly will be
+            raised. Open below only if running an unscheduled administrative day.
+          </p>
+        </div>
+      )}
 
       {/* MandatedChecksList */}
       <div className="rounded-lg border border-border bg-card/40 p-4">

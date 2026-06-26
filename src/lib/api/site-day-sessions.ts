@@ -4,7 +4,38 @@ import {
   verifyStaffPin,
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
-import { getSydneyIsoDate } from "@/lib/operational-time";
+import { getSydneyIsoDate, todaysSydneyDayCode } from "@/lib/operational-time";
+
+// ---------------------------------------------------------------------------
+// Empty-Day Opening Shield
+// ---------------------------------------------------------------------------
+// On weekends, public holidays, or any day with zero active rostered
+// participants we MUST NOT raise a "Centre Not Opened" anomaly. Any
+// centre-opening sweep should call this first and short-circuit when the
+// count is 0 — no site_issues_register insert, no ledger receipt.
+export async function countActiveSchedulesForToday(): Promise<number> {
+  const code = todaysSydneyDayCode();
+  const { count, error } = await supabase
+    .from("participant_attendance_schedules")
+    .select("id", { count: "exact", head: true })
+    .eq("day_of_week", code)
+    .eq("active", true);
+  if (error) {
+    console.error("[countActiveSchedulesForToday] query failed", error);
+    return 0;
+  }
+  return count ?? 0;
+}
+
+/**
+ * Centre-opening sweep gate. Returns true when an overdue-opening anomaly
+ * MAY be raised; false when today has zero rostered participants and the
+ * sweep must silently abort.
+ */
+export async function shouldRaiseOverdueOpening(): Promise<boolean> {
+  const count = await countActiveSchedulesForToday();
+  return count > 0;
+}
 
 // ============================================================================
 // site_day_sessions — Day Centre open/close + dual-PIN site escalation.

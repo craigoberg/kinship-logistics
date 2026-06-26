@@ -20,6 +20,37 @@ import {
   type ComplianceAsset,
   type ComplianceActionModule,
 } from "@/lib/api/compliance-assets";
+import { supabase } from "@/integrations/supabase/client";
+import { getSydneyIsoDate } from "@/lib/operational-time";
+
+// Presence-gated medication alerts: dashboard must NOT surface a med
+// exception for a participant who isn't physically in our custody. We
+// load today's client_attendance_log once and only yield exceptions for
+// participants whose attendance status is strictly 'checked_in'.
+async function fetchTodaysCheckedInParticipants(): Promise<Set<string>> {
+  const date = getSydneyIsoDate();
+  const sessionRes = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (sessionRes.error) throw sessionRes.error;
+  const sessionId = sessionRes.data?.id as string | undefined;
+  if (!sessionId) return new Set();
+  const logRes = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, status")
+    .eq("session_id", sessionId);
+  if (logRes.error) throw logRes.error;
+  const out = new Set<string>();
+  for (const r of logRes.data ?? []) {
+    const row = r as { participant_id: string | null; status: string | null };
+    if (row.status === "checked_in" && row.participant_id) {
+      out.add(row.participant_id);
+    }
+  }
+  return out;
+}
 
 export type Severity = "critical" | "warning" | "info";
 
@@ -90,10 +121,20 @@ export function useMedicationScheduleExceptions() {
     queryFn: () => listParticipants(),
     staleTime: 60_000,
   });
+  // Presence gate — only participants currently checked in today qualify
+  // for a dashboard medication alert. Absent/expected/checked-out are
+  // silently suppressed; underlying medication records are untouched.
+  const presenceQ = useQuery({
+    queryKey: ["med-alerts-presence-gate", getSydneyIsoDate()],
+    queryFn: () => fetchTodaysCheckedInParticipants(),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
 
   const schedules: MedicationSchedule[] = schedulesQ.data ?? [];
   const logs: ComplianceLog[] = logsQ.data ?? [];
   const participants: Participant[] = participantsQ.data ?? [];
+  const checkedIn: Set<string> = presenceQ.data ?? new Set();
 
   const rows = useMemo<MedicationScheduleExceptionRow[]>(() => {
     const now = new Date();
@@ -103,6 +144,8 @@ export function useMedicationScheduleExceptions() {
     return schedules
       .filter((s): s is MedicationSchedule & { participantId: string } => !!s.participantId)
       .map((s): MedicationScheduleExceptionRow | null => {
+        // Presence gate — drop silently when not physically in custody.
+        if (!checkedIn.has(s.participantId)) return null;
         if (isAdministered(s, logs)) return null;
         const scheduledTime = s.expectedTime.slice(0, 5);
         const scheduledMinutes = timeToMinutes(scheduledTime);
@@ -131,11 +174,15 @@ export function useMedicationScheduleExceptions() {
       })
       .filter((r): r is MedicationScheduleExceptionRow => r !== null)
       .sort((a, b) => timeToMinutes(a.scheduledTime) - timeToMinutes(b.scheduledTime));
-  }, [schedules, logs, participants]);
+  }, [schedules, logs, participants, checkedIn]);
 
   return {
     data: rows,
-    isLoading: schedulesQ.isLoading || logsQ.isLoading || participantsQ.isLoading,
+    isLoading:
+      schedulesQ.isLoading ||
+      logsQ.isLoading ||
+      participantsQ.isLoading ||
+      presenceQ.isLoading,
   };
 }
 

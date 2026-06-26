@@ -77,6 +77,7 @@ import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-p
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
+import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -1280,6 +1281,20 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           completedAt: new Date().toISOString(),
         },
       });
+      // Parallel RED escalation — never blocks the boarding action.
+      // The "Unexpected Medical Bag Collected" toggle routes a Sev 1 ticket
+      // into the Governance Hub via the single-rail site_issues_register.
+      if (extraMed && participantId) {
+        raiseUnexpectedMedBagIssue({
+          participantId,
+          participantName: participantName ?? null,
+          context: "transport",
+          referenceId: leg.id,
+          notes: extraNotes.trim() || null,
+        }).catch((e) =>
+          console.error("[ArrivedChecklist] unexpected med escalation failed", e),
+        );
+      }
       localStorage.removeItem(storageKey);
       toast.success(`Leg ${leg.legIndex} logged`, {
         description: `${leg.fromLabel} → ${leg.toLabel}`,

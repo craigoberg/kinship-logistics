@@ -107,6 +107,22 @@ export function getSydneyDayIndex(date: Date = new Date()): number {
   return WEEKDAY_INDEX[WEEKDAY_FORMATTER.format(date)] ?? date.getDay();
 }
 
+// Map Sydney-local weekday → the canonical DAY-XXX code stored in
+// public.participant_attendance_schedules.day_of_week.
+const SYDNEY_DAY_CODES = [
+  "DAY-SUN",
+  "DAY-MON",
+  "DAY-TUE",
+  "DAY-WED",
+  "DAY-THU",
+  "DAY-FRI",
+  "DAY-SAT",
+] as const;
+
+export function todaysSydneyDayCode(date: Date = new Date()): string {
+  return SYDNEY_DAY_CODES[getSydneyDayIndex(date)] ?? "DAY-MON";
+}
+
 export function getSydneyTimeTodayIso(
   hour: number,
   minute: number,
