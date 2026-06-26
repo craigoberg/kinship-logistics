@@ -75,7 +75,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   
 
-  // Reset toggles whenever a fresh issue opens.
+  // Reset toggles only when the dialog transitions from closed -> open.
+  // Depending on `issue.sourceRowId` would clobber the operator's in-progress
+  // textarea whenever a background refetch returned a new issue object
+  // (same row, new identity).
   useEffect(() => {
     if (open) {
       setNote("");
@@ -85,7 +88,8 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       setCouncilSev("Sev 2");
       setPinOpen(false);
     }
-  }, [open, issue.sourceRowId]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open]);
 
   // Live-poll the central Hub timeline for ANY source.
   const timelineQuery = useQuery({
@@ -93,6 +97,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     enabled: open,
     refetchInterval: 8_000,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
     queryFn: () => listIssueNotes(issue.source, issue.sourceRowId),
   });
 
