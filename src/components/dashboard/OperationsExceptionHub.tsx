@@ -573,34 +573,16 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
 function DeferAction() {
   const [date, setDate] = useState<Date | undefined>(undefined);
   return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="h-7 px-2 text-xs">
-          <CalendarIcon className="mr-1 h-3.5 w-3.5" />
-          Defer
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-auto p-3">
-        <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground">
-          <CalendarIcon className="h-3.5 w-3.5" />
-          Defer item until action date arrives.
-        </div>
-        <Calendar
-          mode="single"
-          selected={date}
-          onSelect={setDate}
-          initialFocus
-          className={cn("p-2 pointer-events-auto")}
-        />
-        <div className="mt-2 flex items-center justify-between gap-2">
-          <span className="text-[11px] text-muted-foreground">
-            {date ? format(date, "PPP") : "No date selected"}
-          </span>
-          <Button size="sm" disabled>
-            Defer (coming soon)
-          </Button>
-        </div>
-      </PopoverContent>
-    </Popover>
+    <div className="flex items-center gap-2">
+      <DatePicker
+        value={date}
+        onChange={setDate}
+        placeholder="Defer until…"
+        className="h-7 w-auto px-2 text-xs"
+      />
+      <Button size="sm" disabled>
+        Defer (coming soon)
+      </Button>
+    </div>
   );
 }
