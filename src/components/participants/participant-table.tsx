@@ -1,6 +1,5 @@
 import { useMemo, useState } from "react";
-import { Search, ChevronRight, AlertTriangle } from "lucide-react";
-import { Input } from "@/components/ui/input";
+import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { iddsiLevel } from "@/lib/iddsi";
