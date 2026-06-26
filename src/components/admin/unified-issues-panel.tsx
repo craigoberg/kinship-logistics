@@ -232,10 +232,10 @@ function IssuesTable({
                       </div>
                     )}
                   </TableCell>
-                  <TableCell className="text-xs text-muted-foreground tabular-nums">
+                  <TableCell className="text-xs text-muted-foreground tabular-nums py-3">
                     <ClientTime iso={i.createdAt} />
                   </TableCell>
-                  <TableCell className="text-right">
+                  <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (
                       <Button
                         size="sm"
