@@ -1,6 +1,6 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertOctagon,
@@ -15,24 +15,13 @@ import {
   UserCheck,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { ClientTime } from "@/components/ui/client-time";
 
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
-import {
-  listClearancesAwaitingManagerReview,
-  listGroundedEscalations,
-  rerouteParticipantForDate,
-  subscribeToEscalationPool,
-  subscribeToPendingReviews,
-  type OperationalEscalation,
-  type PendingManagerReviewRow,
-} from "@/lib/data-store";
-import { ManagerJointReviewModal } from "./manager-joint-review-modal";
-import { UngroundVehicleModal } from "./unground-vehicle-modal";
+import { rerouteParticipantForDate } from "@/lib/data-store";
 import { ResolveDispatcher } from "./dispatch-resolve-modal";
 import type { ComplianceAsset } from "@/lib/api/compliance-assets";
 import {
@@ -120,42 +109,7 @@ export function OperationsExceptionHub() {
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
   const { data: complianceRows } = useComplianceExceptions();
 
-  const pendingReviewsQ = useQuery<PendingManagerReviewRow[]>({
-    queryKey: ["pending-manager-reviews"],
-    queryFn: () => listClearancesAwaitingManagerReview(),
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-  });
-  const pendingReviews = pendingReviewsQ.data ?? [];
-  const [activeReview, setActiveReview] =
-    useState<PendingManagerReviewRow | null>(null);
-
-  const groundedQ = useQuery<OperationalEscalation[]>({
-    queryKey: ["grounded-escalations"],
-    queryFn: () => listGroundedEscalations(),
-    refetchInterval: 30_000,
-    refetchIntervalInBackground: false,
-    refetchOnWindowFocus: true,
-  });
-  const grounded = groundedQ.data ?? [];
-  const [activeUnground, setActiveUnground] =
-    useState<OperationalEscalation | null>(null);
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
-
-  useEffect(() => {
-    const off = subscribeToPendingReviews(() => {
-      qc.invalidateQueries({ queryKey: ["pending-manager-reviews"] });
-    });
-    return off;
-  }, [qc]);
-
-  useEffect(() => {
-    const off = subscribeToEscalationPool(() => {
-      qc.invalidateQueries({ queryKey: ["grounded-escalations"] });
-    });
-    return off;
-  }, [qc]);
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
     key: m.legId,
@@ -301,123 +255,6 @@ export function OperationsExceptionHub() {
           ))}
         </div>
       )}
-
-      <section className="rounded-md border-2 border-red-600/40 bg-red-600/5">
-        <header className="flex items-center justify-between gap-2 border-b border-red-600/30 px-3 py-2">
-          <div className="flex items-center gap-2 text-red-700 dark:text-red-300">
-            <ShieldAlert className="h-4 w-4" />
-            <h4 className="text-sm font-semibold">
-              Pending Driver Review (RED dual-PIN handshake)
-            </h4>
-          </div>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {pendingReviews.length}{" "}
-            {pendingReviews.length === 1 ? "vehicle" : "vehicles"}
-          </span>
-        </header>
-        {pendingReviews.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-muted-foreground">
-            No drivers awaiting joint review.
-          </div>
-        ) : (
-          <ul className="divide-y divide-red-600/20">
-            {pendingReviews.map((r) => {
-              const managerDone = !!r.clearance.managerAuthPinVerifiedAt;
-              return (
-                <li
-                  key={r.clearance.id}
-                  className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
-                >
-                  <div className="min-w-0">
-                    <div className="truncate font-semibold">{r.assetName}</div>
-                    <div className="truncate text-xs text-muted-foreground">
-                      {r.assetRego ?? "—"} · submitted{" "}
-                      <ClientTime
-                        iso={r.clearance.createdAt}
-                        options={{ hour: "2-digit", minute: "2-digit" }}
-                      />
-                    </div>
-                  </div>
-
-                  <Button
-                    size="sm"
-                    className="bg-red-600 hover:bg-red-700"
-                    onClick={() => setActiveReview(r)}
-                  >
-                    {managerDone ? "Awaiting driver…" : "Open joint review"}
-                  </Button>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-      </section>
-
-      <section className="rounded-md border-2 border-orange-600/40 bg-orange-600/5">
-        <header className="flex items-center justify-between gap-2 border-b border-orange-600/30 px-3 py-2">
-          <div className="flex items-center gap-2 text-orange-700 dark:text-orange-300">
-            <Truck className="h-4 w-4" />
-            <h4 className="text-sm font-semibold">
-              Grounded Vehicles (awaiting manager clearance)
-            </h4>
-          </div>
-          <span className="text-xs text-muted-foreground tabular-nums">
-            {grounded.length} {grounded.length === 1 ? "vehicle" : "vehicles"}
-          </span>
-        </header>
-        {grounded.length === 0 ? (
-          <div className="px-3 py-4 text-xs text-muted-foreground">
-            No vehicles currently grounded.
-          </div>
-        ) : (
-          <ul className="divide-y divide-orange-600/20">
-            {grounded.map((g) => (
-              <li
-                key={g.id}
-                className="flex items-center justify-between gap-2 px-3 py-2 text-sm"
-              >
-                <div className="min-w-0">
-                  <div className="truncate font-semibold">{g.vehicleInfo}</div>
-                  <div className="truncate text-xs text-muted-foreground">
-                    Grounded{" "}
-                    {g.resolvedAt ? (
-                      <ClientTime
-                        iso={g.resolvedAt}
-                        options={{ dateStyle: "short", timeStyle: "short" }}
-                      />
-                    ) : (
-                      "—"
-                    )}
-                    {g.resolutionNotes ? ` · ${g.resolutionNotes}` : ""}
-                  </div>
-
-                </div>
-                <Button
-                  size="sm"
-                  className="bg-emerald-600 hover:bg-emerald-700"
-                  onClick={() => setActiveUnground(g)}
-                >
-                  Unground vehicle
-                </Button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <ManagerJointReviewModal
-        open={!!activeReview}
-        onOpenChange={(o) => {
-          if (!o) setActiveReview(null);
-        }}
-        row={activeReview}
-      />
-
-      <UngroundVehicleModal
-        escalation={activeUnground}
-        onClose={() => setActiveUnground(null)}
-        onUngrounded={() => qc.invalidateQueries({ queryKey: ["grounded-escalations"] })}
-      />
 
       <ResolveDispatcher
         asset={activeAsset}
