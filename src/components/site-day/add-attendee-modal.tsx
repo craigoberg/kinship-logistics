@@ -230,6 +230,3 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
     </Dialog>
   );
 }
-
-// Eslint helper — silence unused label import noise on tree-shaken builds.
-void Label;
