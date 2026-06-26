@@ -184,7 +184,7 @@ function IssuesTable({
               <TableHead>Source</TableHead>
               <TableHead>Severity</TableHead>
               <TableHead>Issue</TableHead>
-              <TableHead>Created</TableHead>
+              <TableHead className="w-[160px] whitespace-nowrap">Created</TableHead>
               <TableHead className="w-28 text-right" />
             </TableRow>
           </TableHeader>
