@@ -155,7 +155,8 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                 <tr>
                   <th className="px-4 py-2 font-medium">Day</th>
                   <th className="px-4 py-2 font-medium">Service type</th>
-                  <th className="px-4 py-2 font-medium">Transport rule</th>
+                  <th className="px-4 py-2 font-medium">Transport IN</th>
+                  <th className="px-4 py-2 font-medium">Transport OUT</th>
                   <th className="px-4 py-2 font-medium">Status</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
@@ -172,7 +173,10 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                     <td className="px-4 py-2 font-medium">{s.dayOfWeek}</td>
                     <td className="px-4 py-2">{s.serviceType}</td>
                     <td className="px-4 py-2 text-muted-foreground">
-                      {s.transportRule}
+                      {s.inboundTransport || s.transportRule}
+                    </td>
+                    <td className="px-4 py-2 text-muted-foreground">
+                      {s.outboundTransport || s.transportRule}
                     </td>
                     <td className="px-4 py-2">
                       <span

@@ -42,7 +42,8 @@ export function AddAttendanceScheduleModal({
   const [dayOfWeek, setDayOfWeek] = useState<string>("");
   const [dayLabel, setDayLabel] = useState<string>("");
   const [serviceType, setServiceType] = useState("");
-  const [transportRule, setTransportRule] = useState("");
+  const [inboundTransport, setInboundTransport] = useState("");
+  const [outboundTransport, setOutboundTransport] = useState("");
   const [arrivalTime, setArrivalTime] = useState("09:00");
   const [departureTime, setDepartureTime] = useState("15:00");
   const [dirty, setDirty] = useState(false);
@@ -55,7 +56,8 @@ export function AddAttendanceScheduleModal({
       setDayOfWeek(editing.dayOfWeek);
       setDayLabel(editing.dayOfWeek);
       setServiceType(editing.serviceType);
-      setTransportRule(editing.transportRule);
+      setInboundTransport(editing.inboundTransport || editing.transportRule);
+      setOutboundTransport(editing.outboundTransport || editing.transportRule);
       setArrivalTime(editing.expectedArrivalTime || "09:00");
       setDepartureTime(editing.expectedDepartureTime || "15:00");
       setDirty(false);
@@ -63,7 +65,8 @@ export function AddAttendanceScheduleModal({
       setDayOfWeek("");
       setDayLabel("");
       setServiceType("");
-      setTransportRule("");
+      setInboundTransport("");
+      setOutboundTransport("");
       setArrivalTime("09:00");
       setDepartureTime("15:00");
       setDirty(false);
@@ -73,7 +76,8 @@ export function AddAttendanceScheduleModal({
   const valid =
     dayOfWeek.length > 0 &&
     serviceType.trim().length > 0 &&
-    transportRule.trim().length > 0 &&
+    inboundTransport.trim().length > 0 &&
+    outboundTransport.trim().length > 0 &&
     /^\d{2}:\d{2}$/.test(arrivalTime) &&
     /^\d{2}:\d{2}$/.test(departureTime);
   const canSubmit = dirty && valid && !mutation.isPending;
@@ -88,7 +92,8 @@ export function AddAttendanceScheduleModal({
           patch: {
             dayOfWeek: dayOfWeek as WeekDay,
             serviceType: serviceType.trim(),
-            transportRule: transportRule.trim(),
+            inboundTransport: inboundTransport.trim(),
+            outboundTransport: outboundTransport.trim(),
             expectedArrivalTime: arrivalTime,
             expectedDepartureTime: departureTime,
           },
@@ -101,7 +106,8 @@ export function AddAttendanceScheduleModal({
           participantId,
           dayOfWeek: dayOfWeek as WeekDay,
           serviceType: serviceType.trim(),
-          transportRule: transportRule.trim(),
+          inboundTransport: inboundTransport.trim(),
+          outboundTransport: outboundTransport.trim(),
           expectedArrivalTime: arrivalTime,
           expectedDepartureTime: departureTime,
         });
@@ -163,19 +169,38 @@ export function AddAttendanceScheduleModal({
             />
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Transport required
-            </Label>
-            <LookupSelect
-              category={LOOKUP_CATEGORIES.transportRule}
-              value={transportRule}
-              onChange={(code) => {
-                setTransportRule(code);
-                setDirty(true);
-              }}
-              placeholder="Select transport option"
-            />
+          <div className="grid grid-cols-2 gap-3">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Transport IN
+              </Label>
+              <LookupSelect
+                category={LOOKUP_CATEGORIES.transportRule}
+                value={inboundTransport}
+                onChange={(code) => {
+                  setInboundTransport(code);
+                  // Default outbound to match inbound the first time it's
+                  // picked so single-vector schedules stay one click.
+                  if (!outboundTransport) setOutboundTransport(code);
+                  setDirty(true);
+                }}
+                placeholder="Morning trip"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Transport OUT
+              </Label>
+              <LookupSelect
+                category={LOOKUP_CATEGORIES.transportRule}
+                value={outboundTransport}
+                onChange={(code) => {
+                  setOutboundTransport(code);
+                  setDirty(true);
+                }}
+                placeholder="Afternoon trip"
+              />
+            </div>
           </div>
 
           <div className="grid grid-cols-2 gap-3">
