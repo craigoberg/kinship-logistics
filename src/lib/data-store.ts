@@ -59,9 +59,14 @@ export type SyncItemType =
   | "medication_log"
   | "attendance_log";
 
+export type MedicationEventType =
+  | "MEDICATION_ADMIN"
+  | "MEDICATION_REFUSED"
+  | "MEDICATION_MISSED_BYPASS";
+
 export interface MedicationLogPayload {
   participant_id: string;
-  action_performed: "MEDICATION_ADMIN";
+  action_performed: MedicationEventType;
   witness_1_identity: string;
   witness_2_identity: string;
   timestamp: string;
@@ -1865,9 +1870,18 @@ export interface EventManifest {
   endDate: string | null;
   ticketPrice: number;
   description: string | null;
-  active: boolean;
+  /** Lifecycle state: 'Planning' | 'Confirmed' | 'Open' | 'Closed'. */
+  status: string;
+  closedAt: string | null;
+  closedById: string | null;
+  /** When true, no further billing edits are permitted on this event. */
+  billingLocked: boolean;
+  reconciliationNotes: string | null;
+  /** FK → charge_codes — default rate card for new bookings on this event. */
+  defaultChargeCodeId: string | null;
+  /** Default ticket price drawn from the charge code rate card. */
+  standardPrice: number;
   createdAt: string;
-  updatedAt: string;
 }
 
 interface EventManifestRow {
@@ -1879,9 +1893,14 @@ interface EventManifestRow {
   end_date: string | null;
   ticket_price: number | string;
   description: string | null;
-  active: boolean;
+  status: string;
+  closed_at: string | null;
+  closed_by_id: string | null;
+  billing_locked: boolean | null;
+  reconciliation_notes: string | null;
+  default_charge_code_id: string | null;
+  standard_price: number | string | null;
   created_at: string;
-  updated_at: string;
 }
 
 function rowToEvent(r: EventManifestRow): EventManifest {
@@ -1894,9 +1913,14 @@ function rowToEvent(r: EventManifestRow): EventManifest {
     endDate: r.end_date,
     ticketPrice: Number(r.ticket_price ?? 0),
     description: r.description,
-    active: r.active,
+    status: r.status ?? "Planning",
+    closedAt: r.closed_at ?? null,
+    closedById: r.closed_by_id ?? null,
+    billingLocked: r.billing_locked ?? false,
+    reconciliationNotes: r.reconciliation_notes ?? null,
+    defaultChargeCodeId: r.default_charge_code_id ?? null,
+    standardPrice: Number(r.standard_price ?? 0),
     createdAt: r.created_at,
-    updatedAt: r.updated_at,
   };
 }
 
@@ -2077,8 +2101,10 @@ export interface EventRosterBooking {
   customPrice: number | null;
   /** Whether the participant is bringing a carer companion to this event. */
   bringsCarer: boolean;
-  /** FK into carers_registry — populated only when brings_carer = true. */
+  /** FK → staff_registry — the staff member acting as companion carer. */
   carerId: string | null;
+  /** FK → carers_registry — a registered (non-staff) companion carer record. */
+  companionCarerId: string | null;
   /** Whether the companion carer needs a physical bus seat. */
   carerTransportRequired: boolean;
   /** Whether the participant themselves needs a physical bus seat. */
@@ -2095,6 +2121,22 @@ export interface EventRosterBooking {
   participantRegularPickupAddress: string | null;
   /** Mirror of participant.street_address from the join — last-tier fallback. */
   participantStreetAddress: string | null;
+  // ── NDIS billing pipeline ────────────────────────────────────────────────
+  /** Funding source, e.g. 'NDIS Plan Managed' | 'NDIS Self Managed' | 'Private'. */
+  fundingClaimType: string;
+  /** FK → charge_codes — NDIS support item applied to this booking. */
+  chargeCodeId: string | null;
+  /** Units of service delivered (hours, days, sessions — depends on charge code). */
+  quantityDelivered: number;
+  /** Actual rate from the charge code at the time of billing. */
+  ratePerUnitApplied: number | null;
+  /** Computed billed amount = quantity_delivered × rate_per_unit_applied. */
+  totalAmountBilled: number | null;
+  /** Billing lifecycle: 'Unbilled' | 'Billed' | 'Paid' | 'Cancelled'. */
+  billingStatus: string;
+  /** Timestamp when a finance officer verified this claim. */
+  financeVerifiedAt: string | null;
+  // ─────────────────────────────────────────────────────────────────────────
   createdAt: string;
   updatedAt: string;
 }
@@ -2110,10 +2152,19 @@ interface BookingRow {
   custom_price: number | string | null;
   brings_carer: boolean | null;
   carer_id: string | null;
+  companion_carer_id: string | null;
   carer_transport_required: boolean | null;
   participant_transport_required: boolean | null;
   trip_pickup_address_override: string | null;
   dynamic_medical_notes_snapshot: string | null;
+  // NDIS billing pipeline
+  funding_claim_type: string | null;
+  charge_code_id: string | null;
+  quantity_delivered: number | string | null;
+  rate_per_unit_applied: number | string | null;
+  total_amount_billed: number | string | null;
+  billing_status: string | null;
+  finance_verified_at: string | null;
   created_at: string;
   updated_at: string;
   participants?:
@@ -2141,12 +2192,20 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     customPrice: r.custom_price == null ? null : Number(r.custom_price),
     bringsCarer: r.brings_carer ?? false,
     carerId: r.carer_id ?? null,
+    companionCarerId: r.companion_carer_id ?? null,
     carerTransportRequired: r.carer_transport_required ?? false,
     participantTransportRequired: r.participant_transport_required ?? false,
     tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
     participantRegularPickupAddress: r.participants?.regular_pickup_address ?? null,
     participantStreetAddress: r.participants?.street_address ?? null,
+    fundingClaimType: r.funding_claim_type ?? "NDIS Plan Managed",
+    chargeCodeId: r.charge_code_id ?? null,
+    quantityDelivered: Number(r.quantity_delivered ?? 1),
+    ratePerUnitApplied: r.rate_per_unit_applied == null ? null : Number(r.rate_per_unit_applied),
+    totalAmountBilled: r.total_amount_billed == null ? null : Number(r.total_amount_billed),
+    billingStatus: r.billing_status ?? "Unbilled",
+    financeVerifiedAt: r.finance_verified_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -2171,6 +2230,7 @@ export interface EventBookingWithEvent extends EventRosterBooking {
   eventStartDate: string;
   eventEndDate: string;
   eventTicketPrice: number;
+  /** Lifecycle status of the parent event (Planning/Confirmed/Open/Closed). */
   eventStatus: string;
 }
 
@@ -2180,7 +2240,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price)",
+      "*, participants!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price, status)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
@@ -2192,6 +2252,7 @@ export async function listEventBookingsForParticipant(
         start_date: string;
         end_date: string;
         ticket_price: number | string;
+        status: string;
       };
     };
     const base = rowToBooking(raw);
@@ -2202,7 +2263,7 @@ export async function listEventBookingsForParticipant(
       eventStartDate: ev?.start_date ?? "",
       eventEndDate: ev?.end_date ?? "",
       eventTicketPrice: Number(ev?.ticket_price ?? 0),
-      eventStatus: base.bookingStatus ?? "—",
+      eventStatus: ev?.status ?? "Planning",
     };
   });
 }
@@ -3828,6 +3889,42 @@ export async function verifyStaffPin(
     id: string;
   }>;
   return rows.some((r) => r.id === staffId);
+}
+
+/**
+ * GUARDRAILS §1.3 / §3 — Manager-only verification for RED override paths.
+ *
+ * Verifies that `pin` belongs to `staffId` AND that the staff member holds
+ * a coordinator / manager role. Throws a user-surfaceable message when the
+ * PIN is correct but the role is insufficient, so the dialog can display it.
+ *
+ * Returns `true` on success. Returns `false` when the PIN does not match.
+ * Throws when the matched staff member does not hold coordinator/manager role.
+ */
+export async function verifyCoordinatorPin(
+  staffId: string,
+  pin: string,
+): Promise<boolean> {
+  if (!/^\d{4,}$/.test(pin)) return false;
+  const { data, error } = await supabase.rpc("verify_operator_pin", {
+    entered_pin: pin,
+  });
+  if (error) {
+    console.error("[verifyCoordinatorPin] failed", error);
+    return false;
+  }
+  const rows = (
+    Array.isArray(data) ? data : data ? [data] : []
+  ) as Array<{ id: string; role: string }>;
+  const row = rows.find((r) => r.id === staffId);
+  if (!row) return false;
+  const role = classifyRole(row.role);
+  if (role !== "coordinator") {
+    throw new Error(
+      "The selected staff member does not hold a Coordinator or Manager role and cannot authorise RED overrides.",
+    );
+  }
+  return true;
 }
 
 /** Manager side of the dual-PIN handshake — must run BEFORE the driver PIN. */

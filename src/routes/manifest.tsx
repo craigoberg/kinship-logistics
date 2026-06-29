@@ -1,4 +1,4 @@
-// Force rebuild version 2.4 - Full Integrated Guard
+﻿// Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -70,7 +70,7 @@ import {
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
-// RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
+// RedHandshakeWaitingPanel + multi-device handshake removed â€” RED now flows
 // through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
@@ -83,7 +83,7 @@ export const Route = createFileRoute("/manifest")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Active Driver Manifest — Yada Connect" },
+      { title: "Active Driver Manifest â€” Yada Connect" },
       {
         name: "description",
         content: "Sequential leg-by-leg trip workflow with GPS, passenger boarding, and medication bag handover.",
@@ -98,7 +98,7 @@ function ManifestPage() {
   const navigate = useNavigate();
   const manifestQueryClient = useQueryClient();
 
-  // Multi-device handshake rehydration removed — RED issues now resolve
+  // Multi-device handshake rehydration removed â€” RED issues now resolve
   // locally via VerbalAuthOverrideDialog inside IssueAccumulatorPanel. No
   // realtime escalation polling, no EscalationRehydrationGate, no waiting
   // panel branch.
@@ -164,7 +164,7 @@ function ManifestPage() {
       {isLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-          <span className="text-sm font-medium tracking-wide">Synchronizing system manifest…</span>
+          <span className="text-sm font-medium tracking-wide">Synchronizing system manifestâ€¦</span>
         </div>
       ) : bundle ? (
         <ActiveTripScreen bundle={bundle} />
@@ -194,7 +194,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
 
-  // Global escalation/handshake locks removed — RED issues no longer take
+  // Global escalation/handshake locks removed â€” RED issues no longer take
   // over the wizard; the verbal-consultation dialog inside
   // IssueAccumulatorPanel records the workaround and lets the driver keep
   // rolling.
@@ -268,19 +268,19 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Step 1 of 3 — pick today's vehicle and record the starting odometer.
+            Step 1 of 3 â€” pick today's vehicle and record the starting odometer.
           </p>
           <form onSubmit={proceedToClearance} className="mt-5 space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="asset">Select Vehicle</Label>
               <Select value={assetId} onValueChange={setAssetId}>
                 <SelectTrigger id="asset" className="h-12">
-                  <SelectValue placeholder="Today's vehicle…" />
+                  <SelectValue placeholder="Today's vehicleâ€¦" />
                 </SelectTrigger>
                 <SelectContent>
                   {activeAssets.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
-                      {a.name} · {a.regoPlate} · {a.passengerCapacity} seats
+                      {a.name} Â· {a.regoPlate} Â· {a.passengerCapacity} seats
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -299,7 +299,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
               {lastEndOdo != null && (
                 <p className="text-[11px] text-muted-foreground">
                   Last recorded closing odometer: <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
-                  {odoNum === lastEndOdo && " · pre-filled"}
+                  {odoNum === lastEndOdo && " Â· pre-filled"}
                 </p>
               )}
             </div>
@@ -313,7 +313,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                   : "bg-blue-600 hover:bg-blue-700",
               )}
             >
-              Continue to Vehicle Clearance →
+              Continue to Vehicle Clearance â†’
             </button>
           </form>
         </Card>
@@ -364,7 +364,7 @@ function ClearanceGate({
 
   // Grounded lock: if a manager denied an escalation for this vehicle today,
   // refuse to render the walkaround form until the office clears it.
-  const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
+  const vehicleInfo = `${asset.name} Â· ${asset.regoPlate}`;
   const groundedQ = useQuery<boolean>({
     queryKey: ["asset-grounded", vehicleInfo, dateStr],
     queryFn: () => getAssetGroundedStatus(vehicleInfo, dateStr),
@@ -374,7 +374,7 @@ function ClearanceGate({
   if (existingQ.isLoading || groundedQ.isLoading) {
     return (
       <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearance…
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearanceâ€¦
       </Card>
     );
   }
@@ -393,7 +393,7 @@ function ClearanceGate({
           This vehicle is locked out of service until the office manually inspects and overrides the status.
         </p>
         <Button onClick={onBack} variant="outline" className="w-full mt-5 border-red-700/50 hover:bg-red-700/20">
-          ← Pick a different vehicle
+          â† Pick a different vehicle
         </Button>
       </Card>
     );
@@ -421,7 +421,7 @@ function ClearanceGate({
           onClick={onBack}
           className="mt-4 h-12 w-full rounded-xl border-2 border-destructive bg-transparent font-bold text-destructive transition hover:bg-destructive/10"
         >
-          ← Pick a different vehicle
+          â† Pick a different vehicle
         </button>
       </Card>
     );
@@ -490,7 +490,7 @@ function FastPassBanner({
     <Card className="border-2 border-green-600 bg-green-600/10 p-5">
       <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
         <ShieldCheck className="h-6 w-6" />
-        <h2 className="text-lg font-extrabold">Fast-Pass · Vehicle Cleared</h2>
+        <h2 className="text-lg font-extrabold">Fast-Pass Â· Vehicle Cleared</h2>
       </div>
       <p className="mt-3 text-sm">
         <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared for service at{" "}
@@ -504,14 +504,14 @@ function FastPassBanner({
         onClick={onConfirm}
         className="mt-5 h-14 w-full rounded-xl bg-green-600 text-base font-bold text-white shadow transition hover:bg-green-700"
       >
-        ✓ Confirm &amp; Roll
+        âœ“ Confirm &amp; Roll
       </button>
       <button
         type="button"
         onClick={onBack}
         className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
       >
-        ← Change vehicle
+        â† Change vehicle
       </button>
     </Card>
   );
@@ -534,388 +534,10 @@ function isHoistCheckpoint(c: AssetCheckpoint): boolean {
   return HOIST_RX.test(c.label);
 }
 
-function WalkaroundChecklist({
-  asset,
-  startOdometer,
-  dateStr,
-  onPassed,
-  onBack,
-}: {
-  asset: TransportAsset;
-  startOdometer: number;
-  dateStr: string;
-  onPassed: () => void;
-  onBack: () => void;
-}) {
-  const qc = useQueryClient();
-  const checkpointsQ = useQuery<AssetCheckpoint[]>({
-    queryKey: ["asset-checkpoints", asset.id, asset.vehicleCategory],
-    queryFn: () => listCheckpointsForAsset(asset.id, asset.vehicleCategory),
-    staleTime: 5 * 60_000,
-  });
-
-  const manifestSummaryQ = useQuery<TodayManifestSummary>({
-    queryKey: ["today-manifest-summary", dateStr],
-    queryFn: () => getTodayManifestSummary(dateStr),
-    staleTime: 60_000,
-  });
-  const summary = manifestSummaryQ.data;
-  const totalPassengers = summary?.totalSeatsBooked ?? 0;
-  const hoistDependents = summary?.hoistDependents ?? [];
-  const hoistRequiredCount = hoistDependents.length;
-
-  const [answers, setAnswers] = useState<Record<string, ChecklistAnswer>>({});
-  const [brokenBelts, setBrokenBelts] = useState<string>("");
-  const [overrideUnlocked, setOverrideUnlocked] = useState(false);
-  const [pinDialogOpen, setPinDialogOpen] = useState(false);
-  const [pinInput, setPinInput] = useState("");
-  const [pinInputError, setPinInputError] = useState<string | null>(null);
-
-  const submitMut = useMutation({
-    mutationFn: async (input: { checkpoints: AssetCheckpoint[]; forceProceed: boolean }) => {
-      const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
-      const items = input.checkpoints.map((c) => {
-        const a = answers[c.id] ?? { passed: false, notes: "" };
-        let notes = a.notes.trim();
-        if (isSeatbeltCheckpoint(c) && a.passed === false) {
-          const n = Number(brokenBelts) || 0;
-          notes = `${n} faulty seatbelt(s). ${notes}`.trim();
-        }
-        if (isHoistCheckpoint(c) && a.passed === false && hoistRequiredCount > 0) {
-          notes = `Hoist fault — ${hoistRequiredCount} hoist passenger(s) flagged for reroute. ${notes}`.trim();
-        }
-        return {
-          checkpointId: c.id,
-          checkpointLabel: c.label,
-          passed: a.passed,
-          isMandatory: c.isMandatory,
-          notes: notes ? notes : null,
-        };
-      });
-      const bundle = await insertAssetClearanceWithItems({
-        assetId: asset.id,
-        clearanceDate: dateStr,
-        driverStaffId,
-        startOdometer: Math.round(startOdometer),
-        items,
-      });
-
-      const driverName = staffName(driverStaffId);
-      input.checkpoints.forEach((c) => {
-        const row = items.find((it) => it.checkpointId === c.id);
-        if (!row || row.passed !== false) return;
-        triggerInspectionAlert(asset.name, driverName, c.label, toSeverity(c.impactLevel), row.notes);
-      });
-
-      return { bundle, forceProceed: input.forceProceed };
-    },
-    onSuccess: ({ bundle, forceProceed }) => {
-      qc.invalidateQueries({ queryKey: ["asset-clearance", asset.id, dateStr] });
-      qc.invalidateQueries({ queryKey: ["start-end-day-anomalies"] });
-      if (bundle.clearance.status === "passed") {
-        toast.success("Vehicle cleared", { description: `${asset.name} passed walkaround.` });
-        onPassed();
-      } else if (forceProceed) {
-        toast.warning("Cleared with cautions", {
-          description: "Coordinator has been notified of the flagged checkpoints.",
-        });
-        onPassed();
-      } else {
-        toast.error("Vehicle NOT cleared", {
-          description: "A mandatory checkpoint failed. Coordinator notified.",
-          className: "border-red-700 bg-red-600 text-white font-medium",
-        });
-      }
-    },
-    onError: (e: Error) => {
-      toast.error("Could not log clearance", { description: e.message });
-    },
-  });
-
-  if (checkpointsQ.isLoading) {
-    return (
-      <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Loading walkaround checklist…
-      </Card>
-    );
-  }
-
-  const checkpoints = checkpointsQ.data ?? [];
-  const allAnswered = checkpoints.every((c) => answers[c.id]?.passed !== undefined);
-
-  const setPassed = (id: string, passed: boolean) =>
-    setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { notes: "" }), passed } }));
-  const setNotes = (id: string, notes: string) =>
-    setAnswers((p) => ({ ...p, [id]: { ...(p[id] ?? { passed: false }), notes } }));
-
-  const seatbeltFailedCp = checkpoints.find((c) => isSeatbeltCheckpoint(c) && answers[c.id]?.passed === false);
-  const hoistFailedCp = checkpoints.find((c) => isHoistCheckpoint(c) && answers[c.id]?.passed === false);
-  const brokenBeltCount = Math.max(0, Math.floor(Number(brokenBelts) || 0));
-  const baselineCapacity = asset.passengerCapacity;
-  const effectiveCapacity = Math.max(0, baselineCapacity - brokenBeltCount);
-  const capacityMismatch = !!seatbeltFailedCp && brokenBeltCount > 0 && totalPassengers > effectiveCapacity;
-  const seatbeltSoftPass = !!seatbeltFailedCp && brokenBeltCount > 0 && !capacityMismatch;
-  const hoistSoftPass = !!hoistFailedCp;
-
-  const otherMandatoryHardFail = checkpoints.some((c) => {
-    const a = answers[c.id];
-    if (!a || a.passed !== false || !c.isMandatory) return false;
-    if (isHoistCheckpoint(c)) return false;
-    if (isSeatbeltCheckpoint(c)) return capacityMismatch && !overrideUnlocked;
-    return true;
-  });
-
-  const forceProceed = (seatbeltSoftPass || hoistSoftPass) && !otherMandatoryHardFail;
-  const submitBlocked =
-    !allAnswered ||
-    submitMut.isPending ||
-    (capacityMismatch && !overrideUnlocked) ||
-    (!!seatbeltFailedCp && brokenBeltCount <= 0) ||
-    (otherMandatoryHardFail && !forceProceed);
-
-  const handleOverrideSubmit = () => {
-    if (pinInput.trim() === "0000") {
-      setOverrideUnlocked(true);
-      setPinDialogOpen(false);
-      setPinInput("");
-      setPinInputError(null);
-      toast.success("Manager override accepted", {
-        description: "Capacity mismatch unlocked — proceed with caution.",
-      });
-    } else {
-      setPinInputError("Incorrect PIN. Please try again.");
-      setPinInput("");
-      toast.error("Incorrect PIN. Please try again.");
-    }
-  };
-
-  return (
-    <Card className="p-5">
-      <div className="flex items-center gap-2">
-        <ClipboardCheck className="h-5 w-5 text-blue-600" />
-        <h2 className="text-lg font-extrabold">Daily Walkaround — {asset.name}</h2>
-      </div>
-      <p className="mt-1 text-sm text-muted-foreground">
-        {asset.regoPlate} · Tick every checkpoint as PASS or FAIL. Mandatory failures block dispatch.
-      </p>
-      <div className="mt-2 text-[11px] uppercase tracking-wide text-muted-foreground">
-        Capacity {baselineCapacity} seats · {totalPassengers} booked today
-        {hoistRequiredCount > 0 && ` · ${hoistRequiredCount} hoist-dependent`}
-      </div>
-
-      <div className="mt-5 space-y-3">
-        {checkpoints.map((c) => {
-          const a = answers[c.id];
-          const decided = a?.passed !== undefined;
-          const failed = a?.passed === false;
-          const seatbelt = isSeatbeltCheckpoint(c);
-          const hoist = isHoistCheckpoint(c);
-          return (
-            <div
-              key={c.id}
-              className={cn(
-                "rounded-lg border p-3",
-                failed
-                  ? "border-destructive/60 bg-destructive/5"
-                  : decided
-                    ? "border-green-600/40 bg-green-600/5"
-                    : "border-border",
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="text-sm font-semibold">{c.label}</div>
-                  <div className="mt-0.5 text-[11px] uppercase tracking-wide text-muted-foreground">
-                    {c.category ?? "general"} · {c.isMandatory ? "mandatory" : "optional"}
-                  </div>
-                </div>
-                <div className="flex shrink-0 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => setPassed(c.id, true)}
-                    className={cn(
-                      "h-9 rounded-md border px-3 text-xs font-bold transition",
-                      a?.passed === true
-                        ? "border-green-600 bg-green-600 text-white"
-                        : "border-border bg-background text-muted-foreground hover:border-green-600/60",
-                    )}
-                  >
-                    PASS
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setPassed(c.id, false)}
-                    className={cn(
-                      "h-9 rounded-md border px-3 text-xs font-bold transition",
-                      a?.passed === false
-                        ? "border-destructive bg-destructive text-destructive-foreground"
-                        : "border-border bg-background text-muted-foreground hover:border-destructive/60",
-                    )}
-                  >
-                    FAIL
-                  </button>
-                </div>
-              </div>
-
-              {failed && seatbelt && (
-                <div className="mt-3 space-y-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3">
-                  <Label htmlFor={`belts-${c.id}`} className="text-xs font-semibold">
-                    How many seatbelts are faulty?
-                  </Label>
-                  <Input
-                    id={`belts-${c.id}`}
-                    type="number"
-                    min={1}
-                    max={baselineCapacity}
-                    value={brokenBelts}
-                    onChange={(e) => {
-                      setBrokenBelts(e.target.value);
-                      setOverrideUnlocked(false);
-                    }}
-                    className="h-10 w-32 tabular-nums"
-                    placeholder="e.g. 2"
-                  />
-                  {brokenBeltCount > 0 && (
-                    <div className="text-[11px] text-muted-foreground">
-                      Effective capacity: <span className="font-bold tabular-nums">{effectiveCapacity}</span> seats ·
-                      Booked today: <span className="font-bold tabular-nums">{totalPassengers}</span>
-                    </div>
-                  )}
-                  {capacityMismatch && !overrideUnlocked && (
-                    <div className="rounded-md border-2 border-destructive bg-destructive/10 p-2 text-xs text-destructive">
-                      <div className="font-bold uppercase">Capacity Mismatch Emergency</div>
-                      <div className="mt-1">
-                        {totalPassengers} passengers cannot fit in {effectiveCapacity} usable seats. Manager override
-                        required to dispatch.
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setPinDialogOpen(true)}
-                        className="mt-2 h-9 w-full rounded-md bg-destructive font-bold text-destructive-foreground hover:opacity-90"
-                      >
-                        Request Manager Override PIN
-                      </button>
-                    </div>
-                  )}
-                  {seatbeltSoftPass && (
-                    <div className="rounded-md border border-yellow-600 bg-yellow-500/20 p-2 text-xs text-yellow-900 dark:text-yellow-200">
-                      <div className="font-bold uppercase">Clearance Granted with Cautions</div>
-                      <div className="mt-1">
-                        Do not use the faulty seat(s). Remaining vehicle capacity is sufficient for your run.
-                      </div>
-                    </div>
-                  )}
-                  {overrideUnlocked && (
-                    <div className="rounded-md border border-amber-600 bg-amber-500/20 p-2 text-xs text-amber-900 dark:text-amber-200">
-                      Manager override active — proceed with caution. Coordinator notified.
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {failed && hoist && (
-                <div
-                  className={cn(
-                    "mt-3 rounded-md border p-3 text-xs",
-                    hoistRequiredCount > 0
-                      ? "border-amber-600 bg-amber-500/15 text-amber-900 dark:text-amber-200"
-                      : "border-slate-500/60 bg-slate-500/10 text-muted-foreground",
-                  )}
-                >
-                  {hoistRequiredCount > 0 ? (
-                    <>
-                      <div className="font-bold uppercase">Hoist fault recorded</div>
-                      <div className="mt-1">
-                        Manifest contains <b>{hoistRequiredCount}</b> hoist-dependent passenger(s). Proceeding with
-                        mobile passengers only. Coordinator has been alerted to reroute affected clients.
-                      </div>
-                    </>
-                  ) : (
-                    <>
-                      <div className="font-bold uppercase">Minor maintenance flagged</div>
-                      <div className="mt-1">
-                        No hoist-dependent passengers on today's manifest — logged silently as a maintenance follow-up.
-                      </div>
-                    </>
-                  )}
-                </div>
-              )}
-
-              {failed && !seatbelt && !hoist && (
-                <div className="mt-2 grid gap-1">
-                  <Label htmlFor={`note-${c.id}`} className="text-xs">
-                    Notes (what failed?)
-                  </Label>
-                  <Textarea
-                    id={`note-${c.id}`}
-                    rows={2}
-                    value={a?.notes ?? ""}
-                    onChange={(e) => setNotes(c.id, e.target.value)}
-                    placeholder="e.g. left brake light intermittent"
-                  />
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      <button
-        type="button"
-        disabled={submitBlocked}
-        onClick={() => submitMut.mutate({ checkpoints, forceProceed })}
-        className={cn(
-          "mt-5 h-14 w-full rounded-xl font-bold text-white shadow transition",
-          submitBlocked ? "bg-blue-600 opacity-60" : "bg-blue-600 hover:bg-blue-700",
-        )}
-      >
-        {submitMut.isPending ? "Submitting clearance…" : "Submit Walkaround & Clear Vehicle"}
-      </button>
-      <button
-        type="button"
-        onClick={onBack}
-        className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
-      >
-        ← Change vehicle
-      </button>
-
-      <AlertDialog open={pinDialogOpen} onOpenChange={setPinDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Manager Override Required</AlertDialogTitle>
-            <AlertDialogDescription>
-              Capacity mismatch detected. Enter the 4-digit manager PIN to authorise dispatch.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <Input
-            type="password"
-            inputMode="numeric"
-            maxLength={4}
-            value={pinInput}
-            onChange={(e) => {
-              setPinInput(e.target.value);
-              if (pinInputError) setPinInputError(null);
-            }}
-            onFocus={() => pinInputError && setPinInputError(null)}
-            placeholder="----"
-            aria-invalid={!!pinInputError}
-            className={cn(
-              "h-12 text-center text-lg tracking-[0.5em]",
-              pinInputError && "border-2 border-destructive focus-visible:ring-destructive",
-            )}
-          />
-          {pinInputError && (
-            <p className="text-xs font-medium text-destructive">{pinInputError}</p>
-          )}
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => { setPinInput(""); setPinInputError(null); }}>Cancel</AlertDialogCancel>
-            <AlertDialogAction onClick={handleOverrideSubmit}>Unlock</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </Card>
-  );
-}
+// WalkaroundChecklist removed 2026-06-29 - contained a hardcoded '0000' manager
+// override PIN that bypassed GUARDRAILS section 1.3 role verification. The
+// active walkaround path is IssueAccumulatorPanel (via ClearanceGate).
+// Tombstone preserves the removal record per the project's preservation policy.
 
 /* -------------------- Event Picker + Start Trip -------------------- */
 
@@ -966,22 +588,22 @@ function EventPickAndStart({
     <Card className="p-5">
       <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
         <ShieldCheck className="h-5 w-5" />
-        <h2 className="text-lg font-extrabold">{asset.name} cleared · pick event</h2>
+        <h2 className="text-lg font-extrabold">{asset.name} cleared Â· pick event</h2>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Step 3 of 3 — select today's event manifest to open the leg itinerary.
+        Step 3 of 3 â€” select today's event manifest to open the leg itinerary.
       </p>
       <form onSubmit={submit} className="mt-5 space-y-4">
         <div className="grid gap-2">
           <Label htmlFor="event">Select Event</Label>
           <Select value={eventId} onValueChange={setEventId}>
             <SelectTrigger id="event" className="h-12">
-              <SelectValue placeholder={todaysEvents.length ? "Today's events…" : "No events today — pick any"} />
+              <SelectValue placeholder={todaysEvents.length ? "Today's eventsâ€¦" : "No events today â€” pick any"} />
             </SelectTrigger>
             <SelectContent>
               {(todaysEvents.length ? todaysEvents : events).map((e) => (
                 <SelectItem key={e.id} value={e.id}>
-                  {e.title} · {e.startDate}
+                  {e.title} Â· {e.startDate}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -995,14 +617,14 @@ function EventPickAndStart({
             disabled ? "bg-blue-600 opacity-60 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700",
           )}
         >
-          {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
+          {startTrip.isPending ? "Openingâ€¦" : "Start Daily Trip & Open Manifest"}
         </button>
         <button
           type="button"
           onClick={onBack}
           className="mt-1 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
         >
-          ← Back to clearance
+          â† Back to clearance
         </button>
       </form>
     </Card>
@@ -1046,7 +668,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           <div className="min-w-0 flex-1 pr-3">
             <div className="truncate text-base font-bold leading-tight">{bundle.eventTitle ?? "Daily Run"}</div>
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
+              {trip.tripDate} Â· Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
           </div>
           <div className="text-right">
@@ -1104,7 +726,7 @@ function LegRow({ leg }: { leg: TripLeg }) {
       <div className="min-w-0">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Leg {leg.legIndex}</div>
         <div className="truncate font-medium">
-          {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
+          {leg.fromLabel} <span className="text-muted-foreground">â†’</span> {leg.toLabel}
         </div>
         {leg.targetAddress && (
           <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
@@ -1179,7 +801,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
         <MapPin className="mt-1 h-5 w-5 shrink-0 text-blue-300" />
         <div className="min-w-0">
           <div className="truncate text-lg font-bold leading-tight">{leg.fromLabel}</div>
-          <div className="text-xs text-slate-400">↓</div>
+          <div className="text-xs text-slate-400">â†“</div>
           <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
           {leg.targetAddress && (
             <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
@@ -1198,7 +820,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             onClick={() => runGps("end")}
             className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
           >
-            🛑 Arrive at Stop
+            ðŸ›‘ Arrive at Stop
           </button>
         ) : leg.status === "arrived" ? (
           <ArrivedChecklist leg={leg} />
@@ -1209,7 +831,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             onClick={() => runGps("start")}
             className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
           >
-            🚀 Depart Stop
+            ðŸš€ Depart Stop
           </button>
         )}
       </div>
@@ -1281,9 +903,8 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           completedAt: new Date().toISOString(),
         },
       });
-      // Parallel RED escalation — never blocks the boarding action.
-      // The "Unexpected Medical Bag Collected" toggle routes a Sev 1 ticket
-      // into the Governance Hub via the single-rail site_issues_register.
+      // Parallel RED escalation â€” runs after boarding completes.
+      // GUARDRAILS Â§1.1: failure is surfaced to the operator, not swallowed.
       if (extraMed && participantId) {
         raiseUnexpectedMedBagIssue({
           participantId,
@@ -1291,13 +912,16 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           context: "transport",
           referenceId: leg.id,
           notes: extraNotes.trim() || null,
-        }).catch((e) =>
-          console.error("[ArrivedChecklist] unexpected med escalation failed", e),
-        );
+        }).catch((e) => {
+          console.error("[ArrivedChecklist] unexpected med escalation failed", e);
+          toast.error("Unexpected med-bag: escalation failed â€” manual log required", {
+            description: (e as Error).message ?? "Ledger write failed. Contact your coordinator immediately.",
+          });
+        });
       }
       localStorage.removeItem(storageKey);
       toast.success(`Leg ${leg.legIndex} logged`, {
-        description: `${leg.fromLabel} → ${leg.toLabel}`,
+        description: `${leg.fromLabel} â†’ ${leg.toLabel}`,
       });
     } catch {
       /* hook surfaces red toast */
@@ -1335,7 +959,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
             onClick={() => setShowNoShow(true)}
             className="mt-2 h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700"
           >
-            ⚠️ Trigger No-Show Countdown
+            âš ï¸ Trigger No-Show Countdown
           </button>
           <NoShowCountdownModal
             open={showNoShow}
@@ -1363,7 +987,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         {leg.medicationExpected && (
           <div className="mb-3 flex items-start gap-2 text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="text-sm font-semibold">⚠️ EXPECTED MEDICATION: Confirm bag status before departure.</div>
+            <div className="text-sm font-semibold">âš ï¸ EXPECTED MEDICATION: Confirm bag status before departure.</div>
           </div>
         )}
         <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">Medication Bag Handover</div>
@@ -1400,7 +1024,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={extraMed} onCheckedChange={(v) => updateField("extraMed", v === true)} />
           <span className="font-medium">
-            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />➕ Log Unexpected Medication Bag Received
+            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />âž• Log Unexpected Medication Bag Received
           </span>
         </label>
         {extraMed && (
@@ -1414,7 +1038,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
               value={extraNotes}
               onChange={(e) => updateField("extraNotes", e.target.value)}
               className="bg-slate-950 text-white"
-              placeholder="e.g. small white pouch · 2 inhalers labelled JS"
+              placeholder="e.g. small white pouch Â· 2 inhalers labelled JS"
             />
           </div>
         )}
@@ -1426,7 +1050,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         onClick={confirm}
         className="mt-4 h-14 w-full rounded-xl bg-green-600 font-bold text-white transition hover:bg-green-700 disabled:opacity-60"
       >
-        {patch.isPending ? "Logging…" : "Confirm & Log Leg Completion"}
+        {patch.isPending ? "Loggingâ€¦" : "Confirm & Log Leg Completion"}
       </button>
     </div>
   );
@@ -1441,7 +1065,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
 
   const submit = () => {
     if (!valid) {
-      toast.error("Ending odometer must be ≥ starting odometer", {
+      toast.error("Ending odometer must be â‰¥ starting odometer", {
         className: "border-red-700 bg-red-600 text-white font-medium",
       });
       return;
@@ -1461,7 +1085,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
         className="h-12 text-base tabular-nums"
         value={odo}
         onChange={(e) => setOdo(e.target.value)}
-        placeholder={`≥ ${startOdometer}`}
+        placeholder={`â‰¥ ${startOdometer}`}
       />
       <button
         type="button"
@@ -1469,7 +1093,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
         onClick={submit}
         className="h-14 w-full rounded-xl bg-red-700 font-bold text-white transition hover:bg-red-800 disabled:opacity-60"
       >
-        🏁 End Shift & Lock Daily Run Logs
+        ðŸ End Shift & Lock Daily Run Logs
       </button>
     </div>
   );
@@ -1488,7 +1112,7 @@ function CancelTripButton({ tripId }: { tripId: string }) {
           className="h-11 w-full rounded-xl border-2 border-red-600 bg-transparent text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
           disabled={cancel.isPending}
         >
-          ✕ Cancel / Reset Trip
+          âœ• Cancel / Reset Trip
         </button>
       </AlertDialogTrigger>
       <AlertDialogContent>

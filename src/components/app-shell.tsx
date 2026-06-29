@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, ShieldOff } from "lucide-react";
+import { LogOut, ShieldOff, ShieldCheck } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
 import { BottomNav, NAV_ITEMS } from "./bottom-nav";
 import { SyncIndicator } from "./sync-indicator";
@@ -9,6 +9,8 @@ import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { formatDate } from "@/lib/utils";
+import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 
 /** Human-readable label for the active user's role. */
 function roleLabel(role: string | null | undefined): string {
@@ -67,6 +69,9 @@ export function AppShell({ children }: { children: ReactNode }) {
     n.exact ? pathname === n.to : pathname.startsWith(n.to),
   );
   const title = current?.label ?? "Yada Connect";
+  const isDashboard = pathname === "/";
+
+  const [medOpen, setMedOpen] = useState(false);
 
   const handleLogout = () => {
     try {
@@ -92,34 +97,55 @@ export function AppShell({ children }: { children: ReactNode }) {
     <div className="flex min-h-dvh bg-background text-foreground">
       <AppSidebar />
       <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 backdrop-blur md:h-16 md:px-6">
-          <h1 className="truncate text-base font-semibold tracking-tight md:text-lg">
-            <span>{title}</span>
-            {identity && (
-              <span className="ml-2 font-normal text-muted-foreground">
-                — {identity.name}
-                {identity.role && (
-                  <span className="ml-1 text-xs uppercase tracking-wide">
-                    ({identity.role})
-                  </span>
-                )}
-              </span>
+        <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-2 backdrop-blur md:min-h-16 md:px-6">
+          {/* Left: page title + identity + date (dashboard only) */}
+          <div className="flex min-w-0 flex-col gap-0">
+            <h1 className="truncate text-sm font-semibold tracking-tight md:text-base">
+              <span>{title}</span>
+              {identity && (
+                <span className="ml-2 font-normal text-muted-foreground">
+                  — {identity.name}
+                  {identity.role && (
+                    <span className="ml-1 text-xs uppercase tracking-wide">
+                      ({identity.role})
+                    </span>
+                  )}
+                </span>
+              )}
+            </h1>
+            {isDashboard && (
+              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground tabular-nums">
+                {formatDate(new Date())}
+              </p>
             )}
-          </h1>
-          <div className="flex items-center gap-2">
+          </div>
+
+          {/* Right: Med Admin (dashboard only) + sync + logout */}
+          <div className="flex shrink-0 items-center gap-2">
+            {isDashboard && (
+              <Button
+                size="sm"
+                onClick={() => setMedOpen(true)}
+                className="gap-1.5 text-xs"
+              >
+                <ShieldCheck className="h-3.5 w-3.5" />
+                Record medication admin
+              </Button>
+            )}
             <SyncIndicator compact />
             <Button
               variant="ghost"
               size="sm"
               onClick={handleLogout}
-              className="text-red-500 hover:text-red-600 hover:bg-red-50"
+              className="text-red-500 hover:bg-red-50 hover:text-red-600"
             >
               <LogOut className="mr-1.5 h-4 w-4" />
               Log Out
             </Button>
           </div>
-
         </header>
+
+        <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} />
         <SiteNoGoBanner />
         <main className="flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6">
           {children}

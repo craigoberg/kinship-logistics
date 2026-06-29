@@ -33,9 +33,14 @@ function synthEvent(r: EventBookingWithEvent): EventManifest {
     endDate: r.eventEndDate || null,
     ticketPrice: r.eventTicketPrice,
     description: null,
-    active: true,
+    status: r.eventStatus,
+    closedAt: null,
+    closedById: null,
+    billingLocked: false,
+    reconciliationNotes: null,
+    defaultChargeCodeId: null,
+    standardPrice: r.eventTicketPrice,
     createdAt: r.createdAt,
-    updatedAt: r.updatedAt,
   };
 }
 

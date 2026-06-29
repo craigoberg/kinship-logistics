@@ -32,6 +32,7 @@ export type LedgerInsert = Omit<LedgerEntry, "id" | "created_at">;
 /**
  * Append a row to the operational_ledger. Best-effort: failures are logged
  * but never thrown, so compliance logging cannot break the calling flow.
+ * Use for GREEN / YELLOW / INFO entries only.
  */
 export async function writeToLedger(payload: LedgerInsert): Promise<void> {
   try {
@@ -43,6 +44,25 @@ export async function writeToLedger(payload: LedgerInsert): Promise<void> {
     }
   } catch (err) {
     console.error("[ledger] write threw", err);
+  }
+}
+
+/**
+ * Append a row to the operational_ledger and THROW on failure.
+ *
+ * GUARDRAILS §1.1 — "If the ledger write fails, the parent state mutation
+ * must abort entirely to prevent un-vouched operations."
+ *
+ * Use for ALL RED severity writes and every critical state override.
+ * The calling flow must be inside a try/catch that surfaces the error to
+ * the operator — a failed ledger write must never silently complete.
+ */
+export async function writeToLedgerOrThrow(payload: LedgerInsert): Promise<void> {
+  const { error } = await supabase
+    .from("operational_ledger")
+    .insert(payload);
+  if (error) {
+    throw new Error(`[ledger] RED write failed — operation aborted: ${error.message}`);
   }
 }
 

@@ -35,11 +35,19 @@ const COMFORT_DECLARATION_TEXT =
 
 const PRE_TRIP_TAG = "[Pre-trip]";
 
+/**
+ * GUARDRAILS §3: "red-verbal-cleared" is a local sentinel marking a RED issue
+ * that has been formally authorised via VerbalAuthOverrideDialog (manager PIN
+ * verified, ledger receipt written). It is never persisted — it only prevents
+ * `hasRed` from blocking the final submit after the workaround is on record.
+ */
+type DraftIssueSeverity = ClearanceIssueSeverity | "red-verbal-cleared";
+
 interface DraftIssue {
   id: string;
-  /** Backing operational_incidents.id when persisted (Green/Yellow). */
+  /** Backing operational_incidents.id when persisted (Green/Yellow/verbal-RED). */
   incidentId?: string;
-  severity: ClearanceIssueSeverity;
+  severity: DraftIssueSeverity;
   text: string;
 }
 
@@ -66,13 +74,15 @@ function incidentSevToClearance(
 }
 
 
-function severityChip(s: ClearanceIssueSeverity): {
+function severityChip(s: DraftIssueSeverity): {
   label: string;
   tone: string;
   emoji: string;
 } {
   if (s === "red")
     return { label: "RED", tone: "bg-red-600 text-white", emoji: "🛑" };
+  if (s === "red-verbal-cleared")
+    return { label: "RED · Verbal Cleared", tone: "bg-amber-500 text-white", emoji: "✅" };
   if (s === "yellow")
     return { label: "YELLOW", tone: "bg-yellow-400 text-black", emoji: "🟡" };
   return { label: "GREEN", tone: "bg-green-600 text-white", emoji: "🟢" };
@@ -482,9 +492,12 @@ export function IssueAccumulatorPanel({
           if (!verbalPending) return;
           const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
           const localId = freshId();
+          // Use "red-verbal-cleared" sentinel so hasRed stays false and the
+          // final submit unblocks immediately (GUARDRAILS §3 — "local module
+          // unblocks immediately" after verbal consultation is on record).
           setIssues((prev) => [
             ...prev,
-            { id: localId, severity: "red", text: prefixed },
+            { id: localId, severity: "red-verbal-cleared", text: prefixed },
           ]);
           try {
             const { data, error } = await supabase

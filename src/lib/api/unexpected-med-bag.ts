@@ -1,20 +1,22 @@
 // ============================================================================
-// Unexpected Medical Bag — symmetrical RED escalation helper.
+// Unexpected Medical Bag — RED escalation helper.
 //
 // Called from both surfaces in the chain of custody:
 //   • Transport (bus boarding / passenger pickup) — context: "transport"
 //   • Day Centre handover at the door — context: "centre"
 //
-// Inserts ONE site_issues_register row (severity='red',
-// category='medication_handover') so the Governance Hub picks it up via
-// the single-rail escalation feed, and pairs it with an immutable
-// operational_ledger receipt per the 20-Character Compliance Shield.
-// The originating action (boarding / check-in) is NEVER blocked by this
-// helper — it runs in parallel and surfaces failures to the console only.
+// GUARDRAILS §1.1 — ledger write FIRST (writeToLedgerOrThrow). If the ledger
+// write fails, the function throws and the caller must surface the error to the
+// operator. The originating boarding action is NOT blocked, but the failure
+// MUST be shown to the user rather than swallowed silently.
+//
+// GUARDRAILS §1.1 atomicity — ledger succeeds before site_issues_register
+// insert is attempted. A failed register write is surfaced to the caller via
+// the return value; the ledger row is already on record either way.
 // ============================================================================
 
 import { supabase } from "@/integrations/supabase/client";
-import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { getTodaySession } from "@/lib/api/site-day-sessions";
 
@@ -59,12 +61,21 @@ function justificationText(
   );
 }
 
+/**
+ * Raises a RED unexpected-med-bag escalation.
+ *
+ * Throws if the ledger write fails (GUARDRAILS §1.1 — callers must catch and
+ * surface the error to the operator, NOT swallow it).
+ *
+ * Returns `{ issueId, ledgerWritten }`. `issueId` is null when no active
+ * session exists or the register insert fails (ledger row is always written
+ * first, so the event is never un-vouched).
+ */
 export async function raiseUnexpectedMedBagIssue(
   args: RaiseUnexpectedMedBagArgs,
 ): Promise<RaiseUnexpectedMedBagResult> {
   const participantLabel = args.participantName?.trim() || args.participantId;
 
-  // Every site_issues_register row needs a site_day_sessions session_id FK.
   // Resolve today's session — both contexts attach to the same daily anchor.
   let sessionId: string | null = null;
   try {
@@ -75,18 +86,50 @@ export async function raiseUnexpectedMedBagIssue(
   }
   if (!sessionId) {
     console.warn(
-      "[unexpected-med-bag] No active site_day_session — RED issue cannot be persisted; ledger receipt only.",
+      "[unexpected-med-bag] No active site_day_session — ledger receipt written; register row skipped.",
     );
   }
 
   const description =
-    `Unexpected medication bag — investigate. ` +
+    `[AUTOMATED_RED] Unexpected medication bag — investigate. ` +
     `Context: ${args.context} · Participant: ${participantLabel} · ` +
     `Reference: ${args.referenceId}` +
     (args.notes?.trim() ? ` · Notes: ${args.notes.trim()}` : "");
 
   const reportedBy = (await supabase.auth.getUser()).data.user?.id ?? null;
+  const staffId = await resolveStaffIdWithFallback();
+  const gps = await tryGetGps();
 
+  // GUARDRAILS §1.1 — ledger write FIRST. Throws on failure so caller must
+  // surface the error — no silent swallow of a failed RED event.
+  await writeToLedgerOrThrow({
+    staff_id: staffId,
+    category: args.context === "transport" ? "TRIP" : "CLIENT",
+    severity: "RED",
+    action_type: "UNEXPECTED_MED_BAG_FLAGGED",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      subject_type: "medication_handover",
+      subject_id: args.referenceId,
+      context: args.context,
+      participant_id: args.participantId,
+      participant_name: participantLabel,
+      reference_id: args.referenceId,
+      session_id: sessionId,
+      notes: args.notes?.trim() || null,
+      justification: justificationText(
+        args.context,
+        participantLabel,
+        args.referenceId,
+      ),
+      source: "raise_unexpected_med_bag",
+      automated: true,
+    },
+  });
+
+  // Ledger succeeded — now insert the register row (best-effort; ledger is
+  // the authoritative audit record per §1.1).
   let issueId: string | null = null;
   if (sessionId) {
     try {
@@ -107,42 +150,10 @@ export async function raiseUnexpectedMedBagIssue(
       issueId = (data as { id: string }).id;
     } catch (err) {
       console.error("[unexpected-med-bag] site_issues_register insert failed", err);
+      // Ledger row is already written — the event is on record. Register
+      // failure is returned to the caller for operator notification.
     }
   }
 
-  let ledgerWritten = false;
-  try {
-    const staffId = await resolveStaffIdWithFallback();
-    const gps = await tryGetGps();
-    await writeToLedger({
-      staff_id: staffId,
-      category: args.context === "transport" ? "TRIP" : "CLIENT",
-      severity: "RED",
-      action_type: "UNEXPECTED_MED_BAG_FLAGGED",
-      gps_lat: gps?.lat ?? null,
-      gps_lng: gps?.lng ?? null,
-      metadata: {
-        subject_type: "medication_handover",
-        subject_id: args.referenceId,
-        context: args.context,
-        participant_id: args.participantId,
-        participant_name: participantLabel,
-        reference_id: args.referenceId,
-        session_id: sessionId,
-        issue_id: issueId,
-        notes: args.notes?.trim() || null,
-        justification: justificationText(
-          args.context,
-          participantLabel,
-          args.referenceId,
-        ),
-        source: "raise_unexpected_med_bag",
-      },
-    });
-    ledgerWritten = true;
-  } catch (err) {
-    console.error("[unexpected-med-bag] ledger write failed", err);
-  }
-
-  return { issueId, ledgerWritten };
+  return { issueId, ledgerWritten: true };
 }

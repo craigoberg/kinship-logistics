@@ -60,16 +60,20 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
         );
       }
       const row = await addWalkInAttendee(sessionId, selected.id);
-      // Parallel RED escalation — never blocks the check-in.
+      // Parallel RED escalation — runs after check-in completes.
+      // GUARDRAILS §1.1: failure surfaced to operator, not swallowed.
       if (unexpectedFlagged) {
         await raiseUnexpectedMedBagIssue({
           participantId: selected.id,
           participantName: selected.fullName,
           context: "centre",
           referenceId: sessionId,
-        }).catch((e) =>
-          console.error("[AddAttendeeModal] unexpected med escalation failed", e),
-        );
+        }).catch((e) => {
+          console.error("[AddAttendeeModal] unexpected med escalation failed", e);
+          toast.error("Unexpected med-bag: escalation failed — manual log required", {
+            description: (e as Error).message ?? "Ledger write failed. Contact your coordinator immediately.",
+          });
+        });
       }
       return row;
     },

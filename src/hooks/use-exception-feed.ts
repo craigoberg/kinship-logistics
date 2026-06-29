@@ -391,3 +391,89 @@ export function useComplianceExceptions() {
   return { data: rows, isLoading: q.isLoading };
 }
 
+// ---------------------------------------------------------------------------
+// COMPLIANCE CATEGORIES — one entry per unique category in compliance_assets.
+//
+// GUARDRAILS §5.1: "Adding a new compliance category … automatically registers
+// the new rule into the Governance Hub without requiring application
+// redeployment."
+//
+// Unlike useComplianceExceptions (yellow/red only), this hook returns an
+// entry for EVERY active category so the dashboard renders a permanent tile
+// per category. Green categories show an "all-clear" tile; yellow/red show a
+// count badge and scroll to the drill table.
+//
+// Reuses the ["compliance-assets", "active"] query key — React Query
+// deduplicates the network request when both hooks are mounted.
+// ---------------------------------------------------------------------------
+
+export interface ComplianceCategoryRow {
+  category: string;
+  /**
+   * Yellow + red exception rows for this category sorted by daysDelta.
+   * Empty array = all assets in this category are currently GREEN.
+   */
+  exceptionRows: ComplianceExceptionRow[];
+}
+
+function buildExceptionRow(
+  a: ComplianceAsset,
+  today: Date,
+  todayMs: number,
+): ComplianceExceptionRow | null {
+  const severity = rygeToSeverity(computeRyge(a, today));
+  if (!severity) return null;
+  let daysDelta = 9999;
+  if (a.expiry_date) {
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(a.expiry_date);
+    if (m) {
+      const expiry = new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]));
+      daysDelta = Math.round((expiry.getTime() - todayMs) / 86_400_000);
+    }
+  }
+  return {
+    key: `compliance:${a.id}`,
+    assetId: a.id,
+    category: a.category,
+    actionModule: a.action_module,
+    title: a.name,
+    detail: complianceDetail(a, daysDelta),
+    severity,
+    daysDelta,
+    asset: a,
+  };
+}
+
+export function useComplianceCategories() {
+  const q = useQuery<ComplianceAsset[]>({
+    queryKey: ["compliance-assets", "active"],
+    queryFn: () => listComplianceAssets({ status: "active" }),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    refetchIntervalInBackground: false,
+  });
+
+  const data = useMemo<ComplianceCategoryRow[]>(() => {
+    const assets = q.data ?? [];
+    const today = startOfToday();
+    const todayMs = today.getTime();
+
+    // Group all active assets by category, collecting exception rows per group.
+    const map = new Map<string, ComplianceExceptionRow[]>();
+    for (const a of assets) {
+      if (!map.has(a.category)) map.set(a.category, []);
+      const row = buildExceptionRow(a, today, todayMs);
+      if (row) map.get(a.category)!.push(row);
+    }
+
+    return Array.from(map.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([category, exceptionRows]) => ({
+        category,
+        exceptionRows: exceptionRows.sort((x, y) => x.daysDelta - y.daysDelta),
+      }));
+  }, [q.data]);
+
+  return { data, isLoading: q.isLoading };
+}
+

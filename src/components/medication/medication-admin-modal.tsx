@@ -35,10 +35,17 @@ import {
   hashPin,
   insertComplianceLog,
   getDeviceUuid,
+  resolveStaffIdWithFallback,
+  type MedicationEventType,
   type MedicationLogPayload,
   type Participant,
   type StaffMember,
 } from "@/lib/data-store";
+import {
+  writeToLedgerOrThrow,
+  tryGetGps,
+  type LedgerSeverity,
+} from "@/lib/api/ledger";
 import { enqueue } from "@/lib/sync-queue";
 import { toast } from "sonner";
 
@@ -51,6 +58,28 @@ interface Props {
 
 const PIN_RE = /^\d{4}$/;
 
+/** Maps medication event type to operational_ledger severity and action_type. */
+const LEDGER_MAP: Record<
+  MedicationEventType,
+  { severity: LedgerSeverity; actionType: string; label: string }
+> = {
+  MEDICATION_ADMIN: {
+    severity: "GREEN",
+    actionType: "MEDICATION_ADMINISTERED",
+    label: "Administration",
+  },
+  MEDICATION_REFUSED: {
+    severity: "YELLOW",
+    actionType: "MEDICATION_REFUSED",
+    label: "Participant Refusal",
+  },
+  MEDICATION_MISSED_BYPASS: {
+    severity: "RED",
+    actionType: "MEDICATION_WINDOW_BYPASSED",
+    label: "Missed Window — Late Administration",
+  },
+};
+
 export function MedicationAdminModal({ open, onOpenChange, participant }: Props) {
   const online = useOnlineStatus();
   const { data: participants = [] } = useParticipants();
@@ -60,6 +89,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     error: staffError,
   } = useStaffRegistry();
 
+  const [eventType, setEventType] = useState<MedicationEventType>("MEDICATION_ADMIN");
   const [participantId, setParticipantId] = useState<string>("");
   const [participantPickerOpen, setParticipantPickerOpen] = useState(false);
   const [medicationName, setMedicationName] = useState("");
@@ -75,6 +105,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
   // Reset on (re)open
   useEffect(() => {
     if (open) {
+      setEventType("MEDICATION_ADMIN");
       setParticipantId(participant?.id ?? "");
       setParticipantPickerOpen(false);
       setMedicationName("");
@@ -129,7 +160,6 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     if (!member) return false;
     if (!member.pinHash) return false;
     const candidate = await hashPin(pin);
-    // Accept either a raw SHA-256 match or a plaintext fallback for legacy rows.
     return candidate === member.pinHash || pin === member.pinHash;
   };
 
@@ -137,6 +167,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     if (!canSubmit) return;
     setSubmitting(true);
     setPinError(null);
+
     try {
       const w1 = staffById.get(witness1Id);
       const w2 = staffById.get(witness2Id);
@@ -158,9 +189,10 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
       }
 
       const [w1Hash, w2Hash] = await Promise.all([hashPin(witness1Pin), hashPin(witness2Pin)]);
+
       const payload: MedicationLogPayload = {
         participant_id: participantId,
-        action_performed: "MEDICATION_ADMIN",
+        action_performed: eventType,
         witness_1_identity: w1!.fullName,
         witness_2_identity: w2!.fullName,
         timestamp: new Date().toISOString(),
@@ -175,6 +207,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         },
       };
 
+      // Offline path — enqueue as before; ledger requires network.
       if (!online) {
         enqueue("medication_log", payload as unknown as Record<string, unknown>);
         toast.info("Queued offline", {
@@ -184,23 +217,67 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         return;
       }
 
+      // ── Online path ─────────────────────────────────────────────────────
+      // GUARDRAILS §1.1 — ledger write FIRST via writeToLedgerOrThrow.
+      // If this fails, the entire record is aborted; the operator must be
+      // told explicitly — no silent fallback to enqueue for a medication event.
+      const { severity, actionType } = LEDGER_MAP[eventType];
+      const staffId = await resolveStaffIdWithFallback();
+      const gps = await tryGetGps();
+
+      try {
+        await writeToLedgerOrThrow({
+          staff_id: staffId,
+          category: "CLIENT",
+          severity,
+          action_type: actionType,
+          gps_lat: gps?.lat ?? null,
+          gps_lng: gps?.lng ?? null,
+          metadata: {
+            participant_id: participantId,
+            participant_name: selectedParticipant?.fullName ?? null,
+            medication_name: medicationName.trim(),
+            dosage: dosage.trim(),
+            notes: notes.trim() || null,
+            witness_1: w1!.fullName,
+            witness_2: w2!.fullName,
+            event_type: eventType,
+            source: "medication_admin_modal",
+          },
+        });
+      } catch (ledgerErr) {
+        // Ledger failure = abort entirely. Surface it clearly — do NOT enqueue
+        // silently, do NOT close the modal, so the operator knows the record
+        // was not written.
+        toast.error("Medication record aborted — ledger write failed", {
+          description:
+            (ledgerErr as Error).message ??
+            "Could not write to the audit ledger. Contact your coordinator immediately.",
+        });
+        return; // modal stays open
+      }
+
+      // Ledger succeeded — write secondary compliance_audit_logs record.
+      // If this fails, we enqueue for retry (ledger receipt already exists,
+      // so the event is already on record per GUARDRAILS §1.1).
       try {
         await insertComplianceLog(payload);
-        toast.success("Medication log recorded", {
-          description: `Dual-witness sign-off saved for ${selectedParticipant?.fullName ?? "participant"}.`,
-        });
-        onOpenChange(false);
-      } catch (err) {
+      } catch (complianceErr) {
         enqueue("medication_log", payload as unknown as Record<string, unknown>);
-        toast.warning("Saved offline", {
-          description: `Will retry automatically. (${(err as Error).message})`,
-        });
-        onOpenChange(false);
+        console.warn("[MedicationAdminModal] compliance_audit_logs write failed — enqueued", complianceErr);
       }
+
+      const eventLabel = LEDGER_MAP[eventType].label;
+      toast.success(`Medication log recorded — ${eventLabel}`, {
+        description: `Dual-witness sign-off saved for ${selectedParticipant?.fullName ?? "participant"}. Ledger receipt written.`,
+      });
+      onOpenChange(false);
     } finally {
       setSubmitting(false);
     }
   };
+
+  const isMissedBypass = eventType === "MEDICATION_MISSED_BYPASS";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -208,13 +285,15 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         <DialogHeader>
           <div className="flex items-center gap-2">
             <ShieldCheck className="h-5 w-5 text-primary" />
-            <DialogTitle>Record medication administration</DialogTitle>
+            <DialogTitle>Record medication event</DialogTitle>
           </div>
-          <DialogDescription className="flex items-center gap-2">
+          <DialogDescription className="flex flex-wrap items-center gap-2">
             Single-device dual-witness PIN verification. Writes an immutable row to{" "}
+            <code className="rounded bg-muted px-1 text-[11px]">operational_ledger</code>{" "}
+            and{" "}
             <code className="rounded bg-muted px-1 text-[11px]">compliance_audit_logs</code>.
             {!online && (
-              <span className="ml-2 inline-flex items-center gap-1 rounded-full border border-warning/50 px-2 py-0.5 text-[11px] font-medium text-warning">
+              <span className="inline-flex items-center gap-1 rounded-full border border-warning/50 px-2 py-0.5 text-[11px] font-medium text-warning">
                 <WifiOff className="h-3 w-3" /> Offline — will queue
               </span>
             )}
@@ -222,6 +301,59 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         </DialogHeader>
 
         <div className="grid gap-4 py-2">
+          {/* Event type selector */}
+          <Field label="Event type">
+            <div className="flex gap-2">
+              {(
+                [
+                  "MEDICATION_ADMIN",
+                  "MEDICATION_REFUSED",
+                  "MEDICATION_MISSED_BYPASS",
+                ] as MedicationEventType[]
+              ).map((type) => {
+                const { label, severity } = LEDGER_MAP[type];
+                const active = eventType === type;
+                const colorClass =
+                  severity === "RED"
+                    ? active
+                      ? "border-destructive bg-destructive/10 text-destructive font-semibold"
+                      : "border-border text-muted-foreground hover:border-destructive/50"
+                    : severity === "YELLOW"
+                      ? active
+                        ? "border-yellow-500 bg-yellow-500/10 text-yellow-800 dark:text-yellow-200 font-semibold"
+                        : "border-border text-muted-foreground hover:border-yellow-500/50"
+                      : active
+                        ? "border-green-600 bg-green-600/10 text-green-800 dark:text-green-200 font-semibold"
+                        : "border-border text-muted-foreground hover:border-green-600/50";
+                return (
+                  <button
+                    key={type}
+                    type="button"
+                    onClick={() => setEventType(type)}
+                    className={cn(
+                      "flex-1 rounded-md border px-2 py-2 text-xs transition",
+                      colorClass,
+                    )}
+                  >
+                    {label}
+                  </button>
+                );
+              })}
+            </div>
+          </Field>
+
+          {/* Missed-window warning banner */}
+          {isMissedBypass && (
+            <div className="flex items-start gap-2 rounded-md border-2 border-destructive/60 bg-destructive/10 p-3 text-xs text-destructive">
+              <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+              <p>
+                <span className="font-semibold">RED event — ledger write required.</span> This
+                action will write a RED severity receipt to the immutable audit ledger. If the
+                ledger write fails the record is aborted and you must contact your coordinator.
+              </p>
+            </div>
+          )}
+
           <Field label="Participant">
             <Popover open={participantPickerOpen} onOpenChange={setParticipantPickerOpen}>
               <PopoverTrigger asChild>
@@ -292,12 +424,18 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
             />
           </Field>
 
-          <Field label="Administration notes">
+          <Field label={eventType === "MEDICATION_REFUSED" ? "Refusal reason / notes" : "Administration notes"}>
             <Textarea
               rows={3}
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
-              placeholder="Route, time, observations, participant tolerance…"
+              placeholder={
+                eventType === "MEDICATION_REFUSED"
+                  ? "Reason for refusal, participant's stated concerns, follow-up actions…"
+                  : eventType === "MEDICATION_MISSED_BYPASS"
+                    ? "Why the window was missed, when it was administered, any clinical guidance sought…"
+                    : "Route, time, observations, participant tolerance…"
+              }
             />
           </Field>
 
@@ -346,10 +484,19 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
             Cancel
           </Button>
-          <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+          <Button
+            onClick={submit}
+            disabled={!canSubmit}
+            className={cn(
+              "gap-1.5",
+              isMissedBypass
+                ? "bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                : "",
+            )}
+          >
             <ShieldCheck className="h-4 w-4" />
             {submitting ? "Verifying…" : "Verify and submit log"}
           </Button>

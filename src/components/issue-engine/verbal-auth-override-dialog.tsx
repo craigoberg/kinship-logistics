@@ -1,7 +1,7 @@
-import { useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useState, useMemo } from "react";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, PhoneCall, ShieldAlert } from "lucide-react";
+import { Loader2, PhoneCall, ShieldAlert, ShieldCheck } from "lucide-react";
 
 import {
   Dialog,
@@ -14,14 +14,27 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
   DEFAULT_STAFF_UUID,
   getActiveUserProfile,
   getStaffId,
   verifyStaffPin,
+  verifyCoordinatorPin,
+  listStaffRegistry,
 } from "@/lib/data-store";
-import { tryGetGps, writeToLedger, type LedgerCategory } from "@/lib/api/ledger";
+import {
+  tryGetGps,
+  writeToLedgerOrThrow,
+  type LedgerCategory,
+} from "@/lib/api/ledger";
 
 interface Props {
   open: boolean;
@@ -44,25 +57,30 @@ interface Props {
   descriptionOverride?: string;
   /**
    * Called after the ledger receipt has been successfully written. Receives
-   * the captured manager name and verbal plan so the caller can land an
-   * open ticket in the appropriate source register (site_issues_register /
-   * operational_incidents) with a `[VERBAL WORKAROUND]` prefix.
+   * the authorising manager's staff ID and the verbal plan so the caller can
+   * land an open ticket in the appropriate source register with a
+   * `[VERBAL WORKAROUND]` prefix.
+   *
+   * GUARDRAILS §1.3 / §3: the manager PIN has already been verified against
+   * coordinator/manager role before `onAccepted` is invoked.
    */
-  onAccepted: (payload: { managerName: string; reason: string }) => void;
+  onAccepted: (payload: { managerStaffId: string; managerName: string; reason: string }) => void;
 }
 
 /**
- * High-trust escape hatch (MASTER_GUARDRAILS §1 / mem://architecture
- * — "Verbal Authorization Override"). Used when a Manager is unreachable
- * digitally but has authorised the action by phone / in person.
+ * High-trust escape hatch — GUARDRAILS §3 "Single-Rail Verbal Consultation".
  *
- * Writes an immutable `VERBAL_AUTH_OVERRIDE` receipt to `operational_ledger`
- * with the operator's PIN-verified identity, the manager's name (free text),
- * the spoken justification, and a captured GPS coordinate (best-effort).
+ * Requires:
+ *   1. Operator selects the authorising Manager from the coordinator staff list.
+ *   2. Operator enters the Manager's PIN — verified against coordinator/manager role
+ *      via `verifyCoordinatorPin()` (GUARDRAILS §1.3).
+ *   3. Operator enters their own PIN.
+ *   4. Operator provides ≥20-char workaround justification.
  *
- * This is the only path that allows proceeding without a dual-PIN digital
- * handshake. Every override is auditable and surfaces in the Governance Hub
- * for retroactive sign-off.
+ * On success, writes an immutable `RED_VERBAL_WORKAROUND` receipt to
+ * `operational_ledger` (writeToLedgerOrThrow — aborts on failure per §1.1),
+ * then invokes `onAccepted` so the caller inserts the `[VERBAL WORKAROUND]`
+ * ticket into the appropriate source register.
  */
 export function VerbalAuthOverrideDialog({
   open,
@@ -76,37 +94,92 @@ export function VerbalAuthOverrideDialog({
   onAccepted,
 }: Props) {
   const MIN_REASON = 20;
-  const [managerName, setManagerName] = useState("");
+
+  const [selectedManagerId, setSelectedManagerId] = useState("");
+  const [managerPin, setManagerPin] = useState("");
+  const [managerPinError, setManagerPinError] = useState<string | null>(null);
   const [reason, setReason] = useState("");
   const [operatorPin, setOperatorPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [operatorPinError, setOperatorPinError] = useState<string | null>(null);
 
   const reset = () => {
-    setManagerName("");
+    setSelectedManagerId("");
+    setManagerPin("");
+    setManagerPinError(null);
     setReason("");
     setOperatorPin("");
-    setPinError(null);
+    setOperatorPinError(null);
   };
+
+  // Load coordinator / manager staff for the picker
+  const staffQ = useQuery({
+    queryKey: ["staff-registry", "coordinators"],
+    queryFn: async () => {
+      const all = await listStaffRegistry();
+      return all.filter(
+        (s) =>
+          s.active &&
+          (s.role === "coordinator" ||
+            s.role?.toLowerCase().includes("manager") ||
+            s.role?.toLowerCase().includes("coordinator")),
+      );
+    },
+    staleTime: 120_000,
+    enabled: open,
+  });
+
+  const coordinators = staffQ.data ?? [];
+
+  const selectedManager = useMemo(
+    () => coordinators.find((s) => s.id === selectedManagerId) ?? null,
+    [coordinators, selectedManagerId],
+  );
 
   const submitMut = useMutation({
     mutationFn: async () => {
+      // --- 1. Verify operator PIN ---
       const operatorStaffId =
         getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
       if (!/^\d{4,6}$/.test(operatorPin)) {
-        const msg = "Incorrect PIN. Please try again.";
-        setPinError(msg);
+        const msg = "Incorrect operator PIN. Please try again.";
+        setOperatorPinError(msg);
         throw new Error(msg);
       }
-      const pinOk = await verifyStaffPin(operatorStaffId, operatorPin);
-      if (!pinOk) {
-        const msg = "Incorrect PIN. Please try again.";
-        setPinError(msg);
+      const operatorOk = await verifyStaffPin(operatorStaffId, operatorPin);
+      if (!operatorOk) {
+        const msg = "Incorrect operator PIN. Please try again.";
+        setOperatorPinError(msg);
         setOperatorPin("");
         throw new Error(msg);
       }
 
+      // --- 2. Verify manager/coordinator PIN (GUARDRAILS §1.3) ---
+      if (!selectedManagerId) throw new Error("Please select the authorising Manager.");
+      if (!/^\d{4,6}$/.test(managerPin)) {
+        const msg = "Incorrect manager PIN. Please try again.";
+        setManagerPinError(msg);
+        throw new Error(msg);
+      }
+      let managerOk: boolean;
+      try {
+        managerOk = await verifyCoordinatorPin(selectedManagerId, managerPin);
+      } catch (roleErr: unknown) {
+        // verifyCoordinatorPin throws when PIN matches but role is insufficient
+        const msg =
+          roleErr instanceof Error ? roleErr.message : "Manager role verification failed.";
+        setManagerPinError(msg);
+        throw new Error(msg);
+      }
+      if (!managerOk) {
+        const msg = "Incorrect manager PIN. Please try again.";
+        setManagerPinError(msg);
+        setManagerPin("");
+        throw new Error(msg);
+      }
+
+      // --- 3. Ledger write — throws on failure (GUARDRAILS §1.1) ---
       const gps = await tryGetGps();
-      await writeToLedger({
+      await writeToLedgerOrThrow({
         staff_id: operatorStaffId,
         category: ledgerCategory,
         severity: "RED",
@@ -118,7 +191,8 @@ export function VerbalAuthOverrideDialog({
             ledgerCategory === "VEHICLE" ? "transport_asset" : "site_day_session",
           subject_label: subjectLabel,
           source_id: sourceId ?? null,
-          manager_name: managerName.trim(),
+          manager_staff_id: selectedManagerId,
+          manager_name: selectedManager?.fullName ?? selectedManagerId,
           operator_staff_id: operatorStaffId,
           reason: reason.trim(),
           gps_attempted: true,
@@ -128,16 +202,21 @@ export function VerbalAuthOverrideDialog({
             actionType === "RED_VERBAL_WORKAROUND" ? "red_verbal_workaround" : "verbal",
         },
       });
-      return { managerName: managerName.trim(), reason: reason.trim() };
+
+      return {
+        managerStaffId: selectedManagerId,
+        managerName: selectedManager?.fullName ?? selectedManagerId,
+        reason: reason.trim(),
+      };
     },
     onSuccess: (payload) => {
       toast.success(
         actionType === "RED_VERBAL_WORKAROUND"
-          ? "Verbal workaround recorded"
-          : "Verbal authorization recorded",
+          ? "Verbal workaround recorded — ledger receipt written"
+          : "Verbal authorization recorded — ledger receipt written",
         {
           description:
-            "An immutable ledger receipt was written. Governance Hub now shows this as an open verbal workaround.",
+            "An immutable ledger receipt has been written. Governance Hub now shows this as an open verbal workaround.",
         },
       );
       reset();
@@ -145,16 +224,22 @@ export function VerbalAuthOverrideDialog({
       onAccepted(payload);
     },
     onError: (e: Error) => {
-      toast.error("Could not record verbal authorization", {
-        description: e.message,
-      });
+      // Surface ledger abort errors clearly — they mean the operation cannot proceed
+      toast.error(
+        e.message.startsWith("[ledger]")
+          ? "Ledger write failed — override aborted"
+          : "Could not record verbal authorization",
+        { description: e.message },
+      );
     },
   });
 
   const reasonOk = reason.trim().length >= MIN_REASON;
-  const managerOk = managerName.trim().length >= 3;
-  const pinOk = /^\d{4,6}$/.test(operatorPin);
-  const canSubmit = reasonOk && managerOk && pinOk && !submitMut.isPending;
+  const managerSelected = !!selectedManagerId;
+  const managerPinOk = /^\d{4,6}$/.test(managerPin);
+  const operatorPinOk = /^\d{4,6}$/.test(operatorPin);
+  const canSubmit =
+    reasonOk && managerSelected && managerPinOk && operatorPinOk && !submitMut.isPending;
 
   const handleClose = (next: boolean) => {
     if (submitMut.isPending) return;
@@ -172,60 +257,119 @@ export function VerbalAuthOverrideDialog({
           </DialogTitle>
           <DialogDescription>
             {descriptionOverride ??
-              "Use this only if a Manager cannot complete the digital handshake. Their verbal authorization is recorded as an immutable ledger receipt and queued for retroactive sign-off in the Governance Hub."}
+              "Use this only when a Manager cannot complete the digital handshake. Both the Manager's coordinator PIN and your own operator PIN are required. Every field is written to the immutable ledger."}
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-1">
+          {/* Context banner */}
           <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
               <span className="font-semibold">{subjectLabel}</span> — proceeding
-              without a digital Manager handshake. Every field is captured to
-              the ledger.
+              without a digital Manager handshake. The Manager must physically
+              provide their coordinator PIN to authorise this override.
             </p>
           </div>
 
+          {/* Manager selector */}
           <div className="space-y-2">
-            <Label
-              htmlFor="vao-manager"
-              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Authorizing Manager (full name){" "}
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Authorising Manager{" "}
               <span className="text-destructive">*</span>
             </Label>
-            <Input
-              id="vao-manager"
-              value={managerName}
-              onChange={(e) => setManagerName(e.target.value)}
-              placeholder="e.g. Sam Coordinator"
-              className={
-                !managerOk
-                  ? "border-2 border-destructive focus-visible:ring-destructive"
-                  : ""
-              }
-            />
+            <Select
+              value={selectedManagerId}
+              onValueChange={(v) => {
+                setSelectedManagerId(v);
+                setManagerPin("");
+                setManagerPinError(null);
+              }}
+              disabled={staffQ.isLoading}
+            >
+              <SelectTrigger
+                className={
+                  !managerSelected
+                    ? "border-2 border-destructive focus:ring-destructive"
+                    : ""
+                }
+              >
+                <SelectValue
+                  placeholder={
+                    staffQ.isLoading
+                      ? "Loading staff…"
+                      : coordinators.length === 0
+                      ? "No coordinators found"
+                      : "Select authorising manager…"
+                  }
+                />
+              </SelectTrigger>
+              <SelectContent>
+                {coordinators.map((s) => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.fullName}
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      ({s.role})
+                    </span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
 
+          {/* Manager PIN */}
+          {selectedManagerId && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Manager PIN — {selectedManager?.fullName}{" "}
+                <span className="text-destructive">*</span>
+              </Label>
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="h-4 w-4 shrink-0 text-amber-600" />
+                <Input
+                  type="password"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
+                  maxLength={6}
+                  autoComplete="off"
+                  value={managerPin}
+                  onChange={(e) => {
+                    setManagerPin(e.target.value.replace(/\D/g, "").slice(0, 6));
+                    if (managerPinError) setManagerPinError(null);
+                  }}
+                  placeholder="Manager PIN"
+                  aria-invalid={!!managerPinError}
+                  className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
+                    managerPinError || !managerPinOk
+                      ? "border-2 border-destructive focus-visible:ring-destructive"
+                      : ""
+                  }`}
+                />
+              </div>
+              {managerPinError && (
+                <p className="text-xs font-medium text-destructive">{managerPinError}</p>
+              )}
+            </div>
+          )}
+
+          {/* Workaround justification */}
           <CharacterCountedTextarea
             label="Authorization Reason (what did the Manager approve?)"
             value={reason}
             onValueChange={setReason}
-            placeholder="e.g. Manager S.C. approved by phone at 0815 — proceed with Bus 4 despite cracked nearside mirror; replacement booked for 14:00."
+            placeholder="e.g. Manager approved by phone at 0815 — proceed with Bus 4 despite cracked nearside mirror; replacement booked for 14:00."
             minChars={MIN_REASON}
             rows={4}
             required
           />
 
+          {/* Operator PIN */}
           <div className="space-y-2">
-            <Label
-              htmlFor="vao-pin"
-              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-            >
-              Your Operator PIN <span className="text-destructive">*</span>
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Your Operator PIN{" "}
+              <span className="text-destructive">*</span>
             </Label>
             <Input
-              id="vao-pin"
               type="password"
               inputMode="numeric"
               pattern="[0-9]*"
@@ -234,19 +378,18 @@ export function VerbalAuthOverrideDialog({
               value={operatorPin}
               onChange={(e) => {
                 setOperatorPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-                if (pinError) setPinError(null);
+                if (operatorPinError) setOperatorPinError(null);
               }}
-              onFocus={() => pinError && setPinError(null)}
               placeholder="----"
-              aria-invalid={!!pinError}
+              aria-invalid={!!operatorPinError}
               className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
-                pinError || !pinOk
+                operatorPinError || !operatorPinOk
                   ? "border-2 border-destructive focus-visible:ring-destructive"
                   : ""
               }`}
             />
-            {pinError && (
-              <p className="text-xs font-medium text-destructive">{pinError}</p>
+            {operatorPinError && (
+              <p className="text-xs font-medium text-destructive">{operatorPinError}</p>
             )}
           </div>
         </div>

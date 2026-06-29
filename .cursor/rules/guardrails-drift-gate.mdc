@@ -1,0 +1,30 @@
+---
+description: GUARDRAILS drift report gate — defer remediation until frontend matches live Supabase
+alwaysApply: true
+---
+
+# GUARDRAILS Drift — Deferred Work
+
+**Full report:** `docs/architecture/GUARDRAIL-DRIFT-REPORT.md` (2026-06-29 analysis)
+
+## Current priority (user directive)
+
+1. **First:** Bring frontend code up to date with the **live Supabase database** — apply feature changes made before the crash.
+2. **Do NOT execute** drift remediation (ledger abort semantics, RED model cleanup, ActiveIssuesRegister unification, dead-code removal, GUARDRAILS doc edits) until step 1 is complete and the user explicitly approves.
+
+## Quick reference — intended vs legacy RED model
+
+- **Current intended (GUARDRAILS §3):** `LogAnomalyModal` RED → `VerbalAuthOverrideDialog` → `writeToLedger(RED_VERBAL_WORKAROUND)` → `[VERBAL WORKAROUND]` row in `site_issues_register` / `operational_incidents`. `GlobalEscalationInterceptor` is **unmounted** in `__root.tsx`.
+- **Legacy (§8, historical rows only):** `operational_escalations` + `EscalationResolutionPanel` + `escalated_lock`. New RED paths must **not** call `raiseOperationalEscalation` (only dead `dynamic-operational-form.tsx` does).
+
+## Top drift flags (do not fix preemptively)
+
+- `writeToLedger()` is best-effort (never throws) — conflicts with GUARDRAILS §1.1 abort-on-failure
+- Verbal RED: ledger + register writes are separate steps, not atomic
+- `ActiveIssuesRegister` only on manifest; Day Centre uses `IssuesRegisterCard`
+- Automated RED bypasses verbal flow: `client-attendance.ts` sweep, `unexpected-med-bag.ts`
+- `isSignedIn` / `reporterId` patterns only in `day-centre-page.tsx`
+
+## Authoritative spec
+
+`docs/architecture/GUARDRAILS.md` — permanent system directive for all builds.

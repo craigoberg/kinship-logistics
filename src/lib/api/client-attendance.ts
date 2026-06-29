@@ -9,7 +9,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
-import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { writeToLedger, writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
@@ -784,11 +784,54 @@ export async function sweepOverdueArrivals(
     const pName = participantNames[r.participantId] ?? "Client";
     const wantRed = overdueMins >= redMins;
 
-    // ── No issue yet → raise YELLOW (one row). ───────────────────────────
+    // ── No issue yet → raise YELLOW (or RED if already past threshold). ──
     if (!r.escalationIssueId) {
-      const description = `[ATTENDANCE] ${pName} overdue by ${overdueMins} min (expected ${new Date(r.expectedArrivalAt).toLocaleTimeString()}).`;
-      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
       const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
+      const descriptionPrefix = wantRed ? "[AUTOMATED_RED]" : "[ATTENDANCE]";
+      const description = `${descriptionPrefix} ${pName} overdue by ${overdueMins} min (expected ${new Date(r.expectedArrivalAt).toLocaleTimeString()}).`;
+      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+      const staffId = await resolveStaffIdWithFallback();
+
+      // GUARDRAILS §1.1 — ledger write FIRST; abort if it fails so no
+      // un-vouched RED row is created in site_issues_register.
+      if (wantRed) {
+        try {
+          await writeToLedgerOrThrow({
+            staff_id: staffId,
+            category: "CLIENT",
+            severity: "RED",
+            action_type: "ATTENDANCE_RED_ESCALATED",
+            gps_lat: null,
+            gps_lng: null,
+            metadata: {
+              attendance_id: r.id,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              threshold_mins: redMins,
+              automated: true,
+            },
+          });
+        } catch (ledgerErr) {
+          console.error("[client-attendance] RED ledger write failed — promotion aborted", ledgerErr);
+          continue; // issue stays unraised; will retry on next sweep
+        }
+      } else {
+        await writeToLedger({
+          staff_id: staffId,
+          category: "CLIENT",
+          severity: "YELLOW",
+          action_type: "ATTENDANCE_YELLOW_RAISED",
+          gps_lat: null,
+          gps_lng: null,
+          metadata: {
+            attendance_id: r.id,
+            participant_id: r.participantId,
+            overdue_mins: overdueMins,
+            threshold_mins: yellowMins,
+            automated: true,
+          },
+        });
+      }
 
       const { data: issue, error: issueErr } = await supabase
         .from("site_issues_register")
@@ -804,7 +847,7 @@ export async function sweepOverdueArrivals(
         .select("id")
         .single();
       if (issueErr) {
-        console.error("[client-attendance] sweep yellow insert failed", issueErr);
+        console.error("[client-attendance] sweep issue insert failed", issueErr);
         continue;
       }
 
@@ -817,24 +860,6 @@ export async function sweepOverdueArrivals(
         })
         .eq("id", r.id);
 
-      const staffId = await resolveStaffIdWithFallback();
-      await writeToLedger({
-        staff_id: staffId,
-        category: "CLIENT",
-        severity: wantRed ? "RED" : "YELLOW",
-        action_type: wantRed
-          ? "ATTENDANCE_RED_ESCALATED"
-          : "ATTENDANCE_YELLOW_RAISED",
-        gps_lat: null,
-        gps_lng: null,
-        metadata: {
-          attendance_id: r.id,
-          issue_id: issue.id,
-          participant_id: r.participantId,
-          overdue_mins: overdueMins,
-          threshold_mins: wantRed ? redMins : yellowMins,
-        },
-      });
       if (wantRed) {
         await fireRedSmsPipeline(r.id, pName, r.expectedArrivalAt, sessionId);
         redRaised += 1;
@@ -846,11 +871,35 @@ export async function sweepOverdueArrivals(
 
     // ── Yellow row already exists → mutate the SAME id to RED if due. ────
     if (wantRed && r.escalationSeverity !== "red") {
+      const staffId = await resolveStaffIdWithFallback();
+
+      // GUARDRAILS §1.1 — ledger write FIRST; abort RED promotion on failure.
+      try {
+        await writeToLedgerOrThrow({
+          staff_id: staffId,
+          category: "CLIENT",
+          severity: "RED",
+          action_type: "ATTENDANCE_RED_ESCALATED",
+          gps_lat: null,
+          gps_lng: null,
+          metadata: {
+            attendance_id: r.id,
+            issue_id: r.escalationIssueId,
+            participant_id: r.participantId,
+            overdue_mins: overdueMins,
+            automated: true,
+          },
+        });
+      } catch (ledgerErr) {
+        console.error("[client-attendance] RED ledger write failed — promotion aborted", ledgerErr);
+        continue; // issue stays YELLOW; will retry on next sweep
+      }
+
       const { error: upErr } = await supabase
         .from("site_issues_register")
         .update({
           severity: "red",
-          issue_description: `[ATTENDANCE] ${pName} overdue by ${overdueMins} min — escalated to RED.`,
+          issue_description: `[AUTOMATED_RED] ${pName} overdue by ${overdueMins} min — escalated to RED.`,
         })
         .eq("id", r.escalationIssueId);
       if (upErr) {
@@ -862,21 +911,6 @@ export async function sweepOverdueArrivals(
         .update({ escalation_severity: "red" })
         .eq("id", r.id);
 
-      const staffId = await resolveStaffIdWithFallback();
-      await writeToLedger({
-        staff_id: staffId,
-        category: "CLIENT",
-        severity: "RED",
-        action_type: "ATTENDANCE_RED_ESCALATED",
-        gps_lat: null,
-        gps_lng: null,
-        metadata: {
-          attendance_id: r.id,
-          issue_id: r.escalationIssueId,
-          participant_id: r.participantId,
-          overdue_mins: overdueMins,
-        },
-      });
       await fireRedSmsPipeline(r.id, pName, r.expectedArrivalAt, sessionId);
       redRaised += 1;
     }
@@ -1137,11 +1171,55 @@ export async function sweepOverdueDepartures(
     const pName = participantNames[r.participantId] ?? "Client";
     const wantRed = overdueMins >= redMins;
 
-    // No departure issue yet — raise YELLOW (or RED if already past).
+    // No departure issue yet — raise YELLOW (or RED if already past threshold).
     if (!r.departureIssueId) {
-      const description = `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min (expected ${new Date(r.expectedDepartureAt).toLocaleTimeString()}).`;
-      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
       const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
+      const descriptionPrefix = wantRed ? "[AUTOMATED_RED]" : "[DEPARTURE]";
+      const description = `${descriptionPrefix} ${pName} overdue checkout by ${overdueMins} min (expected ${new Date(r.expectedDepartureAt).toLocaleTimeString()}).`;
+      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+      const staffId = await resolveStaffIdWithFallback();
+
+      // GUARDRAILS §1.1 — ledger write FIRST; abort if it fails.
+      if (wantRed) {
+        try {
+          await writeToLedgerOrThrow({
+            staff_id: staffId,
+            category: "CLIENT",
+            severity: "RED",
+            action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
+            gps_lat: null,
+            gps_lng: null,
+            metadata: {
+              attendance_id: r.id,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              threshold_mins: redMins,
+              rail: "departure",
+              automated: true,
+            },
+          });
+        } catch (ledgerErr) {
+          console.error("[client-attendance] departure RED ledger write failed — promotion aborted", ledgerErr);
+          continue;
+        }
+      } else {
+        await writeToLedger({
+          staff_id: staffId,
+          category: "CLIENT",
+          severity: "YELLOW",
+          action_type: "ATTENDANCE_DEPARTURE_YELLOW_RAISED",
+          gps_lat: null,
+          gps_lng: null,
+          metadata: {
+            attendance_id: r.id,
+            participant_id: r.participantId,
+            overdue_mins: overdueMins,
+            threshold_mins: yellowMins,
+            rail: "departure",
+            automated: true,
+          },
+        });
+      }
 
       const { data: issue, error: issueErr } = await supabase
         .from("site_issues_register")
@@ -1157,7 +1235,7 @@ export async function sweepOverdueDepartures(
         .select("id")
         .single();
       if (issueErr) {
-        console.error("[client-attendance] departure yellow insert failed", issueErr);
+        console.error("[client-attendance] departure issue insert failed", issueErr);
         continue;
       }
 
@@ -1170,25 +1248,6 @@ export async function sweepOverdueDepartures(
         })
         .eq("id", r.id);
 
-      const staffId = await resolveStaffIdWithFallback();
-      await writeToLedger({
-        staff_id: staffId,
-        category: "CLIENT",
-        severity: wantRed ? "RED" : "YELLOW",
-        action_type: wantRed
-          ? "ATTENDANCE_DEPARTURE_RED_ESCALATED"
-          : "ATTENDANCE_DEPARTURE_YELLOW_RAISED",
-        gps_lat: null,
-        gps_lng: null,
-        metadata: {
-          attendance_id: r.id,
-          issue_id: issue.id,
-          participant_id: r.participantId,
-          overdue_mins: overdueMins,
-          threshold_mins: wantRed ? redMins : yellowMins,
-          rail: "departure",
-        },
-      });
       if (wantRed) {
         await fireRedDepartureSmsPipeline(
           r.id,
@@ -1205,11 +1264,36 @@ export async function sweepOverdueDepartures(
 
     // YELLOW departure row already exists — mutate SAME id to RED if due.
     if (wantRed && r.departureSeverity !== "red") {
+      const staffId = await resolveStaffIdWithFallback();
+
+      // GUARDRAILS §1.1 — ledger write FIRST; abort RED promotion on failure.
+      try {
+        await writeToLedgerOrThrow({
+          staff_id: staffId,
+          category: "CLIENT",
+          severity: "RED",
+          action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
+          gps_lat: null,
+          gps_lng: null,
+          metadata: {
+            attendance_id: r.id,
+            issue_id: r.departureIssueId,
+            participant_id: r.participantId,
+            overdue_mins: overdueMins,
+            rail: "departure",
+            automated: true,
+          },
+        });
+      } catch (ledgerErr) {
+        console.error("[client-attendance] departure RED ledger write failed — promotion aborted", ledgerErr);
+        continue; // issue stays YELLOW; will retry on next sweep
+      }
+
       const { error: upErr } = await supabase
         .from("site_issues_register")
         .update({
           severity: "red",
-          issue_description: `[DEPARTURE] ${pName} overdue checkout by ${overdueMins} min — escalated to RED.`,
+          issue_description: `[AUTOMATED_RED] ${pName} overdue checkout by ${overdueMins} min — escalated to RED.`,
         })
         .eq("id", r.departureIssueId);
       if (upErr) {
@@ -1221,22 +1305,6 @@ export async function sweepOverdueDepartures(
         .update({ departure_severity: "red" })
         .eq("id", r.id);
 
-      const staffId = await resolveStaffIdWithFallback();
-      await writeToLedger({
-        staff_id: staffId,
-        category: "CLIENT",
-        severity: "RED",
-        action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
-        gps_lat: null,
-        gps_lng: null,
-        metadata: {
-          attendance_id: r.id,
-          issue_id: r.departureIssueId,
-          participant_id: r.participantId,
-          overdue_mins: overdueMins,
-          rail: "departure",
-        },
-      });
       await fireRedDepartureSmsPipeline(
         r.id,
         pName,

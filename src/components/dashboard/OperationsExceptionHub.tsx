@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link } from "@tanstack/react-router";
+import { WallCalendar } from "./rolling-month-calendar";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -28,7 +29,7 @@ import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
-  useComplianceExceptions,
+  useComplianceCategories,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
@@ -107,7 +108,7 @@ export function OperationsExceptionHub() {
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
-  const { data: complianceRows } = useComplianceExceptions();
+  const { data: categories } = useComplianceCategories();
 
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
@@ -175,46 +176,42 @@ export function OperationsExceptionHub() {
   ];
 
   // Registry-driven tiles — one bucket per unique category present in
-  // compliance_assets. Adding a new category in the Governance Hub lights up
-  // a new tile here with no code change.
-  const groupedByCategory = new Map<string, ComplianceExceptionRow[]>();
-  for (const r of complianceRows) {
-    const arr = groupedByCategory.get(r.category) ?? [];
-    arr.push(r);
-    groupedByCategory.set(r.category, arr);
-  }
-  const registryBuckets: Bucket[] = Array.from(groupedByCategory.entries())
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([category, rows]) => {
-      const pres = CATEGORY_PRESENTATION[category] ?? {
-        label: titleCase(category),
-        icon: ShieldCheck,
-      };
-      return {
-        id: `compliance-${category.toLowerCase()}`,
-        anchorId: `exception-section-compliance-${category.toLowerCase()}`,
-        label: pres.label,
-        icon: pres.icon,
-        isLive: true,
-        rows: rows.map((r) => ({
-          key: r.key,
-          title: r.title,
-          detail: r.detail,
-          severity: r.severity,
-          action: (
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2 text-xs"
-              onClick={() => setActiveAsset(r.asset)}
-            >
-              <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-              Resolve
-            </Button>
-          ),
-        })),
-      };
-    });
+  // compliance_assets (status = active).
+  //
+  // GUARDRAILS §5.1: Adding a new category to the DB automatically lights up
+  // a new tile here with no code change required. Green categories (all assets
+  // within threshold) render an "all-clear" tile. Yellow/red categories show
+  // a count badge and scroll to their drill table.
+  const registryBuckets: Bucket[] = categories.map(({ category, exceptionRows }) => {
+    const pres = CATEGORY_PRESENTATION[category] ?? {
+      label: titleCase(category),
+      icon: ShieldCheck,
+    };
+    return {
+      id: `compliance-${category.toLowerCase()}`,
+      anchorId: `exception-section-compliance-${category.toLowerCase()}`,
+      label: pres.label,
+      icon: pres.icon,
+      isLive: true,
+      rows: exceptionRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: (
+          <Button
+            size="sm"
+            variant="outline"
+            className="h-7 px-2 text-xs"
+            onClick={() => setActiveAsset(r.asset)}
+          >
+            <ShieldCheck className="mr-1 h-3.5 w-3.5" />
+            Resolve
+          </Button>
+        ),
+      })),
+    };
+  });
 
   const buckets: Bucket[] = [...operationalBuckets, ...registryBuckets];
 
@@ -227,7 +224,7 @@ export function OperationsExceptionHub() {
   };
 
   return (
-    <Card className="space-y-5 p-5">
+    <Card className="space-y-3 p-3">
       <header className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-destructive" />
@@ -242,11 +239,13 @@ export function OperationsExceptionHub() {
         </div>
       </header>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
         {buckets.map((b) => (
           <StatusTile key={b.id} bucket={b} onClick={() => handleTileClick(b)} />
         ))}
       </div>
+
+      <WallCalendar />
 
       {drillBuckets.length > 0 && (
         <div className="space-y-4">
@@ -307,27 +306,24 @@ function StatusTile({ bucket, onClick }: { bucket: Bucket; onClick: () => void }
           : `${label}: all clear`
       }
       className={cn(
-        "relative flex min-h-32 flex-col justify-between rounded-lg p-4 text-left shadow-sm transition",
+        "relative flex min-h-16 flex-col justify-between rounded-lg p-2.5 text-left shadow-sm transition",
         tone,
         interactive
           ? "cursor-pointer hover:brightness-110 hover:shadow-md focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2 focus-visible:ring-foreground/40"
           : "cursor-default",
       )}
     >
-      <div className="flex items-start justify-between gap-2">
-        <Icon className="h-5 w-5 shrink-0 opacity-90" />
+      <div className="flex items-start justify-between gap-1">
+        <Icon className="h-4 w-4 shrink-0 opacity-90" />
         {!isClear && (
-          <span className="rounded-md bg-black/20 px-2 py-0.5 text-xs font-bold tabular-nums">
+          <span className="rounded-md bg-black/20 px-1.5 py-0.5 text-xs font-bold tabular-nums">
             {count}
           </span>
         )}
-        {isClear && <CheckCircle2 className="h-5 w-5 shrink-0 opacity-90" />}
+        {isClear && <CheckCircle2 className="h-4 w-4 shrink-0 opacity-90" />}
       </div>
-      <div className="mt-3">
-        <div className="text-sm font-semibold leading-tight">{label}</div>
-        <div className="mt-1 text-[11px] uppercase tracking-wide opacity-80">
-          {isLive ? "Live" : "Preview"}
-        </div>
+      <div className="mt-2">
+        <div className="text-xs font-semibold leading-snug">{label}</div>
       </div>
     </button>
   );
