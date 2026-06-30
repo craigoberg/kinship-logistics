@@ -10,10 +10,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 
 import {
   resolveStaffIdWithFallback,
@@ -40,9 +37,7 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
   }, [escalation]);
 
   const trimmed = notes.trim();
-  const charCount = trimmed.length;
-  const tooShort = charCount < MIN_NOTES;
-  const progress = Math.min(100, Math.round((charCount / MIN_NOTES) * 100));
+  const tooShort = trimmed.length < MIN_NOTES;
 
   const submit = async () => {
     if (!escalation || submitting) return;
@@ -140,37 +135,18 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
               )}
             </div>
 
-            <div className="grid gap-1.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <Label htmlFor="ug-notes" className="text-sm font-semibold">
-                  Safety Clearance Notes
-                </Label>
-                <span
-                  className={cn(
-                    "text-[11px] tabular-nums",
-                    tooShort ? "text-muted-foreground" : "text-emerald-600",
-                  )}
-                >
-                  {tooShort ? `${MIN_NOTES - charCount} more` : "Ready"}
-                </span>
-              </div>
-              <Textarea
-                id="ug-notes"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Inspection performed, defect resolution, who verified roadworthiness…"
-                className="resize-none text-sm"
-              />
-              <Progress
-                value={progress}
-                className={cn(
-                  "h-1",
-                  !tooShort && "[&>div]:bg-emerald-600",
-                )}
-                aria-label={`Clearance notes ${charCount} of ${MIN_NOTES} minimum characters`}
-              />
-            </div>
+            <CharacterCountedTextarea
+              id="ug-notes"
+              label="Safety clearance notes"
+              value={notes}
+              onValueChange={setNotes}
+              minChars={MIN_NOTES}
+              maxChars={500}
+              counterMode="minimum"
+              rows={3}
+              placeholder="Inspection performed, defect resolution, who verified roadworthiness…"
+              required
+            />
 
             <Button
               type="button"

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Check, X, Clock, Save } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
@@ -23,12 +23,18 @@ import {
   type TransportPayload,
   type NewSyncLog,
 } from "@/lib/data-store";
+import { completeTransportRequest, type TransportRequest } from "@/lib/api/transport-requests";
+import { invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 import { enqueue } from "@/lib/sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useQueryClient } from "@tanstack/react-query";
 
 interface Props {
   participants: Participant[];
+  /** Open ad-hoc requests for today — optional link when logging completion. */
+  openRequests?: TransportRequest[];
+  linkedRequestId?: string;
+  onLinkedRequestChange?: (id: string) => void;
 }
 
 const STATUSES: { value: TransportStatus; label: string; icon: typeof Check }[] = [
@@ -39,7 +45,12 @@ const STATUSES: { value: TransportStatus; label: string; icon: typeof Check }[] 
 
 export const TRANSPORT_ACTION = "transport_log";
 
-export function TransportForm({ participants }: Props) {
+export function TransportForm({
+  participants,
+  openRequests = [],
+  linkedRequestId = "",
+  onLinkedRequestChange,
+}: Props) {
   const online = useOnlineStatus();
   const qc = useQueryClient();
   const [participantId, setParticipantId] = useState("");
@@ -64,7 +75,36 @@ export function TransportForm({ participants }: Props) {
     setStatus("Arrived");
     setPresent(true);
     setParticipantId("");
+    onLinkedRequestChange?.("");
   };
+
+  const applyRequest = (requestId: string) => {
+    onLinkedRequestChange?.(requestId);
+    const req = openRequests.find((r) => r.id === requestId);
+    if (!req) return;
+    setParticipantId(req.participantId);
+    const noteParts = [
+      req.destinationLabel,
+      req.reason,
+      req.pickupAddress ? `Pickup: ${req.pickupAddress}` : "",
+    ].filter(Boolean);
+    setNotes(noteParts.join(" · "));
+  };
+
+  useEffect(() => {
+    if (linkedRequestId && openRequests.some((r) => r.id === linkedRequestId)) {
+      const req = openRequests.find((r) => r.id === linkedRequestId);
+      if (req) {
+        setParticipantId(req.participantId);
+        const noteParts = [
+          req.destinationLabel,
+          req.reason,
+          req.pickupAddress ? `Pickup: ${req.pickupAddress}` : "",
+        ].filter(Boolean);
+        setNotes(noteParts.join(" · "));
+      }
+    }
+  }, [linkedRequestId, openRequests]);
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -79,6 +119,7 @@ export function TransportForm({ participants }: Props) {
       status,
       notes,
       timestamp: new Date().toISOString(),
+      transport_request_id: linkedRequestId || null,
     };
 
     const newLog: NewSyncLog = {
@@ -90,8 +131,12 @@ export function TransportForm({ participants }: Props) {
 
     if (online) {
       try {
-        await insertSyncLog(newLog);
+        const logRow = await insertSyncLog(newLog);
+        if (linkedRequestId) {
+          await completeTransportRequest(linkedRequestId, logRow.id);
+        }
         qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
+        invalidateTransportRequestCaches(qc);
         toast.success("Run saved", { description: "Synced to Yada Connect." });
         reset();
       } catch (err) {
@@ -114,6 +159,34 @@ export function TransportForm({ participants }: Props) {
   return (
     <Card className="p-0">
       <form onSubmit={submit} className="space-y-5 p-5">
+        {openRequests.length > 0 && (
+          <div className="grid gap-2">
+            <Label htmlFor="linked-request">Link to request (optional)</Label>
+            <Select
+              value={linkedRequestId || "__none__"}
+              onValueChange={(v) => {
+                if (v === "__none__") {
+                  onLinkedRequestChange?.("");
+                } else {
+                  applyRequest(v);
+                }
+              }}
+            >
+              <SelectTrigger id="linked-request" className="h-12">
+                <SelectValue placeholder="Quick log without a request…" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No linked request</SelectItem>
+                {openRequests.map((r) => (
+                  <SelectItem key={r.id} value={r.id}>
+                    {r.participantName ?? "Participant"} → {r.destinationLabel}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
         <div className="grid gap-2">
           <Label htmlFor="participant">Participant</Label>
           <Select value={participantId} onValueChange={setParticipantId}>

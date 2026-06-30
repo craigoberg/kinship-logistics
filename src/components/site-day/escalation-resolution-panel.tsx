@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
   Dialog,
   DialogContent,
@@ -256,7 +256,6 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const [rejectReason, setRejectReason] = useState("");
   const [rejectAttempted, setRejectAttempted] = useState(false);
   const rejectReasonValid = rejectReason.trim().length >= 10;
-  const showRejectReasonError = rejectAttempted && !rejectReasonValid;
 
   // ── States ─────────────────────────────────────────────────────────────
   if (escQ.isLoading) {
@@ -491,40 +490,18 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
             </DialogDescription>
           </DialogHeader>
 
-          <div className="grid gap-1.5">
-            <Label
-              htmlFor="reject-reason"
-              className="text-xs uppercase tracking-wide text-muted-foreground"
-            >
-              Reason for rejection <span className="text-rose-600">*</span>
-            </Label>
-            <Textarea
-              id="reject-reason"
-              rows={4}
-              value={rejectReason}
-              onChange={(e) => setRejectReason(e.target.value)}
-              placeholder="Why the proposed plan is not acceptable. Minimum 10 characters."
-              className={cn(
-                showRejectReasonError &&
-                  "border-2 border-rose-600 focus-visible:ring-rose-600",
-              )}
-            />
-            <div className="flex items-center justify-between text-[11px]">
-              <span
-                className={cn(
-                  "text-muted-foreground",
-                  showRejectReasonError && "font-semibold text-rose-600",
-                )}
-              >
-                {rejectReason.trim().length}/10 minimum
-              </span>
-              {showRejectReasonError && (
-                <span className="font-semibold text-rose-600">
-                  Required — add more detail
-                </span>
-              )}
-            </div>
-          </div>
+          <CharacterCountedTextarea
+            id="reject-reason"
+            label="Reason for rejection"
+            value={rejectReason}
+            onValueChange={setRejectReason}
+            minChars={10}
+            maxChars={2000}
+            counterMode="minimum"
+            rows={4}
+            placeholder="Why the proposed plan is not acceptable. Minimum 10 characters."
+            required
+          />
 
           <DialogFooter className="gap-2 sm:gap-2">
             <Button

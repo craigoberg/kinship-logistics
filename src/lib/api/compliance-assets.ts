@@ -1,7 +1,8 @@
+import { MIN_EVIDENCE } from "@/lib/governance/constants";
 import { supabase } from "@/integrations/supabase/client";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
-import { tryGetGps } from "@/lib/api/ledger";
+import { tryGetGps, writeToLedger } from "@/lib/api/ledger";
 
 // ---------------------------------------------------------------------------
 // Compliance Governance Engine — registry of every "thing that expires".
@@ -61,6 +62,7 @@ export async function listComplianceAssets(
     .select(
       "id, category, type, name, description, subject_table, subject_id, expiry_date, next_action_at, action_module, config, status, created_by, created_at, updated_at",
     )
+    .order("expiry_date", { ascending: true, nullsFirst: false })
     .order("next_action_at", { ascending: true, nullsFirst: false });
   if (args.category) q = q.eq("category", args.category);
   if (args.status) q = q.eq("status", args.status);
@@ -146,10 +148,295 @@ export async function archiveComplianceAsset(
 
   const { error } = await supabase
     .from("compliance_assets")
-    .update({ status: "archived", config: { archive_justification: trimmed } })
+    .update({
+      status: "archived",
+      next_action_at: null,
+      config: { archive_justification: trimmed },
+    })
     .eq("id", id);
   if (error) throw error;
 }
+
+// ---------------------------------------------------------------------------
+// Hub timeline (source = renewal) — defer, notes, close — mirrors Open Issues.
+// ---------------------------------------------------------------------------
+
+export const COMPLIANCE_HUB_SOURCE = "renewal" as const;
+
+export type ComplianceHubNoteKind = "append" | "defer" | "resolve";
+
+export interface ComplianceHubNote {
+  id: string;
+  note: string;
+  kind: ComplianceHubNoteKind;
+  stampedAt: string;
+  staffId: string | null;
+  metadata: Record<string, unknown> | null;
+}
+
+function formatHubStamp(d: Date): string {
+  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
+  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(-2)}/${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+export function renderComplianceNoteLine(n: ComplianceHubNote): string {
+  return `[${formatHubStamp(new Date(n.stampedAt))}]: ${n.note}`;
+}
+
+async function insertComplianceHubNote(args: {
+  assetId: string;
+  note: string;
+  kind: ComplianceHubNoteKind;
+  metadata?: Record<string, unknown> | null;
+}): Promise<void> {
+  const staffId = await resolveStaffIdWithFallback().catch(() => null);
+  const { error } = await supabase.from("hub_issue_notes").insert({
+    source: COMPLIANCE_HUB_SOURCE,
+    source_row_id: args.assetId,
+    note: args.note.trim(),
+    kind: args.kind,
+    staff_id: staffId,
+    metadata: args.metadata ?? null,
+  });
+  if (error) throw error;
+}
+
+export async function listComplianceAssetNotes(
+  assetId: string,
+): Promise<ComplianceHubNote[]> {
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("*")
+    .eq("source", COMPLIANCE_HUB_SOURCE)
+    .eq("source_row_id", assetId)
+    .order("stamped_at", { ascending: true });
+  if (error) {
+    console.warn("[listComplianceAssetNotes] failed", error);
+    return [];
+  }
+  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+    id: String(r.id),
+    note: String(r.note ?? ""),
+    kind: (r.kind as ComplianceHubNoteKind) ?? "append",
+    stampedAt: String(r.stamped_at),
+    staffId: (r.staff_id as string | null) ?? null,
+    metadata: (r.metadata as Record<string, unknown> | null) ?? null,
+  }));
+}
+
+export interface LiveComplianceDefer {
+  deferredUntil: Date;
+  note: string;
+}
+
+/**
+ * Latest defer per asset id (renewal hub notes). Live when kind=defer and
+ * deferred_until is still in the future.
+ */
+export async function fetchComplianceDeferMap(): Promise<
+  Map<string, LiveComplianceDefer>
+> {
+  const map = new Map<string, LiveComplianceDefer>();
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("source_row_id, note, kind, stamped_at, metadata")
+    .eq("source", COMPLIANCE_HUB_SOURCE)
+    .order("stamped_at", { ascending: false })
+    .limit(2000);
+  if (error) {
+    console.warn("[fetchComplianceDeferMap] failed", error);
+    return map;
+  }
+  const seen = new Set<string>();
+  for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+    const id = String(r.source_row_id);
+    if (seen.has(id)) continue;
+    seen.add(id);
+    if (r.kind !== "defer") continue;
+    const meta = (r.metadata as Record<string, unknown> | null) ?? null;
+    const untilStr =
+      meta && typeof meta.deferred_until === "string" ? meta.deferred_until : null;
+    if (!untilStr) continue;
+    const until = new Date(untilStr);
+    if (Number.isNaN(until.getTime())) continue;
+    map.set(id, {
+      deferredUntil: until,
+      note: String(r.note ?? ""),
+    });
+  }
+  return map;
+}
+
+export function isComplianceAssetLiveDeferred(
+  assetId: string,
+  deferMap: Map<string, LiveComplianceDefer>,
+): boolean {
+  const d = deferMap.get(assetId);
+  return !!(d && d.deferredUntil.getTime() > Date.now());
+}
+
+/** Append a `[RESOLVED]` line after domain completion from the Manage shell. */
+export async function appendComplianceAssetResolveNote(
+  assetId: string,
+  args: {
+    note: string;
+    resolutionSummary: string;
+    evidenceRef?: string;
+    metadata?: Record<string, unknown>;
+    /** When the domain API already wrote a ledger row (e.g. resolveComplianceAsset). */
+    skipLedger?: boolean;
+  },
+): Promise<void> {
+  const trimmed = args.note.trim();
+  if (trimmed.length < 10) {
+    throw new Error("Resolution note must be at least 10 characters.");
+  }
+  const evidenceSuffix = args.evidenceRef
+    ? ` · evidence: ${args.evidenceRef.trim()}`
+    : "";
+  await insertComplianceHubNote({
+    assetId,
+    note: `[RESOLVED · ${args.resolutionSummary}] ${trimmed}${evidenceSuffix}`,
+    kind: "resolve",
+    metadata: {
+      resolution_summary: args.resolutionSummary,
+      evidence_ref: args.evidenceRef ?? null,
+      ...args.metadata,
+    },
+  });
+
+  if (args.skipLedger) return;
+
+  const staffId = await resolveStaffIdWithFallback();
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "governance.issue_resolved",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      source: COMPLIANCE_HUB_SOURCE,
+      source_row_id: assetId,
+      resolution_note: trimmed,
+      resolution_summary: args.resolutionSummary,
+      evidence_ref: args.evidenceRef ?? null,
+    },
+  });
+}
+
+export async function saveComplianceAssetRenewal(
+  assetId: string,
+  args: { note: string; newExpiry: string; evidenceRef: string },
+): Promise<void> {
+  const trimmed = args.note.trim();
+  if (trimmed.length < 10) {
+    throw new Error("Update note must be at least 10 characters.");
+  }
+  if (!args.newExpiry || Number.isNaN(Date.parse(args.newExpiry))) {
+    throw new Error("A valid next expiry date is required.");
+  }
+  const evidence = args.evidenceRef.trim();
+  if (evidence.length < MIN_EVIDENCE) {
+    throw new Error(`Evidence reference must be at least ${MIN_EVIDENCE} characters.`);
+  }
+
+  const { data: current, error: readErr } = await supabase
+    .from("compliance_assets")
+    .select("expiry_date")
+    .eq("id", assetId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+
+  const previousExpiry = (current as { expiry_date: string | null } | null)?.expiry_date;
+
+  const { error: updErr } = await supabase
+    .from("compliance_assets")
+    .update({ expiry_date: args.newExpiry, next_action_at: null })
+    .eq("id", assetId);
+  if (updErr) throw updErr;
+
+  await appendComplianceAssetResolveNote(assetId, {
+    note: trimmed,
+    resolutionSummary: `renewed · expiry ${args.newExpiry}`,
+    evidenceRef: evidence,
+    metadata: {
+      previous_expiry: previousExpiry,
+      new_expiry: args.newExpiry,
+      payload_kind: "manage_renewal",
+      archived: true,
+    },
+    skipLedger: false,
+  });
+
+  await archiveComplianceAsset(assetId, trimmed);
+}
+
+export async function appendComplianceAssetNote(
+  assetId: string,
+  note: string,
+  args?: { evidenceRef?: string },
+): Promise<void> {
+  const trimmed = note.trim();
+  if (trimmed.length < 10) {
+    throw new Error("Update note must be at least 10 characters.");
+  }
+  const evidence = args?.evidenceRef?.trim();
+  const evidenceSuffix = evidence ? ` · evidence: ${evidence}` : "";
+  await insertComplianceHubNote({
+    assetId,
+    note: `${trimmed}${evidenceSuffix}`,
+    kind: "append",
+    metadata: evidence ? { evidence_ref: evidence } : undefined,
+  });
+}
+
+export async function deferComplianceAsset(
+  assetId: string,
+  args: { untilIso: string; note: string },
+): Promise<void> {
+  const note = args.note.trim();
+  if (note.length < 10) {
+    throw new Error("Defer note must be at least 10 characters.");
+  }
+  if (!args.untilIso || Number.isNaN(Date.parse(args.untilIso))) {
+    throw new Error("A valid next-action date is required.");
+  }
+
+  const deferStampLocal = formatHubStamp(new Date(args.untilIso));
+  await insertComplianceHubNote({
+    assetId,
+    note: `[DEFERRED until ${deferStampLocal}] ${note}`,
+    kind: "defer",
+    metadata: { deferred_until: args.untilIso },
+  });
+
+  const { error } = await supabase
+    .from("compliance_assets")
+    .update({ next_action_at: args.untilIso })
+    .eq("id", assetId);
+  if (error) throw error;
+
+  const staffId = await resolveStaffIdWithFallback();
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "YELLOW",
+    action_type: "governance.issue_deferred",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      source: COMPLIANCE_HUB_SOURCE,
+      source_row_id: assetId,
+      deferred_until: args.untilIso,
+      note,
+    },
+  });
+}
+
+export type ComplianceAssetTab = "active" | "awaiting";
 
 // ---------------------------------------------------------------------------
 // RYGE — Red/Yellow/Green derivation from expiry_date + config thresholds.

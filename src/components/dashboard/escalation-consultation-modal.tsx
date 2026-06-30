@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { cn } from "@/lib/utils";
 import { ElapsedTimer } from "@/components/ui/elapsed-timer";
 
@@ -255,7 +255,6 @@ function SiteDayProposalModal({
   const notesValid = notes.trim().length >= 10;
   const pinValid = /^\d{4,6}$/.test(pin);
   const sessionMissing = !sessionLoading && !sessionId;
-  const showNotesError = attempted && !notesValid;
   const showPinError = attempted && !pinValid;
 
   const propose = async (decision: "go" | "no_go") => {
@@ -442,41 +441,18 @@ function SiteDayProposalModal({
               </div>
             )}
 
-            <div className="grid gap-1.5">
-              <Label
-                htmlFor="esc-notes"
-                className="text-xs uppercase tracking-wide text-muted-foreground"
-              >
-                Negotiated Action Plan / NO-GO Reason{" "}
-                <span className="text-rose-600">*</span>
-              </Label>
-              <Textarea
-                id="esc-notes"
-                rows={4}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="For GO: the agreed mitigations to open the centre safely. For NO-GO: why the centre must remain closed. Minimum 10 characters."
-                className={cn(
-                  showNotesError &&
-                    "border-2 border-rose-600 focus-visible:ring-rose-600",
-                )}
-              />
-              <div className="flex items-center justify-between text-[11px]">
-                <span
-                  className={cn(
-                    "text-muted-foreground",
-                    showNotesError && "font-semibold text-rose-600",
-                  )}
-                >
-                  {notes.trim().length}/10 minimum
-                </span>
-                {showNotesError && (
-                  <span className="font-semibold text-rose-600">
-                    Required — add more detail
-                  </span>
-                )}
-              </div>
-            </div>
+            <CharacterCountedTextarea
+              id="esc-notes"
+              label="Negotiated action plan / NO-GO reason"
+              value={notes}
+              onValueChange={setNotes}
+              minChars={10}
+              maxChars={2000}
+              counterMode="minimum"
+              rows={4}
+              placeholder="For GO: the agreed mitigations to open the centre safely. For NO-GO: why the centre must remain closed. Minimum 10 characters."
+              required
+            />
 
             <div className="grid gap-1.5">
               <Label

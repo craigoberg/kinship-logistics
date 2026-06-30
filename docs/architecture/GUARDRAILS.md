@@ -102,7 +102,9 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | Pattern / Functional Layer  | Canonical Component / Hook Path                               | Operational Purpose                                                                              |
 | :-------------------------- | :------------------------------------------------------------ | :----------------------------------------------------------------------------------------------- |
 | PIN Re-Authentication       | `src/components/auth/pin-reauth-dialog.tsx`                   | Secure dual-PIN multi-session handshakes.                                                        |
-| Textarea Input & Validation | `src/components/ui/character-counted-textarea.tsx`            | Enforces the 20-char rule, live X/Y tracker, blue progress line, and thick red required borders. |
+| Multi-line required text    | `src/components/ui/character-counted-textarea.tsx`            | Enforces min-char rule, live X/Y tracker, progress bar, thick red required border (§4.3).        |
+| Single-line required text   | `src/components/ui/character-counted-input.tsx`               | Evidence refs and short mandatory inputs — same §4.3 border/counter semantics as textarea.       |
+| Required-field style tokens | `src/lib/ui/required-field.ts`                                | Shared `requiredFieldOutline`, `requiredFieldCounterClass`, `requiredFieldRemainingHint`.      |
 | Centralized Issue Panel     | `src/components/issue-engine/issue-declaration-panel.tsx`     | Context-sensitive reentrant engine governing all RYGE checklist gates and refresh halts.         |
 | Mandated Checks Lookup      | `src/hooks/use-mandated-checks.ts` (or data layer equivalent) | Dynamically sources checkpoints via registry scope ('site_day' vs 'pre_trip').                   |
 | High-Trust Escape Hatch     | `src/components/auth/verbal-auth-override-dialog.tsx`         | Renders the auditable verbal authorization bypass for un-reachable manager states.               |
@@ -129,7 +131,36 @@ Rules:
 
 ### 4.3 Required Field Visual Identifiers
 
-- High-Visibility Outlines: Do not rely on small red asterisks (\*) alone to mark mandatory inputs. Any required input field, dropdown, or textarea that is empty or invalid must be outlined with a prominent, thick red border to give the operator an unmistakable visual indication of what is missing.
+Mandatory inputs must give operators an **immediate, consistent** signal of what is missing and when it is satisfied. Do **not** rely on small red asterisks alone, muted-grey helper text, or post-submit-only error styling.
+
+**Canonical components (mandatory for new builds):**
+
+- Multi-line notes / justifications → `CharacterCountedTextarea`
+- Single-line evidence refs / short required text → `CharacterCountedInput`
+- Custom controls (date pickers, selects) → apply helpers from `src/lib/ui/required-field.ts`
+
+**Visual contract (all required fields):**
+
+1. **Thick red outline** (`border-2 border-destructive`) on the control while it is empty or below the minimum. The outline **disappears** once the field is compliant.
+2. **Live counter** beneath the control: `{current}/{min} minimum` (or `{current} / {min} min` for long-form). Counter is **red and bold** while invalid; **emerald green** when compliant.
+3. **Remaining hint** (right-aligned, red): e.g. `4 more characters required.` — shown only while invalid.
+4. **Progress bar** along the bottom edge of text inputs: blue while filling, emerald when minimum met.
+5. **Save / submit buttons** remain `disabled` until every required field passes validation (see §4.2).
+
+**Anti-patterns (do not ship):**
+
+- White or muted-grey “N more chars required” without a red counter
+- Inline uppercase “REQUIRED” badges instead of the standard counter + border
+- Showing validation styling only after the first submit attempt (`attempted && !valid`)
+- Hand-rolled `<Textarea>` + manual counter divs when a canonical component applies
+
+**Minimum lengths (shared constants in `src/lib/governance/constants.ts`):**
+
+| Constant            | Chars | Typical use                          |
+| :------------------ | :---- | :----------------------------------- |
+| `MIN_TIMELINE_NOTE` | 10    | Manage issue/asset timeline notes    |
+| `MIN_EVIDENCE`      | 6     | Evidence reference on resolve/renew  |
+| (default textarea)  | 20    | Justifications, anomaly descriptions |
 
 ### 4.4 Mobile Checklist Targets (Fat-Finger Proofing)
 

@@ -12,19 +12,18 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Progress } from "@/components/ui/progress";
-import { cn } from "@/lib/utils";
-
+import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { MIN_EVIDENCE } from "@/lib/governance/constants";
 import {
   resolveCertification,
   type CertResolutionType,
 } from "@/lib/api/ledger";
+import { cn } from "@/lib/utils";
 
 const MIN_NOTES = 20;
-const MIN_EVIDENCE = 6;
 const MAX_DEFER_DAYS = 30;
 
 export interface ResolveCertSubject {
@@ -117,8 +116,6 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [resType]);
 
-  const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
-
   const submit = async () => {
     if (!subject || !canSubmit) return;
     setSubmitting(true);
@@ -151,7 +148,7 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
     }
   };
 
-  const open = !!subject;
+  const open = true;
 
   return (
     <Dialog
@@ -172,7 +169,12 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
           </DialogDescription>
         </DialogHeader>
 
-        {subject && (
+        {!subject ? (
+          <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            Linked staff member not found. Use Manage from the Dashboard or Governance Hub
+            to fix the registry link.
+          </p>
+        ) : (
           <div className="space-y-3">
             <div className="grid gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
               <Row label="Staff" value={subject.staffName} />
@@ -251,66 +253,32 @@ export function ResolveCertificationModal({ subject, onClose, onResolved }: Prop
               />
             )}
 
-            <div className="grid gap-1.5">
-              <Label htmlFor="evidence" className="flex items-center gap-1.5 text-sm font-semibold">
-                Evidence Reference
-                <span
-                  className={cn(
-                    "text-[10px] font-medium uppercase tracking-wide",
-                    evidenceRequired ? "text-rose-600" : "text-muted-foreground",
-                  )}
-                >
-                  {evidenceRequired ? "Required" : "Optional"}
-                </span>
-              </Label>
-              <Input
-                id="evidence"
-                value={evidenceRef}
-                onChange={(e) => setEvidenceRef(e.target.value)}
-                placeholder={
-                  evidenceRequired
-                    ? "Doc ID, SharePoint link, ticket #…"
-                    : "Not required for defer/revoke"
-                }
-                className="text-sm"
-              />
-              {evidenceRequired && evidenceTooShort && (
-                <span className="text-[11px] text-muted-foreground">
-                  {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
-                </span>
-              )}
-            </div>
+            <CharacterCountedInput
+              id="evidence"
+              label="Evidence reference"
+              value={evidenceRef}
+              onValueChange={setEvidenceRef}
+              minChars={MIN_EVIDENCE}
+              required={evidenceRequired}
+              placeholder={
+                evidenceRequired
+                  ? "Doc ID, SharePoint link, ticket #…"
+                  : "Not required for defer/revoke"
+              }
+            />
 
-            <div className="grid gap-1.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <Label htmlFor="cert-notes" className="text-sm font-semibold">
-                  Manager Justification
-                </Label>
-                <span
-                  className={cn(
-                    "text-[11px] tabular-nums",
-                    notesTooShort ? "text-muted-foreground" : "text-emerald-600",
-                  )}
-                >
-                  {notesTooShort
-                    ? `${MIN_NOTES - trimmedNotes.length} more`
-                    : "Ready"}
-                </span>
-              </div>
-              <Textarea
-                id="cert-notes"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="Why this resolution? What was verified? Who signed off?"
-                className="resize-none text-sm"
-              />
-              <Progress
-                value={progress}
-                className={cn("h-1", !notesTooShort && "[&>div]:bg-emerald-600")}
-                aria-label={`Justification ${trimmedNotes.length} of ${MIN_NOTES} minimum characters`}
-              />
-            </div>
+            <CharacterCountedTextarea
+              id="cert-notes"
+              label="Manager justification"
+              value={notes}
+              onValueChange={setNotes}
+              minChars={MIN_NOTES}
+              maxChars={500}
+              counterMode="minimum"
+              rows={3}
+              placeholder="Why this resolution? What was verified? Who signed off?"
+              required
+            />
 
             <Button
               type="button"

@@ -30,7 +30,7 @@ const MENUS: { key: string; label: string; description: string }[] = [
   { key: "dashboard", label: "Operations Dashboard", description: "Live exception hub and escalation pool" },
   { key: "day", label: "Day Centre", description: "Site-day workflow, anomalies, handshakes" },
   { key: "manifest", label: "Bus Manifest", description: "Driver walkaround, run sheet, dual-PIN" },
-  { key: "transport", label: "Transport", description: "Fleet, vehicles, compliance assets" },
+  { key: "transport", label: "Transport", description: "Ad-hoc run requests and mileage logging" },
   { key: "participants", label: "Participants", description: "Care profiles, IDDSI, medications" },
   { key: "staff", label: "Personnel Directory", description: "Staff, carers, certifications" },
   { key: "events", label: "Events & Trips", description: "Roster bookings, milestones, finance" },

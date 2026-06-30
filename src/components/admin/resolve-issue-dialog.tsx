@@ -1,28 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2 } from "lucide-react";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { Button } from "@/components/ui/button";
 import {
   appendUpdateNote,
   COUNCIL_SEVERITY_OPTIONS,
@@ -37,29 +17,15 @@ import {
 } from "@/lib/api/unified-issues";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
-import { getActiveUserProfile } from "@/lib/data-store";
-
+import { ManageItemShell } from "@/components/governance/manage-item-shell";
+import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
+import { isManagerProfile } from "@/lib/governance/is-manager";
+import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 
 interface Props {
   issue: UnifiedIssue;
   open: boolean;
   onOpenChange: (open: boolean) => void;
-}
-
-function defaultDeferIso(): string {
-  // tomorrow 09:00 local, formatted for <input type="datetime-local">
-  const d = new Date();
-  d.setDate(d.getDate() + 1);
-  d.setHours(9, 0, 0, 0);
-  const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
-  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function isManagerProfile(): boolean {
-  const profile = getActiveUserProfile();
-  if (!profile) return false;
-  const raw = (profile.staffRole ?? "").toLowerCase();
-  return raw.includes("manager");
 }
 
 export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
@@ -70,13 +36,8 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
   const [councilSev, setCouncilSev] = useState<CouncilSeverity>("Sev 2");
   const [pinOpen, setPinOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"log" | "resolve" | "forceAck">("log");
 
-  
-
-  // Reset toggles only when the dialog transitions from closed -> open.
-  // Depending on `issue.sourceRowId` would clobber the operator's in-progress
-  // textarea whenever a background refetch returned a new issue object
-  // (same row, new identity).
   useEffect(() => {
     if (open) {
       setNote("");
@@ -85,11 +46,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       setDeferAt(defaultDeferIso());
       setCouncilSev("Sev 2");
       setPinOpen(false);
+      setPendingAction("log");
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
-  // Live-poll the central Hub timeline for ANY source.
   const timelineQuery = useQuery({
     queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
     enabled: open,
@@ -99,12 +59,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     queryFn: () => listIssueNotes(issue.source, issue.sourceRowId),
   });
 
-
   const trimmed = note.trim().length;
-  const noteOk = trimmed >= 10;
+  const noteOk = trimmed >= MIN_TIMELINE_NOTE;
   const deferValid =
-    !deferOn ||
-    (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
+    !deferOn || (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
 
   const invalidateAll = () => {
     invalidateIssueCaches(qc, {
@@ -113,8 +71,6 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     });
   };
 
-
-  // Log Note & Update — append + (optionally) defer / escalate. No PIN.
   const logMut = useMutation({
     mutationFn: async () => {
       if (deferOn) {
@@ -147,8 +103,6 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onError: (e: Error) => toast.error("Action failed", { description: e.message }),
   });
 
-  // Resolve & Close — manager-gated. resolveUnifiedIssue now logs the
-  // closing note to the central Hub timeline, so no separate append.
   const resolveMut = useMutation({
     mutationFn: async () => {
       await resolveUnifiedIssue(issue, note);
@@ -182,7 +136,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const busy = logMut.isPending || resolveMut.isPending || forceAckMut.isPending;
   const canLog = noteOk && deferValid && !busy;
-  const canResolve = noteOk && !busy;
+  const canResolve = noteOk && !busy && !deferOn && !escalateOn;
 
   const raw = (issue.raw ?? {}) as Record<string, unknown>;
   const isAwaitingOperatorAck =
@@ -191,15 +145,19 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     raw.operator_acknowledged_at == null;
   const canForceAck = isAwaitingOperatorAck && isManagerProfile() && noteOk && !busy;
 
-
   const timelineLines = useMemo(() => {
-    const notes = timelineQuery.data ?? [];
-    return notes.map(renderNoteLine);
+    return (timelineQuery.data ?? []).map(renderNoteLine);
   }, [timelineQuery.data]);
 
+  const handleLogClick = () => {
+    if (!canLog) return;
+    setPendingAction("log");
+    setPinOpen(true);
+  };
 
   const handleResolveClick = () => {
     if (!canResolve) return;
+    setPendingAction("resolve");
     setPinOpen(true);
   };
 
@@ -207,217 +165,100 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     if (!isManagerProfile()) {
       toast.error("Manager PIN required", {
         description:
-          "Only manager-level operators can close issues. Resolution blocked.",
+          "Only manager-level operators can save issue changes. Action blocked.",
       });
       setPinOpen(false);
       return;
     }
     setPinOpen(false);
-    resolveMut.mutate();
+    if (pendingAction === "resolve") {
+      resolveMut.mutate();
+    } else if (pendingAction === "forceAck") {
+      forceAckMut.mutate();
+    } else {
+      logMut.mutate();
+    }
   };
 
-  const noteLabel = deferOn
-    ? "Defer reason / next action"
-    : escalateOn
-      ? "Council escalation note"
-      : "Update note";
+  const handleForceAckClick = () => {
+    if (!canForceAck) return;
+    setPendingAction("forceAck");
+    setPinOpen(true);
+  };
+
+  const contextCard = (
+    <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+      <div className="flex flex-wrap items-center gap-2">
+        <Badge variant="secondary">{issue.sourceLabel}</Badge>
+        <span className="font-mono text-xs">{issue.category}</span>
+        {issue.subCategory && (
+          <span className="text-xs text-muted-foreground">· {issue.subCategory}</span>
+        )}
+      </div>
+      <div className="font-medium">{issue.title}</div>
+      {issue.description && (
+        <p className="text-xs text-muted-foreground whitespace-pre-wrap">
+          {issue.description}
+        </p>
+      )}
+    </div>
+  );
 
   return (
     <>
-      <Dialog
+      <ManageItemShell
         open={open}
         onOpenChange={(o) => {
           if (busy) return;
           if (!o) setNote("");
           onOpenChange(o);
         }}
-      >
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>Manage issue</DialogTitle>
-            <DialogDescription>
-              Append timeline updates, resolve, defer, or escalate to Council.
-              Every action writes an NDIS-reportable receipt to the operational
-              ledger.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge variant="secondary">{issue.sourceLabel}</Badge>
-              <span className="font-mono text-xs">{issue.category}</span>
-              {issue.subCategory && (
-                <span className="text-xs text-muted-foreground">
-                  · {issue.subCategory}
-                </span>
-              )}
-            </div>
-            <div className="font-medium">{issue.title}</div>
-            {issue.description && (
-              <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-                {issue.description}
-              </p>
-            )}
-          </div>
-
-          <div className="space-y-1">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Timeline
-            </Label>
-            <div
-              className="max-h-48 overflow-y-auto rounded-md border bg-muted/20 p-3 text-xs font-mono whitespace-pre-wrap text-muted-foreground"
-              aria-readonly
-            >
-              {timelineLines.length === 0 ? (
-                <span className="italic">No prior updates.</span>
-              ) : (
-                timelineLines.join("\n")
-              )}
-            </div>
-          </div>
-
-
-          <div className="space-y-2">
-            <Label htmlFor="resolution-note">
-              {noteLabel} <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="resolution-note"
-              rows={4}
-              placeholder="Min 10 chars — appended to the immutable timeline."
-              value={note}
-              onChange={(e) => setNote(e.target.value)}
-            />
-            <div
-              className={`text-xs ${
-                trimmed < 10 ? "text-destructive" : "text-muted-foreground"
-              }`}
-            >
-              {trimmed}/10 minimum
-            </div>
-          </div>
-
-          {/* Timeline Adjustments — optional progressive toggles */}
-          <div className="space-y-3 rounded-md border border-dashed bg-muted/10 p-3">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Timeline Adjustments (optional)
-            </Label>
-
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={deferOn}
-                  onCheckedChange={(v) => {
-                    const next = v === true;
-                    setDeferOn(next);
-                    if (next) setEscalateOn(false);
-                  }}
-                />
-                Defer / Set next action date
-              </label>
-              {deferOn && (
-                <div className="pl-6 space-y-1">
-                  <Label htmlFor="defer-at" className="text-xs">
-                    Next action date
-                  </Label>
-                  <Input
-                    id="defer-at"
-                    type="datetime-local"
-                    value={deferAt}
-                    onChange={(e) => setDeferAt(e.target.value)}
-                    className="[color-scheme:dark]"
-                  />
-                </div>
-              )}
-            </div>
-
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm">
-                <Checkbox
-                  checked={escalateOn}
-                  onCheckedChange={(v) => {
-                    const next = v === true;
-                    setEscalateOn(next);
-                    if (next) setDeferOn(false);
-                  }}
-                />
-                Escalate to Council
-              </label>
-              {escalateOn && (
-                <div className="pl-6 space-y-1">
-                  <Label className="text-xs">Council severity</Label>
-                  <Select
-                    value={councilSev}
-                    onValueChange={(v) => setCouncilSev(v as CouncilSeverity)}
-                  >
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {COUNCIL_SEVERITY_OPTIONS.map((o) => (
-                        <SelectItem key={o.value} value={o.value}>
-                          {o.label}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          </div>
-
-          <DialogFooter className="gap-2 sm:gap-2">
-            {isAwaitingOperatorAck && (
-              <Button
-                variant="destructive"
-                onClick={() => forceAckMut.mutate()}
-                disabled={!canForceAck}
-                title={
-                  isManagerProfile()
-                    ? "Manager-only: clear stranded awaiting-ack rows"
-                    : "Manager sign-in required"
-                }
-              >
-                {forceAckMut.isPending && (
-                  <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-                )}
-                Force-ack (Manager)
-              </Button>
-            )}
+        busy={busy}
+        title="Manage issue"
+        description="Log a note, defer, or escalate. Resolve when the issue is closed. Defer and resolve are mutually exclusive. Manager PIN required."
+        contextCard={contextCard}
+        timelineLines={timelineLines}
+        timelineLoading={timelineQuery.isFetching && !timelineQuery.data}
+        note={note}
+        onNoteChange={setNote}
+        deferOn={deferOn}
+        onDeferOnChange={setDeferOn}
+        deferAt={deferAt}
+        onDeferAtChange={setDeferAt}
+        escalateOn={escalateOn}
+        onEscalateOnChange={setEscalateOn}
+        councilSev={councilSev}
+        onCouncilSevChange={(v) => setCouncilSev(v as CouncilSeverity)}
+        councilOptions={COUNCIL_SEVERITY_OPTIONS}
+        showEscalate={issue.source === "day_centre"}
+        extraFooterStart={
+          isAwaitingOperatorAck ? (
             <Button
-              variant="secondary"
-              onClick={() => logMut.mutate()}
-              disabled={!canLog}
+              variant="destructive"
+              size="sm"
+              onClick={handleForceAckClick}
+              disabled={!canForceAck}
             >
-              {logMut.isPending && (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              )}
-              Log Note &amp; Update
+              Force-ack (Manager)
             </Button>
-            <Button
-              onClick={handleResolveClick}
-              disabled={!canResolve}
-              className="bg-emerald-600 hover:bg-emerald-700 text-white"
-            >
-              {resolveMut.isPending && (
-                <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-              )}
-              Resolve &amp; Close
-            </Button>
-          </DialogFooter>
-
-        </DialogContent>
-      </Dialog>
+          ) : undefined
+        }
+        onLogUpdate={handleLogClick}
+        logUpdateLabel="Log Note"
+        canLog={canLog}
+        onResolveClose={handleResolveClick}
+        resolveCloseLabel="Resolve"
+        canResolve={canResolve}
+      />
 
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager authorization required to close this issue."
+        reason="Manager PIN required to save issue changes."
         onAuthenticated={handlePinAuthenticated}
       />
     </>
   );
 }
 
-// Back-compat alias: older imports continue to work.
 export const ResolveIssueDialog = ManageIssueDialog;

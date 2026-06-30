@@ -20,11 +20,11 @@ import type { LucideIcon } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { DatePicker } from "@/components/ui/date-picker";
 import { cn } from "@/lib/utils";
 import { rerouteParticipantForDate } from "@/lib/data-store";
-import { ResolveDispatcher } from "./dispatch-resolve-modal";
 import type { ComplianceAsset } from "@/lib/api/compliance-assets";
+import { ManageComplianceAssetDialog } from "@/components/admin/manage-compliance-asset-dialog";
+import { DashboardAnomalyManageButton } from "@/components/governance/dashboard-anomaly-manage-button";
 import {
   useMedicationExceptions,
   useMedicationScheduleExceptions,
@@ -104,7 +104,6 @@ function titleCase(s: string): string {
 
 
 export function OperationsExceptionHub() {
-  const qc = useQueryClient();
   const { data: medExceptions = [], isLoading } = useMedicationExceptions();
   const { data: medScheduleRows } = useMedicationScheduleExceptions();
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
@@ -164,13 +163,22 @@ export function OperationsExceptionHub() {
         title: r.title,
         detail: r.detail,
         severity: r.severity,
-        action:
-          r.kind === "hoist" && r.participantId && r.participantName ? (
-            <SplitManifestAction
-              participantId={r.participantId}
-              participantName={r.participantName}
-            />
-          ) : undefined,
+        action: (
+          <div className="flex flex-wrap items-center justify-end gap-1">
+            {r.kind === "hoist" && r.participantId && r.participantName ? (
+              <SplitManifestAction
+                participantId={r.participantId}
+                participantName={r.participantName}
+              />
+            ) : r.kind === "other" ? (
+              <DashboardAnomalyManageButton
+                anomalyKey={r.key}
+                title={r.title}
+                detail={r.detail}
+              />
+            ) : null}
+          </div>
+        ),
       })),
     },
   ];
@@ -206,7 +214,7 @@ export function OperationsExceptionHub() {
             onClick={() => setActiveAsset(r.asset)}
           >
             <ShieldCheck className="mr-1 h-3.5 w-3.5" />
-            Resolve
+            Manage
           </Button>
         ),
       })),
@@ -255,15 +263,17 @@ export function OperationsExceptionHub() {
         </div>
       )}
 
-      <ResolveDispatcher
-        asset={activeAsset}
-        onClose={() => setActiveAsset(null)}
-        onResolved={() => {
-          qc.invalidateQueries({ queryKey: ["compliance-assets"] });
-          qc.invalidateQueries({ queryKey: ["fleet"] });
-          qc.invalidateQueries({ queryKey: ["staff-registry", "all"] });
-        }}
-      />
+      {activeAsset && (
+        <ManageComplianceAssetDialog
+          key={activeAsset.id}
+          asset={activeAsset}
+          open
+          onOpenChange={(o) => {
+            if (!o) setActiveAsset(null);
+          }}
+        />
+      )}
+
     </Card>
   );
 }
@@ -391,7 +401,7 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
                 ) : isLive ? (
                   <span className="text-[11px] text-muted-foreground">Triaged on manifest</span>
                 ) : (
-                  <DeferAction />
+                  <span className="text-[11px] text-muted-foreground">—</span>
                 )}
               </td>
 
@@ -403,19 +413,3 @@ function DrillTable({ bucket }: { bucket: Bucket }) {
   );
 }
 
-function DeferAction() {
-  const [date, setDate] = useState<Date | undefined>(undefined);
-  return (
-    <div className="flex items-center gap-2">
-      <DatePicker
-        value={date}
-        onChange={setDate}
-        placeholder="Defer until…"
-        className="h-7 w-auto px-2 text-xs"
-      />
-      <Button size="sm" disabled>
-        Defer (coming soon)
-      </Button>
-    </div>
-  );
-}

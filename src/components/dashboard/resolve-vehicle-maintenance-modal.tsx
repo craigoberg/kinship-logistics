@@ -13,11 +13,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Progress } from "@/components/ui/progress";
 import { cn } from "@/lib/utils";
+import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { MIN_EVIDENCE } from "@/lib/governance/constants";
 
 import {
   resolveVehicleMaintenance,
@@ -35,7 +36,6 @@ import {
 const FORMAL_AUDIT_CATEGORY = "VEHICLE_FORMAL_AUDIT";
 
 const MIN_NOTES = 20;
-const MIN_EVIDENCE = 6;
 const MAX_DEFER_DAYS = 30;
 
 export interface ResolveVehicleSubject {
@@ -203,8 +203,6 @@ export function ResolveVehicleMaintenanceModal({
       !actionDateInvalid;
 
 
-  const progress = Math.min(100, Math.round((trimmedNotes.length / MIN_NOTES) * 100));
-
   const submit = async () => {
     if (!subject || !canSubmit) return;
     setSubmitting(true);
@@ -249,7 +247,7 @@ export function ResolveVehicleMaintenanceModal({
     }
   };
 
-  const open = !!subject;
+  const open = true;
   const flagLabel: Record<VehicleFlagKind, string> = {
     rego: "Registration",
     service: "Service Due",
@@ -274,7 +272,12 @@ export function ResolveVehicleMaintenanceModal({
           </DialogDescription>
         </DialogHeader>
 
-        {subject && (
+        {!subject ? (
+          <p className="rounded-md border border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
+            Linked vehicle not found. Use Manage from the Dashboard or Governance Hub to fix
+            the registry link.
+          </p>
+        ) : (
           <div className="space-y-3">
             <div className="grid gap-1.5 rounded-md border border-border bg-muted/40 px-3 py-2 text-xs">
               <Row label="Vehicle" value={`${subject.assetName} · ${subject.regoPlate}`} />
@@ -407,64 +410,33 @@ export function ResolveVehicleMaintenanceModal({
             )}
 
             {!isFormalAudit && (
-              <div className="grid gap-1.5">
-                <Label htmlFor="v-evidence" className="flex items-center gap-1.5 text-sm font-semibold">
-                  Evidence Reference
-                  <span
-                    className={cn(
-                      "text-[10px] font-medium uppercase tracking-wide",
-                      evidenceRequired ? "text-rose-600" : "text-muted-foreground",
-                    )}
-                  >
-                    {evidenceRequired ? "Required" : "Optional"}
-                  </span>
-                </Label>
-                <Input
-                  id="v-evidence"
-                  value={evidenceRef}
-                  onChange={(e) => setEvidenceRef(e.target.value)}
-                  placeholder={
-                    evidenceRequired
-                      ? "Rego paper #, service invoice #, SharePoint link…"
-                      : "Not required for defer/decommission"
-                  }
-                  className="text-sm"
-                />
-                {evidenceRequired && evidenceTooShort && (
-                  <span className="text-[11px] text-muted-foreground">
-                    {MIN_EVIDENCE - trimmedEvidence.length} more chars required.
-                  </span>
-                )}
-              </div>
+              <CharacterCountedInput
+                id="v-evidence"
+                label="Evidence reference"
+                value={evidenceRef}
+                onValueChange={setEvidenceRef}
+                minChars={MIN_EVIDENCE}
+                required={evidenceRequired}
+                placeholder={
+                  evidenceRequired
+                    ? "Rego paper #, service invoice #, SharePoint link…"
+                    : "Not required for defer/decommission"
+                }
+              />
             )}
 
-            <div className="grid gap-1.5">
-              <div className="flex items-baseline justify-between gap-2">
-                <Label htmlFor="v-notes" className="text-sm font-semibold">
-                  Manager Justification
-                </Label>
-                <span
-                  className={cn(
-                    "text-[11px] tabular-nums",
-                    notesTooShort ? "text-muted-foreground" : "text-emerald-600",
-                  )}
-                >
-                  {notesTooShort ? `${MIN_NOTES - trimmedNotes.length} more` : "Ready"}
-                </span>
-              </div>
-              <Textarea
-                id="v-notes"
-                rows={3}
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                placeholder="What was verified? Who signed off? Reason for defer/decommission?"
-                className="resize-none text-sm"
-              />
-              <Progress
-                value={progress}
-                className={cn("h-1", !notesTooShort && "[&>div]:bg-emerald-600")}
-              />
-            </div>
+            <CharacterCountedTextarea
+              id="v-notes"
+              label="Manager justification"
+              value={notes}
+              onValueChange={setNotes}
+              minChars={MIN_NOTES}
+              maxChars={500}
+              counterMode="minimum"
+              rows={3}
+              placeholder="What was verified? Who signed off? Reason for defer/decommission?"
+              required
+            />
 
             <Button
               type="button"

@@ -100,3 +100,21 @@ export function invalidateTransportCaches(qc: QueryClient): void {
   // Participants directory Bus/Self indicator grid (reads participant_attendance_schedules).
   qc.invalidateQueries({ queryKey: ["participant-directory-indicators", "v3-split-transport"] });
 }
+
+/** Fleet register + compliance tiles fed from transport_assets. */
+export function invalidateFleetCaches(qc: QueryClient): void {
+  qc.invalidateQueries({ queryKey: ["fleet"] });
+  qc.invalidateQueries({ queryKey: ["transport_assets"] });
+  qc.invalidateQueries({ queryKey: ["transport-assets"] });
+  qc.invalidateQueries({ queryKey: ["compliance-assets"] });
+}
+
+/** Ad-hoc transport request queue on /transport. */
+export function invalidateTransportRequestCaches(qc: QueryClient, dateStr?: string): void {
+  if (dateStr) {
+    qc.invalidateQueries({ queryKey: ["transport-requests", dateStr] });
+  } else {
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "transport-requests" });
+  }
+  qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
+}

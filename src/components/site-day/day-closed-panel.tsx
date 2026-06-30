@@ -6,7 +6,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +41,6 @@ export function DayClosedPanel({ session }: Props) {
   const pinValid = /^\d{4,6}$/.test(pin);
   const reasonValid = reason.trim().length >= 10;
   const showPinErr = attempted && !pinValid;
-  const showReasonErr = attempted && !reasonValid;
 
   const reopenMut = useMutation({
     mutationFn: async () => {
@@ -218,40 +217,18 @@ export function DayClosedPanel({ session }: Props) {
               )}
             </div>
 
-            <div className="grid gap-1.5">
-              <Label
-                htmlFor="reopen-reason"
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
-                Reason for reopen <span className="text-rose-600">*</span>
-              </Label>
-              <Textarea
-                id="reopen-reason"
-                rows={4}
-                value={reason}
-                onChange={(e) => setReason(e.target.value)}
-                placeholder="Why the Centre needs to be reopened. Minimum 10 characters."
-                className={cn(
-                  showReasonErr &&
-                    "border-2 border-rose-600 focus-visible:ring-rose-600",
-                )}
-              />
-              <div className="flex items-center justify-between text-[11px]">
-                <span
-                  className={cn(
-                    "text-muted-foreground",
-                    showReasonErr && "font-semibold text-rose-600",
-                  )}
-                >
-                  {reason.trim().length}/10 minimum
-                </span>
-                {showReasonErr && (
-                  <span className="font-semibold text-rose-600">
-                    Required — add more detail
-                  </span>
-                )}
-              </div>
-            </div>
+            <CharacterCountedTextarea
+              id="reopen-reason"
+              label="Reason for reopen"
+              value={reason}
+              onValueChange={setReason}
+              minChars={10}
+              maxChars={500}
+              counterMode="minimum"
+              rows={4}
+              placeholder="Why the Centre needs to be reopened. Minimum 10 characters."
+              required
+            />
           </div>
 
           <DialogFooter className="gap-2 sm:gap-2">

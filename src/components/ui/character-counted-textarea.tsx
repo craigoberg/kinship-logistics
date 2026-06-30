@@ -2,6 +2,12 @@ import { forwardRef, useId } from "react";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
+import {
+  meetsMinLength,
+  requiredFieldCounterClass,
+  requiredFieldOutline,
+  requiredFieldRemainingHint,
+} from "@/lib/ui/required-field";
 
 /**
  * Canonical primitive for MASTER_GUARDRAILS §4.2 (Textarea Validation &
@@ -28,8 +34,8 @@ export interface CharacterCountedTextareaProps
   maxChars?: number;
   /** If true, the empty-state thick red outline is rendered. Default true. */
   required?: boolean;
-  /** Sub-label shown under the field label. */
-  hint?: string;
+  /** Counter format: "minimum" → `10/10 minimum`; "standard" → `10 / 20 min · len/max`. */
+  counterMode?: "minimum" | "standard";
 }
 
 export const CharacterCountedTextarea = forwardRef<
@@ -44,6 +50,7 @@ export const CharacterCountedTextarea = forwardRef<
     maxChars = 500,
     required = true,
     hint,
+    counterMode = "standard",
     className,
     id: idProp,
     rows = 4,
@@ -55,9 +62,17 @@ export const CharacterCountedTextarea = forwardRef<
   const id = idProp ?? `cct-${reactId}`;
   const trimmedLen = value.trim().length;
   const len = value.length;
-  const meetsMin = trimmedLen >= minChars;
-  const showRedOutline = required && !meetsMin;
+  const valid = meetsMinLength(value, minChars);
+  const showRedOutline = required && !valid;
   const pct = Math.min(100, Math.round((trimmedLen / minChars) * 100));
+  const remainingHint = required
+    ? requiredFieldRemainingHint(trimmedLen, minChars)
+    : null;
+
+  const counterText =
+    counterMode === "minimum"
+      ? `${trimmedLen}/${minChars} minimum`
+      : `${trimmedLen} / ${minChars} min · ${len}/${maxChars}`;
 
   return (
     <div className="space-y-2">
@@ -83,11 +98,9 @@ export const CharacterCountedTextarea = forwardRef<
           value={value}
           maxLength={maxChars}
           onChange={(e) => onValueChange(e.target.value)}
-          className={cn(
-            "pb-6 placeholder:text-slate-400 placeholder:italic",
-            showRedOutline &&
-              "border-2 border-destructive focus-visible:ring-destructive",
-            className,
+          className={requiredFieldOutline(
+            showRedOutline,
+            cn("pb-6 placeholder:text-slate-400 placeholder:italic", className),
           )}
           aria-invalid={showRedOutline || undefined}
           aria-describedby={`${id}-counter`}
@@ -101,7 +114,7 @@ export const CharacterCountedTextarea = forwardRef<
           <div
             className={cn(
               "h-full transition-[width] duration-150 ease-out",
-              meetsMin ? "bg-blue-500" : "bg-blue-500/70",
+              valid ? "bg-emerald-500" : "bg-blue-500/70",
             )}
             style={{ width: `${pct}%` }}
           />
@@ -109,22 +122,11 @@ export const CharacterCountedTextarea = forwardRef<
       </div>
 
       <div className="flex items-center justify-between gap-3 text-[11px]">
-        <span
-          id={`${id}-counter`}
-          className={cn(
-            "font-mono tabular-nums",
-            meetsMin
-              ? "text-muted-foreground"
-              : "font-semibold text-destructive",
-          )}
-        >
-          {trimmedLen} / {minChars} min · {len}/{maxChars}
+        <span id={`${id}-counter`} className={requiredFieldCounterClass(valid)}>
+          {counterText}
         </span>
-        {!meetsMin && required && (
-          <span className="text-destructive">
-            Need {Math.max(0, minChars - trimmedLen)} more character
-            {minChars - trimmedLen === 1 ? "" : "s"}.
-          </span>
+        {remainingHint && (
+          <span className="font-medium text-destructive">{remainingHint}</span>
         )}
       </div>
     </div>

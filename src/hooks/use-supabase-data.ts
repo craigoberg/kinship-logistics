@@ -1,7 +1,20 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { invalidateTransportCaches } from "@/lib/query/invalidation";
+import {
+  listTransportRequests,
+  upsertTransportRequest,
+  cancelTransportRequest,
+  type UpsertTransportRequestInput,
+  type ListTransportRequestsArgs,
+} from "@/lib/api/transport-requests";
+import {
+  insertFleetAsset,
+  updateFleetAsset,
+  type FleetAssetInput,
+  type FleetAssetPatch,
+} from "@/lib/api/fleet";
+import { listTransportAssets } from "@/lib/data-store";
 
 import {
   listParticipants,
@@ -996,7 +1009,7 @@ import {
   type LegPatch,
 } from "@/lib/data-store";
 import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
-import { invalidateIssueCaches, invalidateTransportCaches } from "@/lib/query/invalidation";
+import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches, invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;
 
@@ -1137,5 +1150,61 @@ export function useCancelTripPickup() {
       invalidateIssueCaches(qc);
     },
     onError: (err: Error) => showRedToast("Could not cancel pickup", err),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Fleet register (transport_assets)
+// ---------------------------------------------------------------------------
+
+export function useTransportAssets() {
+  return useQuery({
+    queryKey: ["transport_assets"],
+    queryFn: listTransportAssets,
+    staleTime: 30_000,
+  });
+}
+
+export function useInsertFleetAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: FleetAssetInput) => insertFleetAsset(input),
+    onSuccess: () => invalidateFleetCaches(qc),
+  });
+}
+
+export function useUpdateFleetAsset() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: FleetAssetPatch }) =>
+      updateFleetAsset(id, patch),
+    onSuccess: () => invalidateFleetCaches(qc),
+  });
+}
+
+export function useTransportRequests(args: ListTransportRequestsArgs) {
+  return useQuery({
+    queryKey: ["transport-requests", args.requestDate ?? "all", args.includeCompleted ?? false],
+    queryFn: () => listTransportRequests(args),
+    staleTime: 15_000,
+  });
+}
+
+export function useUpsertTransportRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpsertTransportRequestInput) => upsertTransportRequest(input),
+    onSuccess: (row) => {
+      invalidateTransportRequestCaches(qc, row.requestDate);
+    },
+  });
+}
+
+export function useCancelTransportRequest() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, requestDate }: { id: string; requestDate: string }) =>
+      cancelTransportRequest(id).then(() => requestDate),
+    onSuccess: (requestDate) => invalidateTransportRequestCaches(qc, requestDate),
   });
 }

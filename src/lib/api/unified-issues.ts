@@ -113,7 +113,6 @@ export async function listOpenUnifiedIssues(
     // latest timeline note is a still-live defer.
     const extras = await fetchDeferredNonDayCentreIssues(deferState);
     out.push(...extras);
-    out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
     return out;
   }
 
@@ -229,7 +228,6 @@ export async function listOpenUnifiedIssues(
     return !(d && d.deferredUntil.getTime() > Date.now());
   });
 
-  filtered.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
   return filtered;
 }
 
@@ -703,6 +701,12 @@ export async function deferUnifiedIssue(
       })
       .eq("id", issue.sourceRowId);
     if (writeErr) throw writeErr;
+  } else if (issue.source === "renewal") {
+    const { error: renErr } = await supabase
+      .from("compliance_assets")
+      .update({ next_action_at: args.untilIso })
+      .eq("id", issue.sourceRowId);
+    if (renErr) throw renErr;
   }
 
   const staffId = await resolveStaffIdWithFallback();

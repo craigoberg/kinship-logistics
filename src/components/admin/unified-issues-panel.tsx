@@ -37,6 +37,7 @@ import type {
   UnifiedSeverity,
 } from "@/lib/api/unified-issues";
 import { ManageIssueDialog } from "./resolve-issue-dialog";
+import { sortUnifiedIssuesByRygeThenExpiry } from "@/lib/governance-sort";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
@@ -87,7 +88,7 @@ function IssuesTable({
   const all = q.data ?? [];
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    return all.filter((i) => {
+    const filtered = all.filter((i) => {
       if (sourceFilter !== "all" && i.source !== sourceFilter) return false;
       if (severityFilter !== "all" && i.severity !== severityFilter) return false;
       if (needle) {
@@ -96,6 +97,7 @@ function IssuesTable({
       }
       return true;
     });
+    return sortUnifiedIssuesByRygeThenExpiry(filtered);
   }, [all, sourceFilter, severityFilter, search]);
 
   return (
@@ -237,11 +239,7 @@ function IssuesTable({
                   </TableCell>
                   <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        onClick={() => onManageRenewal?.(i.sourceRowId)}
-                      >
+                      <Button size="sm" onClick={() => onManageRenewal?.(i.sourceRowId)}>
                         Manage
                       </Button>
                     ) : (

@@ -14,7 +14,9 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { MIN_EVIDENCE } from "@/lib/governance/constants";
 import {
   Select,
   SelectContent,
@@ -30,7 +32,6 @@ import {
 import { listStaffRegistry, type StaffMember } from "@/lib/data-store";
 
 const MIN_NOTES = 20;
-const MIN_EVIDENCE = 6;
 
 interface Props {
   asset: ComplianceAsset | null;
@@ -161,20 +162,26 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
             />
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <Label>Evidence reference (min {MIN_EVIDENCE} chars)</Label>
-            <Input
-              placeholder="e.g. invoice #, policy ref, ticket id"
+            <CharacterCountedInput
+              label="Evidence reference"
               value={evidenceRef}
-              onChange={(e) => setEvidenceRef(e.target.value)}
+              onValueChange={setEvidenceRef}
+              minChars={MIN_EVIDENCE}
+              placeholder="e.g. invoice #, policy ref, ticket id"
+              required
             />
           </div>
           <div className="space-y-1 sm:col-span-2">
-            <Label>Justification (min {MIN_NOTES} chars)</Label>
-            <Textarea
-              rows={3}
+            <CharacterCountedTextarea
+              label="Justification"
               value={notes}
-              onChange={(e) => setNotes(e.target.value)}
+              onValueChange={setNotes}
+              minChars={MIN_NOTES}
+              maxChars={500}
+              counterMode="minimum"
+              rows={3}
               placeholder="Why is this being resolved now? Recorded in the ledger."
+              required
             />
           </div>
 

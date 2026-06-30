@@ -40,6 +40,8 @@ export interface TransportPayload {
   status: TransportStatus;
   notes: string;
   timestamp: string;
+  /** Links completion to an ad-hoc transport_requests row when set. */
+  transport_request_id?: string | null;
 }
 
 export interface SyncLog {
@@ -4292,6 +4294,7 @@ export interface TransportAsset {
   lastServiceOdo: number | null;
   lastServiceDate: string | null; // ISO yyyy-mm-dd
   deferredUntil: string | null; // ISO yyyy-mm-dd
+  hasWheelchairHoist: boolean;
 }
 
 interface TransportAssetRow {
@@ -4308,6 +4311,7 @@ interface TransportAssetRow {
   last_service_odo: number | null;
   last_service_date: string | null;
   deferred_until: string | null;
+  has_wheelchair_hoist?: boolean | null;
 }
 
 function rowToAsset(r: TransportAssetRow): TransportAsset {
@@ -4326,6 +4330,7 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
     lastServiceOdo: r.last_service_odo == null ? null : Number(r.last_service_odo),
     lastServiceDate: r.last_service_date ?? null,
     deferredUntil: r.deferred_until ?? null,
+    hasWheelchairHoist: r.has_wheelchair_hoist ?? false,
   };
 }
 
@@ -4396,7 +4401,7 @@ export async function listTransportAssets(): Promise<TransportAsset[]> {
   const { data, error } = await supabase
     .from("transport_assets")
     .select(
-      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until",
+      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until, has_wheelchair_hoist",
     )
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
