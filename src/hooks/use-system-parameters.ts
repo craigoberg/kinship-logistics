@@ -142,6 +142,16 @@ export function useCouncilEmailTo(): string {
   return useSystemParameter<string>("site_management.council_email_to", "");
 }
 
+/** Default bus depot street address (Admin → Day Centre Bus Runs). */
+export function useDepotAddress(): string {
+  return useSystemParameter<string>("depot_address", "");
+}
+
+/** Default Day Centre street address (Admin → Day Centre Bus Runs). */
+export function useDayCentreAddress(): string {
+  return useSystemParameter<string>("day_centre_address", "");
+}
+
 export function useCouncilEmailTemplate(): { subject: string; body: string } {
   const value = useSystemParameter<JsonValue>(
     "site_management.council_email_template",

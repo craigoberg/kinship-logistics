@@ -18,7 +18,8 @@ interface Props {
   participants: Participant[];
   onSelect: (p: Participant) => void;
   search: string;
-  dayFilter: string; // 'all' | 'DAY-MON'…'DAY-FRI'
+  dayFilter: string;       // 'all' | 'DAY-MON'…'DAY-FRI'
+  transportFilter: string; // 'all' | 'bus' | 'private' | 'walk_in' | run code e.g. 'R1'
 }
 
 const WEEK_DAYS: { code: string; short: string; long: string }[] = [
@@ -39,21 +40,15 @@ const DAY_SHORT_2: Record<string, string> = {
   "DAY-SUN": "Su",
 };
 
-const TRANSPORT_LABEL: Record<TransportMethod, string> = {
-  bus: "Bus",
-  private: "Self",
-  walk_in: "Walk",
-  other: "—",
-};
-
 const TRANSPORT_CLASS: Record<TransportMethod, string> = {
+  run: "bg-violet-600 text-white",       // named bus run — distinct from generic bus
   bus: "bg-blue-600 text-white",
   private: "bg-slate-500 text-white",
   walk_in: "bg-emerald-600 text-white",
   other: "bg-slate-300 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
 };
 
-export function ParticipantTable({ participants, onSelect, search, dayFilter }: Props) {
+export function ParticipantTable({ participants, onSelect, search, dayFilter, transportFilter }: Props) {
   const [verifying, setVerifying] = useState<{
     schedule: MedicationSchedule;
     participantName: string;
@@ -65,14 +60,46 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter }: 
     const needle = search.trim().toLowerCase();
     return participants.filter((p) => {
       const ind = indicators?.get(p.id) ?? EMPTY_INDICATORS;
+
+      // Day filter: participant must have a schedule entry for that day.
       if (dayFilter !== "all" && !ind.schedule[dayFilter]) return false;
+
+      // Transport filter: check across relevant days.
+      if (transportFilter !== "all") {
+        const daysToCheck = dayFilter !== "all"
+          ? [dayFilter]
+          : Object.keys(ind.schedule);
+
+        const match = daysToCheck.some((d) => {
+          const sched = ind.schedule[d];
+          if (!sched) return false;
+          if (transportFilter === "bus") {
+            // Generic bus (not a named run)
+            return sched.inbound === "bus" || sched.outbound === "bus";
+          }
+          if (transportFilter === "run") {
+            // Any named run
+            return sched.inbound === "run" || sched.outbound === "run";
+          }
+          if (transportFilter === "private") {
+            return sched.inbound === "private" || sched.outbound === "private";
+          }
+          if (transportFilter === "walk_in") {
+            return sched.inbound === "walk_in" || sched.outbound === "walk_in";
+          }
+          // Specific run code (e.g. "R1")
+          return sched.inboundCode === transportFilter || sched.outboundCode === transportFilter;
+        });
+        if (!match) return false;
+      }
+
       if (!needle) return true;
       return (
         p.fullName.toLowerCase().includes(needle) ||
         p.ndisNumber.toLowerCase().includes(needle)
       );
     });
-  }, [participants, search, dayFilter, indicators]);
+  }, [participants, search, dayFilter, transportFilter, indicators]);
 
   const getInd = (id: string) => indicators?.get(id) ?? EMPTY_INDICATORS;
 
@@ -201,19 +228,47 @@ function DayCell({ day }: { day: DaySchedule | undefined }) {
   if (!day) return null;
   return (
     <div className="grid grid-cols-2 gap-1 w-full">
-      <TransportBadge method={day.inbound} />
-      <TransportBadge method={day.outbound} />
+      <TransportBadge method={day.inbound} label={day.inboundLabel} color={day.inboundColor} />
+      <TransportBadge method={day.outbound} label={day.outboundLabel} color={day.outboundColor} />
     </div>
   );
 }
 
-function TransportBadge({ method }: { method: TransportMethod }) {
+function TransportBadge({
+  method,
+  label,
+  color,
+}: {
+  method: TransportMethod;
+  label: string;
+  color: string | null;
+}) {
+  if (method === "other") {
+    return (
+      <span className="inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold bg-slate-300 text-slate-700 dark:bg-slate-700 dark:text-slate-200">
+        —
+      </span>
+    );
+  }
+  // Named run with a configured color — use inline style for the exact hex.
+  if (color) {
+    return (
+      <span
+        className="inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold text-white"
+        style={{ backgroundColor: color }}
+        title={label}
+      >
+        {label}
+      </span>
+    );
+  }
+  // Generic type — use the Tailwind class default.
   return (
     <span
       className={`inline-flex items-center justify-center rounded px-1 py-0.5 text-[10px] font-semibold ${TRANSPORT_CLASS[method]}`}
-      title={TRANSPORT_LABEL[method]}
+      title={label}
     >
-      {TRANSPORT_LABEL[method]}
+      {label}
     </span>
   );
 }
@@ -261,9 +316,7 @@ function DailyTransportSummary({ ind }: { ind: ParticipantIndicators }) {
             className="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-slate-700 dark:bg-slate-800 dark:text-slate-200"
           >
             <span className="font-semibold">{short}:</span>
-            <span>
-              {TRANSPORT_LABEL[d.inbound]}/{TRANSPORT_LABEL[d.outbound]}
-            </span>
+            <span>{d.inboundLabel}/{d.outboundLabel}</span>
           </span>
         );
       })}

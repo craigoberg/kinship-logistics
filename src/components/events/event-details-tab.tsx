@@ -12,9 +12,10 @@ import type { EventManifest } from "@/lib/data-store";
 interface Props {
   event: EventManifest;
   onSuccess?: () => void;
+  onClose?: () => void;
 }
 
-export function EventDetailsTab({ event, onSuccess }: Props) {
+export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
   const [title, setTitle] = useState(event.title);
   const [eventTypeCode, setEventTypeCode] = useState(event.eventTypeCode);
   const [venue, setVenue] = useState(event.venue);
@@ -162,7 +163,12 @@ export function EventDetailsTab({ event, onSuccess }: Props) {
         </div>
       </div>
 
-      <div className="flex justify-end border-t border-border pt-4">
+      <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
+        {onClose && (
+          <Button variant="outline" onClick={onClose}>
+            Close
+          </Button>
+        )}
         <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
           <Save className="h-4 w-4" />
           {mutation.isPending ? "Saving…" : "Update Event Logistics"}

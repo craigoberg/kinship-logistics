@@ -3,10 +3,12 @@ import { Users, Wallet, Settings2 } from "lucide-react";
 import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
   DialogDescription,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { formatDate } from "@/lib/utils";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
@@ -100,9 +102,17 @@ export function ManageEventModal({ event, open, onOpenChange }: Props) {
                 setTab("roster");
                 onOpenChange(false);
               }}
+              onClose={() => onOpenChange(false)}
             />
           )}
         </div>
+
+        {/* Footer for read-only tabs — Details tab renders its own [Close][Save] footer */}
+        {tab !== "details" && (
+          <DialogFooter className="border-t border-border px-6 py-3">
+            <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

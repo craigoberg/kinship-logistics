@@ -1,4 +1,4 @@
-﻿// Force rebuild version 2.4 - Full Integrated Guard
+// Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import {
   ShieldAlert,
   ClipboardCheck,
   LogOut,
+  GripVertical,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
@@ -37,11 +38,15 @@ import {
 import {
   useActiveTrip,
   useStartTrip,
+  useStartDayCentreRun,
+  useTodaysBusRunSummaries,
   usePatchTripLeg,
   useCompleteTrip,
   useCancelTrip,
   useConfirmedEvents,
   useLastEndOdometer,
+  useLookupParameters,
+  useReorderTripPickupLegs,
 } from "@/hooks/use-supabase-data";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
@@ -56,6 +61,7 @@ import type {
   AssetCheckpoint,
   AssetDailyClearance,
   TodayManifestSummary,
+  StartPointChoice,
 } from "@/lib/data-store";
 import {
   listTransportAssets,
@@ -67,23 +73,44 @@ import {
   getActiveUserRole,
   STAFF_DIRECTORY,
   DEFAULT_STAFF_UUID,
+  computePickupChainEndpoints,
 } from "@/lib/data-store";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
-// RedHandshakeWaitingPanel + multi-device handshake removed â€” RED now flows
+// RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
 // through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { supabase } from "@/integrations/supabase/client";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { dayCodeFromSydneyIndex } from "@/lib/api/centre-hours";
+import { useSystemParameter } from "@/hooks/use-system-parameters";
+import {
+  canCancelPickupLeg,
+  isPassengerPickupLeg,
+  PickupCancelButton,
+  PointerSortableList,
+  usePickupCancelDialog,
+  type PickupDragBind,
+} from "@/components/manifest/manage-pickups-panel";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
   head: () => ({
     meta: [
-      { title: "Active Driver Manifest â€” Yada Connect" },
+      { title: "Active Driver Manifest — Yada Connect" },
       {
         name: "description",
         content: "Sequential leg-by-leg trip workflow with GPS, passenger boarding, and medication bag handover.",
@@ -98,7 +125,7 @@ function ManifestPage() {
   const navigate = useNavigate();
   const manifestQueryClient = useQueryClient();
 
-  // Multi-device handshake rehydration removed â€” RED issues now resolve
+  // Multi-device handshake rehydration removed — RED issues now resolve
   // locally via VerbalAuthOverrideDialog inside IssueAccumulatorPanel. No
   // realtime escalation polling, no EscalationRehydrationGate, no waiting
   // panel branch.
@@ -164,7 +191,7 @@ function ManifestPage() {
       {isLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
-          <span className="text-sm font-medium tracking-wide">Synchronizing system manifestâ€¦</span>
+          <span className="text-sm font-medium tracking-wide">Synchronizing system manifest…</span>
         </div>
       ) : bundle ? (
         <ActiveTripScreen bundle={bundle} />
@@ -194,7 +221,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
 
-  // Global escalation/handshake locks removed â€” RED issues no longer take
+  // Global escalation/handshake locks removed — RED issues no longer take
   // over the wizard; the verbal-consultation dialog inside
   // IssueAccumulatorPanel records the workaround and lets the driver keep
   // rolling.
@@ -268,19 +295,19 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Step 1 of 3 â€” pick today's vehicle and record the starting odometer.
+            Step 1 of 3 — pick today's vehicle and record the starting odometer.
           </p>
           <form onSubmit={proceedToClearance} className="mt-5 space-y-4">
             <div className="grid gap-2">
               <Label htmlFor="asset">Select Vehicle</Label>
               <Select value={assetId} onValueChange={setAssetId}>
                 <SelectTrigger id="asset" className="h-12">
-                  <SelectValue placeholder="Today's vehicleâ€¦" />
+                  <SelectValue placeholder="Today's vehicle…" />
                 </SelectTrigger>
                 <SelectContent>
                   {activeAssets.map((a) => (
                     <SelectItem key={a.id} value={a.id}>
-                      {a.name} Â· {a.regoPlate} Â· {a.passengerCapacity} seats
+                      {a.name} · {a.regoPlate} · {a.passengerCapacity} seats
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -299,7 +326,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
               {lastEndOdo != null && (
                 <p className="text-[11px] text-muted-foreground">
                   Last recorded closing odometer: <span className="tabular-nums font-medium">{lastEndOdo} KM</span>
-                  {odoNum === lastEndOdo && " Â· pre-filled"}
+                  {odoNum === lastEndOdo && " · pre-filled"}
                 </p>
               )}
             </div>
@@ -313,7 +340,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                   : "bg-blue-600 hover:bg-blue-700",
               )}
             >
-              Continue to Vehicle Clearance â†’
+              Continue to Vehicle Clearance →
             </button>
           </form>
         </Card>
@@ -364,7 +391,7 @@ function ClearanceGate({
 
   // Grounded lock: if a manager denied an escalation for this vehicle today,
   // refuse to render the walkaround form until the office clears it.
-  const vehicleInfo = `${asset.name} Â· ${asset.regoPlate}`;
+  const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
   const groundedQ = useQuery<boolean>({
     queryKey: ["asset-grounded", vehicleInfo, dateStr],
     queryFn: () => getAssetGroundedStatus(vehicleInfo, dateStr),
@@ -374,7 +401,7 @@ function ClearanceGate({
   if (existingQ.isLoading || groundedQ.isLoading) {
     return (
       <Card className="flex items-center gap-2 p-5 text-sm text-muted-foreground">
-        <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearanceâ€¦
+        <Loader2 className="h-4 w-4 animate-spin" /> Checking today's clearance…
       </Card>
     );
   }
@@ -393,7 +420,7 @@ function ClearanceGate({
           This vehicle is locked out of service until the office manually inspects and overrides the status.
         </p>
         <Button onClick={onBack} variant="outline" className="w-full mt-5 border-red-700/50 hover:bg-red-700/20">
-          â† Pick a different vehicle
+          ← Pick a different vehicle
         </Button>
       </Card>
     );
@@ -421,7 +448,7 @@ function ClearanceGate({
           onClick={onBack}
           className="mt-4 h-12 w-full rounded-xl border-2 border-destructive bg-transparent font-bold text-destructive transition hover:bg-destructive/10"
         >
-          â† Pick a different vehicle
+          ← Pick a different vehicle
         </button>
       </Card>
     );
@@ -490,7 +517,7 @@ function FastPassBanner({
     <Card className="border-2 border-green-600 bg-green-600/10 p-5">
       <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
         <ShieldCheck className="h-6 w-6" />
-        <h2 className="text-lg font-extrabold">Fast-Pass Â· Vehicle Cleared</h2>
+        <h2 className="text-lg font-extrabold">Fast-Pass · Vehicle Cleared</h2>
       </div>
       <p className="mt-3 text-sm">
         <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared for service at{" "}
@@ -504,14 +531,14 @@ function FastPassBanner({
         onClick={onConfirm}
         className="mt-5 h-14 w-full rounded-xl bg-green-600 text-base font-bold text-white shadow transition hover:bg-green-700"
       >
-        âœ“ Confirm &amp; Roll
+        ✓ Confirm &amp; Roll
       </button>
       <button
         type="button"
         onClick={onBack}
         className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
       >
-        â† Change vehicle
+        ← Change vehicle
       </button>
     </Card>
   );
@@ -541,6 +568,160 @@ function isHoistCheckpoint(c: AssetCheckpoint): boolean {
 
 /* -------------------- Event Picker + Start Trip -------------------- */
 
+type Step3Tab = "daycentre" | "event";
+
+function StartPointPicker({
+  direction,
+  depotAddress,
+  centreAddress,
+  choice,
+  onChoiceChange,
+  alternateAddress,
+  onAlternateAddressChange,
+}: {
+  /** Morning defaults to Depot; afternoon home run defaults to Day Centre. */
+  direction: "morning" | "afternoon";
+  depotAddress: string;
+  centreAddress: string;
+  choice: StartPointChoice;
+  onChoiceChange: (c: StartPointChoice) => void;
+  alternateAddress: string;
+  onAlternateAddressChange: (v: string) => void;
+}) {
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [draftAlternate, setDraftAlternate] = useState("");
+
+  const defaultChoice: StartPointChoice = direction === "morning" ? "depot" : "day_centre";
+
+  const openAlternateDialog = () => {
+    setDraftAlternate(alternateAddress);
+    setDialogOpen(true);
+  };
+
+  const saveAlternate = () => {
+    const trimmed = draftAlternate.trim();
+    if (trimmed.length < 5) {
+      toast.error("Enter a full street address for this trip.");
+      return;
+    }
+    onAlternateAddressChange(trimmed);
+    onChoiceChange("alternate");
+    setDialogOpen(false);
+  };
+
+  const depotDisplay = depotAddress.trim() || "Not configured in Admin";
+  const centreDisplay = centreAddress.trim() || "Not configured in Admin";
+  const alternateDisplay = alternateAddress.trim();
+
+  const optionClass = (selected: boolean) =>
+    cn(
+      "w-full rounded-xl border-2 px-4 py-3 text-left transition active:scale-[0.99]",
+      selected
+        ? "border-green-500 bg-green-600/25 shadow-sm shadow-green-900/30"
+        : "border-border bg-card hover:border-green-400/60",
+    );
+
+  return (
+    <div className="space-y-2">
+      <Label className="text-sm font-semibold">Starting from</Label>
+
+      <button
+        type="button"
+        onClick={() => onChoiceChange("depot")}
+        className={optionClass(choice === "depot")}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-foreground">Depot</span>
+          {choice === "depot" && (
+            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Selected
+            </span>
+          )}
+          {choice !== "depot" && defaultChoice === "depot" && (
+            <span className="text-[10px] font-medium text-muted-foreground">Default</span>
+          )}
+        </div>
+        <p className="mt-1 text-sm leading-snug text-muted-foreground">{depotDisplay}</p>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => onChoiceChange("day_centre")}
+        className={optionClass(choice === "day_centre")}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-foreground">Day Centre</span>
+          {choice === "day_centre" && (
+            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Selected
+            </span>
+          )}
+          {choice !== "day_centre" && defaultChoice === "day_centre" && (
+            <span className="text-[10px] font-medium text-muted-foreground">Default</span>
+          )}
+        </div>
+        <p className="mt-1 text-sm leading-snug text-muted-foreground">{centreDisplay}</p>
+      </button>
+
+      <button
+        type="button"
+        onClick={() => {
+          if (alternateDisplay) {
+            onChoiceChange("alternate");
+          } else {
+            openAlternateDialog();
+          }
+        }}
+        className={optionClass(choice === "alternate")}
+      >
+        <div className="flex items-center justify-between gap-2">
+          <span className="font-bold text-foreground">Other address (this trip only)</span>
+          {choice === "alternate" && (
+            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+              Selected
+            </span>
+          )}
+        </div>
+        <p className="mt-1 text-sm leading-snug text-muted-foreground">
+          {alternateDisplay || "Tap to enter a one-off starting address"}
+        </p>
+      </button>
+
+      {choice === "alternate" && alternateDisplay && (
+        <Button type="button" variant="outline" size="sm" className="w-full" onClick={openAlternateDialog}>
+          Edit alternate address
+        </Button>
+      )}
+
+      <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Alternate starting address</DialogTitle>
+            <DialogDescription>
+              For this trip only — e.g. bus parked at a staff home or temporary yard.
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            rows={3}
+            value={draftAlternate}
+            onChange={(e) => setDraftAlternate(e.target.value)}
+            placeholder="Full street address"
+            className="text-base"
+          />
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button type="button" variant="ghost" onClick={() => setDialogOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={saveAlternate}>
+              Save &amp; use this address
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
 function EventPickAndStart({
   asset,
   startOdometer,
@@ -552,34 +733,145 @@ function EventPickAndStart({
 }) {
   const { data: events = [] } = useConfirmedEvents();
   const startTrip = useStartTrip();
+  const startDayCentreRun = useStartDayCentreRun();
   const today = todayDateStr();
+
+  // Derive today's day-of-week code (DAY-MON … DAY-SUN) from Sydney local time.
+  const todayDayCode = useMemo(() => {
+    const sydneyOffset = 10; // AEST (+10), DST not considered here — offset handles display
+    const nowUtc = new Date();
+    const sydneyMs = nowUtc.getTime() + sydneyOffset * 60 * 60 * 1000;
+    const sydneyDate = new Date(sydneyMs);
+    return dayCodeFromSydneyIndex(sydneyDate.getUTCDay());
+  }, []);
+
+  // Load bus run definitions so we can map codes → labels.
+  const { data: busRunDefs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const runLabels = useMemo(
+    () => Object.fromEntries(busRunDefs.map((r) => [r.code, r.displayName])),
+    [busRunDefs],
+  );
+
+  // Today's active bus run summaries (which runs have passengers today).
+  const { data: todaysRuns = [] } = useTodaysBusRunSummaries(todayDayCode, runLabels);
+
+  // BMS-style silent refresh: if the coordinator adds/removes a booking while
+  // the driver is on the event-picker screen, the list updates in real time.
+  useRealtimeInvalidate({
+    table: "event_roster_bookings",
+    queryKeys: [["events", "confirmed"]],
+  });
+  useRealtimeInvalidate({
+    table: "participant_attendance_schedules",
+    queryKeys: [["today-bus-run-summaries", todayDayCode]],
+  });
+
   const todaysEvents = useMemo(
     () => events.filter((e) => e.startDate <= today && (e.endDate ?? e.startDate) >= today),
     [events, today],
   );
+
+  // Always default to Day Centre Run — drivers use this almost exclusively.
+  // The One-off Event tab remains accessible via the tab switcher.
+  const [tab, setTab] = useState<Step3Tab>("daycentre");
+
+  // Day Centre run state.
+  const [selectedRun, setSelectedRun] = useState("");
+  const [selectedDirection, setSelectedDirection] = useState<"morning" | "afternoon">("morning");
+  const dcInFlightRef = useRef(false);
+
+  // Event state.
   const [eventId, setEventId] = useState("");
-  const inFlightRef = useRef(false);
+  const eventInFlightRef = useRef(false);
 
-  const disabled = !eventId || startTrip.isPending;
+  const defaultDepotAddress = useSystemParameter<string>("depot_address", "");
+  const defaultCentreAddress = useSystemParameter<string>("day_centre_address", "");
 
-  const submit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (disabled) return;
-    if (inFlightRef.current || startTrip.isPending) return;
-    inFlightRef.current = true;
-    startTrip.mutate(
-      { eventId, startOdometerKm: startOdometer, varianceReason: null },
+  const [runStartChoice, setRunStartChoice] = useState<StartPointChoice>("depot");
+  const [runAlternateAddress, setRunAlternateAddress] = useState("");
+  const [eventStartChoice, setEventStartChoice] = useState<StartPointChoice>("depot");
+  const [eventAlternateAddress, setEventAlternateAddress] = useState("");
+
+  useEffect(() => {
+    if (todaysRuns.length === 1) {
+      setSelectedRun(todaysRuns[0]!.runCode);
+      setSelectedDirection(todaysRuns[0]!.direction);
+    }
+  }, [todaysRuns]);
+
+  useEffect(() => {
+    setRunStartChoice(selectedDirection === "morning" ? "depot" : "day_centre");
+    setRunAlternateAddress("");
+  }, [selectedDirection]);
+
+  useEffect(() => {
+    setEventStartChoice("depot");
+    setEventAlternateAddress("");
+  }, [eventId]);
+
+  const clearLocalStorage = () => {
+    localStorage.removeItem("yada_init_step");
+    localStorage.removeItem("yada_init_assetId");
+    localStorage.removeItem("yada_init_odo");
+    localStorage.removeItem("yada_init_clearanceOk");
+  };
+
+  // ── Day Centre Run submit ──────────────────────────────────────────────────
+  const submitDayCentreRun = () => {
+    if (!selectedRun || startDayCentreRun.isPending || dcInFlightRef.current) return;
+    if (runStartChoice === "alternate" && !runAlternateAddress.trim()) {
+      toast.error("Enter an alternate starting address first.");
+      return;
+    }
+    dcInFlightRef.current = true;
+    const runLabel = runLabels[selectedRun] ?? selectedRun;
+    startDayCentreRun.mutate(
+      {
+        busRunCode: selectedRun,
+        busRunLabel: runLabel,
+        startOdometerKm: startOdometer,
+        dayCode: todayDayCode,
+        direction: selectedDirection,
+        startPoint: runStartChoice,
+        alternateStartAddress: runAlternateAddress.trim() || null,
+        centreAddress: defaultCentreAddress.trim() || null,
+        depotAddress: defaultDepotAddress.trim() || null,
+      },
       {
         onSuccess: () => {
-          localStorage.removeItem("yada_init_step");
-          localStorage.removeItem("yada_init_assetId");
-          localStorage.removeItem("yada_init_odo");
-          localStorage.removeItem("yada_init_clearanceOk");
+          clearLocalStorage();
+          toast.success(`${runLabel} started`, { description: "Day Centre manifest is open." });
+        },
+        onSettled: () => { dcInFlightRef.current = false; },
+      },
+    );
+  };
+
+  // ── Event submit ───────────────────────────────────────────────────────────
+  const submitEvent = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!eventId || startTrip.isPending || eventInFlightRef.current) return;
+    if (eventStartChoice === "alternate" && !eventAlternateAddress.trim()) {
+      toast.error("Enter an alternate starting address first.");
+      return;
+    }
+    eventInFlightRef.current = true;
+    startTrip.mutate(
+      {
+        eventId,
+        startOdometerKm: startOdometer,
+        varianceReason: null,
+        startPoint: eventStartChoice,
+        alternateStartAddress: eventAlternateAddress.trim() || null,
+        depotAddress: defaultDepotAddress.trim() || null,
+        centreAddress: defaultCentreAddress.trim() || null,
+      },
+      {
+        onSuccess: () => {
+          clearLocalStorage();
           toast.success("Daily run started", { description: "Manifest is now open." });
         },
-        onSettled: () => {
-          inFlightRef.current = false;
-        },
+        onSettled: () => { eventInFlightRef.current = false; },
       },
     );
   };
@@ -588,45 +880,166 @@ function EventPickAndStart({
     <Card className="p-5">
       <div className="flex items-center gap-2 text-green-700 dark:text-green-300">
         <ShieldCheck className="h-5 w-5" />
-        <h2 className="text-lg font-extrabold">{asset.name} cleared Â· pick event</h2>
+        <h2 className="text-lg font-extrabold">{asset.name} cleared · start run</h2>
       </div>
       <p className="mt-1 text-sm text-muted-foreground">
-        Step 3 of 3 â€” select today's event manifest to open the leg itinerary.
+        Step 3 of 3 — choose your starting point, then open the manifest to run the route.
       </p>
-      <form onSubmit={submit} className="mt-5 space-y-4">
-        <div className="grid gap-2">
-          <Label htmlFor="event">Select Event</Label>
-          <Select value={eventId} onValueChange={setEventId}>
-            <SelectTrigger id="event" className="h-12">
-              <SelectValue placeholder={todaysEvents.length ? "Today's eventsâ€¦" : "No events today â€” pick any"} />
-            </SelectTrigger>
-            <SelectContent>
-              {(todaysEvents.length ? todaysEvents : events).map((e) => (
-                <SelectItem key={e.id} value={e.id}>
-                  {e.title} Â· {e.startDate}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
+
+      {/* Tab switcher */}
+      <div className="mt-4 flex rounded-lg border border-border overflow-hidden">
         <button
-          type="submit"
-          disabled={disabled}
+          type="button"
+          onClick={() => setTab("daycentre")}
           className={cn(
-            "h-14 w-full rounded-xl font-bold text-white shadow transition",
-            disabled ? "bg-blue-600 opacity-60 cursor-not-allowed" : "bg-blue-600 hover:bg-blue-700",
+            "flex-1 py-2 text-sm font-semibold transition",
+            tab === "daycentre"
+              ? "bg-blue-600 text-white"
+              : "bg-card text-muted-foreground hover:text-foreground",
           )}
         >
-          {startTrip.isPending ? "Openingâ€¦" : "Start Daily Trip & Open Manifest"}
+          Day Centre Run
+          {todaysRuns.length > 0 && (
+            <span className="ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[11px] font-bold">
+              {todaysRuns.length}
+            </span>
+          )}
         </button>
         <button
           type="button"
-          onClick={onBack}
-          className="mt-1 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+          onClick={() => setTab("event")}
+          className={cn(
+            "flex-1 py-2 text-sm font-semibold transition",
+            tab === "event"
+              ? "bg-blue-600 text-white"
+              : "bg-card text-muted-foreground hover:text-foreground",
+          )}
         >
-          â† Back to clearance
+          One-off Event
         </button>
-      </form>
+      </div>
+
+      {/* ── Day Centre Run tab ─────────────────────────────────────────────── */}
+      {tab === "daycentre" && (
+        <div className="mt-4 space-y-4">
+          {todaysRuns.length === 0 ? (
+            <div className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+              No participants are scheduled for a Day Centre bus run today.
+              <br />
+              <span className="text-xs">
+                Runs are configured in Admin → Day Centre Bus Runs.
+              </span>
+            </div>
+          ) : todaysRuns.length > 1 ? (
+            <div className="grid gap-2">
+              <Label htmlFor="bus-run">Which run?</Label>
+              <Select
+                value={selectedRun && selectedDirection ? `${selectedRun}:${selectedDirection}` : ""}
+                onValueChange={(v) => {
+                  const [code, dir] = v.split(":");
+                  setSelectedRun(code ?? "");
+                  setSelectedDirection((dir as "morning" | "afternoon") ?? "morning");
+                }}
+              >
+                <SelectTrigger id="bus-run" className="h-12">
+                  <SelectValue placeholder="Select today's run…" />
+                </SelectTrigger>
+                <SelectContent>
+                  {todaysRuns.map((run) => (
+                    <SelectItem key={`${run.runCode}-${run.direction}`} value={`${run.runCode}:${run.direction}`}>
+                      {run.runLabel} · {run.direction === "morning" ? "Morning" : "Afternoon Return"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="rounded-lg border border-border bg-muted/20 px-4 py-3 text-sm">
+              <span className="font-semibold">{todaysRuns[0]!.runLabel}</span>
+              <span className="ml-2 text-xs text-muted-foreground">
+                {todaysRuns[0]!.direction === "morning" ? "Morning pickup" : "Afternoon return"}
+              </span>
+            </div>
+          )}
+
+          {/* Starting point — morning = Depot, afternoon home run = Day Centre */}
+          <StartPointPicker
+            direction={selectedDirection}
+            depotAddress={defaultDepotAddress}
+            centreAddress={defaultCentreAddress}
+            choice={runStartChoice}
+            onChoiceChange={setRunStartChoice}
+            alternateAddress={runAlternateAddress}
+            onAlternateAddressChange={setRunAlternateAddress}
+          />
+
+          <button
+            type="button"
+            disabled={!selectedRun || startDayCentreRun.isPending}
+            onClick={submitDayCentreRun}
+            className={cn(
+              "h-14 w-full rounded-xl font-bold text-white shadow transition",
+              !selectedRun || startDayCentreRun.isPending
+                ? "bg-blue-600 opacity-60 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700",
+            )}
+          >
+            {startDayCentreRun.isPending ? "Opening…" : "Start Day Centre Run & Open Manifest"}
+          </button>
+        </div>
+      )}
+
+      {/* ── Event tab ─────────────────────────────────────────────────────── */}
+      {tab === "event" && (
+        <form onSubmit={submitEvent} className="mt-4 space-y-4">
+          <div className="grid gap-2">
+            <Label htmlFor="event">Select Event</Label>
+            <Select value={eventId} onValueChange={setEventId}>
+              <SelectTrigger id="event" className="h-12">
+                <SelectValue placeholder={todaysEvents.length ? "Today's events…" : "No events today — pick any"} />
+              </SelectTrigger>
+              <SelectContent>
+                {(todaysEvents.length ? todaysEvents : events).map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.title} · {e.startDate}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          <StartPointPicker
+            direction="morning"
+            depotAddress={defaultDepotAddress}
+            centreAddress={defaultCentreAddress}
+            choice={eventStartChoice}
+            onChoiceChange={setEventStartChoice}
+            alternateAddress={eventAlternateAddress}
+            onAlternateAddressChange={setEventAlternateAddress}
+          />
+
+          <button
+            type="submit"
+            disabled={!eventId || startTrip.isPending}
+            className={cn(
+              "h-14 w-full rounded-xl font-bold text-white shadow transition",
+              !eventId || startTrip.isPending
+                ? "bg-blue-600 opacity-60 cursor-not-allowed"
+                : "bg-blue-600 hover:bg-blue-700",
+            )}
+          >
+            {startTrip.isPending ? "Opening…" : "Start Daily Trip & Open Manifest"}
+          </button>
+        </form>
+      )}
+
+      <button
+        type="button"
+        onClick={onBack}
+        className="mt-3 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
+      >
+        ← Back to clearance
+      </button>
     </Card>
   );
 }
@@ -637,12 +1050,81 @@ interface ActiveTripScreenProps {
   bundle: ActiveTripBundle;
 }
 
+const ACTIVE_TRIP_QUERY_KEY = ["transport_trips", "active"] as const;
+
 function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const { trip, legs } = bundle;
+  const reorderPickups = useReorderTripPickupLegs();
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
   const allLegsComplete = activeLeg == null;
   const totalKm = legs.reduce((sum, l) => sum + (l.loggedDistanceKm ?? l.gpsDistanceKm ?? 0), 0);
+  const { requestCancel, dialog: pickupCancelDialog, isCancelling } = usePickupCancelDialog(trip.id);
+
+  const completedPickupCount = useMemo(
+    () => legs.filter((l) => isPassengerPickupLeg(l) && l.status === "completed").length,
+    [legs],
+  );
+  const completedLegs = useMemo(
+    () => legs.filter((l) => l.status === "completed").sort((a, b) => a.legIndex - b.legIndex),
+    [legs],
+  );
+  const pendingPickups = useMemo(
+    () =>
+      legs
+        .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+        .sort((a, b) => a.legIndex - b.legIndex),
+    [legs],
+  );
+  const pendingPickupIds = pendingPickups.map((l) => l.id);
+  const pendingPickupMap = useMemo(() => new Map(pendingPickups.map((l) => [l.id, l])), [pendingPickups]);
+
+  const activeIsPendingPickup =
+    activeLeg != null && isPassengerPickupLeg(activeLeg) && activeLeg.status === "pending";
+  const activeInProgress =
+    activeLeg != null && (activeLeg.status === "en_route" || activeLeg.status === "arrived");
+
+  const upcomingStaticLegs = useMemo(() => {
+    if (!activeLeg) return [];
+    const pendingPickupIdSet = new Set(pendingPickupIds);
+    return legs.filter(
+      (l) =>
+        l.status !== "completed" &&
+        l.id !== activeLeg.id &&
+        !pendingPickupIdSet.has(l.id),
+    );
+  }, [activeLeg, legs, pendingPickupIds]);
+
+  const [localPickupOrder, setLocalPickupOrder] = useState<string[]>([]);
+  useEffect(() => {
+    setLocalPickupOrder([]);
+  }, [pendingPickupIds.join("|")]);
+
+  const sortablePickupIds =
+    localPickupOrder.length === pendingPickupIds.length ? localPickupOrder : pendingPickupIds;
+
+  const displayLegForPendingOrder = (leg: TripLeg, orderedPendingIds: string[]): TripLeg => {
+    const ep = computePickupChainEndpoints(trip, legs, orderedPendingIds).get(leg.id);
+    return ep ? { ...leg, ...ep } : leg;
+  };
+
+  const applyPickupReorder = (nextIds: string[]) => {
+    setLocalPickupOrder(nextIds);
+    reorderPickups.mutate(
+      { tripId: trip.id, orderedLegIds: nextIds },
+      {
+        onSuccess: () => toast.success("Pickup order updated"),
+        onSettled: () => setLocalPickupOrder([]),
+      },
+    );
+  };
+
+  const startAddressForLeg = (leg: TripLeg) =>
+    leg.legKind === "depot_to_client" && leg.toParticipantId != null ? trip.originAddress : null;
+
+  // BMS-style silent refresh:
+  useRealtimeInvalidate({ table: "trip_legs", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
+  useRealtimeInvalidate({ table: "transport_trips", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
 
   const activeRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -661,6 +1143,47 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     prevLegIdsRef.current = legs.map((l) => l.id);
   }, [legs]);
 
+  const renderActiveCard = (
+    leg: TripLeg,
+    outerRef?: (el: HTMLDivElement | null) => void,
+    drag?: PickupDragBind,
+    displayLeg?: TripLeg,
+  ) => {
+    const shown = displayLeg ?? leg;
+    return (
+      <div
+        ref={(el) => {
+          activeRef.current = el;
+          outerRef?.(el);
+        }}
+      >
+        <ActiveLegCard
+          leg={shown}
+          startAddress={startAddressForLeg(shown)}
+          onCancelPickup={canCancelPickupLeg(leg) ? () => requestCancel(leg) : undefined}
+          cancelDisabled={isCancelling}
+          drag={drag}
+        />
+      </div>
+    );
+  };
+
+  const renderUpcomingPickupRow = (
+    leg: TripLeg,
+    stopNumber: number,
+    drag?: PickupDragBind,
+    displayLeg?: TripLeg,
+  ) => (
+    <LegRow
+      key={leg.id}
+      leg={displayLeg ?? leg}
+      stopNumber={stopNumber}
+      drag={drag}
+      onCancelPickup={requestCancel}
+      cancelDisabled={isCancelling || reorderPickups.isPending}
+    />
+  );
+
   return (
     <>
       <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
@@ -668,7 +1191,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           <div className="min-w-0 flex-1 pr-3">
             <div className="truncate text-base font-bold leading-tight">{bundle.eventTitle ?? "Daily Run"}</div>
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {trip.tripDate} Â· Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
+              {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
           </div>
           <div className="text-right">
@@ -678,12 +1201,87 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-3 pb-4 pt-3">
-        {activeLeg ? (
-          <div ref={activeRef}>
-            <ActiveLegCard leg={activeLeg} />
+      <main className="flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2">
+        {completedLegs.map((l) => (
+          <LegRow key={l.id} leg={l} locked />
+        ))}
+
+        {activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
+
+        {activeIsPendingPickup && pendingPickups.length > 0 && (
+          <>
+            {pendingPickups.length >= 2 ? (
+              <PointerSortableList
+                itemIds={sortablePickupIds}
+                onReorder={applyPickupReorder}
+                disabled={reorderPickups.isPending || isCancelling}
+              >
+                {({ ids, bindRow }) => (
+                  <div className="space-y-2">
+                    {ids.map((id, index) => {
+                      const leg = pendingPickupMap.get(id);
+                      if (!leg) return null;
+                      const bind = bindRow(id);
+                      const displayLeg = displayLegForPendingOrder(leg, ids);
+                      if (index === 0) {
+                        return (
+                          <div key={id}>{renderActiveCard(leg, bind.rowRef, bind, displayLeg)}</div>
+                        );
+                      }
+                      return renderUpcomingPickupRow(leg, completedPickupCount + index + 1, bind, displayLeg);
+                    })}
+                  </div>
+                )}
+              </PointerSortableList>
+            ) : (
+              renderActiveCard(
+                pendingPickups[0]!,
+                undefined,
+                undefined,
+                displayLegForPendingOrder(pendingPickups[0]!, pendingPickupIds),
+              )
+            )}
+          </>
+        )}
+
+        {activeInProgress && pendingPickups.length >= 2 && (
+          <div className="space-y-2">
+            <div className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+              Upcoming stops — drag to reorder
+            </div>
+            <PointerSortableList
+              itemIds={sortablePickupIds}
+              onReorder={applyPickupReorder}
+              disabled={reorderPickups.isPending || isCancelling}
+            >
+              {({ ids, bindRow }) => (
+                <div className="space-y-2">
+                  {ids.map((id, index) => {
+                    const leg = pendingPickupMap.get(id);
+                    if (!leg) return null;
+                    return renderUpcomingPickupRow(
+                      leg,
+                      completedPickupCount + index + 2,
+                      bindRow(id),
+                      displayLegForPendingOrder(leg, ids),
+                    );
+                  })}
+                </div>
+              )}
+            </PointerSortableList>
           </div>
-        ) : (
+        )}
+
+        {activeInProgress && pendingPickups.length === 1 && (
+          renderUpcomingPickupRow(
+            pendingPickups[0]!,
+            completedPickupCount + 2,
+            undefined,
+            displayLegForPendingOrder(pendingPickups[0]!, pendingPickupIds),
+          )
+        )}
+
+        {!activeLeg && (
           <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
             <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
             <div className="mt-2 text-lg font-bold">All legs completed</div>
@@ -691,21 +1289,19 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </Card>
         )}
 
-        <div className="mt-4 space-y-2">
-          {legs
-            .filter((l) => l.id !== activeLeg?.id)
-            .map((l) => (
-              <LegRow key={l.id} leg={l} />
-            ))}
-        </div>
+        {upcomingStaticLegs.map((l) => (
+          <LegRow key={l.id} leg={l} onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined} cancelDisabled={isCancelling} />
+        ))}
       </main>
+
+      {pickupCancelDialog}
 
       <footer className="sticky bottom-0 z-20 space-y-3 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
         {allLegsComplete ? (
           <FinalizeShiftCard tripId={trip.id} startOdometer={trip.startOdometerKm} />
         ) : (
           <div className="text-center text-xs text-muted-foreground">
-            Complete each leg in order. Driver: tap from the seat.
+            Drag upcoming stops to reorder · tap Depart Stop when ready.
           </div>
         )}
         <CancelTripButton tripId={trip.id} />
@@ -714,19 +1310,57 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   );
 }
 
-function LegRow({ leg }: { leg: TripLeg }) {
+function LegRow({
+  leg,
+  onCancelPickup,
+  cancelDisabled,
+  stopNumber,
+  drag,
+  locked,
+}: {
+  leg: TripLeg;
+  onCancelPickup?: (leg: TripLeg) => void;
+  cancelDisabled?: boolean;
+  stopNumber?: number;
+  drag?: PickupDragBind;
+  locked?: boolean;
+}) {
   const done = leg.status === "completed";
+  const showCancel = !done && !locked && onCancelPickup && canCancelPickupLeg(leg);
+  const label = stopNumber != null ? `Stop ${stopNumber}` : `Leg ${leg.legIndex}`;
+
   return (
     <Card
+      ref={drag?.rowRef}
+      data-sort-id={drag ? leg.id : undefined}
       className={cn(
         "flex items-center justify-between gap-3 p-3 text-sm",
-        done ? "border-green-600/40 bg-green-600/5" : "pointer-events-none opacity-50",
+        drag?.isDragging && "z-10 opacity-90 shadow-lg ring-2 ring-blue-400",
+        done
+          ? "border-green-600/40 bg-green-600/5"
+          : locked || !drag
+            ? "border-border bg-card"
+            : "border-border bg-card touch-manipulation select-none",
       )}
     >
-      <div className="min-w-0">
-        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">Leg {leg.legIndex}</div>
+      {drag && (
+        <button
+          type="button"
+          className={cn(
+            "flex h-10 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+            cancelDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing",
+          )}
+          aria-label="Drag to reorder stop"
+          disabled={cancelDisabled}
+          onPointerDown={drag.onGripPointerDown}
+        >
+          <GripVertical className="h-5 w-5" />
+        </button>
+      )}
+      <div className="min-w-0 flex-1">
+        <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
         <div className="truncate font-medium">
-          {leg.fromLabel} <span className="text-muted-foreground">â†’</span> {leg.toLabel}
+          {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
         </div>
         {leg.targetAddress && (
           <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
@@ -734,14 +1368,25 @@ function LegRow({ leg }: { leg: TripLeg }) {
             <span className="truncate">{leg.targetAddress}</span>
           </div>
         )}
+        {done && leg.passengerPresent === false && (
+          <div className="mt-0.5 text-[10px] font-medium uppercase text-amber-600">
+            Cancelled / no pickup
+          </div>
+        )}
       </div>
       {done ? (
-        <div className="flex items-center gap-1 text-xs font-semibold text-green-600">
+        <div className="flex shrink-0 items-center gap-1 text-xs font-semibold text-green-600">
           <CheckCircle2 className="h-4 w-4" />
           {(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0).toFixed(1)} km
         </div>
+      ) : showCancel ? (
+        <PickupCancelButton
+          size="sm"
+          onClick={() => onCancelPickup!(leg)}
+          disabled={cancelDisabled}
+        />
       ) : (
-        <div className="text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
+        <div className="shrink-0 text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
       )}
     </Card>
   );
@@ -749,7 +1394,19 @@ function LegRow({ leg }: { leg: TripLeg }) {
 
 /* -------------------- Active Leg -------------------- */
 
-function ActiveLegCard({ leg }: { leg: TripLeg }) {
+function ActiveLegCard({
+  leg,
+  startAddress,
+  onCancelPickup,
+  cancelDisabled,
+  drag,
+}: {
+  leg: TripLeg;
+  startAddress?: string | null;
+  onCancelPickup?: () => void;
+  cancelDisabled?: boolean;
+  drag?: PickupDragBind;
+}) {
   const patch = usePatchTripLeg();
   const [busy, setBusy] = useState(false);
 
@@ -793,15 +1450,50 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
   };
 
   return (
-    <Card className="rounded-xl border-2 border-blue-500 bg-slate-900 p-4 text-white">
-      <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
+    <Card
+      className={cn(
+        "relative rounded-xl border-2 border-blue-500 bg-slate-900 p-4 text-white",
+        drag?.isDragging && "z-10 opacity-90 shadow-lg ring-2 ring-blue-300",
+      )}
+    >
+      {drag && (
+        <button
+          type="button"
+          className={cn(
+            "absolute left-3 top-3 z-10 flex h-9 w-8 items-center justify-center rounded-md text-slate-400",
+            cancelDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing",
+          )}
+          aria-label="Drag to reorder stop"
+          disabled={cancelDisabled}
+          onPointerDown={drag.onGripPointerDown}
+        >
+          <GripVertical className="h-5 w-5" />
+        </button>
+      )}
+      {onCancelPickup && (
+        <div className="absolute right-3 top-3 z-10">
+          <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+        </div>
+      )}
+      <div
+        className={cn(
+          "flex items-center gap-2 pr-10 text-[11px] font-bold uppercase tracking-wider text-blue-300",
+          drag && "pl-10",
+        )}
+      >
         <Navigation className="h-3.5 w-3.5" /> Active leg {leg.legIndex}
       </div>
       <div className="mt-1 flex items-start gap-2">
         <MapPin className="mt-1 h-5 w-5 shrink-0 text-blue-300" />
         <div className="min-w-0">
           <div className="truncate text-lg font-bold leading-tight">{leg.fromLabel}</div>
-          <div className="text-xs text-slate-400">â†“</div>
+          {startAddress && (
+            <div className="mt-0.5 flex items-start gap-1.5 text-xs text-slate-300">
+              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+              <span className="break-words">{startAddress}</span>
+            </div>
+          )}
+          <div className="text-xs text-slate-400">↓</div>
           <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
           {leg.targetAddress && (
             <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
@@ -820,7 +1512,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             onClick={() => runGps("end")}
             className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
           >
-            ðŸ›‘ Arrive at Stop
+            🛑 Arrive at Stop
           </button>
         ) : leg.status === "arrived" ? (
           <ArrivedChecklist leg={leg} />
@@ -831,7 +1523,7 @@ function ActiveLegCard({ leg }: { leg: TripLeg }) {
             onClick={() => runGps("start")}
             className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
           >
-            ðŸš€ Depart Stop
+            🚀 Depart Stop
           </button>
         )}
       </div>
@@ -896,15 +1588,19 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           status: "completed",
           loggedDistanceKm: Number(loggedKm),
           passengerPresent: present,
-          medicationHandoverStatus: medStatus,
-          medicationHandoverConfirmed: medStatus === "collected_intact" || medStatus === "collected_damaged",
+          medicationHandoverStatus: leg.medicationExpected
+            ? medStatus
+            : "not_required",
+          medicationHandoverConfirmed:
+            leg.medicationExpected &&
+            (medStatus === "collected_intact" || medStatus === "collected_damaged"),
           unexpectedMedicationLogged: extraMed,
           unexpectedMedicationNotes: extraMed ? extraNotes.trim() : null,
           completedAt: new Date().toISOString(),
         },
       });
-      // Parallel RED escalation â€” runs after boarding completes.
-      // GUARDRAILS Â§1.1: failure is surfaced to the operator, not swallowed.
+      // Parallel RED escalation — runs after boarding completes.
+      // GUARDRAILS §1.1: failure is surfaced to the operator, not swallowed.
       if (extraMed && participantId) {
         raiseUnexpectedMedBagIssue({
           participantId,
@@ -914,14 +1610,14 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
           notes: extraNotes.trim() || null,
         }).catch((e) => {
           console.error("[ArrivedChecklist] unexpected med escalation failed", e);
-          toast.error("Unexpected med-bag: escalation failed â€” manual log required", {
+          toast.error("Unexpected med-bag: escalation failed — manual log required", {
             description: (e as Error).message ?? "Ledger write failed. Contact your coordinator immediately.",
           });
         });
       }
       localStorage.removeItem(storageKey);
       toast.success(`Leg ${leg.legIndex} logged`, {
-        description: `${leg.fromLabel} â†’ ${leg.toLabel}`,
+        description: `${leg.fromLabel} → ${leg.toLabel}`,
       });
     } catch {
       /* hook surfaces red toast */
@@ -959,7 +1655,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
             onClick={() => setShowNoShow(true)}
             className="mt-2 h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700"
           >
-            âš ï¸ Trigger No-Show Countdown
+            ⚠️ Trigger No-Show Countdown
           </button>
           <NoShowCountdownModal
             open={showNoShow}
@@ -978,53 +1674,52 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         </>
       )}
 
-      <div
-        className={cn(
-          "rounded-lg border p-3",
-          leg.medicationExpected ? "border-amber-500/60 bg-amber-500/10" : "border-slate-700 bg-slate-950/40",
-        )}
-      >
-        {leg.medicationExpected && (
+      {leg.medicationExpected && (
+        <div className="rounded-lg border border-amber-500/60 bg-amber-500/10 p-3">
           <div className="mb-3 flex items-start gap-2 text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-            <div className="text-sm font-semibold">âš ï¸ EXPECTED MEDICATION: Confirm bag status before departure.</div>
+            <div className="text-sm font-semibold">
+              Expected medication on this client — confirm bag status before departure.
+            </div>
           </div>
-        )}
-        <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">Medication Bag Handover</div>
-        <RadioGroup
-          value={medStatus ?? ""}
-          onValueChange={(v) => updateField("medStatus", v as MedicationHandoverStatus)}
-          className="mt-2 grid gap-2"
-        >
-          <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="collected_intact" id={`med-intact-${leg.id}`} />
-            <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-            <span className="font-medium">Collected &amp; Intact</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="collected_damaged" id={`med-dmg-${leg.id}`} />
-            <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-            <span className="font-medium">Collected but Damaged / Compromised</span>
-          </label>
-          <label className="flex items-center gap-2 text-sm">
-            <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
-            <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-            <span className="font-medium">Expected but Not Provided</span>
-          </label>
-        </RadioGroup>
-        {exceptionFlagged && (
-          <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
-            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>Manager exception flag will be recorded against this leg.</span>
+          <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
+            Medication Bag Handover
           </div>
-        )}
-      </div>
+          <RadioGroup
+            value={medStatus ?? ""}
+            onValueChange={(v) => updateField("medStatus", v as MedicationHandoverStatus)}
+            className="mt-2 grid gap-2"
+          >
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="collected_intact" id={`med-intact-${leg.id}`} />
+              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
+              <span className="font-medium">Collected &amp; Intact</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="collected_damaged" id={`med-dmg-${leg.id}`} />
+              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
+              <span className="font-medium">Collected but Damaged / Compromised</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
+              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
+              <span className="font-medium">Expected but Not Provided</span>
+            </label>
+          </RadioGroup>
+          {exceptionFlagged && (
+            <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
+              <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+              <span>Manager exception flag will be recorded against this leg.</span>
+            </div>
+          )}
+        </div>
+      )}
 
       <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
         <label className="flex items-center gap-2 text-sm">
           <Checkbox checked={extraMed} onCheckedChange={(v) => updateField("extraMed", v === true)} />
           <span className="font-medium">
-            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />âž• Log Unexpected Medication Bag Received
+            <Pill className="mr-1 inline h-4 w-4 text-blue-300" />➕ Log Unexpected Medication Bag Received
           </span>
         </label>
         {extraMed && (
@@ -1038,7 +1733,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
               value={extraNotes}
               onChange={(e) => updateField("extraNotes", e.target.value)}
               className="bg-slate-950 text-white"
-              placeholder="e.g. small white pouch Â· 2 inhalers labelled JS"
+              placeholder="e.g. small white pouch · 2 inhalers labelled JS"
             />
           </div>
         )}
@@ -1050,7 +1745,7 @@ function ArrivedChecklist({ leg }: { leg: TripLeg }) {
         onClick={confirm}
         className="mt-4 h-14 w-full rounded-xl bg-green-600 font-bold text-white transition hover:bg-green-700 disabled:opacity-60"
       >
-        {patch.isPending ? "Loggingâ€¦" : "Confirm & Log Leg Completion"}
+        {patch.isPending ? "Logging…" : "Confirm & Log Leg Completion"}
       </button>
     </div>
   );
@@ -1065,7 +1760,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
 
   const submit = () => {
     if (!valid) {
-      toast.error("Ending odometer must be â‰¥ starting odometer", {
+      toast.error("Ending odometer must be ≥ starting odometer", {
         className: "border-red-700 bg-red-600 text-white font-medium",
       });
       return;
@@ -1085,7 +1780,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
         className="h-12 text-base tabular-nums"
         value={odo}
         onChange={(e) => setOdo(e.target.value)}
-        placeholder={`â‰¥ ${startOdometer}`}
+        placeholder={`≥ ${startOdometer}`}
       />
       <button
         type="button"
@@ -1093,7 +1788,7 @@ function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdo
         onClick={submit}
         className="h-14 w-full rounded-xl bg-red-700 font-bold text-white transition hover:bg-red-800 disabled:opacity-60"
       >
-        ðŸ End Shift & Lock Daily Run Logs
+        🏁 End Shift & Lock Daily Run Logs
       </button>
     </div>
   );
@@ -1112,7 +1807,7 @@ function CancelTripButton({ tripId }: { tripId: string }) {
           className="h-11 w-full rounded-xl border-2 border-red-600 bg-transparent text-sm font-bold text-red-600 transition hover:bg-red-50 disabled:opacity-60"
           disabled={cancel.isPending}
         >
-          âœ• Cancel / Reset Trip
+          ✕ Cancel / Reset Trip
         </button>
       </AlertDialogTrigger>
       <AlertDialogContent>

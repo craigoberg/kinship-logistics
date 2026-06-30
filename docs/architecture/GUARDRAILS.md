@@ -110,6 +110,23 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
+### 4.2 Modal Footer Button Standard
+
+Every tab or form panel inside a `Dialog` must display a footer at the bottom of the visible content area. The footer layout is:
+
+| Scenario | Left button | Right button |
+| :-- | :-- | :-- |
+| Tab or form **with a save/submit action** | `Close` (variant `outline`) | `Save` / action label (primary, disabled until valid and dirty) |
+| Tab or form **read-only** (no save action) | — | `Close` (variant `outline`) |
+
+Rules:
+- The **Close** button always calls `onOpenChange(false)` on the parent dialog. It must be labelled "Close", not "Cancel" or "Dismiss".
+- The **Save** button must be disabled (`disabled={!canSubmit}`) until all required fields are populated **and** the form has unsaved changes (`dirty`). It must never be enabled for an unchanged form.
+- The Save button must display a pending state (e.g. "Saving…") while the mutation is in-flight, and remain disabled during that period.
+- `DialogFooter` from `src/components/ui/dialog.tsx` is the canonical wrapper — it handles responsive stacking on mobile automatically.
+- Tabs that open child modals for their mutations (e.g. Attendance, Finance) are **read-only** from the parent tab's perspective and use the Close-only footer.
+- The dialog's built-in top-right **X** remains present as a secondary close path, but the footer Close button is the primary affordance.
+
 ### 4.3 Required Field Visual Identifiers
 
 - High-Visibility Outlines: Do not rely on small red asterisks (\*) alone to mark mandatory inputs. Any required input field, dropdown, or textarea that is empty or invalid must be outlined with a prominent, thick red border to give the operator an unmistakable visual indication of what is missing.
@@ -226,3 +243,252 @@ The component acts as an abstract, state-driven engine, applying identical data 
 ### Amendment Process
 
 These guardrails may only be amended by explicit project-owner approval documented in this file via a dated signature line. AI-assisted edits must reference this file and confirm compliance before implementation.
+
+---
+
+## 10. Real-time Data Refresh Standard (BMS / Network Monitor Model)
+
+> Status: Permanent Build Requirement — effective 2026-06-30. All current and future modules must comply.
+
+The application must behave like a BMS (Building Management System) or Network Monitor: every coordinator save, booking edit, or participant profile change must be visible to the driver manifest, dashboard tiles, and all connected surfaces **immediately**, without a manual page refresh.
+
+### 10.1 Two-Layer Refresh Architecture
+
+Every data class that can be mutated by one user and observed by another must use **both** layers simultaneously:
+
+| Layer | Mechanism | Purpose |
+| :-- | :-- | :-- |
+| **Realtime (primary)** | `useRealtimeInvalidate` hook — `postgres_changes` subscription on the Supabase table | Instant invalidation on INSERT / UPDATE / DELETE; sub-second update on all subscribed screens |
+| **Polling (fallback)** | `refetchInterval` on the underlying `useQuery` | Recovers from dropped WebSocket connections; ensures data is never older than the configured floor even if the socket is lost |
+
+Both layers are mandatory. Neither may be omitted. Using polling alone (the pre-2026-06-30 state for transport data) is a violation of this standard.
+
+### 10.2 Polling Floor Requirements
+
+| Data class | Mandatory `refetchInterval` ceiling | Realtime table(s) |
+| :-- | :-- | :-- |
+| Active driver trip + legs | 30 s | `transport_trips`, `trip_legs` |
+| Day Centre attendance roll | 60 s | `client_attendance_log`, `site_issues_register` |
+| Site issues / escalations | 30 s | `site_issues_register` |
+| Governance unified issues | 30 s | `site_issues_register`, `operational_escalations`, `operational_incidents`, `hub_issue_notes` |
+| Site session (RYGE state) | realtime-only acceptable; `refetchOnWindowFocus: true` as fallback | `site_day_sessions` |
+| Event confirmed list (driver picker) | 60 s | `event_roster_bookings` |
+| Compliance assets | 5 min | none — polling only is acceptable for low-velocity compliance data |
+
+### 10.3 Canonical Subscription Primitive
+
+All realtime subscriptions must use:
+
+```typescript
+// src/hooks/use-realtime-invalidate.ts
+useRealtimeInvalidate({
+  table: "table_name",          // public schema table
+  filter: "col=eq.value",       // optional PostgREST filter
+  queryKeys: [["key", "parts"]], // TanStack Query keys to invalidate
+  enabled: boolean,              // optional — disable without unmounting
+});
+```
+
+Building ad-hoc `supabase.channel().on("postgres_changes", ...).subscribe()` calls inside components is prohibited unless the subscription result must write directly to `setQueryData` (as in `subscribeToSiteSession`). In all other cases use `useRealtimeInvalidate`.
+
+### 10.4 Centralised Invalidation Helpers
+
+Two helpers in `src/lib/query/invalidation.ts` are the mandatory entry points for batch invalidation:
+
+| Helper | Covers | When to call |
+| :-- | :-- | :-- |
+| `invalidateIssueCaches(qc, scope?)` | Day Centre / Governance Hub feeds — roll, session, unified issues, site-day prefix | Any mutation touching `site_issues_register`, `operational_incidents`, `site_day_sessions`, or attendance |
+| `invalidateTransportCaches(qc)` | Driver manifest bundle, dashboard manifest summary tile, start/end-day anomaly feed, confirmed-events picker | Any mutation touching `participants`, `event_roster_bookings`, `event_manifest`, `trip_legs`, or `transport_trips` |
+
+Never inline individual `invalidateQueries` calls for transport-adjacent keys without also calling `invalidateTransportCaches`. Doing so will leave the driver manifest stale.
+
+### 10.5 Query Key Registry
+
+The canonical TanStack Query key for each Supabase table is:
+
+| Table | Canonical query key | Polling interval |
+| :-- | :-- | :-- |
+| `transport_trips` (active bundle) | `["transport_trips", "active", driverId]` | 30 s |
+| `trip_legs` | included in active bundle above | — |
+| `participants` | `["participants"]` | stale 5 min, focus-refetch |
+| `event_manifest` | `["event_manifest"]` | stale 5 min |
+| `event_roster_bookings` (by event) | `["event_roster_bookings", eventId]` | stale 30 s |
+| `event_roster_bookings` (by participant) | `["event_roster_bookings", "by-participant", participantId]` | stale 30 s |
+| `events` (confirmed picker) | `["events", "confirmed"]` | stale 60 s |
+| `client_attendance_log` (roll) | `["client-attendance-roll", sessionId]` | 60 s |
+| `site_issues_register` (active session) | `["site-issues", sessionId]` | 30 s |
+| `site_day_sessions` (today) | `["site-day-session", "today"]` | realtime + focus |
+| `asset_daily_clearance` | `["asset-clearance", assetId, date]` | stale 30 s |
+| `compliance_assets` | `["compliance-assets", "active"]` | 5 min |
+
+When adding a new `useQuery` that targets one of these tables, use the key listed above. Do not create a new, parallel key for the same data. Duplicate keys for the same underlying table break cross-component invalidation.
+
+### 10.6 Mutation Compliance Rules
+
+Every `useMutation` that writes to a table in §10.5 must, in its `onSuccess` callback:
+
+1. Invalidate all **specific** keys for the row (e.g. `["event_roster_bookings", booking.eventId]`).
+2. Call the appropriate centralised helper — `invalidateIssueCaches` and/or `invalidateTransportCaches` — so broader surfaces refresh without needing individual key tracking.
+
+Omitting step 2 is a structural defect. Any new feature that adds a mutation without calling the helper will leave related modules stale and must be flagged in code review.
+
+### 10.7 Constraint — No Realtime on RED Verbal Workaround Paths
+
+Per §3 of this document, the verbal RED consultation flow must **not** use realtime broadcast for unblocking. The ledger write + register insert is the unblocking mechanism. `useRealtimeInvalidate` may still be mounted on `site_issues_register` (and is), but the local module unblocks synchronously on mutation success — it does not wait for the socket event to return. This is the only case where the realtime layer is present but not load-bearing for the primary UX path.
+
+---
+
+## 11. Driver Manifest & Transport Run Workflow (Locked UX — effective 2026-06-30)
+
+> Status: Permanent Build Requirement. Applies to **Day Centre bus runs**, **single-day event trips**, and **multi-day event trips** wherever the driver uses `/manifest`. Future transport UI must extend this pattern — not replace it with alternate pre-start lists or reorder panels.
+
+This section locks the end-to-end workflow for selecting a run, choosing a starting point, opening the manifest, and rearranging stops during the drive. The same `ActiveTripScreen`, `StartPointPicker`, and `reorderTripPickupLegs` pipeline is the canonical experience across run types.
+
+### 11.1 Initialize Wizard (Steps 1–3)
+
+Every new driver session follows the same three-step gate before the active manifest opens:
+
+| Step | Screen | Purpose |
+| :-- | :-- | :-- |
+| **1 — Vehicle** | Fleet asset picker | Select cleared vehicle for today's shift |
+| **2 — Clearance** | Daily operational clearance | Walkaround / checklist sign-off |
+| **3 — Run start** | `EventPickAndStart` (`src/routes/manifest.tsx`) | Choose run type + starting point only — **not** stop management |
+
+Step 3 must **not** display a passenger roster, pickup-order list, or scrollable stop preview. Stops are discovered and managed **inside** the active manifest after the run opens. Showing a pre-start stop list is a structural violation of this workflow.
+
+### 11.2 Step 3 — Run Selection (Consistent Across Run Types)
+
+#### Day Centre bus runs
+
+| Today's runs | UI treatment |
+| :-- | :-- |
+| **0 runs** | Empty state with Admin pointer — no start button |
+| **1 run** | Run name + direction shown as a single label; run auto-selected |
+| **2+ runs** | One compact **Select** dropdown ("Which run?") — not a card list with passenger counts |
+
+Passenger counts and stop sequences are **not** shown on Step 3.
+
+#### One-off / multi-day event trips
+
+| Control | UI treatment |
+| :-- | :-- |
+| **Event picker** | Single **Select** dropdown (today's events first) |
+| **Multi-day events** | Same Step 3 UX as single-day — one event selection + starting point per trip start. Cross-day exception carry-over uses §9 `ActiveIssuesRegister`; it does **not** change Step 3 layout. |
+
+Event roster order seeds the initial leg chain at trip creation (`startTrip` in `src/lib/data-store.ts`). The driver does **not** reorder stops before opening the manifest.
+
+### 11.3 Step 3 — Starting Point (Shared Component)
+
+All run types use the same touch-friendly `StartPointPicker` (`src/routes/manifest.tsx`):
+
+| Option | Default when |
+| :-- | :-- |
+| **Depot** | Morning Day Centre pickup; default for event trips |
+| **Day Centre** | Afternoon home run |
+| **Other address (this trip only)** | Driver-entered alternate via dialog — e.g. bus parked off-site |
+
+Rules:
+
+- Addresses default from Admin → Lookups → Day Centre Bus Runs → **Transport site addresses** (`depot_address`, `day_centre_address` in `system_parameters`).
+- The resolved street address is stored on `transport_trips.origin_address` at trip start.
+- **Leg 1 display rule:** When the active pickup leg is the first segment from the trip anchor (`leg_kind = depot_to_client` with a passenger destination), the active leg card must show that stored starting address under the origin label.
+
+Direction-aware defaults (morning → Depot, afternoon return → Day Centre) must not be bypassed without explicit driver selection.
+
+### 11.4 Active Manifest — Single Unified Leg List
+
+Once the run is open, **one scrollable leg sequence** replaces any separate "reorder pickups" panel. Implementation: `ActiveTripScreen` in `src/routes/manifest.tsx` + `PointerSortableList` in `src/components/manifest/manage-pickups-panel.tsx`.
+
+Layout order (top → bottom):
+
+1. **Completed legs** — green, locked, no drag handle
+2. **Active leg card** — blue pinned card with Depart Stop / Arrive at Stop / arrival checklist
+3. **Upcoming passenger pickups** — compact rows with **⋮⋮ drag handles** (touch-friendly, no external DnD library required)
+4. **Terminal legs** — Day Centre, Depot, or event venue return legs; fixed at bottom, not reorderable
+
+Anti-patterns (prohibited):
+
+- A separate "Reorder pickups" panel above the active leg card
+- Arrow-only ↑/↓ reorder controls on mobile operational screens
+- Pre-start drag lists that duplicate in-manifest reorder
+
+### 11.5 Stop Reorder Rules (Drivable Chain — Mandatory)
+
+Reordering changes **stop sequence only**. It must **never** teleport the bus. Every leg's `from_label` / `to_label` pair must remain a physically drivable chain.
+
+Canonical chain logic lives in `computePickupChainEndpoints` and `reorderTripPickupLegs` (`src/lib/data-store.ts`):
+
+| Leg position | From (where the bus is) | To |
+| :-- | :-- | :-- |
+| First pending pickup (no completed pickups yet) | Trip origin label (Depot / Day Centre / alternate) | First client |
+| Next pending pickup | Previous client's name/location | Next client |
+| After last pickup | Last client | Terminal destination (Day Centre, Depot, or venue) |
+
+**Lock rules during the run:**
+
+| Leg state | Reorderable? |
+| :-- | :-- |
+| **Completed** pickup | No — locked forever; shown in completed section |
+| **Active, pending** (before Depart Stop) | Yes — included in the unified sortable list; whoever is first becomes the active card |
+| **Active, en_route / arrived** | No — current stop is in progress; other **pending** pickups may still reorder among themselves |
+| **Terminal** (centre / depot / venue return) | No |
+
+**UI requirement:** While dragging, from/to labels must update **live** using `computePickupChainEndpoints` against the current drag order — not stale DB labels from the leg's previous position. Example: at Depot, moving David ahead of Fred must immediately show **Depot → David**, then **David → Fred** — never Fred → David on stop 1.
+
+**Persistence:** On drop, `reorderTripPickupLegs` rewrites pending pickup `leg_index`, chain labels, and terminal leg `from_label` anchors. Call `invalidateTransportCaches` on success (§10.4).
+
+### 11.6 Pickup Cancellation (Shared Across Run Types)
+
+Cancel is available on any non-completed **passenger pickup** leg (`canCancelPickupLeg` in `manage-pickups-panel.tsx`):
+
+- **Active leg card** — cancel control top-right
+- **Upcoming pickup rows** — cancel button on the row
+
+Cancel flow (`cancelTripPickupLeg` in `src/lib/api/transport-pickup.ts`):
+
+1. Complete the leg as skipped (`passengerPresent = false`)
+2. Write a **YELLOW** ledger entry + open Hub issue when a site session exists
+3. Dispatch manager SMS via internal route
+
+The manifest advances to the next leg without breaking the chain rebuild for remaining pending pickups.
+
+### 11.7 Cross-Run-Type Consistency Matrix
+
+| Capability | Day Centre run | Event trip (single or multi-day) |
+| :-- | :-- | :-- |
+| Step 3 starting point picker | ✓ Same component | ✓ Same component |
+| Pre-start stop / roster list | ✗ Prohibited | ✗ Prohibited |
+| Active manifest leg list | ✓ Unified list | ✓ Same `ActiveTripScreen` |
+| Drag reorder pending pickups | ✓ | ✓ (passenger pickup legs only) |
+| Chain-aware label recompute | ✓ | ✓ |
+| Pickup cancel → YELLOW + SMS | ✓ | ✓ |
+| Realtime leg refresh | ✓ §10 | ✓ §10 |
+| Terminal leg after pickups | Day Centre or Depot (direction-dependent) | Event venue → return origin |
+
+Differences that are **allowed** (not UX drift):
+
+- Day Centre Step 3 uses bus-run code + direction; Event Step 3 uses event picker.
+- Leg chain terminal labels differ (Day Centre / Depot vs event venue name).
+- Morning Day Centre runs may end with `trip_return = none` (bus stays at centre); event trips include a return leg.
+
+Differences that are **violations**:
+
+- Building a second reorder UI for events only
+- Showing passenger lists on Step 3 for one run type but not another
+- Reordering legs without recomputing the drivable from/to chain
+
+### 11.8 Code Anchors (Implementation Reference)
+
+| Concern | Canonical path |
+| :-- | :-- |
+| Initialize + Step 3 | `src/routes/manifest.tsx` — `EventPickAndStart`, `StartPointPicker` |
+| Active trip UI | `src/routes/manifest.tsx` — `ActiveTripScreen`, `ActiveLegCard`, `LegRow` |
+| Drag reorder + cancel dialog | `src/components/manifest/manage-pickups-panel.tsx` |
+| Trip start (events) | `startTrip()` — `src/lib/data-store.ts` |
+| Trip start (Day Centre) | `startDayCentreRun()` — `src/lib/data-store.ts` |
+| Chain recompute + persist | `computePickupChainEndpoints`, `reorderTripPickupLegs` — `src/lib/data-store.ts` |
+| Site address defaults | `src/components/admin/transport-site-addresses-panel.tsx` |
+
+### Amendment Process (§11)
+
+> **2026-06-30 — Project owner directive:** Step 3 run/start workflow and in-manifest drag reorder locked as specified in §11. Pre-start pickup lists removed. Drivable-chain label recompute mandatory on reorder. Consistent across Day Centre runs and event trips (including multi-day event contexts per §9 exception carry-over).

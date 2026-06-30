@@ -1,5 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMemo } from "react";
 import { toast } from "sonner";
+import { invalidateTransportCaches } from "@/lib/query/invalidation";
 
 import {
   listParticipants,
@@ -29,12 +31,15 @@ import {
   insertAttendanceSchedule,
   updateAttendanceSchedule,
   archiveAttendanceSchedule,
+  removeAttendanceSchedule,
+  type RemoveScheduleInput,
   updateAttendanceLog,
   insertAttendanceLog,
   insertAttendanceLogsBulk,
   cancelChargesForDate,
   NON_CHARGEABLE_STATUSES,
   listLookupParameters,
+  LOOKUP_CATEGORIES,
   listLedgerForParticipant,
   insertLedgerEntry,
   insertSchedule,
@@ -134,6 +139,42 @@ export function useLookupParameters(category: string | null | undefined) {
   });
 }
 
+/** Palette applied to bus runs without a configured badge_color — same order as the admin workspace. */
+const BUS_RUN_PALETTE = [
+  "#7c3aed", // violet  — run 1
+  "#d97706", // amber   — run 2
+  "#0891b2", // cyan    — run 3
+  "#e11d48", // rose    — run 4
+  "#059669", // emerald — run 5
+  "#7c2d12", // deep-orange — run 6
+];
+
+export interface BusRunBadge {
+  label: string;
+  color: string;
+}
+
+/**
+ * Returns a stable Map<code, {label, color}> for all configured Day Centre
+ * bus runs. Runs without a badge_color get a palette color based on
+ * alphabetical position (same logic as the indicator hook and admin workspace).
+ * Use this wherever run badges need to match the Participants Directory colours.
+ */
+export function useBusRunMap(): Map<string, BusRunBadge> {
+  const { data: runs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  return useMemo(() => {
+    const sorted = [...runs].sort((a, b) => a.code.localeCompare(b.code));
+    const map = new Map<string, BusRunBadge>();
+    sorted.forEach((r, idx) => {
+      map.set(r.code, {
+        label: r.displayName,
+        color: r.badgeColor ?? BUS_RUN_PALETTE[idx % BUS_RUN_PALETTE.length],
+      });
+    });
+    return map;
+  }, [runs]);
+}
+
 
 export function useInsertAttendanceLog() {
   const qc = useQueryClient();
@@ -205,6 +246,8 @@ export function useAttendanceLogs(participantId: string | null | undefined) {
   });
 }
 
+const DIRECTORY_INDICATORS_KEY = ["participant-directory-indicators", "v3-split-transport"] as const;
+
 export function useInsertAttendanceSchedule() {
   const qc = useQueryClient();
   return useMutation({
@@ -213,6 +256,7 @@ export function useInsertAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules", vars.participantId] });
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
     },
     onError: (err: Error) => {
       console.error("[useInsertAttendanceSchedule] insert failed", err);
@@ -234,6 +278,7 @@ export function useUpdateAttendanceSchedule() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not update schedule", { description: err.message });
@@ -247,9 +292,24 @@ export function useArchiveAttendanceSchedule() {
     mutationFn: (id: string) => archiveAttendanceSchedule(id),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+      qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not archive schedule", { description: err.message });
+    },
+  });
+}
+
+export function useRemoveAttendanceSchedule() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: RemoveScheduleInput) => removeAttendanceSchedule(input),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+      qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not remove schedule", { description: err.message });
     },
   });
 }
@@ -555,6 +615,7 @@ export function useUpdateParticipant() {
       updateParticipant(id, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
     },
   });
 }
@@ -565,6 +626,7 @@ export function useInsertParticipant() {
     mutationFn: (input: NewParticipant) => insertParticipant(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
     },
   });
 }
@@ -803,6 +865,7 @@ export function useInsertEventBooking() {
       qc.invalidateQueries({ queryKey: ["event_manifest"] });
       qc.invalidateQueries({ queryKey: ["events"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
     },
     onError: (err: Error) => {
       toast.error("Could not add participant to roster", { description: err.message });
@@ -900,6 +963,7 @@ export function useUpdateEventBooking() {
       qc.invalidateQueries({ queryKey: ["event_manifest"] });
       qc.invalidateQueries({ queryKey: ["events"] });
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
       void vars;
     },
     onError: (err: Error) => {
@@ -916,14 +980,23 @@ export function useUpdateEventBooking() {
 import {
   getActiveTripForDriver,
   startTrip as startTripFn,
+  startDayCentreRun as startDayCentreRunFn,
+  listTodaysBusRunSummaries,
   patchTripLeg as patchTripLegFn,
   completeTrip as completeTripFn,
   cancelTrip as cancelTripFn,
   getStaffId,
   getLastEndOdometer,
+  listBusRunRosterForDay,
+  reorderTripPickupLegs,
   type StartTripInput,
+  type StartDayCentreRunInput,
+  type BusRunSummary,
+  type BusRunRosterEntry,
   type LegPatch,
 } from "@/lib/data-store";
+import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
+import { invalidateIssueCaches, invalidateTransportCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;
 
@@ -967,6 +1040,27 @@ export function useStartTrip() {
   });
 }
 
+export function useStartDayCentreRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: Omit<StartDayCentreRunInput, "driverStaffId">) =>
+      startDayCentreRunFn({ ...input, driverStaffId: getStaffId() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not start Day Centre run", err),
+  });
+}
+
+export function useTodaysBusRunSummaries(dayCode: string, runLabels: Record<string, string>) {
+  return useQuery<BusRunSummary[]>({
+    queryKey: ["today-bus-run-summaries", dayCode],
+    queryFn: () => listTodaysBusRunSummaries(dayCode, runLabels),
+    staleTime: 60_000,
+    enabled: dayCode.length > 0,
+  });
+}
+
 export function usePatchTripLeg() {
   const qc = useQueryClient();
   return useMutation({
@@ -1001,5 +1095,47 @@ export function useCancelTrip() {
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
     },
     onError: (err: Error) => showRedToast("Could not cancel trip", err),
+  });
+}
+
+export function useBusRunRoster(
+  busRunCode: string,
+  dayCode: string,
+  direction: "morning" | "afternoon",
+) {
+  return useQuery<BusRunRosterEntry[]>({
+    queryKey: ["bus-run-roster", busRunCode, dayCode, direction],
+    queryFn: () => listBusRunRosterForDay(busRunCode, dayCode, direction),
+    staleTime: 30_000,
+    enabled: busRunCode.length > 0 && dayCode.length > 0,
+  });
+}
+
+export function useReorderTripPickupLegs() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      tripId,
+      orderedLegIds,
+    }: {
+      tripId: string;
+      orderedLegIds: string[];
+    }) => reorderTripPickupLegs(tripId, orderedLegIds),
+    onSuccess: () => {
+      invalidateTransportCaches(qc);
+    },
+    onError: (err: Error) => showRedToast("Could not reorder pickups", err),
+  });
+}
+
+export function useCancelTripPickup() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: cancelTripPickupLeg,
+    onSuccess: () => {
+      invalidateTransportCaches(qc);
+      invalidateIssueCaches(qc);
+    },
+    onError: (err: Error) => showRedToast("Could not cancel pickup", err),
   });
 }

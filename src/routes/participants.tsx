@@ -14,8 +14,12 @@ import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
-import { useParticipants } from "@/hooks/use-supabase-data";
+import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import type { Participant } from "@/lib/data-store";
+
+const DIRECTORY_INDICATORS_KEY = ["participant-directory-indicators", "v3-split-transport"] as const;
 
 export const Route = createFileRoute("/participants")({
   ssr: false,
@@ -39,12 +43,23 @@ const DAY_OPTIONS: { value: string; label: string }[] = [
 
 function ParticipantsPage() {
   const { data: participants = [], isLoading, error } = useParticipants();
+
+  // BMS-style silent refresh: any schedule change (this device or coordinator on
+  // another screen) immediately re-fetches the Bus/Self indicator grid.
+  useRealtimeInvalidate({
+    table: "participant_attendance_schedules",
+    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"]],
+  });
+
   const [selected, setSelected] = useState<Participant | null>(null);
   const [open, setOpen] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [medOpen, setMedOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [dayFilter, setDayFilter] = useState("all");
+  const [transportFilter, setTransportFilter] = useState("all");
+
+  const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -90,6 +105,29 @@ function ParticipantsPage() {
             ))}
           </SelectContent>
         </Select>
+
+        <Select value={transportFilter} onValueChange={setTransportFilter}>
+          <SelectTrigger className="h-11 w-48" aria-label="Filter by transport">
+            <SelectValue placeholder="All transport" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">All transport</SelectItem>
+            {/* Named bus runs — shown first, purple to match badge colour */}
+            {busRuns.length > 0 && (
+              <>
+                {busRuns.map((r) => (
+                  <SelectItem key={r.code} value={r.code}>
+                    🟣 {r.displayName}
+                  </SelectItem>
+                ))}
+                <SelectItem value="run">Any named run</SelectItem>
+              </>
+            )}
+            <SelectItem value="bus">🔵 Bus (generic)</SelectItem>
+            <SelectItem value="private">⚫ Self / Private</SelectItem>
+            <SelectItem value="walk_in">🟢 Walk-in</SelectItem>
+          </SelectContent>
+        </Select>
       </div>
 
       {error && (
@@ -102,6 +140,7 @@ function ParticipantsPage() {
         participants={participants}
         search={search}
         dayFilter={dayFilter}
+        transportFilter={transportFilter}
         onSelect={(p) => {
           setSelected(p);
           setOpen(true);

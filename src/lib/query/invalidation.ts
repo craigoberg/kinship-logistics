@@ -1,10 +1,16 @@
 /**
  * Centralised silent cache invalidation for the operational surfaces.
  *
- * Mutations across the Day Centre / Governance Hub should call
- * `invalidateIssueCaches(qc)` (optionally narrowed via a source/row hint) so
- * every list, badge and timeline refetches once in the background. No hard
- * reload, no remount — TanStack Query handles the diff.
+ * Two helpers are exported:
+ *
+ * - `invalidateIssueCaches(qc)` — Day Centre / Governance Hub surfaces.
+ * - `invalidateTransportCaches(qc)` — Driver manifest, dashboard manifest
+ *   tile, and the confirmed-events picker. Any mutation that writes to
+ *   `participants`, `event_roster_bookings`, `event_manifest`, `trip_legs`,
+ *   or `transport_trips` must call this helper so the driver manifest and
+ *   coordinator views update without a manual page refresh.
+ *
+ * No hard reload, no remount — TanStack Query handles the diff.
  */
 import type { QueryClient } from "@tanstack/react-query";
 
@@ -66,4 +72,31 @@ export function invalidateIssueCaches(
       );
     },
   });
+}
+
+/**
+ * Invalidate every cache that could be affected by a transport mutation
+ * (participant profile save, booking edit, event roster change, or leg patch).
+ *
+ * Call from any mutation `onSuccess` that writes to `participants`,
+ * `event_roster_bookings`, `event_manifest`, `trip_legs`, or
+ * `transport_trips`. This keeps the driver manifest, dashboard manifest
+ * summary tile, and start/end-day anomaly feed in sync with the coordinator
+ * in real time without a page reload.
+ */
+export function invalidateTransportCaches(qc: QueryClient): void {
+  // Active driver manifest bundle (trip + legs).
+  qc.invalidateQueries({ queryKey: ["transport_trips", "active"] });
+
+  // Dashboard manifest summary tile (hoist dependents, headcount, etc.).
+  qc.invalidateQueries({ queryKey: ["today-manifest-summary"] });
+
+  // Dashboard start/end-day anomaly feed (clearance failures, split legs).
+  qc.invalidateQueries({ queryKey: ["start-end-day-anomalies"] });
+
+  // Confirmed-events picker shown to the driver before trip start.
+  qc.invalidateQueries({ queryKey: ["events", "confirmed"] });
+
+  // Participants directory Bus/Self indicator grid (reads participant_attendance_schedules).
+  qc.invalidateQueries({ queryKey: ["participant-directory-indicators", "v3-split-transport"] });
 }

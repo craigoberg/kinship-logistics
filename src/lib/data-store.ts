@@ -1334,6 +1334,8 @@ export interface LookupParameter {
   displayName: string;
   /** Optional explicit chronological/priority ordering from `sort_order`. */
   sortOrder: number | null;
+  /** Optional hex badge color (e.g. "#7c3aed") — null means use the category default. */
+  badgeColor: string | null;
 }
 
 interface LookupRow {
@@ -1342,6 +1344,7 @@ interface LookupRow {
   code: string;
   display_name: string | null;
   sort_order: number | null;
+  badge_color: string | null;
 }
 
 const DAY_ORDER: Record<string, number> = {
@@ -1357,25 +1360,56 @@ export function dayChronoIndex(value: string | null | undefined): number {
 export async function listLookupParameters(
   category: string,
 ): Promise<LookupParameter[]> {
-  const base = supabase
-    .from("system_lookup_parameters")
-    .select("id, category, code, display_name, sort_order")
-    .eq("category", category);
+  // Try fetching with badge_color first (available after the
+  // 2026-06-30_lookup_badge_color.sql migration). If Supabase returns a
+  // column-not-found error, fall back to the base columns so the app
+  // continues working before the migration is applied.
+  const fetchWithColor = async () => {
+    const base = supabase
+      .from("system_lookup_parameters")
+      .select("id, category, code, display_name, sort_order, badge_color")
+      .eq("category", category);
+    return category === "operating_days"
+      ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
+      : base.order("display_name", { ascending: true });
+  };
 
-  const { data, error } =
-    category === "operating_days"
-      ? await base
-          .order("sort_order", { ascending: true, nullsFirst: false })
-          .order("display_name", { ascending: true })
-      : await base.order("display_name", { ascending: true });
-  if (error) throw error;
-  const rows = (data ?? []).map((r: LookupRow) => ({
+  const fetchWithoutColor = async () => {
+    const base = supabase
+      .from("system_lookup_parameters")
+      .select("id, category, code, display_name, sort_order")
+      .eq("category", category);
+    return category === "operating_days"
+      ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
+      : base.order("display_name", { ascending: true });
+  };
+
+  let result = await fetchWithColor();
+
+  // Supabase returns code "PGRST204" or a message containing the column name
+  // when a selected column doesn't exist. Fall back gracefully.
+  if (result.error) {
+    const msg = result.error.message ?? "";
+    const isColumnMissing =
+      msg.includes("badge_color") ||
+      msg.includes("column") ||
+      (result.error as unknown as { code?: string }).code === "PGRST204";
+    if (isColumnMissing) {
+      result = await fetchWithoutColor();
+    }
+  }
+
+  if (result.error) throw result.error;
+
+  const rows = (result.data ?? []).map((r: LookupRow) => ({
     id: r.id,
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
+    badgeColor: (r as LookupRow).badge_color ?? null,
   }));
+
   if (category === "operating_days") {
     rows.sort((a, b) => {
       const ai = a.sortOrder ?? dayChronoIndex(a.code || a.displayName);
@@ -1384,6 +1418,23 @@ export async function listLookupParameters(
     });
   }
   return rows;
+}
+
+export async function updateLookupParameterColor(
+  id: string,
+  badgeColor: string | null,
+): Promise<void> {
+  const { error } = await supabase
+    .from("system_lookup_parameters")
+    .update({ badge_color: badgeColor })
+    .eq("id", id);
+  // If migration not yet applied, surface a helpful message.
+  if (error) {
+    if (error.message?.includes("badge_color") || error.message?.includes("column")) {
+      throw new Error("Run docs/sql/2026-06-30_lookup_badge_color.sql in Supabase first to enable badge colours.");
+    }
+    throw error;
+  }
 }
 
 export async function insertLookupParameter(input: {
@@ -1398,7 +1449,7 @@ export async function insertLookupParameter(input: {
       code: input.code,
       display_name: input.displayName,
     })
-    .select("id, category, code, display_name, sort_order")
+    .select("id, category, code, display_name, sort_order, badge_color")
     .single();
   if (error) throw error;
   const r = data as LookupRow;
@@ -1408,6 +1459,7 @@ export async function insertLookupParameter(input: {
     code: r.code,
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
+    badgeColor: r.badge_color ?? null,
   };
 }
 
@@ -1431,6 +1483,7 @@ export const LOOKUP_CATEGORIES = {
   financialCode: "financial_codes",
   operatingDay: "operating_days",
   eventType: "event_types",
+  busRun: "bus_runs",
 } as const;
 
 
@@ -1468,6 +1521,12 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     category: LOOKUP_CATEGORIES.eventType,
     label: "Event types",
     description: "Categories powering the Event Management dashboard (Fundraiser, Workshop, …).",
+  },
+  {
+    category: LOOKUP_CATEGORIES.busRun,
+    label: "Day Centre Bus Runs",
+    description:
+      "Named recurring bus runs (e.g. Run 1, Run 2). Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
   },
 ];
 
@@ -1702,6 +1761,73 @@ export async function updateAttendanceSchedule(
   return rowToAttendanceSchedule(data as AttendanceScheduleRow);
 }
 
+export interface RemoveScheduleInput {
+  id: string;
+  /** Plain-English reason for removing the schedule (required for audit trail). */
+  reason: string;
+  /** Staff id making the change — defaults to resolveStaffIdWithFallback(). */
+  staffId?: string | null;
+}
+
+/**
+ * Permanently deactivate a recurring attendance schedule and record the
+ * change in `operational_ledger`. Use this for genuine schedule changes
+ * (as opposed to temporary exceptions). The row is NOT hard-deleted so
+ * historical attendance logs retain their schedule reference.
+ */
+export async function removeAttendanceSchedule(
+  input: RemoveScheduleInput,
+): Promise<void> {
+  const nowIso = new Date().toISOString();
+  const staffId = input.staffId ?? (await resolveStaffIdWithFallback());
+
+  const { data: row, error: fetchErr } = await supabase
+    .from("participant_attendance_schedules")
+    .select("day_of_week, service_type, participant_id, inbound_transport, outbound_transport")
+    .eq("id", input.id)
+    .single();
+  if (fetchErr) throw new Error(fetchErr.message);
+
+  const { error: updateErr } = await supabase
+    .from("participant_attendance_schedules")
+    .update({
+      active: false,
+      archived_at: nowIso,
+      archived_by_id: staffId,
+      archive_reason: input.reason.trim(),
+      archive_reference_type: "Management Operational Directive",
+    })
+    .eq("id", input.id);
+  if (updateErr) throw new Error(updateErr.message);
+
+  const r = row as {
+    day_of_week: string;
+    service_type: string;
+    participant_id: string;
+    inbound_transport: string | null;
+    outbound_transport: string | null;
+  };
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "ATTENDANCE_SCHEDULE_REMOVED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      schedule_id: input.id,
+      participant_id: r.participant_id,
+      day_of_week: r.day_of_week,
+      service_type: r.service_type,
+      inbound_transport: r.inbound_transport,
+      outbound_transport: r.outbound_transport,
+      reason: input.reason.trim(),
+    },
+  });
+}
+
+/** @deprecated Use removeAttendanceSchedule() for permanent changes. */
 export async function archiveAttendanceSchedule(id: string): Promise<void> {
   await updateAttendanceSchedule(id, { active: false });
 }
@@ -2837,41 +2963,75 @@ export type LegKind =
   | "client_to_venue"
   | "venue_to_depot";
 
+/** Where the bus departs from for a given trip. */
+export type TripOrigin = "depot" | "day_centre";
+
+/**
+ * Where the bus returns after completing its passenger mission.
+ * "none" means it stays wherever it ends (e.g. morning Day Centre run — bus
+ * remains at Day Centre during the day).
+ */
+export type TripReturn = "depot" | "day_centre" | "none";
+
 export interface TransportTrip {
   id: string;
   driverStaffId: string | null;
   eventId: string | null;
+  /** Set for Day Centre recurring runs; null for event-driven trips. */
+  busRunCode: string | null;
   tripDate: string;
   startOdometerKm: number;
   endOdometerKm: number | null;
   status: TripStatus;
   startedAt: string;
   completedAt: string | null;
+  /** Where the bus departs from. Defaults to 'depot' for historical rows. */
+  tripOrigin: TripOrigin;
+  /**
+   * Where the bus returns after its mission.
+   * 'none' = bus stays at its destination (e.g. morning Day Centre run).
+   */
+  tripReturn: TripReturn;
+  /**
+   * Resolved depot street address at trip-start time. Null when origin is
+   * 'day_centre' (fixed location needs no stored address).
+   */
+  originAddress: string | null;
 }
 
 interface TripRow {
   id: string;
   driver_staff_id: string | null;
   event_id: string | null;
+  bus_run_code: string | null;
   trip_date: string;
   start_odometer: number | string;
   end_odometer_km: number | string | null;
   status: TripStatus;
   started_at: string;
   completed_at: string | null;
+  trip_origin?: string | null;
+  trip_return?: string | null;
+  origin_address?: string | null;
 }
 
 function rowToTrip(r: TripRow): TransportTrip {
+  const origin = (r.trip_origin ?? "depot") as TripOrigin;
+  const ret = (r.trip_return ?? "depot") as TripReturn;
   return {
     id: r.id,
     driverStaffId: r.driver_staff_id,
     eventId: r.event_id,
+    busRunCode: r.bus_run_code ?? null,
     tripDate: r.trip_date,
     startOdometerKm: Number(r.start_odometer),
     endOdometerKm: r.end_odometer_km == null ? null : Number(r.end_odometer_km),
     status: r.status,
     startedAt: r.started_at,
     completedAt: r.completed_at,
+    tripOrigin: origin,
+    tripReturn: ret,
+    originAddress: r.origin_address ?? null,
   };
 }
 
@@ -3126,11 +3286,66 @@ export async function listActiveMedicationExceptions(): Promise<MedicationExcept
   });
 }
 
+export type StartPointChoice = "depot" | "day_centre" | "alternate";
+
+/** Resolves leg-1 label and trip_origin from the driver's start-point pick. */
+function resolveTripStartAnchor(
+  startPoint: StartPointChoice | undefined,
+  direction: "morning" | "afternoon" | undefined,
+  centreLabel: string,
+): { startLabel: string; tripOrigin: TripOrigin } {
+  const DEPOT = "Depot";
+  const defaultPoint: StartPointChoice =
+    direction === "afternoon" ? "day_centre" : "depot";
+  const point = startPoint ?? defaultPoint;
+  if (point === "depot") return { startLabel: DEPOT, tripOrigin: "depot" };
+  if (point === "day_centre") return { startLabel: centreLabel, tripOrigin: "day_centre" };
+  return {
+    startLabel: "Starting point",
+    tripOrigin: direction === "afternoon" ? "day_centre" : "depot",
+  };
+}
+
+function resolveStartPointAddress(
+  startPoint: StartPointChoice | undefined,
+  direction: "morning" | "afternoon" | undefined,
+  depotAddr: string | null,
+  centreAddr: string | null,
+  alternateAddr: string | null,
+): string | null {
+  const defaultPoint: StartPointChoice =
+    direction === "afternoon" ? "day_centre" : "depot";
+  const point = startPoint ?? defaultPoint;
+  if (point === "depot") return depotAddr;
+  if (point === "day_centre") return centreAddr;
+  return alternateAddr;
+}
+
 export interface StartTripInput {
   driverStaffId: string;
   eventId: string;
   startOdometerKm: number;
   varianceReason?: string | null;
+  /**
+   * Where the bus departs from for this trip. Defaults to 'depot'.
+   * Set to 'day_centre' when the bus is already parked at the Day Centre
+   * (e.g. mid-day event, day trip starting from the centre).
+   */
+  origin?: TripOrigin;
+  /**
+   * Street address of the depot for this trip when origin = 'depot'.
+   * Pre-filled from system_parameters 'depot_address'; driver may override.
+   */
+  depotAddress?: string | null;
+  /**
+   * Street address of the Day Centre when origin = 'day_centre'.
+   * Pre-filled from system_parameters 'day_centre_address'; driver may override.
+   */
+  centreAddress?: string | null;
+  /** Driver's chosen starting anchor (depot, day centre, or trip-only alternate). */
+  startPoint?: StartPointChoice;
+  /** Custom address when startPoint = 'alternate'. */
+  alternateStartAddress?: string | null;
 }
 
 /** Returns the most recent closing odometer (end_odometer_km) recorded across
@@ -3266,7 +3481,24 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     for (const m of medRows ?? []) medSet.add((m as { participant_id: string }).participant_id);
   }
 
-  // 4. Insert trip row.
+  // 4. Resolve origin / return anchors from driver's start-point selection.
+  const centreLabel = "Day Centre";
+  const depotAddr = input.depotAddress?.trim() || null;
+  const centreAddr = input.centreAddress?.trim() || null;
+  const alternateAddr = input.alternateStartAddress?.trim() || null;
+  const { startLabel, tripOrigin } = resolveTripStartAnchor(
+    input.startPoint ?? (input.origin === "day_centre" ? "day_centre" : input.origin === "depot" ? "depot" : undefined),
+    undefined,
+    centreLabel,
+  );
+  const tripReturn: TripReturn = tripOrigin;
+  const originLabel = startLabel;
+  const originAddress =
+    resolveStartPointAddress(input.startPoint, undefined, depotAddr, centreAddr, alternateAddr) ??
+    (tripOrigin === "depot" ? depotAddr : centreAddr);
+  const returnAddress = originAddress;
+
+  // 5. Insert trip row.
   const { data: tripRow, error: tripErr } = await supabase
     .from("transport_trips")
     .insert({
@@ -3279,14 +3511,17 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         input.varianceReason && input.varianceReason.trim().length > 0
           ? input.varianceReason.trim()
           : null,
+      trip_origin: tripOrigin,
+      trip_return: tripReturn,
+      origin_address: originAddress,
     })
     .select("*")
     .single();
   if (tripErr) throwPg("[startTrip:insert]", tripErr);
   const trip = rowToTrip(tripRow as TripRow);
 
-  // 5. Build leg chain: depot → client1 → ... → clientN → venue → depot.
-  const DEPOT = "Depot";
+  // 6. Build leg chain: [origin] → client1 → ... → clientN → venue → [origin].
+  //    Origin label is 'Depot' or 'Day Centre' depending on trip_origin.
   type LegSeed = {
     leg_kind: LegKind;
     from_label: string;
@@ -3298,9 +3533,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   };
   const seeds: LegSeed[] = [];
   if (roster.length === 0) {
+    // No passengers: single positioning leg (origin → venue).
     seeds.push({
-      leg_kind: "venue_to_depot",
-      from_label: DEPOT,
+      leg_kind: "depot_to_client",
+      from_label: startLabel,
       to_label: venueLabel,
       from_participant_id: null,
       to_participant_id: null,
@@ -3313,7 +3549,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       const from = i === 0 ? null : roster[i - 1];
       seeds.push({
         leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
-        from_label: from ? from.name : DEPOT,
+        from_label: from ? from.name : startLabel,
         to_label: to.name,
         from_participant_id: from ? from.id : null,
         to_participant_id: to.id,
@@ -3332,14 +3568,15 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       target_address: null,
     });
   }
+  // Return leg: venue → origin.
   seeds.push({
     leg_kind: "venue_to_depot",
     from_label: venueLabel,
-    to_label: DEPOT,
+    to_label: originLabel,
     from_participant_id: null,
     to_participant_id: null,
     medication_expected: false,
-    target_address: null,
+    target_address: returnAddress,
   });
 
   const legPayload = seeds.map((s, i) => ({
@@ -3359,6 +3596,582 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
 
   const eventTitle = await fetchEventTitle(trip.eventId);
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
+}
+
+// ============================================================================
+// DAY CENTRE BUS RUNS — schedule-driven manifest (no event_manifest row needed)
+// ============================================================================
+
+export interface BusRunSummary {
+  /** Code from system_lookup_parameters (e.g. "BUSRUN-1"). */
+  runCode: string;
+  /** Human-readable label from system_lookup_parameters (e.g. "Run 1"). */
+  runLabel: string;
+  /** "morning" = inbound pickup run; "afternoon" = outbound return run. */
+  direction: "morning" | "afternoon";
+  /** Number of active participants assigned to this run today. */
+  passengerCount: number;
+}
+
+/**
+ * Return all Day Centre bus runs (morning AND afternoon) that have at least
+ * one active participant scheduled for the given day-of-week code.
+ *
+ * Fetches the authoritative set of bus run codes from system_lookup_parameters
+ * so any code naming convention works (BUSRUN-1, R1, RUN-A, etc.).
+ */
+export async function listTodaysBusRunSummaries(
+  dayCode: string,
+  runLabels: Record<string, string>,
+): Promise<BusRunSummary[]> {
+  // Fetch the canonical set of bus run codes from the lookup table so the
+  // check is not tied to any particular code prefix.
+  const { data: runRows, error: runErr } = await supabase
+    .from("system_lookup_parameters")
+    .select("code, display_name")
+    .eq("category", "bus_runs");
+  if (runErr) throw runErr;
+
+  const knownRunCodes = new Set((runRows ?? []).map((r) => (r as { code: string }).code));
+  // Build a label map from the DB rows; caller-supplied labels take priority.
+  const dbLabels: Record<string, string> = {};
+  for (const r of runRows ?? []) {
+    const row = r as { code: string; display_name: string };
+    dbLabels[row.code] = row.display_name;
+  }
+  const mergedLabels = { ...dbLabels, ...runLabels };
+
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .select("inbound_transport, outbound_transport")
+    .eq("day_of_week", dayCode)
+    .eq("active", true);
+  if (error) throw error;
+
+  const morningCounts: Record<string, number> = {};
+  const afternoonCounts: Record<string, number> = {};
+  for (const row of data ?? []) {
+    const r = row as { inbound_transport: string | null; outbound_transport: string | null };
+    const inb = r.inbound_transport ?? "";
+    const outb = r.outbound_transport ?? "";
+    if (inb && knownRunCodes.has(inb)) morningCounts[inb] = (morningCounts[inb] ?? 0) + 1;
+    if (outb && knownRunCodes.has(outb)) afternoonCounts[outb] = (afternoonCounts[outb] ?? 0) + 1;
+  }
+
+  const summaries: BusRunSummary[] = [];
+  for (const [runCode, passengerCount] of Object.entries(morningCounts)) {
+    summaries.push({ runCode, runLabel: mergedLabels[runCode] ?? runCode, direction: "morning", passengerCount });
+  }
+  for (const [runCode, passengerCount] of Object.entries(afternoonCounts)) {
+    summaries.push({ runCode, runLabel: mergedLabels[runCode] ?? runCode, direction: "afternoon", passengerCount });
+  }
+  return summaries.sort((a, b) =>
+    a.direction === b.direction
+      ? a.runCode.localeCompare(b.runCode)
+      : a.direction === "morning" ? -1 : 1,
+  );
+}
+
+export interface StartDayCentreRunInput {
+  busRunCode: string;
+  busRunLabel: string;
+  driverStaffId: string;
+  startOdometerKm: number;
+  dayCode: string; // e.g. "DAY-TUE"
+  /** "morning" = depot → clients → centre (default). "afternoon" = centre → clients → depot. */
+  direction?: "morning" | "afternoon";
+  centreLabel?: string; // defaults to "Day Centre"
+  /** Day Centre address — used on the final morning leg. From Admin defaults. */
+  centreAddress?: string | null;
+  /** Depot address — used on the final afternoon leg. From Admin defaults. */
+  depotAddress?: string | null;
+  /** Driver's chosen starting anchor. Defaults from run direction. */
+  startPoint?: StartPointChoice;
+  /** Custom address when startPoint = 'alternate'. */
+  alternateStartAddress?: string | null;
+  /** Optional passenger pickup order (participant ids) before trip starts. */
+  participantOrder?: string[];
+}
+
+export interface BusRunRosterEntry {
+  id: string;
+  name: string;
+  address: string | null;
+}
+
+/** Preview today's passengers for a bus run (same roster as trip seeding). */
+export async function listBusRunRosterForDay(
+  busRunCode: string,
+  dayCode: string,
+  direction: "morning" | "afternoon",
+): Promise<BusRunRosterEntry[]> {
+  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
+  const { data: schedRows, error: schedErr } = await supabase
+    .from("participant_attendance_schedules")
+    .select(
+      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+    )
+    .eq("day_of_week", dayCode)
+    .eq(transportCol, busRunCode)
+    .eq("active", true)
+    .order("created_at", { ascending: true });
+  if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
+
+  return (schedRows ?? []).map((r) => {
+    const row = r as unknown as {
+      participant_id: string;
+      participants:
+        | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
+        | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
+        | null;
+    };
+    const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
+    const regular = (p?.regular_pickup_address ?? "").trim();
+    const street = (p?.street_address ?? "").trim();
+    return {
+      id: row.participant_id,
+      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+    };
+  });
+}
+
+export function isPassengerPickupLeg(leg: TripLeg): boolean {
+  return (
+    leg.toParticipantId != null &&
+    (leg.legKind === "depot_to_client" || leg.legKind === "client_to_client")
+  );
+}
+
+/** Pickup legs that have started or finished — their from/to must not change on reorder. */
+function lockedPassengerPickupLegs(legs: TripLeg[]): TripLeg[] {
+  return legs
+    .filter((l) => isPassengerPickupLeg(l) && l.status !== "pending")
+    .sort((a, b) => a.legIndex - b.legIndex);
+}
+
+/** Trip anchor label for the first pickup when the bus has not left yet. */
+function tripStartLabelForPickups(trip: TransportTrip, legs: TripLeg[]): string {
+  const firstPickup = legs
+    .filter(isPassengerPickupLeg)
+    .sort((a, b) => a.legIndex - b.legIndex)[0];
+  if (firstPickup?.legKind === "depot_to_client") return firstPickup.fromLabel;
+  if (trip.tripOrigin === "day_centre") return "Day Centre";
+  return "Depot";
+}
+
+export type PickupChainEndpoint = {
+  fromLabel: string;
+  toLabel: string;
+  fromParticipantId: string | null;
+  toParticipantId: string | null;
+  legKind: LegKind;
+};
+
+/**
+ * Recompute drivable from→to labels for pending pickups so each leg departs
+ * from where the previous stop ended (Depot/Day Centre, then each client).
+ */
+export function computePickupChainEndpoints(
+  trip: TransportTrip,
+  legs: TripLeg[],
+  orderedPendingPickupIds: string[],
+): Map<string, PickupChainEndpoint> {
+  const locked = lockedPassengerPickupLegs(legs);
+  const pendingById = new Map(
+    legs.filter((l) => isPassengerPickupLeg(l) && l.status === "pending").map((l) => [l.id, l]),
+  );
+  const orderedPending = orderedPendingPickupIds
+    .map((id) => pendingById.get(id))
+    .filter((l): l is TripLeg => l != null);
+
+  const out = new Map<string, PickupChainEndpoint>();
+  let chainTail: { toLabel: string; toParticipantId: string | null } | null =
+    locked.length > 0
+      ? {
+          toLabel: locked[locked.length - 1]!.toLabel,
+          toParticipantId: locked[locked.length - 1]!.toParticipantId,
+        }
+      : null;
+  const originLabel = tripStartLabelForPickups(trip, legs);
+
+  for (const leg of orderedPending) {
+    const fromLabel = chainTail ? chainTail.toLabel : originLabel;
+    const fromParticipantId = chainTail ? chainTail.toParticipantId : null;
+    const legKind: LegKind = chainTail ? "client_to_client" : "depot_to_client";
+    out.set(leg.id, {
+      fromLabel,
+      toLabel: leg.toLabel,
+      fromParticipantId,
+      toParticipantId: leg.toParticipantId,
+      legKind,
+    });
+    chainTail = { toLabel: leg.toLabel, toParticipantId: leg.toParticipantId };
+  }
+  return out;
+}
+
+function rebuildPendingPickupChain(
+  trip: TransportTrip,
+  legs: TripLeg[],
+  reorderedPending: TripLeg[],
+): TripLeg[] {
+  const endpoints = computePickupChainEndpoints(
+    trip,
+    legs,
+    reorderedPending.map((l) => l.id),
+  );
+  return reorderedPending.map((leg) => {
+    const ep = endpoints.get(leg.id)!;
+    return {
+      ...leg,
+      legKind: ep.legKind,
+      fromLabel: ep.fromLabel,
+      toLabel: ep.toLabel,
+      fromParticipantId: ep.fromParticipantId,
+      toParticipantId: ep.toParticipantId,
+    };
+  });
+}
+
+/**
+ * Re-order pending passenger pickup legs on an active trip. Completed pickups
+ * and terminal legs (centre / depot) are fixed; only pending pickups move.
+ */
+export async function reorderTripPickupLegs(
+  tripId: string,
+  orderedPendingPickupLegIds: string[],
+): Promise<TripLeg[]> {
+  const [{ data: tripRow, error: tripErr }, { data: rows, error: fetchErr }] = await Promise.all([
+    supabase.from("transport_trips").select("*").eq("id", tripId).single(),
+    supabase.from("trip_legs").select("*").eq("trip_id", tripId).order("leg_index", { ascending: true }),
+  ]);
+  if (tripErr) throwPg("[reorderTripPickupLegs:trip]", tripErr);
+  if (fetchErr) throwPg("[reorderTripPickupLegs:fetch]", fetchErr);
+
+  const trip = rowToTrip(tripRow as TripRow);
+  const legs = (rows ?? []).map((r) => rowToLeg(r as LegRow));
+  if (legs.length === 0) return [];
+
+  const lockedPickups = lockedPassengerPickupLegs(legs);
+  const pendingPickups = legs.filter((l) => isPassengerPickupLeg(l) && l.status === "pending");
+  const otherLegs = legs.filter((l) => !isPassengerPickupLeg(l));
+
+  const pendingIds = new Set(pendingPickups.map((l) => l.id));
+  if (orderedPendingPickupLegIds.length !== pendingPickups.length) {
+    throw new Error("Pickup order must include every pending stop exactly once.");
+  }
+  for (const id of orderedPendingPickupLegIds) {
+    if (!pendingIds.has(id)) throw new Error("Invalid pickup leg in reorder list.");
+  }
+
+  const pendingMap = new Map(pendingPickups.map((l) => [l.id, l]));
+  const reorderedPending = orderedPendingPickupLegIds.map((id) => pendingMap.get(id)!);
+  const rebuiltPending = rebuildPendingPickupChain(trip, legs, reorderedPending);
+  const orderedPickups = [...lockedPickups, ...rebuiltPending];
+
+  const lastPickup = orderedPickups[orderedPickups.length - 1] ?? null;
+  const updatedOtherLegs = otherLegs.map((leg) => {
+    if (!lastPickup) return leg;
+    if (leg.legKind === "client_to_venue") {
+      return {
+        ...leg,
+        fromLabel: lastPickup.toLabel,
+        fromParticipantId: lastPickup.toParticipantId,
+      };
+    }
+    if (leg.legKind === "venue_to_depot" && leg.fromParticipantId) {
+      return {
+        ...leg,
+        fromLabel: lastPickup.toLabel,
+        fromParticipantId: lastPickup.toParticipantId,
+      };
+    }
+    return leg;
+  });
+
+  const finalLegs = [...orderedPickups, ...updatedOtherLegs];
+
+  // Two-phase leg_index update to satisfy UNIQUE (trip_id, leg_index).
+  for (let i = 0; i < finalLegs.length; i++) {
+    const { error } = await supabase
+      .from("trip_legs")
+      .update({ leg_index: -(i + 1), updated_at: new Date().toISOString() })
+      .eq("id", finalLegs[i].id);
+    if (error) throwPg("[reorderTripPickupLegs:temp]", error);
+  }
+
+  for (let i = 0; i < finalLegs.length; i++) {
+    const leg = finalLegs[i];
+    const patch: Record<string, unknown> = {
+      leg_index: i + 1,
+      updated_at: new Date().toISOString(),
+    };
+    if (isPassengerPickupLeg(leg) && leg.status === "pending") {
+      patch.leg_kind = leg.legKind;
+      patch.from_label = leg.fromLabel;
+      patch.to_label = leg.toLabel;
+      patch.from_participant_id = leg.fromParticipantId;
+      patch.to_participant_id = leg.toParticipantId;
+    } else if (
+      leg.legKind === "client_to_venue" ||
+      (leg.legKind === "venue_to_depot" && leg.fromParticipantId)
+    ) {
+      patch.from_label = leg.fromLabel;
+      patch.from_participant_id = leg.fromParticipantId;
+    }
+    const { error } = await supabase.from("trip_legs").update(patch).eq("id", leg.id);
+    if (error) throwPg("[reorderTripPickupLegs:final]", error);
+  }
+
+  const { data: out, error: outErr } = await supabase
+    .from("trip_legs")
+    .select("*")
+    .eq("trip_id", tripId)
+    .order("leg_index", { ascending: true });
+  if (outErr) throwPg("[reorderTripPickupLegs:read]", outErr);
+  return (out ?? []).map((r) => rowToLeg(r as LegRow));
+}
+
+/**
+ * Start a Day Centre bus-run trip seeded from participant_attendance_schedules
+ * rather than event_roster_bookings. Returns the same ActiveTripBundle as
+ * startTrip so the driver's active-trip screen is unchanged.
+ */
+export async function startDayCentreRun(
+  input: StartDayCentreRunInput,
+): Promise<ActiveTripBundle> {
+  const centreLabel = input.centreLabel ?? "Day Centre";
+  const direction = input.direction ?? "morning";
+
+  // 0. Guard: reuse any existing active run for this driver + run code today.
+  const today = new Date().toISOString().slice(0, 10);
+  const { data: existingTrip, error: existingErr } = await supabase
+    .from("transport_trips")
+    .select("*")
+    .eq("bus_run_code", input.busRunCode)
+    .eq("driver_staff_id", input.driverStaffId)
+    .not("status", "in", "(completed,cancelled)")
+    .order("started_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (existingErr) throwPg("[startDayCentreRun:existingLookup]", existingErr);
+  if (existingTrip) {
+    const existing = rowToTrip(existingTrip as TripRow);
+    const { data: legRows, error: legErr } = await supabase
+      .from("trip_legs")
+      .select("*")
+      .eq("trip_id", existing.id)
+      .order("leg_index", { ascending: true });
+    if (legErr) throwPg("[startDayCentreRun:existingLegs]", legErr);
+    return {
+      trip: existing,
+      legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+      eventTitle: `${centreLabel} — ${input.busRunLabel}`,
+    };
+  }
+
+  // 1. Build roster from participant_attendance_schedules.
+  // Morning runs match inbound_transport; afternoon/return runs match outbound_transport.
+  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
+  const { data: schedRows, error: schedErr } = await supabase
+    .from("participant_attendance_schedules")
+    .select(
+      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+    )
+    .eq("day_of_week", input.dayCode)
+    .eq(transportCol, input.busRunCode)
+    .eq("active", true)
+    .order("created_at", { ascending: true });
+  if (schedErr) throwPg("[startDayCentreRun:schedules]", schedErr);
+
+  type RosterEntry = { id: string; name: string; address: string | null };
+  const roster: RosterEntry[] = (schedRows ?? []).map((r) => {
+    const row = r as unknown as {
+      participant_id: string;
+      participants:
+        | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
+        | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
+        | null;
+    };
+    const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
+    const regular = (p?.regular_pickup_address ?? "").trim();
+    const street = (p?.street_address ?? "").trim();
+    return {
+      id: row.participant_id,
+      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+    };
+  });
+
+  if (input.participantOrder?.length) {
+    const orderMap = new Map(input.participantOrder.map((id, idx) => [id, idx]));
+    roster.sort(
+      (a, b) => (orderMap.get(a.id) ?? 9999) - (orderMap.get(b.id) ?? 9999),
+    );
+  }
+
+  // 2. Medication flags.
+  const participantIds = roster.map((p) => p.id);
+  const medSet = new Set<string>();
+  if (participantIds.length) {
+    const { data: medRows } = await supabase
+      .from("participant_medication_schedules")
+      .select("participant_id")
+      .eq("active", true)
+      .in("participant_id", participantIds);
+    for (const m of medRows ?? []) medSet.add((m as { participant_id: string }).participant_id);
+  }
+
+  // 3. Insert trip row (event_id = null; bus_run_code identifies the run).
+  const depotAddr = input.depotAddress?.trim() || null;
+  const centreAddr = input.centreAddress?.trim() || null;
+  const alternateAddr = input.alternateStartAddress?.trim() || null;
+  const { startLabel, tripOrigin } = resolveTripStartAnchor(
+    input.startPoint,
+    direction,
+    centreLabel,
+  );
+  const tripReturn: TripReturn = direction === "morning" ? "none" : "depot";
+  const originAddress =
+    resolveStartPointAddress(input.startPoint, direction, depotAddr, centreAddr, alternateAddr) ??
+    (direction === "morning" ? depotAddr : centreAddr);
+
+  const { data: tripRow, error: tripErr } = await supabase
+    .from("transport_trips")
+    .insert({
+      driver_staff_id: input.driverStaffId,
+      event_id: null,
+      bus_run_code: input.busRunCode,
+      status: "active",
+      trip_date: today,
+      start_odometer: input.startOdometerKm,
+      start_odometer_km: input.startOdometerKm,
+      trip_origin: tripOrigin,
+      trip_return: tripReturn,
+      origin_address: originAddress,
+    })
+    .select("*")
+    .single();
+  if (tripErr) throwPg("[startDayCentreRun:insert]", tripErr);
+  const trip = rowToTrip(tripRow as TripRow);
+
+  // 4. Build leg chain.
+  //    Morning:   Depot → Client1 → … → ClientN → Day Centre
+  //               (no return leg — bus stays at Day Centre during the day)
+  //    Afternoon: Day Centre → Client1 → … → ClientN → Depot
+  type LegSeed = {
+    leg_kind: LegKind;
+    from_label: string;
+    to_label: string;
+    from_participant_id: string | null;
+    to_participant_id: string | null;
+    medication_expected: boolean;
+    target_address: string | null;
+  };
+  const DEPOT = "Depot";
+  const seeds: LegSeed[] = [];
+
+  if (direction === "morning") {
+    // Morning: Depot → [Client1 → … → ClientN →] Day Centre.
+    // The bus remains at Day Centre for the rest of the day — no return leg.
+    if (roster.length === 0) {
+      // No passengers today: single dead-run leg (Depot → Day Centre).
+      seeds.push({
+        leg_kind: "depot_to_client",
+        from_label: startLabel,
+        to_label: centreLabel,
+        from_participant_id: null,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: centreAddr,
+      });
+    } else {
+      for (let i = 0; i < roster.length; i++) {
+        const to = roster[i];
+        const from = i === 0 ? null : roster[i - 1];
+        seeds.push({
+          leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+          from_label: from ? from.name : startLabel,
+          to_label: to.name,
+          from_participant_id: from ? from.id : null,
+          to_participant_id: to.id,
+          medication_expected: medSet.has(to.id),
+          target_address: to.address,
+        });
+      }
+      const last = roster[roster.length - 1];
+      seeds.push({
+        leg_kind: "client_to_venue",
+        from_label: last.name,
+        to_label: centreLabel,
+        from_participant_id: last.id,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: centreAddr,
+      });
+    }
+    // No return leg — trip_return = 'none'; bus stays at Day Centre.
+  } else {
+    // Afternoon/return: Day Centre → each client's home → Depot
+    if (roster.length === 0) {
+      seeds.push({
+        leg_kind: "venue_to_depot",
+        from_label: startLabel,
+        to_label: DEPOT,
+        from_participant_id: null,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: depotAddr,
+      });
+    } else {
+      for (let i = 0; i < roster.length; i++) {
+        const to = roster[i];
+        const from = i === 0 ? null : roster[i - 1];
+        seeds.push({
+          leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+          from_label: i === 0 ? startLabel : from!.name,
+          to_label: to.name,
+          from_participant_id: from ? from.id : null,
+          to_participant_id: to.id,
+          medication_expected: false,
+          target_address: to.address,
+        });
+      }
+      const last = roster[roster.length - 1];
+      seeds.push({
+        leg_kind: "venue_to_depot",
+        from_label: last.name,
+        to_label: DEPOT,
+        from_participant_id: last.id,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: depotAddr,
+      });
+    }
+  }
+
+  const legPayload = seeds.map((s, i) => ({
+    trip_id: trip.id,
+    leg_index: i + 1,
+    status: "pending" as LegStatus,
+    medication_handover_status: "not_required" as MedicationHandoverStatus,
+    ...s,
+  }));
+
+  const { data: legRows, error: legErr } = await supabase
+    .from("trip_legs")
+    .insert(legPayload)
+    .select("*")
+    .order("leg_index", { ascending: true });
+  if (legErr) throwPg("[startDayCentreRun:legs]", legErr);
+
+  const dirLabel = direction === "afternoon" ? "Return" : "Morning";
+  return {
+    trip,
+    legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+    eventTitle: `${centreLabel} — ${input.busRunLabel} (${dirLabel})`,
+  };
 }
 
 export type LegPatch = Partial<{

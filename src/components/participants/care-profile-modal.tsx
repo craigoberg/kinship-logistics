@@ -338,6 +338,9 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   onQueryChange={setHistoryQuery}
                 />
               </div>
+              <DialogFooter className="mt-1 shrink-0">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              </DialogFooter>
             </TabsContent>
 
             {/* TAB 4 — Schedules & Attendance */}
@@ -348,6 +351,9 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   participantName={participant.fullName}
                 />
               </div>
+              <DialogFooter className="mt-1 shrink-0">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              </DialogFooter>
             </TabsContent>
 
             {/* TAB 5 — Finance & Ledger */}
@@ -358,6 +364,9 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   participantName={participant.fullName}
                 />
               </div>
+              <DialogFooter className="mt-1 shrink-0">
+                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              </DialogFooter>
             </TabsContent>
           </Tabs>
         </DialogContent>

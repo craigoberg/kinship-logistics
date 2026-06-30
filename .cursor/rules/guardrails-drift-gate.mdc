@@ -28,3 +28,12 @@ alwaysApply: true
 ## Authoritative spec
 
 `docs/architecture/GUARDRAILS.md` — permanent system directive for all builds.
+
+## Driver manifest workflow (GUARDRAILS §11 — locked 2026-06-30)
+
+When touching `/manifest`, transport trip start, or pickup reorder:
+
+- **Step 3:** Run/event picker + `StartPointPicker` only — **no** pre-start passenger/stop list.
+- **Active manifest:** Single unified leg list; drag reorder on leg rows; no separate reorder panel.
+- **Chain rule:** Reorder must recompute drivable from→to via `computePickupChainEndpoints` / `reorderTripPickupLegs` — bus never teleports.
+- **Consistency:** Same UX for Day Centre runs and event trips (single- and multi-day).

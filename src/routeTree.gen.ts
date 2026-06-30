@@ -20,6 +20,7 @@ import { Route as DayRouteImport } from './routes/day'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as ApiInternalTransportPickupSmsRouteImport } from './routes/api/internal/transport-pickup-sms'
 import { Route as ApiInternalDepartureSmsRouteImport } from './routes/api/internal/departure-sms'
 import { Route as ApiInternalAttendanceSmsRouteImport } from './routes/api/internal/attendance-sms'
 
@@ -78,6 +79,12 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiInternalTransportPickupSmsRoute =
+  ApiInternalTransportPickupSmsRouteImport.update({
+    id: '/api/internal/transport-pickup-sms',
+    path: '/api/internal/transport-pickup-sms',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 const ApiInternalDepartureSmsRoute = ApiInternalDepartureSmsRouteImport.update({
   id: '/api/internal/departure-sms',
   path: '/api/internal/departure-sms',
@@ -104,6 +111,7 @@ export interface FileRoutesByFullPath {
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
+  '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -119,6 +127,7 @@ export interface FileRoutesByTo {
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
+  '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -135,6 +144,7 @@ export interface FileRoutesById {
   '/transport': typeof TransportRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
+  '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -152,6 +162,7 @@ export interface FileRouteTypes {
     | '/transport'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
+    | '/api/internal/transport-pickup-sms'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -167,6 +178,7 @@ export interface FileRouteTypes {
     | '/transport'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
+    | '/api/internal/transport-pickup-sms'
   id:
     | '__root__'
     | '/'
@@ -182,6 +194,7 @@ export interface FileRouteTypes {
     | '/transport'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
+    | '/api/internal/transport-pickup-sms'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -198,6 +211,7 @@ export interface RootRouteChildren {
   TransportRoute: typeof TransportRoute
   ApiInternalAttendanceSmsRoute: typeof ApiInternalAttendanceSmsRoute
   ApiInternalDepartureSmsRoute: typeof ApiInternalDepartureSmsRoute
+  ApiInternalTransportPickupSmsRoute: typeof ApiInternalTransportPickupSmsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -279,6 +293,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/transport-pickup-sms': {
+      id: '/api/internal/transport-pickup-sms'
+      path: '/api/internal/transport-pickup-sms'
+      fullPath: '/api/internal/transport-pickup-sms'
+      preLoaderRoute: typeof ApiInternalTransportPickupSmsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/api/internal/departure-sms': {
       id: '/api/internal/departure-sms'
       path: '/api/internal/departure-sms'
@@ -310,6 +331,7 @@ const rootRouteChildren: RootRouteChildren = {
   TransportRoute: TransportRoute,
   ApiInternalAttendanceSmsRoute: ApiInternalAttendanceSmsRoute,
   ApiInternalDepartureSmsRoute: ApiInternalDepartureSmsRoute,
+  ApiInternalTransportPickupSmsRoute: ApiInternalTransportPickupSmsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

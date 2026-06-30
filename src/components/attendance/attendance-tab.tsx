@@ -10,6 +10,9 @@ import {
   ClipboardList,
   Search,
   AlertTriangle,
+  ArrowUpDown,
+  ArrowUp,
+  ArrowDown,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -18,11 +21,35 @@ import { Label } from "@/components/ui/label";
 import {
   useAttendanceLogs,
   useAttendanceSchedules,
-  useArchiveAttendanceSchedule,
   useUpdateAttendanceSchedule,
+  useRemoveAttendanceSchedule,
+  useBusRunMap,
 } from "@/hooks/use-supabase-data";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
 import { formatDate } from "@/lib/utils";
 import type { AttendanceLog, AttendanceSchedule } from "@/lib/data-store";
+
+// Canonical weekday sort order for the schedules table.
+const DAY_ORDER: Record<string, number> = {
+  "DAY-MON": 0, "DAY-TUE": 1, "DAY-WED": 2, "DAY-THU": 3,
+  "DAY-FRI": 4, "DAY-SAT": 5, "DAY-SUN": 6,
+};
+const DAY_LABELS: Record<string, string> = {
+  "DAY-MON": "Monday", "DAY-TUE": "Tuesday", "DAY-WED": "Wednesday",
+  "DAY-THU": "Thursday", "DAY-FRI": "Friday", "DAY-SAT": "Saturday", "DAY-SUN": "Sunday",
+};
+function dayRank(code: string): number {
+  return DAY_ORDER[code] ?? 99;
+}
+
 import { AddAttendanceScheduleModal } from "./add-attendance-schedule-modal";
 import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
@@ -30,6 +57,33 @@ import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
 import { NoShowCountdownModal } from "./no-show-countdown-modal";
 import { toast } from "sonner";
+
+type ScheduleSortCol = "day" | "service" | "inbound" | "outbound" | "status";
+type SortDir = "asc" | "desc";
+
+interface BusRunBadge { label: string; color: string; }
+
+/** Renders a colored run badge (R1, R2…) or plain muted text for generic codes. */
+function TransportCodeBadge({
+  code,
+  runMap,
+}: {
+  code: string;
+  runMap: Map<string, BusRunBadge>;
+}) {
+  const run = runMap.get(code);
+  if (run) {
+    return (
+      <span
+        className="inline-flex items-center rounded px-2 py-0.5 text-[11px] font-bold text-white"
+        style={{ backgroundColor: run.color }}
+      >
+        {run.label}
+      </span>
+    );
+  }
+  return <span className="text-muted-foreground">{code || "—"}</span>;
+}
 
 interface Props {
   participantId: string;
@@ -48,17 +102,50 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
   const [noShowOpen, setNoShowOpen] = useState(false);
+  const [sortCol, setSortCol] = useState<ScheduleSortCol>("day");
+  const [sortDir, setSortDir] = useState<SortDir>("asc");
+  const [removeTarget, setRemoveTarget] = useState<AttendanceSchedule | null>(null);
+  const [removeReason, setRemoveReason] = useState("");
 
   const schedulesQ = useAttendanceSchedules(participantId);
   const logsQ = useAttendanceLogs(participantId);
-  const archive = useArchiveAttendanceSchedule();
   const restore = useUpdateAttendanceSchedule();
+  const removeMut = useRemoveAttendanceSchedule();
+  const busRunMap = useBusRunMap();
 
   const allSchedules = schedulesQ.data ?? [];
-  const schedules = showArchived
-    ? allSchedules
-    : allSchedules.filter((s) => s.active);
   const archivedCount = allSchedules.filter((s) => !s.active).length;
+
+  const schedules = useMemo(() => {
+    const base = showArchived ? allSchedules : allSchedules.filter((s) => s.active);
+    return [...base].sort((a, b) => {
+      let cmp = 0;
+      switch (sortCol) {
+        case "day":
+          cmp = dayRank(a.dayOfWeek) - dayRank(b.dayOfWeek);
+          break;
+        case "service":
+          cmp = a.serviceType.localeCompare(b.serviceType);
+          break;
+        case "inbound":
+          cmp = (a.inboundTransport || a.transportRule).localeCompare(
+            b.inboundTransport || b.transportRule,
+          );
+          break;
+        case "outbound":
+          cmp = (a.outboundTransport || a.transportRule).localeCompare(
+            b.outboundTransport || b.transportRule,
+          );
+          break;
+        case "status":
+          cmp = Number(b.active) - Number(a.active);
+          break;
+      }
+      // Secondary sort: always day order when primary col ties.
+      if (cmp === 0 && sortCol !== "day") cmp = dayRank(a.dayOfWeek) - dayRank(b.dayOfWeek);
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+  }, [allSchedules, showArchived, sortCol, sortDir]);
   const logs = logsQ.data ?? [];
 
   const filteredLogs = useMemo(() => {
@@ -77,16 +164,6 @@ export function AttendanceTab({ participantId, participantName }: Props) {
     );
   }, [logs, query]);
 
-  const onArchive = async (s: AttendanceSchedule) => {
-    try {
-      await archive.mutateAsync(s.id);
-      toast.success("Schedule archived", {
-        description: `${s.dayOfWeek} · ${s.serviceType} marked inactive.`,
-      });
-    } catch {
-      /* handled in hook */
-    }
-  };
   const onRestore = async (s: AttendanceSchedule) => {
     try {
       await restore.mutateAsync({ id: s.id, patch: { active: true } });
@@ -153,11 +230,39 @@ export function AttendanceTab({ participantId, participantName }: Props) {
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="px-4 py-2 font-medium">Day</th>
-                  <th className="px-4 py-2 font-medium">Service type</th>
-                  <th className="px-4 py-2 font-medium">Transport IN</th>
-                  <th className="px-4 py-2 font-medium">Transport OUT</th>
-                  <th className="px-4 py-2 font-medium">Status</th>
+                  {(
+                    [
+                      { col: "day" as ScheduleSortCol, label: "Day" },
+                      { col: "service" as ScheduleSortCol, label: "Service type" },
+                      { col: "inbound" as ScheduleSortCol, label: "Transport IN" },
+                      { col: "outbound" as ScheduleSortCol, label: "Transport OUT" },
+                      { col: "status" as ScheduleSortCol, label: "Status" },
+                    ] as const
+                  ).map(({ col, label }) => {
+                    const active = sortCol === col;
+                    const Icon = active
+                      ? sortDir === "asc" ? ArrowUp : ArrowDown
+                      : ArrowUpDown;
+                    return (
+                      <th key={col} className="px-4 py-2 font-medium">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (sortCol === col) {
+                              setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+                            } else {
+                              setSortCol(col);
+                              setSortDir("asc");
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 hover:text-foreground transition-colors"
+                        >
+                          {label}
+                          <Icon className={`h-3 w-3 ${active ? "text-primary" : "opacity-40"}`} />
+                        </button>
+                      </th>
+                    );
+                  })}
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -170,13 +275,15 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                       (s.active ? "" : "bg-muted/30 text-muted-foreground")
                     }
                   >
-                    <td className="px-4 py-2 font-medium">{s.dayOfWeek}</td>
-                    <td className="px-4 py-2">{s.serviceType}</td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {s.inboundTransport || s.transportRule}
+                    <td className="px-4 py-2 font-medium">
+                      {DAY_LABELS[s.dayOfWeek] ?? s.dayOfWeek}
                     </td>
-                    <td className="px-4 py-2 text-muted-foreground">
-                      {s.outboundTransport || s.transportRule}
+                    <td className="px-4 py-2">{s.serviceType}</td>
+                    <td className="px-4 py-2">
+                      <TransportCodeBadge code={s.inboundTransport || s.transportRule} runMap={busRunMap} />
+                    </td>
+                    <td className="px-4 py-2">
+                      <TransportCodeBadge code={s.outboundTransport || s.transportRule} runMap={busRunMap} />
                     </td>
                     <td className="px-4 py-2">
                       <span
@@ -224,12 +331,14 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                             size="sm"
                             variant="ghost"
                             className="gap-1 text-destructive hover:text-destructive"
-                            onClick={() => onArchive(s)}
-                            disabled={archive.isPending}
-                            title="Archive (keeps history, sets active=false)"
+                            onClick={() => {
+                              setRemoveTarget(s);
+                              setRemoveReason("");
+                            }}
+                            title="Remove this schedule (permanent change, audit logged)"
                           >
                             <Archive className="h-3.5 w-3.5" />
-                            Archive
+                            Remove
                           </Button>
                         ) : (
                           <Button
@@ -353,6 +462,89 @@ export function AttendanceTab({ participantId, participantName }: Props) {
           </div>
         )}
       </section>
+
+      {/* ── Remove schedule confirmation ─────────────────────────────── */}
+      <Dialog
+        open={!!removeTarget}
+        onOpenChange={(o) => {
+          if (!o) { setRemoveTarget(null); setRemoveReason(""); }
+        }}
+      >
+        <DialogContent className="max-w-md border-border bg-card">
+          <DialogHeader>
+            <DialogTitle>Remove operational schedule</DialogTitle>
+            <DialogDescription>
+              This is a permanent schedule change for{" "}
+              <span className="font-semibold text-foreground">{participantName}</span>.
+              The row will be deactivated and the reason logged to the audit trail.
+              Historical attendance records are preserved.
+            </DialogDescription>
+          </DialogHeader>
+          {removeTarget && (
+            <div className="space-y-3 pt-1">
+              <div className="rounded-lg border border-border bg-muted/30 px-3 py-2 text-sm">
+                <div className="font-semibold">
+                  {DAY_LABELS[removeTarget.dayOfWeek] ?? removeTarget.dayOfWeek}
+                  {" — "}
+                  {removeTarget.serviceType}
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  IN: {removeTarget.inboundTransport || removeTarget.transportRule}
+                  {" · "}
+                  OUT: {removeTarget.outboundTransport || removeTarget.transportRule}
+                </div>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Reason for removal <span className="text-destructive">*</span>
+                </Label>
+                <Textarea
+                  rows={3}
+                  value={removeReason}
+                  onChange={(e) => setRemoveReason(e.target.value)}
+                  placeholder="e.g. Client has changed their days — no longer attending on this day."
+                  className="resize-none"
+                />
+                <p className="text-[11px] text-muted-foreground">
+                  Minimum 10 characters. This will appear in the Governance Hub audit log.
+                </p>
+              </div>
+            </div>
+          )}
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => { setRemoveTarget(null); setRemoveReason(""); }}
+            >
+              Close
+            </Button>
+            <Button
+              variant="destructive"
+              disabled={removeReason.trim().length < 10 || removeMut.isPending}
+              onClick={async () => {
+                if (!removeTarget) return;
+                try {
+                  await removeMut.mutateAsync({
+                    id: removeTarget.id,
+                    reason: removeReason.trim(),
+                  });
+                  toast.success("Schedule removed", {
+                    description: `${DAY_LABELS[removeTarget.dayOfWeek] ?? removeTarget.dayOfWeek} · ${removeTarget.serviceType} removed for ${participantName}.`,
+                  });
+                  setRemoveTarget(null);
+                  setRemoveReason("");
+                } catch {
+                  /* surfaced via hook */
+                }
+              }}
+              className="gap-1.5"
+            >
+              <Archive className="h-4 w-4" />
+              {removeMut.isPending ? "Removing…" : "Confirm Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <AddAttendanceScheduleModal
         open={addOpen}
