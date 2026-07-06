@@ -110,17 +110,24 @@ export async function listActiveIssues(sessionId: string): Promise<SiteIssue[]> 
 }
 
 export interface NewSiteIssue {
-  sessionId: string;
+  /** site_day_sessions.id — required for Day Centre issues; null for event-day issues. */
+  sessionId: string | null;
   severity: RygeSeverity;
   issueDescription: string;
   workaroundPlan: string | null;
   owner: ResponsibilityOwner;
+  /** event_manifest.id — set for outing event issues (§12.6). */
+  eventId?: string | null;
+  /** event_day_sessions.id — set for outing event issues (§12.6). */
+  eventDaySessionId?: string | null;
 }
 
 export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
   console.info("[SiteIssues] createIssue → inserting", {
     session_id: payload.sessionId,
+    event_id: payload.eventId,
+    event_day_session_id: payload.eventDaySessionId,
     severity: payload.severity,
     owner: payload.owner,
   });
@@ -128,7 +135,7 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
   const { data, error } = await supabase
     .from("site_issues_register")
     .insert({
-      session_id: payload.sessionId,
+      session_id: payload.sessionId ?? null,
       reported_by: userId,
       severity: payload.severity,
       issue_description: payload.issueDescription,
@@ -136,6 +143,8 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
       owner: payload.owner,
       status: "open",
       workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
+      event_id: payload.eventId ?? null,
+      event_day_session_id: payload.eventDaySessionId ?? null,
     })
     .select("*")
     .single();
@@ -165,6 +174,8 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
       gps_lng: gps?.lng ?? null,
       metadata: {
         session_id: payload.sessionId,
+        event_id: payload.eventId ?? null,
+        event_day_session_id: payload.eventDaySessionId ?? null,
         issue_id: next.id,
         severity: payload.severity,
         owner: payload.owner,
@@ -176,6 +187,35 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     console.error("[site_issues.createIssue] ledger failed", err);
   }
   return next;
+}
+
+/**
+ * List all open issues for a specific event day session (§12.6).
+ * Used by EventIssuesCard to show issues on the event day coordinator screen.
+ */
+export async function listEventDayIssues(eventDaySessionId: string): Promise<SiteIssue[]> {
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("*")
+    .eq("event_day_session_id", eventDaySessionId)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+}
+
+/**
+ * Returns true if there is an open RED issue for the given event day session.
+ * Used by the depart gate to block departure when a RED lock is active.
+ */
+export async function hasOpenRedIssueForSession(eventDaySessionId: string): Promise<boolean> {
+  const { count, error } = await supabase
+    .from("site_issues_register")
+    .select("id", { count: "exact", head: true })
+    .eq("event_day_session_id", eventDaySessionId)
+    .eq("status", "open")
+    .eq("severity", "red");
+  if (error) return false;
+  return (count ?? 0) > 0;
 }
 
 export async function markResolved(id: string): Promise<SiteIssue> {

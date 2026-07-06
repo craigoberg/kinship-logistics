@@ -14,6 +14,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRecordEventPaymentMilestone } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
+import { todayLocalIso } from "@/lib/utils";
 
 interface Props {
   open: boolean;
@@ -22,14 +23,10 @@ interface Props {
   booking: EventRosterBooking | null;
 }
 
-function today(): string {
-  return new Date().toISOString().slice(0, 10);
-}
 
 export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking }: Props) {
   const [amount, setAmount] = useState("0.00");
-  const [paymentDate, setPaymentDate] = useState(today());
-  const [dirty, setDirty] = useState(false);
+  const [paymentDate, setPaymentDate] = useState(todayLocalIso());
   const mutation = useRecordEventPaymentMilestone();
 
   const baselineCost = (booking?.customPrice ?? event.ticketPrice) || 0;
@@ -38,8 +35,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
     if (open && booking) {
       const balance = Math.max(0, baselineCost - booking.amountPaid);
       setAmount(balance.toFixed(2));
-      setPaymentDate(today());
-      setDirty(false);
+      setPaymentDate(todayLocalIso());
     }
   }, [open, booking, baselineCost]);
 
@@ -51,7 +47,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
     Number.isFinite(amountNum) &&
     amountNum > 0 &&
     paymentDate.length === 10;
-  const canSubmit = dirty && valid && !mutation.isPending;
+  const canSubmit = valid && !mutation.isPending;
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -103,10 +99,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
               min="0.01"
               step="0.01"
               value={amount}
-              onChange={(e) => {
-                setAmount(e.target.value);
-                setDirty(true);
-              }}
+              onChange={(e) => setAmount(e.target.value)}
               className="tabular-nums"
             />
           </div>
@@ -118,10 +111,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
             <Input
               type="date"
               value={paymentDate}
-              onChange={(e) => {
-                setPaymentDate(e.target.value);
-                setDirty(true);
-              }}
+              onChange={(e) => setPaymentDate(e.target.value)}
             />
           </div>
 

@@ -28,6 +28,7 @@ import {
   useRefreshBookingSnapshot,
 } from "@/hooks/use-supabase-data";
 import type { EventRosterBooking } from "@/lib/data-store";
+import { updateBookingTransportModes } from "@/lib/api/event-outing";
 
 interface Props {
   open: boolean;
@@ -35,6 +36,8 @@ interface Props {
   booking: EventRosterBooking | null;
   eventTitle?: string;
   eventTicketPrice?: number;
+  /** §12.3.1 — show outbound/return transport mode pickers for outing events. */
+  eventKind?: string;
 }
 
 const STATUS_OPTIONS = ["Confirmed", "Waitlisted", "Cancelled"] as const;
@@ -56,7 +59,9 @@ export function EditRosterBookingModal({
   booking,
   eventTitle,
   eventTicketPrice = 0,
+  eventKind = "legacy",
 }: Props) {
+  const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
   const [bookingStatus, setBookingStatus] = useState<string>("Confirmed");
   const [notes, setNotes] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -70,6 +75,8 @@ export function EditRosterBookingModal({
   const [participantTransport, setParticipantTransport] = useState(false);
   const [permanentAddress, setPermanentAddress] = useState<string>("");
   const [tripPickupOverride, setTripPickupOverride] = useState<string>("");
+  const [outboundMode, setOutboundMode] = useState<"bus" | "self">("bus");
+  const [returnMode, setReturnMode] = useState<"bus" | "self">("bus");
   const mutation = useUpdateEventBooking();
   const updateParticipant = useUpdateParticipant();
   const refreshSnapshot = useRefreshBookingSnapshot();
@@ -92,6 +99,8 @@ export function EditRosterBookingModal({
       setParticipantTransport(!!booking.participantTransportRequired);
       setPermanentAddress(booking.participantRegularPickupAddress ?? "");
       setTripPickupOverride(booking.tripPickupAddressOverride ?? "");
+      setOutboundMode((booking.outboundTransportMode as "bus" | "self") ?? "bus");
+      setReturnMode((booking.returnTransportMode as "bus" | "self") ?? "bus");
     }
   }, [open, booking, collected, eventTicketPrice]);
 
@@ -178,6 +187,19 @@ export function EditRosterBookingModal({
             : null
           : undefined,
       });
+      // Persist outing transport modes if changed.
+      if (isOuting) {
+        const origOut = (booking.outboundTransportMode ?? "bus") as "bus" | "self";
+        const origRet = (booking.returnTransportMode ?? "bus") as "bus" | "self";
+        if (outboundMode !== origOut || returnMode !== origRet) {
+          await updateBookingTransportModes({
+            booking_id: booking.id,
+            outbound_transport_mode: outboundMode,
+            return_transport_mode: returnMode,
+          });
+        }
+      }
+
       toast.success("Booking updated", {
         description: result.refundLedger
           ? `${booking.participantName} → Cancelled · Refund $${fmtMoney(parsedRefund)} posted`
@@ -367,6 +389,49 @@ export function EditRosterBookingModal({
               }}
             />
           </div>
+
+          {/* ----- Outing transport modes (§12.3.2) ----- */}
+          {isOuting && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Outing transport modes
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Outbound</Label>
+                  <Select
+                    value={outboundMode}
+                    onValueChange={(v) => { setOutboundMode(v as "bus" | "self"); setDirty(true); }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bus">Bus</SelectItem>
+                      <SelectItem value="self">Self-transport</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">Self = first-day inbound only.</p>
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Return</Label>
+                  <Select
+                    value={returnMode}
+                    onValueChange={(v) => { setReturnMode(v as "bus" | "self"); setDirty(true); }}
+                  >
+                    <SelectTrigger className="h-8 text-sm">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="bus">Bus</SelectItem>
+                      <SelectItem value="self">Self-transport</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <p className="text-[10px] text-muted-foreground">Self = last-day outbound only.</p>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* ----- Carer companion ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">

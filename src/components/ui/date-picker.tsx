@@ -2,7 +2,7 @@ import * as React from "react";
 import { format } from "date-fns";
 import { Calendar as CalendarIcon } from "lucide-react";
 
-import { cn } from "@/lib/utils";
+import { cn, REGIONAL_DATE_FORMAT } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Calendar } from "@/components/ui/calendar";
 import {
@@ -35,7 +35,7 @@ export function DatePicker({
   disabled,
   className,
   disabledDates,
-  dateFormat = "PPP",
+  dateFormat = REGIONAL_DATE_FORMAT,
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = React.useState(false);
 

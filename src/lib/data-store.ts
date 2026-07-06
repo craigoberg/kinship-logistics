@@ -10,6 +10,7 @@
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
+import { todayLocalIso } from "@/lib/utils";
 
 export interface Participant {
   id: string;
@@ -2010,6 +2011,10 @@ export interface EventManifest {
   /** Default ticket price drawn from the charge code rate card. */
   standardPrice: number;
   createdAt: string;
+  /** §12.3.1 — 'legacy' | 'single_day_outing' | 'multi_day_tour'. Defaults to 'legacy'. */
+  eventKind: string;
+  /** §12.2.1 — FK → venues.id. Primary destination for outings. */
+  primaryVenueId: string | null;
 }
 
 interface EventManifestRow {
@@ -2029,6 +2034,8 @@ interface EventManifestRow {
   default_charge_code_id: string | null;
   standard_price: number | string | null;
   created_at: string;
+  event_kind?: string | null;
+  primary_venue_id?: string | null;
 }
 
 function rowToEvent(r: EventManifestRow): EventManifest {
@@ -2049,6 +2056,8 @@ function rowToEvent(r: EventManifestRow): EventManifest {
     defaultChargeCodeId: r.default_charge_code_id ?? null,
     standardPrice: Number(r.standard_price ?? 0),
     createdAt: r.created_at,
+    eventKind: r.event_kind ?? "legacy",
+    primaryVenueId: r.primary_venue_id ?? null,
   };
 }
 
@@ -2066,7 +2075,7 @@ export async function listConfirmedEvents(): Promise<EventManifest[]> {
   const { data, error } = await supabase
     .from("event_manifest")
     .select("*")
-    .eq("status", "Confirmed")
+    .in("status", ["Confirmed", "Open"])
     .order("start_date", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
@@ -2086,6 +2095,10 @@ export interface NewEvent {
   /** When set, the roster from this source event is copied into the new event
    * after insert (financial fields reset, fresh medical snapshots). */
   cloneFromEventId?: string | null;
+  /** §12.3.1 — 'legacy' | 'single_day_outing' | 'multi_day_tour'. Defaults to 'legacy'. */
+  eventKind?: string | null;
+  /** §12.2.1 — FK → venues.id. Primary venue for outings. */
+  primaryVenueId?: string | null;
 }
 
 function toIsoDate(value: string | null | undefined): string | null {
@@ -2117,6 +2130,8 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
     ticket_price: input.ticketPrice,
     description: input.description ?? null,
     status: (input.status && input.status.trim().length > 0) ? input.status : "Planning",
+    event_kind: input.eventKind ?? "legacy",
+    primary_venue_id: input.primaryVenueId ?? null,
   };
 
   console.warn("[insertEvent] active Supabase URL:", supabaseUrl);
@@ -2172,6 +2187,8 @@ export interface UpdateEventInput {
   endDate?: string | null;
   ticketPrice: number;
   description?: string | null;
+  eventKind?: string | null;
+  primaryVenueId?: string | null;
 }
 
 export async function updateEvent(input: UpdateEventInput): Promise<EventManifest> {
@@ -2182,7 +2199,7 @@ export async function updateEvent(input: UpdateEventInput): Promise<EventManifes
   // Strict date-coercion rule: empty end_date mirrors start_date.
   const endIso = toIsoDate(input.endDate ?? null) ?? startIso;
 
-  const payload = {
+  const payload: Record<string, unknown> = {
     title: input.title,
     event_type: input.eventTypeCode,
     venue_name: input.venue,
@@ -2191,6 +2208,8 @@ export async function updateEvent(input: UpdateEventInput): Promise<EventManifes
     ticket_price: input.ticketPrice,
     description: input.description ?? null,
   };
+  if (input.eventKind !== undefined) payload.event_kind = input.eventKind ?? "legacy";
+  if ("primaryVenueId" in input) payload.primary_venue_id = input.primaryVenueId ?? null;
 
   const { data, error } = await supabase
     .from("event_manifest")
@@ -2249,6 +2268,10 @@ export interface EventRosterBooking {
   participantRegularPickupAddress: string | null;
   /** Mirror of participant.street_address from the join — last-tier fallback. */
   participantStreetAddress: string | null;
+  /** §12.3.2 — 'bus' | 'self'. Self only on first-day inbound (enforced in API). */
+  outboundTransportMode: string;
+  /** §12.3.2 — 'bus' | 'self'. Self only on last-day outbound (enforced in API). */
+  returnTransportMode: string;
   // ── NDIS billing pipeline ────────────────────────────────────────────────
   /** Funding source, e.g. 'NDIS Plan Managed' | 'NDIS Self Managed' | 'Private'. */
   fundingClaimType: string;
@@ -2285,6 +2308,8 @@ interface BookingRow {
   participant_transport_required: boolean | null;
   trip_pickup_address_override: string | null;
   dynamic_medical_notes_snapshot: string | null;
+  outbound_transport_mode?: string | null;
+  return_transport_mode?: string | null;
   // NDIS billing pipeline
   funding_claim_type: string | null;
   charge_code_id: string | null;
@@ -2327,6 +2352,8 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
     participantRegularPickupAddress: r.participants?.regular_pickup_address ?? null,
     participantStreetAddress: r.participants?.street_address ?? null,
+    outboundTransportMode: r.outbound_transport_mode ?? "bus",
+    returnTransportMode: r.return_transport_mode ?? "bus",
     fundingClaimType: r.funding_claim_type ?? "NDIS Plan Managed",
     chargeCodeId: r.charge_code_id ?? null,
     quantityDelivered: Number(r.quantity_delivered ?? 1),
@@ -2448,7 +2475,7 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
   if (amount > 0) {
     await insertLedgerEntry({
       participantId: input.participantId,
-      transactionDate: new Date().toISOString().slice(0, 10),
+      transactionDate: todayLocalIso(),
       financialCode: "EVENT_PMT",
       description: `Event Payment Milestone — ${input.eventTitle ?? "Event"} [event:${input.eventId}]`,
       amount,
@@ -2817,7 +2844,7 @@ export async function updateEventBooking(
 
   let priceAdjustmentLedger: LedgerEntry | null = null;
   if (priceAdjustmentDelta > 0 && input.participantId && input.eventId) {
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocalIso();
     const reason = (trimmed.length > 0 ? trimmed : "Booking cost amended");
     const evTitle = input.eventTitle ?? "Event";
     try {
@@ -2878,6 +2905,40 @@ export async function listEventPaymentLedgerForEvent(
   return (data ?? []).map((r) => rowToLedgerEntry(r as LedgerRow));
 }
 
+/** P&L totals — same rules as EventFinanceTab / Trip Report (§12.8). */
+export interface EventFinanceTotals {
+  ticketRevenue: number;
+  vendorExpenses: number;
+  netPnl: number;
+}
+
+export function summarizeEventFinance(
+  paymentLedger: Array<{ amount: number }>,
+  expenseLedger: Array<{ amount: number }>,
+): EventFinanceTotals {
+  const ticketRevenue = paymentLedger.reduce(
+    (s, entry) => Number((s + entry.amount).toFixed(2)),
+    0,
+  );
+  const vendorExpenses = expenseLedger.reduce(
+    (s, e) => (e.amount < 0 ? s + e.amount : s),
+    0,
+  );
+  return {
+    ticketRevenue,
+    vendorExpenses,
+    netPnl: ticketRevenue + vendorExpenses,
+  };
+}
+
+export async function getEventFinanceTotals(eventId: string): Promise<EventFinanceTotals> {
+  const [paymentLedger, expenseLedger] = await Promise.all([
+    listEventPaymentLedgerForEvent(eventId),
+    listEventLedger(eventId),
+  ]);
+  return summarizeEventFinance(paymentLedger, expenseLedger);
+}
+
 
 
 
@@ -2901,19 +2962,44 @@ interface EventLedgerRow {
   description: string;
   amount: number | string;
   financial_code: string;
-  vendor_name: string | null;
+  vendor_name?: string | null;
   created_at: string;
 }
 
+/** Live schema has no vendor_name column — vendor is stored in description prefix. */
+const VENDOR_DESC_PREFIX = /^\[Vendor:\s*([^\]]+)\]\s*(.*)$/s;
+
+function parseVendorFromDescription(description: string): {
+  vendorName: string | null;
+  description: string;
+} {
+  const m = description.match(VENDOR_DESC_PREFIX);
+  if (!m) return { vendorName: null, description };
+  return {
+    vendorName: m[1].trim() || null,
+    description: m[2].trim() || description,
+  };
+}
+
+function formatEventLedgerDescription(
+  description: string,
+  vendorName?: string | null,
+): string {
+  const vendor = vendorName?.trim();
+  if (!vendor) return description;
+  return `[Vendor: ${vendor}] ${description}`;
+}
+
 function rowToEventLedger(r: EventLedgerRow): EventLedgerEntry {
+  const parsed = parseVendorFromDescription(r.description);
   return {
     id: r.id,
     eventId: r.event_id,
     transactionDate: r.transaction_date,
-    description: r.description,
+    description: parsed.description,
     amount: Number(r.amount ?? 0),
     financialCode: r.financial_code,
-    vendorName: r.vendor_name,
+    vendorName: r.vendor_name ?? parsed.vendorName,
     createdAt: r.created_at,
   };
 }
@@ -2938,14 +3024,15 @@ export interface NewEventLedger {
 }
 
 export async function insertEventLedger(input: NewEventLedger): Promise<void> {
-  const { error } = await supabase.from("event_financial_ledger").insert({
+  const row: Record<string, unknown> = {
     event_id: input.eventId,
     transaction_date: input.transactionDate,
-    description: input.description,
+    description: formatEventLedgerDescription(input.description, input.vendorName),
     amount: input.amount,
     financial_code: input.financialCode,
-    vendor_name: input.vendorName ?? null,
-  });
+  };
+
+  const { error } = await supabase.from("event_financial_ledger").insert(row);
   if (error) {
     console.error("[insertEventLedger] failed", error);
     throw error;
@@ -3329,6 +3416,13 @@ export interface StartTripInput {
   startOdometerKm: number;
   varianceReason?: string | null;
   /**
+   * Run direction for outing events (§12):
+   *   'outbound' — Depot → pickups → Venue. trip_return = 'none'; bus stays at venue.
+   *   'return'   — Venue → drop-offs → Depot. Roster filtered to return-bus passengers.
+   * Omit for legacy events (always builds full outbound + depot-return loop).
+   */
+  tripDirection?: "outbound" | "return";
+  /**
    * Where the bus departs from for this trip. Defaults to 'depot'.
    * Set to 'day_centre' when the bus is already parked at the Day Centre
    * (e.g. mid-day event, day trip starting from the centre).
@@ -3348,6 +3442,15 @@ export interface StartTripInput {
   startPoint?: StartPointChoice;
   /** Custom address when startPoint = 'alternate'. */
   alternateStartAddress?: string | null;
+  /**
+   * Return run only (§12.4.3a): where the bus is parked when the home run starts.
+   * Defaults to last itinerary stop for the trip day when omitted.
+   */
+  returnDepartPoint?: "last_itinerary_stop" | "alternate";
+  returnDepartLabel?: string | null;
+  returnDepartAddress?: string | null;
+  /** Calendar date (YYYY-MM-DD) for resolving last itinerary stop. */
+  returnSessionDate?: string | null;
 }
 
 /** Returns the most recent closing odometer (end_odometer_km) recorded across
@@ -3377,6 +3480,32 @@ export async function getLastEndOdometer(): Promise<number | null> {
   return raw == null ? null : Number(raw);
 }
 
+/** Last itinerary stop for a trip day — return-run departure anchor (§12.4.3a). */
+async function fetchLastItineraryStopForReturn(
+  eventId: string,
+  sessionDate: string,
+): Promise<{ label: string; address: string | null } | null> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("label_override, stop_order, venues(name, street_address)")
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .order("stop_order", { ascending: true });
+  if (error) throwPg("[startTrip:lastItineraryStop]", error);
+  const rows = data ?? [];
+  const last = rows[rows.length - 1] as
+    | {
+        label_override?: string | null;
+        venues?: { name?: string; street_address?: string | null } | null;
+      }
+    | undefined;
+  if (!last) return null;
+  const v = last.venues;
+  return {
+    label: (last.label_override ?? "").trim() || v?.name?.trim() || "Last stop",
+    address: v?.street_address?.trim() || null,
+  };
+}
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
   // 0. Defensive guard: if an active (not completed/cancelled) trip already
@@ -3410,13 +3539,22 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
 
   // 1. Build roster (ordered participants for this event) and pull every
   //    address signal needed for the 3-tier target_address fallback.
-  const { data: bookingRows, error: bookingErr } = await supabase
+  //    Filter by transport mode when a run direction is given (§12).
+  let bookingQuery = supabase
     .from("event_roster_bookings")
     .select(
-      "participant_id, trip_pickup_address_override, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "participant_id, trip_pickup_address_override, outbound_transport_mode, return_transport_mode, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("event_id", input.eventId)
+    .neq("booking_status", "Cancelled")
     .order("created_at", { ascending: true });
+  // NULL transport_mode means "bus" (JS default in rowToBooking).  Include both.
+  if (input.tripDirection === "outbound") {
+    bookingQuery = bookingQuery.or("outbound_transport_mode.eq.bus,outbound_transport_mode.is.null");
+  } else if (input.tripDirection === "return") {
+    bookingQuery = bookingQuery.or("return_transport_mode.eq.bus,return_transport_mode.is.null");
+  }
+  const { data: bookingRows, error: bookingErr } = await bookingQuery;
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
 
   type RosterEntry = {
@@ -3465,11 +3603,37 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   // 2. Resolve event venue.
   const { data: eventRow, error: eventErr } = await supabase
     .from("event_manifest")
-    .select("venue_name, title")
+    .select("venue_name, title, start_date")
     .eq("id", input.eventId)
     .single();
   if (eventErr) throwPg("[startTrip:event]", eventErr);
-  const venueLabel = (eventRow as { venue_name: string | null; title: string }).venue_name || (eventRow as { title: string }).title || "Venue";
+  const eventMeta = eventRow as { venue_name: string | null; title: string; start_date?: string };
+  let venueLabel = eventMeta.venue_name || eventMeta.title || "Venue";
+  let returnDepartAddress: string | null = null;
+
+  if (input.tripDirection === "return") {
+    const sessionDate =
+      input.returnSessionDate?.slice(0, 10) ??
+      eventMeta.start_date?.slice(0, 10) ??
+      new Date().toISOString().slice(0, 10);
+    if (input.returnDepartPoint === "alternate") {
+      venueLabel = input.returnDepartLabel?.trim() || "Starting point";
+      returnDepartAddress = input.returnDepartAddress?.trim() || null;
+    } else {
+      const preset =
+        input.returnDepartLabel?.trim()
+          ? {
+              label: input.returnDepartLabel.trim(),
+              address: input.returnDepartAddress?.trim() || null,
+            }
+          : null;
+      const lastStop = preset ?? (await fetchLastItineraryStopForReturn(input.eventId, sessionDate));
+      if (lastStop) {
+        venueLabel = lastStop.label;
+        returnDepartAddress = lastStop.address;
+      }
+    }
+  }
 
   // 3. Resolve which participants have active medication schedules.
   const participantIds = roster.map((p) => p.id);
@@ -3493,12 +3657,14 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     undefined,
     centreLabel,
   );
-  const tripReturn: TripReturn = tripOrigin;
+  // Outbound outing run: bus stays at venue; no return leg (mirrors Day Centre morning run).
+  const tripReturn: TripReturn = input.tripDirection === "outbound" ? "none" : tripOrigin;
   const originLabel = startLabel;
   const originAddress =
     resolveStartPointAddress(input.startPoint, undefined, depotAddr, centreAddr, alternateAddr) ??
     (tripOrigin === "depot" ? depotAddr : centreAddr);
   const returnAddress = originAddress;
+  const isReturn = input.tripDirection === "return";
 
   // 5. Insert trip row.
   const { data: tripRow, error: tripErr } = await supabase
@@ -3515,15 +3681,20 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
           : null,
       trip_origin: tripOrigin,
       trip_return: tripReturn,
-      origin_address: originAddress,
+      // Return run: origin_address = where the bus is parked at run start (last stop).
+      // Outbound / legacy: origin_address = depot or day-centre anchor.
+      origin_address: isReturn ? returnDepartAddress ?? null : originAddress,
     })
     .select("*")
     .single();
   if (tripErr) throwPg("[startTrip:insert]", tripErr);
   const trip = rowToTrip(tripRow as TripRow);
 
-  // 6. Build leg chain: [origin] → client1 → ... → clientN → venue → [origin].
-  //    Origin label is 'Depot' or 'Day Centre' depending on trip_origin.
+  // 6. Build leg chain.
+  //
+  //   Outbound (§12): [origin] → pax1 → … → paxN → venue.  Bus stays; no return leg.
+  //   Return  (§12): venue → pax1 → … → paxN → [origin].  Home run; passengers dropped off.
+  //   Legacy (no direction): [origin] → pax1 → … → venue → [origin].  Full loop.
   type LegSeed = {
     leg_kind: LegKind;
     from_label: string;
@@ -3534,52 +3705,95 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     target_address: string | null;
   };
   const seeds: LegSeed[] = [];
-  if (roster.length === 0) {
-    // No passengers: single positioning leg (origin → venue).
-    seeds.push({
-      leg_kind: "depot_to_client",
-      from_label: startLabel,
-      to_label: venueLabel,
-      from_participant_id: null,
-      to_participant_id: null,
-      medication_expected: false,
-      target_address: null,
-    });
-  } else {
-    for (let i = 0; i < roster.length; i++) {
-      const to = roster[i];
-      const from = i === 0 ? null : roster[i - 1];
+  const isOutbound = input.tripDirection === "outbound";
+
+  if (isReturn) {
+    // Return run: Venue → drop-offs → Depot.
+    if (roster.length === 0) {
       seeds.push({
-        leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
-        from_label: from ? from.name : startLabel,
-        to_label: to.name,
-        from_participant_id: from ? from.id : null,
-        to_participant_id: to.id,
-        medication_expected: medSet.has(to.id),
-        target_address: to.address,
+        leg_kind: "venue_to_depot",
+        from_label: venueLabel,
+        to_label: originLabel,
+        from_participant_id: null,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: returnAddress,
+      });
+    } else {
+      for (let i = 0; i < roster.length; i++) {
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1];
+        seeds.push({
+          leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+          from_label: from ? from.name : venueLabel,
+          to_label: to.name,
+          from_participant_id: from ? from.id : null,
+          to_participant_id: to.id,
+          medication_expected: false,
+          target_address: to.address,
+        });
+      }
+      const last = roster[roster.length - 1]!;
+      seeds.push({
+        leg_kind: "venue_to_depot",
+        from_label: last.name,
+        to_label: originLabel,
+        from_participant_id: last.id,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: returnAddress,
       });
     }
-    const last = roster[roster.length - 1];
-    seeds.push({
-      leg_kind: "client_to_venue",
-      from_label: last.name,
-      to_label: venueLabel,
-      from_participant_id: last.id,
-      to_participant_id: null,
-      medication_expected: false,
-      target_address: null,
-    });
+  } else {
+    // Outbound or legacy: [origin] → pickups → venue [→ origin].
+    if (roster.length === 0) {
+      seeds.push({
+        leg_kind: "depot_to_client",
+        from_label: startLabel,
+        to_label: venueLabel,
+        from_participant_id: null,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: null,
+      });
+    } else {
+      for (let i = 0; i < roster.length; i++) {
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1];
+        seeds.push({
+          leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+          from_label: from ? from.name : startLabel,
+          to_label: to.name,
+          from_participant_id: from ? from.id : null,
+          to_participant_id: to.id,
+          medication_expected: medSet.has(to.id),
+          target_address: to.address,
+        });
+      }
+      const last = roster[roster.length - 1]!;
+      seeds.push({
+        leg_kind: "client_to_venue",
+        from_label: last.name,
+        to_label: venueLabel,
+        from_participant_id: last.id,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: null,
+      });
+    }
+    // Return leg appended only for legacy (full-loop) runs; outbound bus stays at venue.
+    if (!isOutbound) {
+      seeds.push({
+        leg_kind: "venue_to_depot",
+        from_label: venueLabel,
+        to_label: originLabel,
+        from_participant_id: null,
+        to_participant_id: null,
+        medication_expected: false,
+        target_address: returnAddress,
+      });
+    }
   }
-  // Return leg: venue → origin.
-  seeds.push({
-    leg_kind: "venue_to_depot",
-    from_label: venueLabel,
-    to_label: originLabel,
-    from_participant_id: null,
-    to_participant_id: null,
-    medication_expected: false,
-    target_address: returnAddress,
-  });
 
   const legPayload = seeds.map((s, i) => ({
     trip_id: trip.id,
@@ -3947,7 +4161,7 @@ export async function startDayCentreRun(
   const direction = input.direction ?? "morning";
 
   // 0. Guard: reuse any existing active run for this driver + run code today.
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalIso();
   const { data: existingTrip, error: existingErr } = await supabase
     .from("transport_trips")
     .select("*")

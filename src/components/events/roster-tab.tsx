@@ -1,4 +1,5 @@
 import { Fragment, useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, HeartHandshake, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,16 +15,24 @@ import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
+import {
+  eventActualTransportKey,
+  fetchEventActualTransport,
+} from "@/lib/api/event-transport";
+import { EventTransportPair } from "./event-transport-badge";
 
 interface Props {
   event: EventManifest;
+  /** Passed through to EditRosterBookingModal for outing transport mode pickers. */
+  eventKind?: string;
 }
 
 function fmtMoney(n: number): string {
   return n.toLocaleString("en-AU", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
-export function RosterTab({ event }: Props) {
+export function RosterTab({ event, eventKind = "legacy" }: Props) {
+  const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
@@ -33,6 +42,13 @@ export function RosterTab({ event }: Props) {
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
   const { data: carersAll = [] } = useCarersRegistry();
+
+  const { data: actualTransport = new Map() } = useQuery({
+    queryKey: eventActualTransportKey(event.id),
+    queryFn: () => fetchEventActualTransport(event.id),
+    enabled: isOuting,
+    staleTime: 30_000,
+  });
 
   const carersById = useMemo(() => {
     const m = new Map<string, (typeof carersAll)[number]>();
@@ -211,6 +227,21 @@ export function RosterTab({ event }: Props) {
                               )}
                             </div>
                           )}
+                          {isOuting && (
+                            <EventTransportPair
+                              className="mt-0.5"
+                              outbound={
+                                actualTransport.get(b.participantId)?.outbound ??
+                                b.outboundTransportMode
+                              }
+                              return={
+                                actualTransport.get(b.participantId)?.return ??
+                                b.returnTransportMode
+                              }
+                              plannedOutbound={b.outboundTransportMode}
+                              plannedReturn={b.returnTransportMode}
+                            />
+                          )}
                           {b.notes && (
                             <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
                               “{b.notes}”
@@ -338,6 +369,7 @@ export function RosterTab({ event }: Props) {
         booking={editBookingWithLedger}
         eventTitle={event.title}
         eventTicketPrice={event.ticketPrice}
+        eventKind={eventKind}
       />
 
       {noShowFor && (

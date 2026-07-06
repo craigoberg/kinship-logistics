@@ -1,0 +1,18 @@
+---
+description: Persistent product/engineering backlog — docs/BACKLOG.md
+alwaysApply: true
+---
+
+# Project backlog
+
+**File:** `docs/BACKLOG.md`
+
+Use this for **future work, policy questions, and deferred decisions** that must survive chat sessions (e.g. trip vendor registry vs free text, Security RBAC workshop, multi-day tour testing).
+
+When the user asks about the **backlog**, **priorities**, **what's left**, or asks to **add / track / mark done** an item:
+
+1. Read `docs/BACKLOG.md` first.
+2. Update it when new items are agreed (keep IDs BL-xxx; use status: discuss · ready · blocked · deferred · done).
+3. Do **not** merge with `GUARDRAIL-DRIFT-REPORT.md` — that file is technical drift audit; backlog is product and planning.
+
+**Not in backlog:** Locked build rules in `docs/architecture/GUARDRAILS.md`.

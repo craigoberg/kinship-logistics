@@ -13,6 +13,13 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { LookupSelect } from "@/components/lookups/lookup-select";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -23,8 +30,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { cn } from "@/lib/utils";
+import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { useInsertEvent, usePriorEventsForClone } from "@/hooks/use-supabase-data";
+import { useQuery } from "@tanstack/react-query";
+import { listVenues } from "@/lib/api/venues";
+import { inferEventKind } from "@/lib/api/event-outing";
+import { DatePicker } from "@/components/ui/date-picker";
 
 interface Props {
   open: boolean;
@@ -40,6 +51,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const [title, setTitle] = useState("");
   const [eventTypeCode, setEventTypeCode] = useState("");
   const [venue, setVenue] = useState("");
+  const [primaryVenueId, setPrimaryVenueId] = useState<string | null>(null);
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState("");
   const [ticketPrice, setTicketPrice] = useState("0.00");
@@ -49,12 +61,18 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEvent();
   const { data: priorEvents = [], isLoading: priorLoading } = usePriorEventsForClone();
+  const { data: venues = [] } = useQuery({
+    queryKey: ["venues", "active"],
+    queryFn: () => listVenues("active"),
+    staleTime: 60_000,
+  });
 
   useEffect(() => {
     if (open) {
       setTitle("");
       setEventTypeCode("");
       setVenue("");
+      setPrimaryVenueId(null);
       setStartDate(todayIso());
       setEndDate("");
       setTicketPrice("0.00");
@@ -68,6 +86,21 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
     () => priorEvents.find((e) => e.id === sourceEventId) ?? null,
     [priorEvents, sourceEventId],
   );
+
+  const resolvedEndDate = endDate && endDate.length === 10 ? endDate : startDate;
+
+  const scopeKind = useMemo(
+    () =>
+      inferEventKind({
+        startDate,
+        endDate: resolvedEndDate,
+        eventTypeCode,
+        primaryVenueId,
+      }),
+    [startDate, resolvedEndDate, eventTypeCode, primaryVenueId],
+  );
+
+  const isOuting = scopeKind !== "legacy";
 
   const priceNumber = Number(ticketPrice);
   const valid = useMemo(
@@ -85,17 +118,18 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      const resolvedEndDate = endDate && endDate.length === 10 ? endDate : startDate;
       await mutation.mutateAsync({
         title: title.trim(),
         eventTypeCode,
-        venue: venue.trim(),
+        venue: venue.trim() || (venues.find((v) => v.id === primaryVenueId)?.name ?? ""),
         startDate,
         endDate: resolvedEndDate,
         ticketPrice: priceNumber,
         description: description.trim() || null,
         status: "Planning",
         cloneFromEventId: sourceEventId,
+        eventKind: scopeKind,
+        primaryVenueId,
       });
       toast.success(
         selectedSource
@@ -265,14 +299,58 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
               )}
             </div>
 
+            {/* Trip scope — derived from dates + event type (§12.3.1) */}
+            <div className="rounded-lg border bg-muted/20 px-3 py-2.5 text-sm">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Trip scope
+              </p>
+              <p className="mt-1 font-medium">
+                {scopeKind === "multi_day_tour"
+                  ? "Multi-day tour"
+                  : scopeKind === "single_day_outing"
+                    ? "Single-day outing"
+                    : "Centre-linked event"}
+              </p>
+              {isOuting && (
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Outing types use the Venue Registry, itinerary, and trip-day rolls (§12).
+                </p>
+              )}
+            </div>
+
+            {/* Primary venue (outings) */}
+            {isOuting && (
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Primary venue
+                </Label>
+                <Select
+                  value={primaryVenueId ?? ""}
+                  onValueChange={(v) => { mark(setPrimaryVenueId)(v || null); }}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select from registry…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {venues.map((v) => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.name}{v.venue_type ? ` · ${v.venue_type}` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+
+            {/* Venue name (free-text fallback for legacy / display label override) */}
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Venue
+                {isOuting ? "Venue display label (optional override)" : "Venue"}
               </Label>
               <Input
                 value={venue}
                 onChange={(e) => mark(setVenue)(e.target.value)}
-                placeholder="e.g. Bondi Pavilion"
+                placeholder={isOuting ? "Leave blank to use registry name" : "e.g. Bondi Pavilion"}
               />
             </div>
 
@@ -281,20 +359,20 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Start date
                 </Label>
-                <Input
-                  type="date"
-                  value={startDate}
-                  onChange={(e) => mark(setStartDate)(e.target.value)}
+                <DatePicker
+                  value={parseIsoDateLocal(startDate)}
+                  onChange={(d) => d && mark(setStartDate)(toIsoDateString(d))}
+                  placeholder="Pick start date"
                 />
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   End date (optional)
                 </Label>
-                <Input
-                  type="date"
-                  value={endDate}
-                  onChange={(e) => mark(setEndDate)(e.target.value)}
+                <DatePicker
+                  value={parseIsoDateLocal(endDate || undefined)}
+                  onChange={(d) => mark(setEndDate)(d ? toIsoDateString(d) : "")}
+                  placeholder={formatDate(startDate)}
                 />
               </div>
             </div>

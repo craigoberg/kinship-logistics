@@ -3,6 +3,7 @@ import { Plus, Search, BadgeDollarSign, Wallet, TrendingUp } from "lucide-react"
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useEventLedger, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
+import { summarizeEventFinance } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
 import type { EventManifest } from "@/lib/data-store";
 import { LogEventExpenseModal } from "./log-event-expense-modal";
@@ -25,16 +26,14 @@ export function EventFinanceTab({ event }: Props) {
   const { data: ledger = [], isLoading, error } = useEventLedger(event.id);
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
 
-  const revenue = useMemo(
-    () => paymentLedger.reduce((s, entry) => Number((s + entry.amount).toFixed(2)), 0),
-    [paymentLedger],
-  );
-  const expenses = useMemo(
-    () =>
-      ledger.reduce((s, e) => (e.amount < 0 ? s + e.amount : s), 0), // negative sum
-    [ledger],
-  );
-  const net = revenue + expenses;
+  const { revenue, expenses, net } = useMemo(() => {
+    const totals = summarizeEventFinance(paymentLedger, ledger);
+    return {
+      revenue: totals.ticketRevenue,
+      expenses: totals.vendorExpenses,
+      net: totals.netPnl,
+    };
+  }, [paymentLedger, ledger]);
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();

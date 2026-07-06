@@ -68,6 +68,18 @@ export type AnomalyContext =
       }) => void;
       /** Pre-trip RED — parent opens VerbalAuthOverrideDialog. */
       onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
+    }
+  | {
+      /**
+       * Event-day coordinator context (§12.6).
+       * Issues are written to site_issues_register with event_id and
+       * event_day_session_id set. RED hands off to VerbalAuthOverrideDialog
+       * via onRedRequested, same as site-day.
+       */
+      kind: "event-day";
+      eventId: string;
+      eventDaySessionId: string;
+      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
     };
 
 interface Props {
@@ -145,7 +157,9 @@ export function LogAnomalyModal({
   const storageKey =
     context.kind === "site-day"
       ? `site-day-anomaly:${context.sessionId}`
-      : `pre-trip-anomaly:${context.asset.id}:${context.dateStr}`;
+      : context.kind === "event-day"
+        ? `event-day-anomaly:${context.eventDaySessionId}`
+        : `pre-trip-anomaly:${context.asset.id}:${context.dateStr}`;
   const form = usePersistedForm<AnomalyDraft>(
     storageKey,
     makeInitial(defaultSeverity ?? "yellow"),
@@ -195,6 +209,24 @@ export function LogAnomalyModal({
         return { kind: "pre-trip", severity: values.severity } as const;
       }
 
+      // ---------- Event-day context (§12.6) ----------
+      if (context.kind === "event-day") {
+        if (values.severity === "red") {
+          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
+          return { kind: "event-day-red" as const };
+        }
+        const issue = await createIssue({
+          sessionId: null,
+          severity: values.severity,
+          issueDescription: values.description.trim(),
+          workaroundPlan,
+          owner: DEFAULT_OWNER,
+          eventId: context.eventId,
+          eventDaySessionId: context.eventDaySessionId,
+        });
+        return { kind: "event-day" as const, issue, eventDaySessionId: context.eventDaySessionId };
+      }
+
       // ---------- Site-day context (default / legacy) ----------
       const sId = context.sessionId;
 
@@ -217,8 +249,16 @@ export function LogAnomalyModal({
       return { kind: "site-day" as const, issue };
     },
     onSuccess: (result) => {
-      if (result.kind === "site-day-red") {
+      if (result.kind === "site-day-red" || result.kind === "event-day-red") {
         // Parent opens VerbalAuthOverrideDialog; just close the modal.
+        reset();
+        onOpenChange(false);
+        return;
+      }
+      if (result.kind === "event-day") {
+        queryClient.invalidateQueries({ queryKey: ["event-day-issues", result.eventDaySessionId] });
+        queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+        toast.success(`${result.issue.severity.toUpperCase()} issue logged on event day.`);
         reset();
         onOpenChange(false);
         return;

@@ -185,14 +185,41 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 
 ### 5.3 User Interface Time Conventions
 
-- Display Layer Timezones: All user-facing dates and timestamps must interpret using the client browser's local timezone context. Timestamps must be wrapped inside the SSR-safe <ClientTime iso="{...}"/> component or the useClientFormattedDate hook found in src/components/ui/client-time.tsx to completely safeguard against React hydration mismatches. Never render raw toISOString() strings directly to users.
-- Storage Layer Timezones: All persistence vectors, database indices, and Supabase hooks strictly utilize UTC ISO string formats (new Date().toISOString()).
+**Canonical helpers:** `src/lib/utils.ts` — `formatDate`, `formatTime`, `formatDateTime`, `parseIsoDateLocal`, `toIsoDateString`, `todayLocalIso`, `REGIONAL_DATE_FORMAT`.  
+**SSR-safe timestamps:** `src/components/ui/client-time.tsx` — `<ClientTime iso="…" />` / `useClientFormattedDate`.  
+**Calendar inputs:** `src/components/ui/date-picker.tsx` — canonical `DatePicker` with `REGIONAL_DATE_FORMAT`.
+
+#### Local timezone (mandatory)
+
+- **Display:** All user-facing dates and times are interpreted in the **browser's local timezone** (operators work in Australia/Sydney context; the client clock is authoritative for “today”).
+- **Calendar-date logic:** Guards and comparisons against stored calendar dates (`event_manifest.start_date`, “is today”, roster dates, etc.) must use **`todayLocalIso()`** or **`toIsoDateString(localDate)`** — never `new Date().toISOString().slice(0, 10)`, which is UTC and can be **one day behind** local time before midday UTC+10.
+- **Instant timestamps:** Full ISO instants from Supabase (`created_at`, `checked_in_at`, …) are stored UTC. Render them through `<ClientTime />` or `formatDateTime()` so the user sees local wall-clock time.
+- **Never** render raw `toISOString()` strings to operators.
+
+#### Display formats (mandatory)
+
+| Kind | Format | Example | Helper |
+| :-- | :-- | :-- | :-- |
+| **Date only** | `dd-Mmm-yy` | `06-Jul-26` | `formatDate()` · `DatePicker` · `REGIONAL_DATE_FORMAT` |
+| **Time only** | 24-hour `hh:mm` | `08:43` | `formatTime()` |
+| **Date + time** | `dd-Mmm-yy / hh:mm` | `06-Jul-26 / 08:43` | `formatDateTime()` · `<ClientTime />` (default) |
+
+- Month abbreviations use three-letter English caps (`Jan` … `Dec`).
+- Time is **24-hour**, zero-padded, **no seconds** unless a compliance audit explicitly requires them.
+- Do **not** use native `<input type="date">` or `<input type="time">` in operator-facing forms — they render locale-dependent controls that conflict with this standard.
+
+#### Storage layer (unchanged)
+
+- **Instants:** UTC ISO strings (`new Date().toISOString()`) for `timestamptz` columns and ledger metadata.
+- **Calendar dates:** Plain **`YYYY-MM-DD`** strings in the database (`event_manifest.start_date`, `end_date`, session dates, etc.). Only the **display layer** uses `dd-Mmm-yy`; parsing back from pickers uses `parseIsoDateLocal` / `toIsoDateString` without UTC day-shift.
 
 ---
 
 ## 6. Upcoming Module Context (Future Horizons)
 
 When architecting or laying data foundations for upcoming features, you must automatically inject all existing guardrails (Session derivation, 20-character limits, thick red borders, and automated NDIS ledger writing):
+
+> **Venue registry, out-of-centre outings, and multi-day tours** are specified in **§12** (effective 2026-07-04). New work on those modules must comply with §12 before shipping.
 
 ### 6.1 Continuous Improvement & Procedural Review Pipeline
 
@@ -373,6 +400,8 @@ Per §3 of this document, the verbal RED consultation flow must **not** use real
 
 > Status: Permanent Build Requirement. Applies to **Day Centre bus runs**, **single-day event trips**, and **multi-day event trips** wherever the driver uses `/manifest`. Future transport UI must extend this pattern — not replace it with alternate pre-start lists or reorder panels.
 
+> **Coordinator-side outing workflows** (venue registry, event-floor rolls, bus boarding rolls, curfew, Trip Report) are specified in **§12** — not in this section. §11 covers the **driver** manifest only.
+
 This section locks the end-to-end workflow for selecting a run, choosing a starting point, opening the manifest, and rearranging stops during the drive. The same `ActiveTripScreen`, `StartPointPicker`, and `reorderTripPickupLegs` pipeline is the canonical experience across run types.
 
 ### 11.1 Initialize Wizard (Steps 1–3)
@@ -523,3 +552,409 @@ Differences that are **violations**:
 ### Amendment Process (§11)
 
 > **2026-06-30 — Project owner directive:** Step 3 run/start workflow and in-manifest drag reorder locked as specified in §11. Pre-start pickup lists removed. Drivable-chain label recompute mandatory on reorder. Consistent across Day Centre runs and event trips (including multi-day event contexts per §9 exception carry-over).
+
+---
+
+## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended same day — Day Centre parity)
+
+> Status: Permanent Build Requirement. Applies to **out-of-centre single-day outings**, **multi-day tours**, and the **Venue Management** registry. Extends §11 (driver manifest) and Day Centre patterns (`client_attendance_log`, `site_day_sessions`) — **same cadence, temporary centre at the venue**. Does **not** replace Day Centre modules.
+
+These trips are **not NDIS-funded**. Safety, auditability, and internal P&L reporting are the goals. Reuse the existing **Events** module (`event_manifest`, `event_roster_bookings`, `event_financial_ledger`, Finance tab) for revenue and expenses. Do **not** build a parallel finance subsystem.
+
+### 12.1 Design Principles
+
+> **2026-07-04 (amendment) — Project owner directive:** Outings follow **Day Centre parity**. Transport to/from the venue is a **separate activity** from the **event floor** at the venue. The cinema, hotel, or park is a **temporary centre**. **Hard open** when the trip leader opens the location; **hard close** when departure handover is complete. No soft open/close unless a legal requirement applies.
+
+| Principle | Rule |
+| :-- | :-- |
+| **Centre parity** | Single-day and multi-day outings use the **same separation** as Day Centre: **transport** (bus runs, manifests) vs **site** (leader open, arrival roll, program, departure handover, close). Events are **not** a different operational model. |
+| **Two accountability layers** | **Transport layer:** `event_bus_manifest` + §11 driver manifest — who is on **this bus for this leg**. **Event-floor layer:** `event_attendance_log` (planned; mirrors `client_attendance_log`) — who has **arrived at / departed from** the temporary centre. **Neither layer substitutes for the other.** |
+| **Hard open = event starts** | Trip leader **opens the location** (Manager PIN + on-the-day venue checks, parallel to Day Centre open). **RED blocks open** — buses may be turned around; self-transport contacted. Kinship transport may start **hours before** open; that does **not** start the event. |
+| **Hard close = handover done** | Trip leader **closes the location** after **departure handover** — every participant on assigned return transport (bus / self). Leader **does not** wait for the last home drop-off. |
+| **Transport home** | Return legs completed and reconciled via §11 manifest (parallel to Day Centre going-home logging). **`event_manifest` → Closed** is not blocked on the last drop-off completing. |
+| **Venue safety (planning) ≠ live roll** | Registry baseline sign-off (§12.2) is **planning/compliance**. Live rolls are §12.4 event-floor + bus boarding + curfew/morning (multi-day). |
+| **One hop = one trip** | Each venue leg (Hotel → Park → Cinema → Hotel) is exactly **one** `transport_trip` with its own manifest lifecycle per §11. |
+| **Check on at bus boarding** | Before every hop **depart**, every expected bus traveller is checked **onto the bus** — transport accountability for that leg only. |
+| **Group hop arrival** | When the **whole group** travels together on one bus, **no per-person event-floor check-in at the hop destination** — group presence is implied unless an incident was logged en route. |
+| **Self-transport** | Permitted **only** on **first day inbound** and **last day outbound** (roster + API). Self arrivals are checked in on the **event-floor roll** as they arrive at the venue. |
+| **Trip leader on duty** | A **Manager** (or Coordinator with manager-equivalent PIN per §7) must be assigned to **`event_day_sessions`** for each calendar day before Confirm. UI label: **Trip leader** (not “Day Centre manager”). |
+| **Ledger on every mutation** | Event-floor check-in/out, bus boarding, curfew/morning account, location open/close, venue baseline sign-off — all receipt to `operational_ledger` via `writeToLedger()` / `writeToLedgerOrThrow()` per §1.1. |
+| **Finance reuse** | Ticket revenue, booking payments, and vendor expenses stay on the existing Event Finance tab; Trip Report aggregates them (§12.8). |
+
+### 12.2 Venue Registry & Variable Safety Templates
+
+#### 12.2.1 Managed venues
+
+All recurring destinations (clubs, hotels, cinemas, parks, museums) live in a **Venue Management** registry — not as free-text-only `venue_name` on events.
+
+| Field class | Examples |
+| :-- | :-- |
+| Identity | Name, venue type, status (`active` / `archived`) |
+| Location | Street address, GPS pin, access notes |
+| Operations | Site contact, max safe group size, risk tier |
+| Safety | Linked template + baseline sign-off record |
+
+Events must reference venues via FK (`primary_venue_id`, `event_venue_stops.venue_id`). Legacy `venue_name` text may remain as a display fallback during migration only.
+
+#### 12.2.2 Variable template model (competency-style fields)
+
+Venue safety uses a **field-definition** model — not a fixed pass/fail checklist only:
+
+| Concept | Behaviour |
+| :-- | :-- |
+| **`venue_template_fields`** | Prompt (e.g. “Wheelchair ramps?”), `answer_type` (`yes_no`, `text`, `number`, `select`), optional `options_json`, `is_mandatory`, `sort_order` |
+| **System mandatory core** | Shipped defaults (access ramps, accessible toilet, emergency exits, evacuation point, max group size, site contact briefed). Org may add custom fields. |
+| **Baseline sign-off** | Manager PIN + evidence reference (§4.3 `CharacterCountedInput`) + ledger receipt. Answers stored per venue in `venue_safety_answers`. |
+| **Per-event reconfirmation** | Lightweight “still valid for this trip?” before event status → `Confirmed`. Required when baseline age exceeds configured threshold. |
+| **Clone template** | Copying from Venue A → new Venue B copies **field structure only** — **never** copies answered values. New venue requires fresh baseline sign-off. |
+
+Anti-patterns:
+
+- One-off free-text venue safety notes with no template linkage
+- Cloning a hotel and inheriting another hotel’s answered checklist
+- Using **event-floor check-in** as a substitute for **bus boarding** check (or vice versa)
+- Treating “bus left depot” as **event open**
+- Requiring the trip leader to **wait for last home drop-off** before close
+
+#### 12.2.3 Canonical UI (when built)
+
+| Surface | Purpose |
+| :-- | :-- |
+| Admin → **Venues** tab | CRUD, template edit, baseline sign-off, clone-from-venue |
+| Event planning | Pick stops from venue pool; block **Confirmed** until reconfirmations satisfied |
+
+### 12.3 Trip Planning — Reuse Existing Events Module
+
+#### 12.3.1 Event kinds and trip-day scope
+
+Extend `event_manifest` (do not fork):
+
+| `event_kind` | Scope | How it is set |
+| :-- | :-- | :-- |
+| `single_day_outing` | One calendar day; ordered venue hops | **Derived:** outing `event_type` (excursion / tour / trip) and `start_date` = `end_date` |
+| `multi_day_tour` | `start_date` … `end_date`; base hotel + daily hops | **Derived:** same outing types when `end_date` > `start_date` |
+| `legacy` | Existing centre-linked events unchanged until migrated | Non-outing event types only |
+
+**Rules (locked 2026-07-06):**
+
+- Operators do **not** pick “Standard event vs outing” separately from dates. **Start date** and **end date** (optional — mirrors start when blank) define the calendar span; **event type** (e.g. Single Day Excursion) determines whether §12 outing modules apply.
+- **`event_day_sessions`** rows are **auto-seeded** from `start_date`…`end_date` on save and before Confirm — no manual “Seed trip days” step.
+- **`event_venue_stops`** are **auto-seeded** from **Primary venue** (one stop per calendar day with no itinerary yet) on save and before **Open** — managers may add/reorder extra hops on the **Itinerary** tab.
+- **Confirm** still requires a **trip leader** (`manager_staff_id`) on every calendar day in range — assign on the **Trip days** tab.
+
+#### 12.3.2 Roster — `event_roster_bookings` (reuse)
+
+| Field / behaviour | Rule |
+| :-- | :-- |
+| Participant booking | Existing flow — revenue, medical snapshot, payments |
+| **`brings_carer` / `carer_id` / `carer_transport_required`** | **Mandatory support** — carers on trips when rostered; carer appears on bus manifest when transport required |
+| **Outbound transport** | `bus` \| `self` — self only on **first day inbound** |
+| **Return transport** | `bus` \| `self` — self only on **last day outbound** |
+| Mid-trip legs | **Bus only** — API must reject self-transport on intermediate hops |
+
+#### 12.3.3 Itinerary — ordered hops
+
+**`event_venue_stops`** defines the day’s sequence (e.g. Hotel → Park → Museum → Movies → Hotel). Each adjacent pair becomes **one transport trip** at runtime (§12.4).
+
+#### 12.3.4 Trip leader assignment
+
+**`event_day_sessions.manager_staff_id`** (UI: **Trip leader**) is required before `event_manifest.status` → **Confirmed**. **Open location** and **close location** require **Manager PIN** (`PinReauthDialog` + `isManagerProfile()`). This is the accountable leader for the **event floor** that day — they may or may not be a bus driver.
+
+Getting participants to the venue may involve Kinship buses, multiple buses, or external/self transport — that is **transport planning**, not a substitute for trip leader assignment.
+
+### 12.4 Event Day Session, Event Floor & Transport Accountability
+
+#### 12.4.0 Centre parity model (authoritative)
+
+Outings mirror Day Centre with the venue as a **temporary centre**:
+
+| Layer | Day Centre | Outing equivalent |
+| :-- | :-- | :-- |
+| **Transport in** | Bus runs → centre | Bus runs / self → venue (may start before event open) |
+| **Site open** | Manager opens centre | Trip leader **opens location** (hard) |
+| **Arrival roll** | `client_attendance_log` — tap as each person arrives | `event_attendance_log` — tap as each person arrives (bus unload or self) |
+| **During program** | Floor accountability | Trip leader at venue |
+| **Overnight** | N/A at centre | **Curfew + morning** at base hotel (multi-day) — §12.5 |
+| **Daily bus hops** | N/A | Check **onto bus** at boarding; group arrival at next stop (no per-person floor check-in) |
+| **Departure handover** | Checkout — who is on which transport | Same — assigned return bus / self |
+| **Site close** | Manager closes centre | Trip leader **closes location** (hard) |
+| **Transport home** | Driver manifest | §11 return manifest — leader not blocked on last drop-off |
+
+There is **no soft open/close** for the event floor unless a legal requirement mandates it.
+
+#### 12.4.1 Location lifecycle — `event_day_sessions`
+
+**`event_day_sessions`** — one row per event per **calendar day** (UI: **Trip day**, not “Day Centre session”):
+
+| Phase | Meaning |
+| :-- | :-- |
+| `planning` | Roster, itinerary, trip leader assigned; location not yet open |
+| `active` | Trip leader **opened location** — event floor live; arrival roll active |
+| `in_transit` | *(Optional UI phase)* Group between floor sessions on a bus hop — transport layer active |
+| `at_base` | Multi-day: group at base hotel between daily activities |
+| `closed_orderly` | Trip leader **closed location** after departure handover; manager PIN + ledger |
+| `closed_incident` | Closed with open RED — Trip Report flags incident |
+
+**Open location (hard):**
+
+1. On-the-day venue checks (access, toilets, lifts, exits — may reference §12.2 baseline).
+2. **RED** from failed checks or open blocking issues → **cannot open**; coordinate transport turnaround / self-transport contact.
+3. Manager PIN → phase `active` → ledger receipt `EVENT_LOCATION_OPENED`.
+
+**Close location (hard):**
+
+1. **Departure handover** complete — every rostered participant on assigned return transport (bus A / bus B / self).
+2. Manager PIN → phase `closed_orderly` or `closed_incident` → ledger receipt `EVENT_LOCATION_CLOSED`.
+3. Leader **may leave** — return transport reconciliation continues via §11 (does not block step 2).
+
+Coordinators run **event-floor** and **bus boarding** rolls. Trip leader owns **open/close** and escalation clearance.
+
+#### 12.4.2 Event-floor roll — `event_attendance_log` (planned)
+
+Mirrors **`client_attendance_log`** (`src/lib/api/client-attendance.ts`, `attendance-roll-panel.tsx`):
+
+| Column / concept | Purpose |
+| :-- | :-- |
+| `event_day_session_id` | Which trip day |
+| `participant_id` / `carer_id` | Who is expected on the event floor |
+| `arrival_method` | `bus` \| `private` \| `walk_in` \| `other` — from roster + operator tap |
+| `status` | `expected` \| `checked_in` \| `checked_out` \| `absent` |
+| `checked_in_at` / `checked_in_by` | Tap when person **arrives at the venue** — async; buses and cars at different times |
+| `checked_out_at` | Tap at **departure handover** when assigned to return transport |
+| Escalation fields | Optional YELLOW→RED for overdue arrival (same semantics as centre) |
+
+**Rules:**
+
+1. Seed from `event_roster_bookings` when trip leader opens location (or on first open).
+2. **Check-in as they arrive** — multiple buses and self-transport at different times.
+3. **Departure handover** at close — checkout each participant to return transport option.
+4. Self-transport inbound: checked in on **event floor only** (not on bus manifest for that leg).
+
+#### 12.4.3 Bus boarding roll — `event_bus_manifest`
+
+Transport accountability only — keyed by `event_day_session_id` + `transport_trip_id`:
+
+| Column | Purpose |
+| :-- | :-- |
+| `participant_id` / `carer_id` | Who is expected on **this bus for this leg** |
+| `status` | `expected` \| `on_bus` \| `not_travelling` |
+| `checked_on_at` / `checked_on_by` | Tap when **boarding** — §4.4 fat-finger cards |
+
+**Rules:**
+
+1. **Every venue hop = one new `transport_trip`** (`trip_kind` e.g. `event_venue_hop`). Driver uses §11 manifest for that hop only.
+2. Trip leader or coordinator completes **bus boarding roll before driver Depart Stop**.
+3. **Depart gate:** all expected → `on_bus`; no active RED lock on trip day; optional manager PIN on depart.
+4. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
+5. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
+
+#### 12.4.3a Outbound vs. return runs — two separate manifests
+
+For single-day outings and every day of a multi-day tour, **transport is always two separate §11 manifests**:
+
+| Run | `trip_return` | Leg chain | When created |
+| :-- | :-- | :-- | :-- |
+| **Outbound** | `none` | Depot → pickups → Venue. Bus **stays at venue**. | Coordinator / driver at run-start (select *Outbound*) |
+| **Return** | `depot` | Venue → drop-offs → Depot. | Coordinator creates **after** departure handover starts |
+
+**Rules:**
+
+1. **Outbound manifest ends at the venue** — the driver completes the last leg (`client_to_venue`) and the bus parks/waits. No `venue_to_depot` leg is generated.
+2. The bus may remain at the venue, park nearby, or reposition to another address — the coordinator updates the driver's status note if repositioning.
+3. **Return manifest** is a new trip started from the "One-off Event" tab with *Return home* selected. Only participants with `return_transport_mode = 'bus'` are included in the leg chain.
+4. A legacy event (not inferred as an outing) still gets the full loop (outbound + return) in a single manifest — existing behaviour is preserved.
+
+#### 12.4.4 Single-day flow (reference — e.g. Movies)
+
+```
+Planning: roster, itinerary, trip leader assigned → Confirm event
+
+Transport IN — outbound manifest (trip_return = none):
+  → Driver: One-off Event tab → select event → direction = Outbound → start run
+  → Manifest: Depot → pax1 → … → Venue   (bus stays at venue — no return leg)
+  → Self-transport passengers travel direct to venue
+
+Trip leader at venue:
+  → On-the-day venue checks → RED blocks open
+  → OPEN location (hard) — event starts
+  → Event-floor roll: check in each person as they arrive (bus or car)
+
+During program:
+  → Trip leader accountable; LogAnomalyModal available
+
+End of program:
+  → Departure handover: each person → return bus / self
+  → CLOSE location (hard) — trip leader done
+
+Transport HOME — return manifest (separate trip, trip_return = depot):
+  → Coordinator/driver: One-off Event tab → select event → direction = Return home → start run
+  → Manifest: Venue → pax1 → … → Depot   (bus passengers only, per return_transport_mode)
+  → Reconcile manifest / checkout (parallel to Day Centre going home)
+  → Close event when trip days + finance guards satisfied
+```
+
+#### 12.4.5 Multi-day flow (reference)
+
+| Moment | Roll / action |
+| :-- | :-- |
+| **Day 1 — arrive at first stop** | Transport in (bus/self) → trip leader **opens location** → **event-floor check-in** (handover from transport) |
+| **Staying at venue until curfew** | No constant re-check-in — **curfew roll** (bedtime) + **morning roll** (breakfast) at base only — §12.5 |
+| **Daily bus hops** | **Boarding roll** when getting on bus → drive → group arrival at next location (no per-person floor check-in at destination) |
+| **Return to hotel** | Boarding roll → if no incident en route, group back at base |
+| **Between days** | Repeat open/hops/curfew/morning pattern |
+| **Last day** | Morning roll (if applicable) → program → departure handover → **close location** → return transport home → **close event** |
+
+Mid-trip **self-drive is prohibited** except first inbound and last outbound (§12.3.2).
+
+#### 12.4.6 `event_manifest.status` vs location open/close
+
+| Concept | Table / field | Meaning |
+| :-- | :-- | :-- |
+| **Planning / Confirm / Open / Closed** | `event_manifest.status` | **Office lifecycle** — roster ready, trip authorised, finance lock at end |
+| **Open / close location** | `event_day_sessions.phase` | **Operational floor** — trip leader has opened/closed the temporary centre that day |
+
+`event_manifest.status` → **Open** authorises transport and coordinator workflows; **the event floor starts** only when trip leader **opens location** (`active`). Do not conflate the two.
+
+### 12.5 Curfew & Morning Rolls — YELLOW → RED → SMS
+
+Multi-day **curfew** and **morning** accountability mirror **`client_attendance_log`** escalation semantics (`src/lib/api/client-attendance.ts`):
+
+| Mechanism | Rule |
+| :-- | :-- |
+| **Expected time** | From event config (`curfew_time`, `morning_roll_time`) |
+| **YELLOW** | Approaching / soft overdue — logged; visible on event day dashboard |
+| **RED** | Hard overdue — same issue row promoted (never duplicated) |
+| **SMS at RED** | Dispatch via internal route (parallel to `attendance-sms` / `departure-sms` patterns) |
+| **Thresholds** | `system_parameters`: e.g. `event_curfew_yellow_mins_before`, `event_curfew_red_mins_after`, `event_curfew_red_sms_recipients` |
+| **Background sweep** | Same 60 s sweep pattern as Day Centre arrival — promotes rows and fires SMS once |
+
+Curfew breach is **RED + SMS**, not a silent log entry.
+
+Tables (when migrated): `event_curfew_log`, `event_morning_log` — columns analogous to `escalation_severity`, `escalation_issue_id`, `red_sms_dispatched_at` on `client_attendance_log`.
+
+### 12.6 Issues, RED & ActiveIssuesRegister
+
+- **`LogAnomalyModal`** / verbal RED path (§3) must be available on every event day coordinator screen.
+- Issue context metadata must include: `event_id`, `event_day_session_id`, `transport_trip_id` (optional), `venue_id` (optional).
+- **`ActiveIssuesRegister`** (§9) embeds on event day workspace — same Amber / Grey / Hidden lifecycle.
+- RED lock may block **Open location**, **Depart Stop**, and **Close location** until manager resolution or documented verbal workaround.
+
+### 12.7 Manage Actions — Resolve vs Log Note (Compliance Parity)
+
+Outing **compliance renewals** use the same two-button pattern as Governance Manage dialogs:
+
+| Action | Effect |
+| :-- | :-- |
+| **Log Note** | Timeline append or defer; evidence optional |
+| **Resolve** | Note + next expiry + evidence + **archive** asset; cannot run while defer selected |
+| **Cancel** | Close form with no writes (outline button — not “Close asset”) |
+
+This § applies to `compliance_assets` tied to trip infrastructure where relevant; outing operational rolls use §12.4–§12.5 actions instead.
+
+### 12.8 Trip Report & Finance (Reuse Event Booking)
+
+#### 12.8.1 Finance — no duplicate ledger
+
+| Existing asset | Trip use |
+| :-- | :-- |
+| `event_roster_bookings` | Attendee revenue, carer flags, transport modes |
+| `event_financial_ledger` + Finance tab | Vendor expenses (venue hire, tickets, meals, transport) |
+| `recordEventPaymentMilestone` | Payment tracking |
+
+NDIS claim generation is **out of scope** for these trips. Internal P&L only.
+
+#### 12.8.2 Trip Report (aggregate read model)
+
+When an event moves to **`Closed`**, generate a **Trip Report** view (export/PDF later) aggregating:
+
+1. **Summary** — title, dates, manager on duty, headcount (participants + carers)
+2. **P&L** — revenue, expenses, net (from Finance tab queries)
+3. **Itinerary** — completed hops + venue names from registry
+4. **Attendance** — event-floor check-in/out, transport modes, bus boarding, no-shows
+5. **Issues & incidents** — `site_issues_register` / hub notes filtered by event context
+6. **Curfew / morning breaches** — multi-day only
+7. **Venue safety** — baseline + reconfirmation refs
+
+Trip Report is a **read model** — it must not introduce a second place to enter expenses or payments.
+
+### 12.9 Realtime & Invalidation (extends §10)
+
+When event-day tables ship, add to §10.5 registry:
+
+| Table | Canonical query key | Polling floor |
+| :-- | :-- | :-- |
+| `event_day_sessions` | `["event-day-session", eventId, date]` | 30 s + realtime |
+| `event_attendance_log` | `["event-attendance-log", sessionId]` | 30 s |
+| `event_bus_manifest` | `["event-bus-manifest", tripId]` | 30 s |
+| `event_curfew_log` | `["event-curfew-log", sessionId]` | 60 s |
+| `event_morning_log` | `["event-morning-log", sessionId]` | 60 s |
+| `venues` | `["venues", "active"]` | 5 min |
+
+Mutations must call **`invalidateTransportCaches`** when touching `transport_trips` / `trip_legs`, and a future **`invalidateEventDayCaches`** helper for session + bus manifest keys — same pattern as §10.4.
+
+### 12.10 Cross-Module Consistency Matrix
+
+| Capability | Day Centre | Outing trip (§12) |
+| :-- | :-- | :-- |
+| Site open/close (hard) | `site_day_sessions` | `event_day_sessions` — **open/close location** |
+| Arrival / departure roll | `client_attendance_log` | `event_attendance_log` @ venue |
+| Bus boarding roll | *(on bus run)* | `event_bus_manifest` @ boarding |
+| Driver transport | `startDayCentreRun` | One `startTrip` **per hop** |
+| Manifest UX | §11 | §11 (same screen) |
+| Overdue sweep + SMS | Arrival at centre | Event-floor arrival (planned) + curfew/morning at hotel |
+| Issues register | §9 | §9 (event context) |
+| Finance | N/A | Event Finance tab |
+| Venue safety checklist | N/A | §12.2 (planning) + on-the-day open checks |
+| Going home | Driver manifest + checkout | §11 return manifest + event-floor checkout — **leader close not blocked** |
+
+**Violations:**
+
+- Using event-floor check-in **instead of** bus boarding check (or vice versa)
+- Treating transport departure as **event open**
+- Requiring trip leader to wait for **last home drop-off** before close
+- One multi-stop `transport_trip` spanning Hotel → Park → Museum (must be separate trips)
+- Self-transport on intermediate hops
+- Trip without assigned trip leader on duty
+- Expense entry on Trip Report instead of `event_financial_ledger`
+- Per-person event-floor check-in at **every hop destination** when group arrived together on one bus
+
+### 12.11 Implementation Phases (Authoritative Sequence)
+
+Build order is fixed — do not skip venue registry before outing runtime:
+
+1. **Phase 0** — Schema + this §12 signed off  
+2. **Phase 1** — Venue Management tab (templates, baseline, clone)  
+3. **Phase 2** — Event planning extensions (hops, roster transport modes, trip leader)  
+4. **Phase 3** — Event day session + bus boarding roll  
+5. **Phase 4** — Trip Report v1 + event status lifecycle (Confirm/Open/Close)  
+6. **Phase 5** — Issues context on event day + depart gate  
+7. **Phase 6** — Multi-day curfew/morning rolls + SMS  
+8. **Phase 7** — Venue ↔ compliance link + Trip Report print (optional)  
+9. **Phase 8** — **Centre parity:** `event_attendance_log` + open/close location flows (mirror `client_attendance_log` / `site_day_sessions`)  
+10. **Phase 9** — Departure handover + transport-home reconciliation (decouple leader close from last drop-off)  
+11. **Phase 10** — Coordinator workspace UX (Trip day tab, rename labels, open-location gate)
+
+Phases 0–7: **shipped or in progress** (2026-07-04). Phases 8–10 implement the **2026-07-04 §12 amendment** (Day Centre parity).
+
+First production slice for **Movies-style single-day**: Phases 1–3 + **Phase 8 minimum** (event-floor roll + open/close location).
+
+### 12.12 Code Anchors (Implementation Reference)
+
+| Concern | Canonical path (existing) | Planned / extend |
+| :-- | :-- | :-- |
+| Events & roster | `src/routes/events.tsx`, `src/lib/data-store.ts` | Extend, do not fork |
+| Event Finance | `src/components/events/event-finance-tab.tsx` | Trip Report consumes |
+| Driver manifest | §11 — `src/routes/manifest.tsx` | One invocation per hop |
+| Day Centre arrival roll | `src/components/site-day/attendance-roll-panel.tsx` | **Template for `event_attendance_log` UI (Phase 8)** |
+| Day Centre open/close | `src/lib/api/site-day-sessions.ts`, `start-of-day-panel.tsx` | **Template for open/close location (Phase 8)** |
+| Bus boarding roll | `src/components/events/bus-check-on-panel.tsx` | Transport layer only — do not treat as event-floor roll |
+| Attendance sweep + SMS | `src/lib/api/client-attendance.ts` | Template for event-floor + curfew sweep |
+| Event day ops | `src/lib/api/event-day-ops.ts` | Split: bus manifest vs attendance log |
+| Venue admin | `src/routes/admin.tsx` → Venues tab | Built |
+| Event coordinator | `src/components/events/day-sessions-tab.tsx` | Rename Trip day; add open/close + arrival roll |
+
+### Amendment Process (§12)
+
+> **2026-07-04 — Project owner directive (initial):** Venue registry with variable safety templates (clone structure, not answers). Each venue hop = one `transport_trip`. Carers on roster. Trip leader required per calendar day. Curfew/morning breach = YELLOW → RED + SMS (Day Centre pattern). Finance and Trip Report reuse existing Event Booking module. Self-transport only first inbound and last outbound legs.
+
+> **2026-07-04 — Project owner directive (amendment — Day Centre parity):** Outings use the **same cadence as Day Centre** — transport is separate from the **event floor** at the venue (temporary centre). **Hard open** when trip leader opens location (RED blocks); **hard close** after departure handover — leader does **not** wait for last home drop-off. **Two rolls:** `event_attendance_log` (arrive/depart at venue, async) and `event_bus_manifest` (boarding per leg) — neither substitutes for the other. Group bus hops: boarding check only; no per-person floor check-in at destination when group moves together. Multi-day: check into event at first stop; curfew/morning at hotel; repeat daily until last-day hard close. No soft open/close unless legally required.

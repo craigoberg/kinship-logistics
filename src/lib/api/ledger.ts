@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { todayLocalIso } from "@/lib/utils";
 import {
   listStaffRegistry,
   resolveStaffIdWithFallback,
@@ -389,7 +390,7 @@ export async function resolveVehicleMaintenance(
       await updateFleetAsset(assetId, {
         lastServiceOdo: newServiceOdo ?? null,
         lastServiceDate:
-          actionDate ?? newServiceDate ?? new Date().toISOString().slice(0, 10),
+          actionDate ?? newServiceDate ?? todayLocalIso(),
         deferredUntil: null,
       });
     } else if (resolutionType === "deferred") {

@@ -118,3 +118,65 @@ export function invalidateTransportRequestCaches(qc: QueryClient, dateStr?: stri
   }
   qc.invalidateQueries({ queryKey: ["offline_sync_logs"] });
 }
+
+/**
+ * Invalidate event-day coordinator caches (§12.9).
+ * Call when mutating event_day_sessions, event_bus_manifest, event_curfew_log,
+ * event_morning_log, event_venue_stops, or venues registry rows.
+ */
+export function invalidateEventDayCaches(
+  qc: QueryClient,
+  scope: { eventId?: string; sessionDate?: string; tripId?: string; sessionId?: string } = {},
+): void {
+  if (scope.eventId && scope.sessionDate) {
+    qc.invalidateQueries({
+      queryKey: ["event-day-session", scope.eventId, scope.sessionDate],
+    });
+  } else if (scope.eventId) {
+    qc.invalidateQueries({
+      predicate: (q) =>
+        q.queryKey?.[0] === "event-day-session" && q.queryKey?.[1] === scope.eventId,
+    });
+  } else {
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-day-session" });
+  }
+
+  if (scope.tripId) {
+    qc.invalidateQueries({ queryKey: ["event-bus-manifest", scope.tripId] });
+  } else {
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-bus-manifest" });
+  }
+
+  if (scope.sessionId) {
+    qc.invalidateQueries({ queryKey: ["event-curfew-log", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-morning-log", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-attendance-log", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-day-issues", scope.sessionId] });
+  } else {
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-curfew-log" });
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-morning-log" });
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-attendance-log" });
+  }
+
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-day-sessions" });
+
+  if (scope.eventId) {
+    qc.invalidateQueries({ queryKey: ["event-actual-transport", scope.eventId] });
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "trip-report" && q.queryKey?.[1] === scope.eventId });
+  } else {
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-actual-transport" });
+    qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "trip-report" });
+  }
+
+  qc.invalidateQueries({ queryKey: ["venues", "active"] });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-venue-stops" });
+}
+
+/** Pull fresh event_manifest rows after status or logistics mutations. */
+export async function refetchEventManifest(qc: QueryClient): Promise<void> {
+  await Promise.all([
+    qc.refetchQueries({ queryKey: ["event_manifest"] }),
+    qc.refetchQueries({ queryKey: ["events"] }),
+    qc.refetchQueries({ queryKey: ["events", "confirmed"] }),
+  ]);
+}

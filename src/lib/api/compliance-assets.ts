@@ -52,6 +52,8 @@ export interface ComplianceAsset {
 export interface ListComplianceAssetsArgs {
   category?: string;
   status?: ComplianceStatus;
+  subjectTable?: string;
+  subjectId?: string;
 }
 
 export async function listComplianceAssets(
@@ -66,9 +68,19 @@ export async function listComplianceAssets(
     .order("next_action_at", { ascending: true, nullsFirst: false });
   if (args.category) q = q.eq("category", args.category);
   if (args.status) q = q.eq("status", args.status);
+  if (args.subjectTable) q = q.eq("subject_table", args.subjectTable);
+  if (args.subjectId) q = q.eq("subject_id", args.subjectId);
   const { data, error } = await q;
   if (error) throw error;
   return (data ?? []) as ComplianceAsset[];
+}
+
+/**
+ * Convenience wrapper: list all compliance assets linked to a specific venue.
+ * Returns both active and archived rows ordered by expiry (soonest first).
+ */
+export async function listVenueComplianceAssets(venueId: string): Promise<ComplianceAsset[]> {
+  return listComplianceAssets({ subjectTable: "venues", subjectId: venueId });
 }
 
 export interface UpsertComplianceAssetInput {

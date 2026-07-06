@@ -1,27 +1,48 @@
 import { useEffect, useState } from "react";
+import { formatDate, formatDateTime, formatTime } from "@/lib/utils";
 
 /**
  * Browser-local time display for SSR-safe React trees.
  *
- * Storage stays UTC ISO. Display is always in the browser's timezone via
- * `toLocaleString` (no explicit `timeZone` option). On the server / first
- * client paint we emit a stable placeholder so SSR HTML matches CSR HTML;
- * after mount we swap to the locale-formatted string.
+ * Storage stays UTC ISO. Display uses GUARDRAILS §5.3 canonical formats
+ * (local timezone via Date getters — not UTC slice). On the server / first
+ * client paint we emit a stable placeholder so SSR HTML matches CSR HTML.
  *
- * Project rule: never render `toISOString()` strings to users. Always use
- * <ClientTime> / useClientFormattedDate. See PROJECT_CONTEXT.md §10.
+ * Never render raw `toISOString()` strings to users.
  */
 export type ClientTimeOptions = Intl.DateTimeFormatOptions;
 
-const DEFAULT_OPTIONS: ClientTimeOptions = {
-  dateStyle: "short",
-  timeStyle: "short",
-};
+const DEFAULT_OPTIONS: ClientTimeOptions = {};
 
 function safeDate(iso: string | null | undefined): Date | null {
   if (!iso) return null;
   const d = new Date(iso);
   return Number.isFinite(d.getTime()) ? d : null;
+}
+
+/** Map Intl-style options to §5.3 formatters (date only, time only, or both). */
+function formatWithOptions(d: Date, options: ClientTimeOptions): string {
+  const keys = Object.keys(options);
+  const timeOnly =
+    keys.length > 0 &&
+    keys.every((k) => k === "hour" || k === "minute" || k === "second");
+  const dateOnly =
+    keys.length > 0 &&
+    keys.every(
+      (k) =>
+        k === "year" ||
+        k === "month" ||
+        k === "day" ||
+        k === "dateStyle" ||
+        k === "weekday",
+    ) &&
+    !("hour" in options) &&
+    !("minute" in options) &&
+    !("timeStyle" in options);
+
+  if (timeOnly) return formatTime(d);
+  if (dateOnly) return formatDate(d);
+  return formatDateTime(d);
 }
 
 /**
@@ -34,7 +55,6 @@ export function useClientFormattedDate(
   options: ClientTimeOptions = DEFAULT_OPTIONS,
 ): string | null {
   const [formatted, setFormatted] = useState<string | null>(null);
-  // Stringify options so changes re-format. Intl options are plain objects.
   const optionsKey = JSON.stringify(options);
   useEffect(() => {
     const d = safeDate(iso);
@@ -42,11 +62,7 @@ export function useClientFormattedDate(
       setFormatted(null);
       return;
     }
-    try {
-      setFormatted(d.toLocaleString(undefined, options));
-    } catch {
-      setFormatted(d.toISOString());
-    }
+    setFormatted(formatWithOptions(d, options));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [iso, optionsKey]);
   return formatted;
@@ -62,8 +78,7 @@ export interface ClientTimeProps {
 }
 
 /**
- * SSR-safe timestamp renderer. Emits `placeholder` until mounted, then the
- * browser-local formatted string. Wrap any user-visible date/time with this.
+ * SSR-safe timestamp renderer. Default output: `dd-Mmm-yy / hh:mm` (§5.3).
  */
 export function ClientTime({
   iso,
