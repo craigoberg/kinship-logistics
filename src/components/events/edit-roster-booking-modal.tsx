@@ -24,11 +24,10 @@ import {
 import {
   useUpdateEventBooking,
   useCarersForParticipant,
-  useUpdateParticipant,
   useRefreshBookingSnapshot,
 } from "@/hooks/use-supabase-data";
 import type { EventRosterBooking } from "@/lib/data-store";
-import { updateBookingTransportModes } from "@/lib/api/event-outing";
+import { updateBookingTransportModes, updateBookingTransportMed, type TransportMedBagRequired } from "@/lib/api/event-outing";
 
 interface Props {
   open: boolean;
@@ -73,12 +72,13 @@ export function EditRosterBookingModal({
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
   const [participantTransport, setParticipantTransport] = useState(false);
-  const [permanentAddress, setPermanentAddress] = useState<string>("");
   const [tripPickupOverride, setTripPickupOverride] = useState<string>("");
   const [outboundMode, setOutboundMode] = useState<"bus" | "self">("bus");
   const [returnMode, setReturnMode] = useState<"bus" | "self">("bus");
+  const [medBagRequired, setMedBagRequired] = useState<TransportMedBagRequired>("not_set");
+  const [medBagNotes, setMedBagNotes] = useState("");
+  const [snapshotDisplay, setSnapshotDisplay] = useState<string | null>(null);
   const mutation = useUpdateEventBooking();
-  const updateParticipant = useUpdateParticipant();
   const refreshSnapshot = useRefreshBookingSnapshot();
   const { data: carers = [] } = useCarersForParticipant(booking?.participantId ?? null);
 
@@ -97,10 +97,12 @@ export function EditRosterBookingModal({
       setCarerId(booking.carerId ?? "");
       setCarerTransport(!!booking.carerTransportRequired);
       setParticipantTransport(!!booking.participantTransportRequired);
-      setPermanentAddress(booking.participantRegularPickupAddress ?? "");
       setTripPickupOverride(booking.tripPickupAddressOverride ?? "");
       setOutboundMode((booking.outboundTransportMode as "bus" | "self") ?? "bus");
       setReturnMode((booking.returnTransportMode as "bus" | "self") ?? "bus");
+      setMedBagRequired(booking.transportMedBagRequired ?? "not_set");
+      setMedBagNotes(booking.transportMedNotes ?? "");
+      setSnapshotDisplay(booking.dynamicMedicalNotesSnapshot);
     }
   }, [open, booking, collected, eventTicketPrice]);
 
@@ -128,6 +130,17 @@ export function EditRosterBookingModal({
   const overpaymentDelta = Math.max(0, collected - parsedAmended);
   const isCaseB = !showRefundPanel && priceChanged && parsedAmended < collected;
 
+  const profileRegularPickup = (booking?.participantRegularPickupAddress ?? "").trim();
+  const profileStreetAddress = (booking?.participantStreetAddress ?? "").trim();
+  const effectiveProfilePickup = profileRegularPickup || profileStreetAddress || null;
+  const usesStreetFallback = !profileRegularPickup && !!profileStreetAddress;
+
+  const manifestPickupPreview = useMemo(() => {
+    const override = tripPickupOverride.trim();
+    if (override) return override;
+    return effectiveProfilePickup ?? null;
+  }, [tripPickupOverride, effectiveProfilePickup]);
+
   if (!booking) return null;
 
   const canSubmit =
@@ -137,23 +150,6 @@ export function EditRosterBookingModal({
     if (!canSubmit) return;
     try {
       const willRefund = showRefundPanel && issueRefund && parsedRefund > 0;
-
-      // Persist the participant-profile permanent pickup address change
-      // (if any) BEFORE the booking update so the join read on the booking
-      // refetch reflects the new value.
-      const newPermanent = permanentAddress.trim();
-      const originalPermanent = (booking.participantRegularPickupAddress ?? "").trim();
-      if (newPermanent !== originalPermanent) {
-        try {
-          await updateParticipant.mutateAsync({
-            id: booking.participantId,
-            patch: { regularPickupAddress: newPermanent.length > 0 ? newPermanent : null },
-          });
-        } catch (e) {
-          // Surface, but don't block the rest of the save.
-          console.error("[edit-roster-booking-modal] permanent address save failed", e);
-        }
-      }
 
       const newOverride = tripPickupOverride.trim();
       const originalOverride = (booking.tripPickupAddressOverride ?? "").trim();
@@ -196,6 +192,23 @@ export function EditRosterBookingModal({
             booking_id: booking.id,
             outbound_transport_mode: outboundMode,
             return_transport_mode: returnMode,
+          });
+        }
+
+        const resolvedMed: TransportMedBagRequired =
+          outboundMode === "self" ? "no" : medBagRequired;
+        const origMed = booking.transportMedBagRequired ?? "not_set";
+        const origNotes = (booking.transportMedNotes ?? "").trim();
+        const newNotes = medBagNotes.trim();
+        if (
+          resolvedMed !== origMed ||
+          newNotes !== origNotes ||
+          (outboundMode === "self" && origMed !== "no")
+        ) {
+          await updateBookingTransportMed({
+            booking_id: booking.id,
+            transport_med_bag_required: resolvedMed,
+            transport_med_notes: resolvedMed === "yes" ? newNotes || null : null,
           });
         }
       }
@@ -433,6 +446,101 @@ export function EditRosterBookingModal({
             </div>
           )}
 
+          {/* ----- Frozen medical alerts snapshot ----- */}
+          <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
+            <div className="flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+                <HeartPulse className="h-3.5 w-3.5" /> Medical alerts snapshot
+              </div>
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-7 gap-1 px-2 text-[11px]"
+                disabled={refreshSnapshot.isPending}
+                onClick={() =>
+                  refreshSnapshot.mutate(
+                    {
+                      bookingId: booking.id,
+                      participantId: booking.participantId,
+                      eventId: booking.eventId,
+                    },
+                    {
+                      onSuccess: (text) => {
+                        setSnapshotDisplay(text.length > 0 ? text : null);
+                        toast.success("Medical snapshot refreshed");
+                      },
+                    },
+                  )
+                }
+              >
+                <RefreshCw className={"h-3.5 w-3.5 " + (refreshSnapshot.isPending ? "animate-spin" : "")} />
+                Re-snapshot
+              </Button>
+            </div>
+            {snapshotDisplay && snapshotDisplay.trim().length > 0 ? (
+              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/60 p-2 font-mono text-[11px] leading-snug text-foreground">
+                {snapshotDisplay}
+              </pre>
+            ) : (
+              <p className="text-[11px] italic text-muted-foreground">
+                No snapshot on file yet — frozen copy from when {booking.participantName} was
+                rostered. Click &quot;Re-snapshot&quot; to pull compliance medical alerts and
+                active medication schedules from the participant profile.
+              </p>
+            )}
+          </div>
+
+          {/* ----- Outing transport med bag (BL-014) — bus outbound only ----- */}
+          {isOuting && outboundMode === "bus" && (
+            <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
+              <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                <HeartPulse className="h-3.5 w-3.5" />
+                Transport med bag (this outing)
+              </div>
+              <p className="text-[11px] leading-relaxed text-muted-foreground">
+                Does a <strong>labelled med supply</strong> travel on the bus for this trip?
+                Daytime schedules (e.g. 11 AM Panadol) do not auto-require a bag — set explicitly.
+                Administration at the venue is the trip leader&apos;s responsibility.
+              </p>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Med bag on bus?</Label>
+                <Select
+                  value={medBagRequired}
+                  onValueChange={(v) => {
+                    setMedBagRequired(v as TransportMedBagRequired);
+                    if (v !== "yes") setMedBagNotes("");
+                    setDirty(true);
+                  }}
+                >
+                  <SelectTrigger className="h-9 text-sm">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="not_set">Not assessed yet</SelectItem>
+                    <SelectItem value="no">No — no bag on bus</SelectItem>
+                    <SelectItem value="yes">Yes — bag required on bus</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              {medBagRequired === "yes" && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">What is in the bag?</Label>
+                  <Textarea
+                    value={medBagNotes}
+                    onChange={(e) => {
+                      setMedBagNotes(e.target.value);
+                      setDirty(true);
+                    }}
+                    rows={3}
+                    placeholder="e.g. Epilim PRN + spacer. No daytime Panadol in bag."
+                    className="text-sm"
+                  />
+                </div>
+              )}
+            </div>
+          )}
+
           {/* ----- Carer companion ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex items-center justify-between gap-2">
@@ -495,91 +603,64 @@ export function EditRosterBookingModal({
             )}
           </div>
 
-          {/* ----- Pickup addresses (coordinator overrides) ----- */}
+          {/* ----- Event pickup (profile read-only + this-event override) ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
             <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              <MapPin className="h-3.5 w-3.5" /> Pickup addresses
+              <MapPin className="h-3.5 w-3.5" /> Event pickup address
             </div>
+            <p className="text-[11px] leading-relaxed text-muted-foreground">
+              <strong className="text-foreground">Event outings</strong> use the client&apos;s{" "}
+              <em>regular pickup address</em> from their profile (or home address if pickup is blank).
+              <strong className="text-foreground"> Day Centre bus runs</strong> use the weekly schedule
+              instead — edit those under Client profile → Schedules &amp; Attendance.
+              Permanent address changes belong in Client profile → Contact Information.
+            </p>
 
             <div className="space-y-1">
-              <Label htmlFor="permanent-addr" className="text-[11px] font-medium text-muted-foreground">
-                Regular pickup address
+              <Label className="text-[11px] font-medium text-muted-foreground">
+                From client profile (read-only)
               </Label>
-              <Input
-                id="permanent-addr"
-                value={permanentAddress}
-                placeholder="e.g. 12 Sunrise Cres, Bondi NSW 2026"
-                onChange={(e) => {
-                  setPermanentAddress(e.target.value);
-                  setDirty(true);
-                }}
-              />
+              <div className="rounded-md border border-border bg-background/60 px-3 py-2 text-sm text-foreground">
+                {effectiveProfilePickup ?? (
+                  <span className="italic text-muted-foreground">No pickup or home address on file</span>
+                )}
+              </div>
               <p className="text-[10px] text-muted-foreground">
-                Saved to participant profile — used on every future event.
+                {profileRegularPickup
+                  ? "Regular pickup address on file."
+                  : usesStreetFallback
+                    ? "No regular pickup set — manifest will use home / street address."
+                    : "Add addresses in Participants → open client → Contact Information."}
               </p>
             </div>
 
             <div className="space-y-1">
               <Label htmlFor="override-addr" className="text-[11px] font-medium text-muted-foreground">
-                One-off pickup override (this event only)
+                One-off override (this event only)
               </Label>
               <Input
                 id="override-addr"
                 value={tripPickupOverride}
-                placeholder="Leave blank to use the permanent address"
+                placeholder="Leave blank to use the profile address above"
                 onChange={(e) => {
                   setTripPickupOverride(e.target.value);
                   setDirty(true);
                 }}
               />
               <p className="text-[10px] text-muted-foreground">
-                Overrides permanent address for this event's manifest only.
+                Overrides the profile for this event&apos;s manifest only — does not change the client record.
               </p>
             </div>
-          </div>
 
-          {/* ----- Frozen medical alerts snapshot ----- */}
-          <div className="space-y-2 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
-            <div className="flex items-center justify-between gap-2">
-              <div className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-amber-700 dark:text-amber-300">
-                <HeartPulse className="h-3.5 w-3.5" /> Medical alerts snapshot
-              </div>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                className="h-7 gap-1 px-2 text-[11px]"
-                disabled={refreshSnapshot.isPending}
-                onClick={() =>
-                  refreshSnapshot.mutate(
-                    {
-                      bookingId: booking.id,
-                      participantId: booking.participantId,
-                      eventId: booking.eventId,
-                    },
-                    {
-                      onSuccess: () => toast.success("Medical snapshot refreshed"),
-                    },
-                  )
-                }
-              >
-                <RefreshCw className={"h-3.5 w-3.5 " + (refreshSnapshot.isPending ? "animate-spin" : "")} />
-                Re-snapshot
-              </Button>
+            <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px]">
+              <span className="font-semibold text-muted-foreground">Driver manifest will use: </span>
+              <span className="text-foreground">
+                {manifestPickupPreview ?? (
+                  <span className="italic text-amber-600 dark:text-amber-400">No address — set profile or override</span>
+                )}
+              </span>
             </div>
-            {booking.dynamicMedicalNotesSnapshot && booking.dynamicMedicalNotesSnapshot.trim().length > 0 ? (
-              <pre className="max-h-40 overflow-y-auto whitespace-pre-wrap rounded bg-background/60 p-2 font-mono text-[11px] leading-snug text-foreground">
-                {booking.dynamicMedicalNotesSnapshot}
-              </pre>
-            ) : (
-              <p className="text-[11px] italic text-muted-foreground">
-                No critical alerts captured. Click "Re-snapshot" to rebuild from the compliance &amp; medication tables.
-              </p>
-            )}
           </div>
-
-
-
 
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

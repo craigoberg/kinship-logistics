@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, ShieldCheck } from "lucide-react";
@@ -13,7 +13,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
@@ -56,9 +57,11 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
   const [evidenceRef, setEvidenceRef] = useState("");
   const [notes, setNotes] = useState("");
   const [managerStaffId, setManagerStaffId] = useState<string>("");
-  const [managerPin, setManagerPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [witnessStaffId, setWitnessStaffId] = useState<string>("");
-  const [witnessPin, setWitnessPin] = useState("");
+  const [witnessPinVerified, setWitnessPinVerified] = useState(false);
+  const verifiedWitnessPinRef = useRef("");
   const [staff, setStaff] = useState<StaffMember[]>([]);
 
   const handshake = asset?.config?.handshake === "dual" ? "dual" : "single";
@@ -70,9 +73,11 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
     setEvidenceRef("");
     setNotes("");
     setManagerStaffId("");
-    setManagerPin("");
+    setManagerPinVerified(false);
+    verifiedManagerPinRef.current = "";
     setWitnessStaffId("");
-    setWitnessPin("");
+    setWitnessPinVerified(false);
+    verifiedWitnessPinRef.current = "";
     listStaffRegistry().then((s) => setStaff(s.filter((x) => x.active))).catch(() => setStaff([]));
   }, [asset]);
 
@@ -86,9 +91,9 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
         evidenceRef,
         justification: notes,
         managerStaffId,
-        managerPin,
+        managerPin: verifiedManagerPinRef.current,
         witnessStaffId: handshake === "dual" ? witnessStaffId : null,
-        witnessPin: handshake === "dual" ? witnessPin : null,
+        witnessPin: handshake === "dual" ? verifiedWitnessPinRef.current : null,
       });
     },
     onSuccess: () => {
@@ -105,9 +110,9 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
     if (!actionDate || actionDate > todayISO()) return false;
     if (evidenceRef.trim().length < MIN_EVIDENCE) return false;
     if (notes.trim().length < MIN_NOTES) return false;
-    if (!managerStaffId || managerPin.length < 4) return false;
+    if (!managerStaffId || !managerPinVerified) return false;
     if (handshake === "dual") {
-      if (!witnessStaffId || witnessPin.length < 4) return false;
+      if (!witnessStaffId || !witnessPinVerified) return false;
       if (witnessStaffId === managerStaffId) return false;
     }
     return !mut.isPending;
@@ -118,9 +123,9 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
     evidenceRef,
     notes,
     managerStaffId,
-    managerPin,
+    managerPinVerified,
     witnessStaffId,
-    witnessPin,
+    witnessPinVerified,
     handshake,
     mut.isPending,
   ]);
@@ -187,7 +192,11 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
 
           <div className="space-y-1">
             <Label>Manager</Label>
-            <Select value={managerStaffId} onValueChange={setManagerStaffId}>
+            <Select value={managerStaffId} onValueChange={(id) => {
+              setManagerStaffId(id);
+              setManagerPinVerified(false);
+              verifiedManagerPinRef.current = "";
+            }}>
               <SelectTrigger><SelectValue placeholder="Select manager" /></SelectTrigger>
               <SelectContent>
                 {staff.map((s) => (
@@ -198,12 +207,21 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
           </div>
           <div className="space-y-1">
             <Label>Manager PIN</Label>
-            <Input
-              type="password"
-              inputMode="numeric"
-              maxLength={6}
-              value={managerPin}
-              onChange={(e) => setManagerPin(e.target.value.replace(/\D/g, ""))}
+            <PinEntryTrigger
+              label="Tap to enter manager PIN"
+              verified={managerPinVerified}
+              verifiedLabel="Manager PIN verified"
+              length={6}
+              title="Resolve compliance asset"
+              description="Manager PIN required to sign off this resolution."
+              disabled={!managerStaffId}
+              onVerify={async (pin) => {
+                await verifyManagerPin(managerStaffId, pin);
+              }}
+              onSuccess={(pin) => {
+                verifiedManagerPinRef.current = pin;
+                setManagerPinVerified(true);
+              }}
             />
           </div>
 
@@ -211,7 +229,11 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
             <>
               <div className="space-y-1">
                 <Label>Witness</Label>
-                <Select value={witnessStaffId} onValueChange={setWitnessStaffId}>
+                <Select value={witnessStaffId} onValueChange={(id) => {
+                  setWitnessStaffId(id);
+                  setWitnessPinVerified(false);
+                  verifiedWitnessPinRef.current = "";
+                }}>
                   <SelectTrigger><SelectValue placeholder="Select witness" /></SelectTrigger>
                   <SelectContent>
                     {staff
@@ -224,12 +246,21 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
               </div>
               <div className="space-y-1">
                 <Label>Witness PIN</Label>
-                <Input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={witnessPin}
-                  onChange={(e) => setWitnessPin(e.target.value.replace(/\D/g, ""))}
+                <PinEntryTrigger
+                  label="Tap to enter witness PIN"
+                  verified={witnessPinVerified}
+                  verifiedLabel="Witness PIN verified"
+                  length={6}
+                  title="Witness compliance resolution"
+                  description="Witness PIN required for dual-handshake assets."
+                  disabled={!witnessStaffId}
+                  onVerify={async (pin) => {
+                    await verifyManagerPin(witnessStaffId, pin);
+                  }}
+                  onSuccess={(pin) => {
+                    verifiedWitnessPinRef.current = pin;
+                    setWitnessPinVerified(true);
+                  }}
                 />
               </div>
             </>

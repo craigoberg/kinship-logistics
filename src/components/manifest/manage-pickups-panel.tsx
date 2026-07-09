@@ -2,22 +2,45 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { GripVertical, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { cn } from "@/lib/utils";
 import type { BusRunRosterEntry, TripLeg } from "@/lib/data-store";
 import { isPassengerPickupLeg } from "@/lib/data-store";
 import { useCancelTripPickup } from "@/hooks/use-supabase-data";
 
 export { isPassengerPickupLeg };
+
+/** Grip handle — touch-action:none prevents iOS scroll stealing the drag. */
+export const PICKUP_DRAG_GRIP_CLASS =
+  "flex h-11 w-10 shrink-0 touch-none select-none items-center justify-center rounded-md text-muted-foreground cursor-grab active:cursor-grabbing";
+
+function isScrollable(el: HTMLElement): boolean {
+  const { overflowY, overflow } = getComputedStyle(el);
+  return /(auto|scroll)/.test(overflowY) || /(auto|scroll)/.test(overflow);
+}
+
+function lockScrollAncestors(from: HTMLElement): HTMLElement[] {
+  const locked: HTMLElement[] = [];
+  let node: HTMLElement | null = from.parentElement;
+  while (node) {
+    if (isScrollable(node)) {
+      locked.push(node);
+      node.dataset.manifestScrollLock = node.style.overflow;
+      node.style.overflow = "hidden";
+      node.style.touchAction = "none";
+    }
+    node = node.parentElement;
+  }
+  return locked;
+}
+
+function unlockScrollAncestors(locked: HTMLElement[]): void {
+  for (const node of locked) {
+    node.style.overflow = node.dataset.manifestScrollLock ?? "";
+    node.style.touchAction = "";
+    delete node.dataset.manifestScrollLock;
+  }
+}
 
 export function canCancelPickupLeg(leg: TripLeg): boolean {
   return isPassengerPickupLeg(leg) && leg.status !== "completed";
@@ -54,30 +77,33 @@ export function usePickupCancelDialog(tripId: string) {
   };
 
   const dialog = (
-    <AlertDialog open={!!cancelTarget} onOpenChange={(o) => !o && setCancelTarget(null)}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Cancel pickup for {cancelTarget?.toLabel}?</AlertDialogTitle>
-          <AlertDialogDescription>
-            The driver will skip this stop and move to the next passenger. This sends an SMS alert
-            to managers and creates a YELLOW issue in the Governance Hub for follow-up.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Keep stop</AlertDialogCancel>
-          <AlertDialogAction
-            className="bg-amber-600 hover:bg-amber-700"
-            disabled={cancelPickup.isPending}
-            onClick={(e) => {
-              e.preventDefault();
-              confirmCancel();
-            }}
-          >
-            Cancel pickup
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
+    <BottomSheet
+      open={!!cancelTarget}
+      onOpenChange={(o) => !o && setCancelTarget(null)}
+      title={`Cancel pickup for ${cancelTarget?.toLabel}?`}
+      description="The driver will skip this stop and move to the next passenger. This sends an SMS alert to managers and creates a YELLOW issue in the Governance Hub for follow-up."
+      className="border-t-2 border-amber-500/60"
+    >
+      <div className="flex flex-col gap-2">
+        <Button
+          type="button"
+          className="h-14 touch-manipulation bg-amber-600 text-base hover:bg-amber-700"
+          disabled={cancelPickup.isPending}
+          onClick={confirmCancel}
+        >
+          {cancelPickup.isPending ? "Cancelling…" : "Cancel pickup"}
+        </Button>
+        <Button
+          type="button"
+          variant="outline"
+          className="h-12 touch-manipulation"
+          disabled={cancelPickup.isPending}
+          onClick={() => setCancelTarget(null)}
+        >
+          Keep stop
+        </Button>
+      </div>
+    </BottomSheet>
   );
 
   return { requestCancel, dialog, isCancelling: cancelPickup.isPending };
@@ -93,7 +119,7 @@ type SortableRowProps = {
   trailing?: ReactNode;
   highlight?: boolean;
   onGripPointerDown: (e: React.PointerEvent) => void;
-  rowRef: (el: HTMLDivElement | null) => void;
+  rowRef: (el: HTMLElement | null) => void;
 };
 
 function SortablePickupRow({
@@ -122,8 +148,8 @@ function SortablePickupRow({
       <button
         type="button"
         className={cn(
-          "flex h-10 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-          dragDisabled ? "cursor-not-allowed" : "cursor-grab active:cursor-grabbing",
+          PICKUP_DRAG_GRIP_CLASS,
+          dragDisabled && "cursor-not-allowed opacity-50",
         )}
         aria-label="Drag to reorder"
         disabled={dragDisabled}
@@ -159,15 +185,19 @@ export function PointerSortableList({
     ids: string[];
     dragId: string | null;
     bindRow: (id: string) => {
-      rowRef: (el: HTMLDivElement | null) => void;
+      rowRef: (el: HTMLElement | null) => void;
       onGripPointerDown: (e: React.PointerEvent) => void;
       isDragging: boolean;
     };
   }) => ReactNode;
 }) {
   const [order, setOrder] = useState(itemIds);
-  const rowRefs = useRef<Map<string, HTMLDivElement>>(new Map());
-  const dragRef = useRef<{ id: string; pointerId: number } | null>(null);
+  const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const dragRef = useRef<{
+    id: string;
+    pointerId: number;
+    lockedScroll: HTMLElement[];
+  } | null>(null);
   const [dragId, setDragId] = useState<string | null>(null);
 
   useEffect(() => {
@@ -206,6 +236,7 @@ export function PointerSortableList({
 
     const onPointerUp = (e: PointerEvent) => {
       if (!dragRef.current || e.pointerId !== dragRef.current.pointerId) return;
+      unlockScrollAncestors(dragRef.current.lockedScroll);
       dragRef.current = null;
       setDragId(null);
       setOrder((current) => {
@@ -224,9 +255,19 @@ export function PointerSortableList({
     };
   }, [onReorder, swapByPointerY]);
 
+  useEffect(
+    () => () => {
+      if (dragRef.current) {
+        unlockScrollAncestors(dragRef.current.lockedScroll);
+        dragRef.current = null;
+      }
+    },
+    [],
+  );
+
   const bindRow = useCallback(
     (id: string) => ({
-      rowRef: (el: HTMLDivElement | null) => {
+      rowRef: (el: HTMLElement | null) => {
         if (el) rowRefs.current.set(id, el);
         else rowRefs.current.delete(id);
       },
@@ -234,8 +275,10 @@ export function PointerSortableList({
         if (disabled) return;
         e.preventDefault();
         e.stopPropagation();
-        (e.currentTarget as HTMLElement).setPointerCapture(e.pointerId);
-        dragRef.current = { id, pointerId: e.pointerId };
+        const grip = e.currentTarget as HTMLElement;
+        grip.setPointerCapture(e.pointerId);
+        const lockedScroll = lockScrollAncestors(grip);
+        dragRef.current = { id, pointerId: e.pointerId, lockedScroll };
         setDragId(id);
       },
       isDragging: dragId === id,
@@ -292,7 +335,7 @@ export function PreviewPickupOrderPanel({
 }
 
 export type PickupDragBind = {
-  rowRef: (el: HTMLDivElement | null) => void;
+  rowRef: (el: HTMLElement | null) => void;
   onGripPointerDown: (e: React.PointerEvent) => void;
   isDragging: boolean;
 };

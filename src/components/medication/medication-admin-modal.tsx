@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Check, ChevronsUpDown, ShieldCheck, WifiOff, AlertCircle } from "lucide-react";
 import {
   Dialog,
@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -56,7 +57,6 @@ interface Props {
   participant?: Participant | null;
 }
 
-const PIN_RE = /^\d{4}$/;
 
 /** Maps medication event type to operational_ledger severity and action_type. */
 const LEDGER_MAP: Record<
@@ -80,6 +80,14 @@ const LEDGER_MAP: Record<
   },
 };
 
+
+async function verifyWitnessPin(member: StaffMember | undefined, pin: string): Promise<void> {
+  if (!member?.pinHash) throw new Error("Incorrect PIN. Please try again.");
+  const candidate = await hashPin(pin);
+  const ok = candidate === member.pinHash || pin === member.pinHash;
+  if (!ok) throw new Error("Incorrect PIN. Please try again.");
+}
+
 export function MedicationAdminModal({ open, onOpenChange, participant }: Props) {
   const online = useOnlineStatus();
   const { data: participants = [] } = useParticipants();
@@ -96,9 +104,11 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
   const [dosage, setDosage] = useState("");
   const [notes, setNotes] = useState("");
   const [witness1Id, setWitness1Id] = useState("");
-  const [witness1Pin, setWitness1Pin] = useState("");
+  const [witness1PinVerified, setWitness1PinVerified] = useState(false);
+  const witness1PinRef = useRef("");
   const [witness2Id, setWitness2Id] = useState("");
-  const [witness2Pin, setWitness2Pin] = useState("");
+  const [witness2PinVerified, setWitness2PinVerified] = useState(false);
+  const witness2PinRef = useRef("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -112,9 +122,11 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
       setDosage("");
       setNotes("");
       setWitness1Id("");
-      setWitness1Pin("");
+      setWitness1PinVerified(false);
+      witness1PinRef.current = "";
       setWitness2Id("");
-      setWitness2Pin("");
+      setWitness2PinVerified(false);
+      witness2PinRef.current = "";
       setPinError(null);
       setSubmitting(false);
     }
@@ -124,7 +136,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
   useEffect(() => {
     if (pinError) setPinError(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [witness1Pin, witness2Pin, witness1Id, witness2Id]);
+  }, [witness1PinVerified, witness2PinVerified, witness1Id, witness2Id]);
 
   const dirty =
     participantId.length > 0 ||
@@ -132,9 +144,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     dosage.length > 0 ||
     notes.length > 0 ||
     witness1Id.length > 0 ||
-    witness1Pin.length > 0 ||
+    witness1PinVerified ||
     witness2Id.length > 0 ||
-    witness2Pin.length > 0;
+    witness2PinVerified;
 
   const witnessesDistinct = witness1Id !== "" && witness2Id !== "" && witness1Id !== witness2Id;
 
@@ -145,8 +157,8 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     medicationName.trim().length > 0 &&
     dosage.trim().length > 0 &&
     witnessesDistinct &&
-    PIN_RE.test(witness1Pin) &&
-    PIN_RE.test(witness2Pin);
+    witness1PinVerified &&
+    witness2PinVerified;
 
   const selectedParticipant = useMemo(
     () => participants.find((p) => p.id === participantId) ?? null,
@@ -154,14 +166,6 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
   );
 
   const staffById = useMemo(() => new Map(staff.map((s) => [s.id, s])), [staff]);
-
-  /** Verify a 4-digit PIN against the staff member's stored pin_hash. */
-  const verifyPin = async (member: StaffMember | undefined, pin: string): Promise<boolean> => {
-    if (!member) return false;
-    if (!member.pinHash) return false;
-    const candidate = await hashPin(pin);
-    return candidate === member.pinHash || pin === member.pinHash;
-  };
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -171,24 +175,15 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     try {
       const w1 = staffById.get(witness1Id);
       const w2 = staffById.get(witness2Id);
-
-      const [w1ok, w2ok] = await Promise.all([
-        verifyPin(w1, witness1Pin),
-        verifyPin(w2, witness2Pin),
-      ]);
-
-      if (!w1ok || !w2ok) {
-        setPinError(
-          !w1ok && !w2ok
-            ? "Incorrect PIN. Please try again. (Both witness PINs)"
-            : !w1ok
-              ? `Incorrect PIN. Please try again. (Witness 1 — ${w1?.fullName ?? "selected staff"})`
-              : `Incorrect PIN. Please try again. (Witness 2 — ${w2?.fullName ?? "selected staff"})`,
-        );
+      if (!witness1PinVerified || !witness2PinVerified) {
+        setPinError("Both witness PINs must be verified.");
         return;
       }
 
-      const [w1Hash, w2Hash] = await Promise.all([hashPin(witness1Pin), hashPin(witness2Pin)]);
+      const [w1Hash, w2Hash] = await Promise.all([
+        hashPin(witness1PinRef.current),
+        hashPin(witness2PinRef.current),
+      ]);
 
       const payload: MedicationLogPayload = {
         participant_id: participantId,
@@ -452,9 +447,16 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
               staff={staff}
               staffLoading={staffLoading}
               staffValue={witness1Id}
-              onStaffChange={setWitness1Id}
-              pinValue={witness1Pin}
-              onPinChange={setWitness1Pin}
+              onStaffChange={(id) => {
+                setWitness1Id(id);
+                setWitness1PinVerified(false);
+                witness1PinRef.current = "";
+              }}
+              pinVerified={witness1PinVerified}
+              onPinVerified={(pin) => {
+                witness1PinRef.current = pin;
+                setWitness1PinVerified(true);
+              }}
               excludeId={witness2Id}
             />
             <WitnessBlock
@@ -462,9 +464,16 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
               staff={staff}
               staffLoading={staffLoading}
               staffValue={witness2Id}
-              onStaffChange={setWitness2Id}
-              pinValue={witness2Pin}
-              onPinChange={setWitness2Pin}
+              onStaffChange={(id) => {
+                setWitness2Id(id);
+                setWitness2PinVerified(false);
+                witness2PinRef.current = "";
+              }}
+              pinVerified={witness2PinVerified}
+              onPinVerified={(pin) => {
+                witness2PinRef.current = pin;
+                setWitness2PinVerified(true);
+              }}
               excludeId={witness1Id}
             />
           </div>
@@ -512,8 +521,8 @@ function WitnessBlock({
   staffLoading,
   staffValue,
   onStaffChange,
-  pinValue,
-  onPinChange,
+  pinVerified,
+  onPinVerified,
   excludeId,
 }: {
   title: string;
@@ -521,11 +530,12 @@ function WitnessBlock({
   staffLoading: boolean;
   staffValue: string;
   onStaffChange: (v: string) => void;
-  pinValue: string;
-  onPinChange: (v: string) => void;
+  pinVerified: boolean;
+  onPinVerified: (pin: string) => void;
   excludeId: string;
 }) {
   const options = staff.filter((s) => s.id !== excludeId);
+  const selected = staff.find((s) => s.id === staffValue);
   return (
     <div className="space-y-2 rounded-lg border border-border bg-background/50 p-3">
       <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -554,15 +564,18 @@ function WitnessBlock({
           )}
         </SelectContent>
       </Select>
-      <Input
-        type="password"
-        inputMode="numeric"
-        autoComplete="off"
-        maxLength={4}
-        placeholder="----"
-        value={pinValue}
-        onChange={(e) => onPinChange(e.target.value.replace(/\D/g, "").slice(0, 4))}
-        className="tracking-[0.5em] text-center font-mono"
+      <PinEntryTrigger
+        label="Tap to enter witness PIN"
+        verified={pinVerified}
+        verifiedLabel="Witness PIN verified"
+        length={4}
+        title={title}
+        description={`Verify ${selected?.fullName ?? "witness"} PIN for medication sign-off.`}
+        disabled={!staffValue}
+        onVerify={async (pin) => {
+          await verifyWitnessPin(selected, pin);
+        }}
+        onSuccess={onPinVerified}
       />
       <p className="text-[11px] text-muted-foreground">
         4-digit security PIN — verified against staff_registry.pin_hash.

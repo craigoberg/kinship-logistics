@@ -3,11 +3,14 @@ import {
   useEffect,
   useImperativeHandle,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { AlertTriangle } from "lucide-react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { DatePicker } from "@/components/ui/date-picker";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import {
@@ -154,9 +157,11 @@ export const ComplianceResolutionPanel = forwardRef<
   const [genericNewExpiry, setGenericNewExpiry] = useState("");
   const [genericActionDate, setGenericActionDate] = useState(todayISO());
   const [managerStaffId, setManagerStaffId] = useState("");
-  const [managerPin, setManagerPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [witnessStaffId, setWitnessStaffId] = useState("");
-  const [witnessPin, setWitnessPin] = useState("");
+  const [witnessPinVerified, setWitnessPinVerified] = useState(false);
+  const verifiedWitnessPinRef = useRef("");
   const [staff, setStaff] = useState<StaffMember[]>([]);
   const [auditState, setAuditState] =
     useState<FormalAuditState>(emptyFormalAuditState);
@@ -181,9 +186,11 @@ export const ComplianceResolutionPanel = forwardRef<
     setGenericNewExpiry("");
     setGenericActionDate(todayISO());
     setManagerStaffId("");
-    setManagerPin("");
+    setManagerPinVerified(false);
+    verifiedManagerPinRef.current = "";
     setWitnessStaffId("");
-    setWitnessPin("");
+    setWitnessPinVerified(false);
+    verifiedWitnessPinRef.current = "";
     setAuditState(emptyFormalAuditState);
     setServiceOdo(subject?.latestOdo != null ? String(subject.latestOdo) : "");
     setNewExpiry(undefined);
@@ -320,9 +327,9 @@ export const ComplianceResolutionPanel = forwardRef<
     if (genericActionDate > todayISO()) return false;
     if (trimmedEvidence.length < MIN_EVIDENCE) return false;
     if (isGeneric && !hideExpiryFields) {
-      if (!managerStaffId || managerPin.length < 4) return false;
+      if (!managerStaffId || !managerPinVerified) return false;
       if (handshake === "dual") {
-        if (!witnessStaffId || witnessPin.length < 4) return false;
+        if (!witnessStaffId || !witnessPinVerified) return false;
         if (witnessStaffId === managerStaffId) return false;
       }
     }
@@ -336,10 +343,10 @@ export const ComplianceResolutionPanel = forwardRef<
     genericRenewalMin,
     trimmedEvidence,
     managerStaffId,
-    managerPin,
+    managerPinVerified,
     handshake,
     witnessStaffId,
-    witnessPin,
+    witnessPinVerified,
   ]);
 
   const validate = (newExpiryIso?: string): boolean => {
@@ -418,9 +425,9 @@ export const ComplianceResolutionPanel = forwardRef<
         actionDate: genericActionDate,
         evidenceRef: trimmedEvidence,
         managerStaffId,
-        managerPin,
+        managerPin: verifiedManagerPinRef.current,
         witnessStaffId: handshake === "dual" ? witnessStaffId : null,
-        witnessPin: handshake === "dual" ? witnessPin : null,
+        witnessPin: handshake === "dual" ? verifiedWitnessPinRef.current : null,
       };
     }
 
@@ -498,9 +505,9 @@ export const ComplianceResolutionPanel = forwardRef<
       trimmedEvidence,
       auditPayload.valid,
       managerStaffId,
-      managerPin,
+      managerPinVerified,
       witnessStaffId,
-      witnessPin,
+      witnessPinVerified,
       genericNewExpiry,
       genericActionDate,
       newExpiry,
@@ -573,13 +580,27 @@ export const ComplianceResolutionPanel = forwardRef<
         handshake={handshake}
         staff={staff}
         managerStaffId={managerStaffId}
-        onManagerStaffId={setManagerStaffId}
-        managerPin={managerPin}
-        onManagerPin={setManagerPin}
+        onManagerStaffId={(id) => {
+          setManagerStaffId(id);
+          setManagerPinVerified(false);
+          verifiedManagerPinRef.current = "";
+        }}
+        managerPinVerified={managerPinVerified}
+        onManagerPinVerified={(pin) => {
+          verifiedManagerPinRef.current = pin;
+          setManagerPinVerified(true);
+        }}
         witnessStaffId={witnessStaffId}
-        onWitnessStaffId={setWitnessStaffId}
-        witnessPin={witnessPin}
-        onWitnessPin={setWitnessPin}
+        onWitnessStaffId={(id) => {
+          setWitnessStaffId(id);
+          setWitnessPinVerified(false);
+          verifiedWitnessPinRef.current = "";
+        }}
+        witnessPinVerified={witnessPinVerified}
+        onWitnessPinVerified={(pin) => {
+          verifiedWitnessPinRef.current = pin;
+          setWitnessPinVerified(true);
+        }}
       />
     );
   }
@@ -781,12 +802,12 @@ function GenericFields({
   staff = [],
   managerStaffId = "",
   onManagerStaffId,
-  managerPin = "",
-  onManagerPin,
+  managerPinVerified = false,
+  onManagerPinVerified,
   witnessStaffId = "",
   onWitnessStaffId,
-  witnessPin = "",
-  onWitnessPin,
+  witnessPinVerified = false,
+  onWitnessPinVerified,
 }: {
   baseDate: string | null;
   resetKey: string;
@@ -802,12 +823,12 @@ function GenericFields({
   staff?: StaffMember[];
   managerStaffId?: string;
   onManagerStaffId?: (v: string) => void;
-  managerPin?: string;
-  onManagerPin?: (v: string) => void;
+  managerPinVerified?: boolean;
+  onManagerPinVerified?: (pin: string) => void;
   witnessStaffId?: string;
   onWitnessStaffId?: (v: string) => void;
-  witnessPin?: string;
-  onWitnessPin?: (v: string) => void;
+  witnessPinVerified?: boolean;
+  onWitnessPinVerified?: (pin: string) => void;
 }) {
   const minIso = toISODate(
     new Date(Math.max(Date.now(), parseExpiryBase(baseDate).getTime())),
@@ -834,7 +855,7 @@ function GenericFields({
       <div className="space-y-1 sm:col-span-2">
         <EvidenceField value={evidenceRef} onChange={onEvidenceRef} required />
       </div>
-      {showPin && onManagerStaffId && onManagerPin && (
+      {showPin && onManagerStaffId && onManagerPinVerified && (
         <>
           <div className="space-y-1">
             <Label>Manager</Label>
@@ -849,15 +870,21 @@ function GenericFields({
           </div>
           <div className="space-y-1">
             <Label>Manager PIN</Label>
-            <Input
-              type="password"
-              inputMode="numeric"
-              maxLength={6}
-              value={managerPin}
-              onChange={(e) => onManagerPin(e.target.value.replace(/\D/g, ""))}
+            <PinEntryTrigger
+              label="Tap to enter manager PIN"
+              verified={managerPinVerified}
+              verifiedLabel="Manager PIN verified"
+              length={6}
+              title="Resolve compliance item"
+              description="Manager PIN required to sign off this resolution."
+              disabled={!managerStaffId}
+              onVerify={async (pin) => {
+                await verifyManagerPin(managerStaffId, pin);
+              }}
+              onSuccess={onManagerPinVerified}
             />
           </div>
-          {handshake === "dual" && onWitnessStaffId && onWitnessPin && (
+          {handshake === "dual" && onWitnessStaffId && onWitnessPinVerified && (
             <>
               <div className="space-y-1">
                 <Label>Witness</Label>
@@ -872,12 +899,18 @@ function GenericFields({
               </div>
               <div className="space-y-1">
                 <Label>Witness PIN</Label>
-                <Input
-                  type="password"
-                  inputMode="numeric"
-                  maxLength={6}
-                  value={witnessPin}
-                  onChange={(e) => onWitnessPin(e.target.value.replace(/\D/g, ""))}
+                <PinEntryTrigger
+                  label="Tap to enter witness PIN"
+                  verified={witnessPinVerified}
+                  verifiedLabel="Witness PIN verified"
+                  length={6}
+                  title="Witness compliance resolution"
+                  description="Witness PIN required for dual-handshake assets."
+                  disabled={!witnessStaffId}
+                  onVerify={async (pin) => {
+                    await verifyManagerPin(witnessStaffId, pin);
+                  }}
+                  onSuccess={onWitnessPinVerified}
                 />
               </div>
             </>

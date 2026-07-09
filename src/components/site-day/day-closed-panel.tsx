@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { CheckCircle2, Loader2, RotateCcw, ShieldOff } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
   Dialog,
@@ -30,7 +31,8 @@ export function DayClosedPanel({ session }: Props) {
   const noGo = session.phase === "closed_no_go";
   const queryClient = useQueryClient();
   const [open, setOpen] = useState(false);
-  const [pin, setPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [reason, setReason] = useState("");
   const [attempted, setAttempted] = useState(false);
 
@@ -38,18 +40,18 @@ export function DayClosedPanel({ session }: Props) {
   const isManager = isActiveUserManager();
   const managerStaffId = profile?.staffId ?? null;
 
-  const pinValid = /^\d{4,6}$/.test(pin);
+  const pinValid = managerPinVerified;
   const reasonValid = reason.trim().length >= 10;
-  const showPinErr = attempted && !pinValid;
 
   const reopenMut = useMutation({
     mutationFn: async () => {
       if (!isManager) throw new Error("Only a Manager can reopen the Centre.");
       if (!managerStaffId)
         throw new Error("No signed-in Manager staff record — sign in again.");
+      if (!managerPinVerified) throw new Error("Manager PIN required.");
       return reopenSession({
         managerStaffId,
-        pin,
+        pin: verifiedManagerPinRef.current,
         reason: reason.trim(),
       });
     },
@@ -61,7 +63,8 @@ export function DayClosedPanel({ session }: Props) {
           "Re-closing later will only flip newly finalised attendance rows. Existing issues, billing, and ledger entries are preserved.",
       });
       setOpen(false);
-      setPin("");
+      setManagerPinVerified(false);
+      verifiedManagerPinRef.current = "";
       setReason("");
       setAttempted(false);
     },
@@ -123,7 +126,8 @@ export function DayClosedPanel({ session }: Props) {
                 className="gap-1.5 border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
                 onClick={() => {
                   setAttempted(false);
-                  setPin("");
+                  setManagerPinVerified(false);
+                  verifiedManagerPinRef.current = "";
                   setReason("");
                   setOpen(true);
                 }}
@@ -188,31 +192,30 @@ export function DayClosedPanel({ session }: Props) {
 
           <div className="space-y-4">
             <div className="grid gap-1.5">
-              <Label
-                htmlFor="reopen-pin"
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Manager PIN <span className="text-rose-600">*</span>
               </Label>
-              <Input
-                id="reopen-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                autoComplete="off"
-                value={pin}
-                onChange={(e) =>
-                  setPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                className={cn(
-                  "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums",
-                  showPinErr &&
-                    "border-2 border-rose-600 focus-visible:ring-rose-600",
-                )}
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={6}
+                title="Reopen Day Centre"
+                description="Manager-only override to reopen today's session."
+                disabled={!managerStaffId}
+                required
+                onVerify={async (pin) => {
+                  if (!managerStaffId) throw new Error("Sign in as a Manager first.");
+                  await verifyManagerPin(managerStaffId, pin);
+                }}
+                onSuccess={(pin) => {
+                  verifiedManagerPinRef.current = pin;
+                  setManagerPinVerified(true);
+                }}
               />
-              {showPinErr && (
+              {attempted && !pinValid && (
                 <span className="text-[11px] font-semibold text-rose-600">
-                  Enter your 4–6 digit Manager PIN
+                  Enter your Manager PIN to continue
                 </span>
               )}
             </div>

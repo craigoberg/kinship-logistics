@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, ShieldOff, ShieldCheck } from "lucide-react";
+import { LogOut, PanelLeft, PanelLeftClose, ShieldOff, ShieldCheck } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
 import { BottomNav, NAV_ITEMS } from "./bottom-nav";
+import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
 import { SyncIndicator } from "./sync-indicator";
 import { Button } from "@/components/ui/button";
 import { supabase } from "@/integrations/supabase/client";
@@ -72,6 +73,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   const isDashboard = pathname === "/";
 
   const [medOpen, setMedOpen] = useState(false);
+  const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
 
   const handleLogout = () => {
     try {
@@ -95,11 +97,27 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex min-h-dvh bg-background text-foreground">
-      <AppSidebar />
+      <AppSidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-2 backdrop-blur md:min-h-16 md:px-6">
-          {/* Left: page title + identity + date (dashboard only) */}
-          <div className="flex min-w-0 flex-col gap-0">
+          {/* Left: menu toggle (md+) + page title */}
+          <div className="flex min-w-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="hidden h-9 w-9 shrink-0 md:inline-flex"
+              onClick={toggleSidebar}
+              aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+              aria-expanded={!sidebarCollapsed}
+            >
+              {sidebarCollapsed ? (
+                <PanelLeft className="h-4 w-4" />
+              ) : (
+                <PanelLeftClose className="h-4 w-4" />
+              )}
+            </Button>
+            <div className="flex min-w-0 flex-col gap-0">
             <h1 className="truncate text-sm font-semibold tracking-tight md:text-base">
               <span>{title}</span>
               {identity && (
@@ -118,6 +136,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 {formatDate(new Date())}
               </p>
             )}
+            </div>
           </div>
 
           {/* Right: Med Admin (dashboard only) + sync + logout */}

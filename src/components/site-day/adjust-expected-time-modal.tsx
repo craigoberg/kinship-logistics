@@ -12,7 +12,8 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
@@ -27,7 +28,7 @@ import {
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
 import { isoToSydneyClock } from "@/lib/operational-time";
-import { GuardianPinError, loginWithPin } from "@/lib/data-store";
+import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   row: ClientAttendanceRow | null;
@@ -56,8 +57,8 @@ export function AdjustExpectedTimeModal({
   const [hhmm, setHhmm] = useState("09:00");
   const [reasonCode, setReasonCode] = useState<string>("");
   const [detail, setDetail] = useState("");
-  const [pin, setPin] = useState("");
   const [pinError, setPinError] = useState<string | null>(null);
+  const [operatorPinVerified, setOperatorPinVerified] = useState(false);
 
   // Reset internal state only when the modal transitions from closed -> open
   // for a NEW row id. A background refetch that returns a fresh `row` object
@@ -70,7 +71,7 @@ export function AdjustExpectedTimeModal({
       setHhmm(isoToSydneyClock(row!.expectedArrivalAt));
       setReasonCode("");
       setDetail("");
-      setPin("");
+      setOperatorPinVerified(false);
       setPinError(null);
     } else if (!rowId) {
       openedForRef.current = null;
@@ -98,23 +99,13 @@ export function AdjustExpectedTimeModal({
       if (!row) throw new Error("No row");
       const reason = ABSENCE_REASONS.find((r) => r.code === reasonCode);
       if (!reason) throw new Error("Select an absence reason.");
-      if (!/^\d{4}$/.test(pin)) throw new Error("Enter your 4-digit PIN.");
-
-      // Verify the operator PIN. Records who authorised the absence.
-      let profile;
-      try {
-        profile = await loginWithPin(pin);
-      } catch (e) {
-        if (e instanceof GuardianPinError) throw new Error(e.message);
-        throw e;
-      }
-      if (!profile) throw new Error("Incorrect PIN. Please try again.");
+      if (!operatorPinVerified) throw new Error("Operator PIN required.");
 
       return markAttendanceAbsent(row, {
         reasonCode: reason.code,
         reasonLabel: reason.label,
         detail: detail.trim() || null,
-        operatorStaffId: profile.staffId ?? null,
+        operatorStaffId: getActiveUserProfile()?.staffId ?? null,
       });
     },
     onSuccess: (res) => {
@@ -133,7 +124,7 @@ export function AdjustExpectedTimeModal({
   });
 
   const busy = updateMut.isPending || absentMut.isPending;
-  const canMarkAbsent = !!reasonCode && /^\d{4}$/.test(pin) && !busy;
+  const canMarkAbsent = !!reasonCode && operatorPinVerified && !busy;
 
   return (
     <Dialog open={!!row} onOpenChange={(o) => !o && !busy && onClose(false)}>
@@ -210,26 +201,21 @@ export function AdjustExpectedTimeModal({
 
           <div className="space-y-1.5">
             <Label
-              htmlFor="absent-pin"
               className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
             >
               <ShieldCheck className="h-3.5 w-3.5" />
               Operator PIN
             </Label>
-            <Input
-              id="absent-pin"
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={4}
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
-                setPinError(null);
-              }}
-              placeholder="••••"
-              className="h-11 text-center text-xl tracking-[0.6em] font-mono"
+            <PinEntryTrigger
+              label="Tap to sign with your PIN"
+              verified={operatorPinVerified}
+              verifiedLabel="Operator PIN verified"
+              length={4}
+              title="Mark client absent"
+              description="Confirms this absence record and writes to the ledger."
               disabled={busy}
+              onVerify={verifyOperatorPin}
+              onSuccess={() => setOperatorPinVerified(true)}
             />
             {pinError && (
               <p className="text-xs font-medium text-destructive">{pinError}</p>

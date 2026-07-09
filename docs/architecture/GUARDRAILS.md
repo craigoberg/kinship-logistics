@@ -60,6 +60,25 @@ const reporterId = user?.id ?? profile?.staffId ?? "";
 
 - Use profile.id or the staff profile's identifier as a fallback when a Supabase auth session is absent so the active opener is accurately attributed.
 
+### 2.3 PIN Entry UI (Field Devices — locked 2026-07-07)
+
+All operator and manager **authentication PIN capture** must use the canonical on-screen components — never a raw `<Input type="password">` or OS keyboard for PIN digits.
+
+| Component | Path | Use when |
+| :-------- | :--- | :------- |
+| `PinPad` | `src/components/auth/pin-pad.tsx` | Inline keypad (dedicated login screen) |
+| `PinEntryDialog` | `src/components/auth/pin-entry-dialog.tsx` | Popup/sheet overlay for PIN-only step |
+| `PinEntryTrigger` | `src/components/auth/pin-entry-dialog.tsx` | Form button → opens `PinEntryDialog` → verify → continue workflow |
+| `verifyOperatorPin` / `verifyManagerPin` | `src/components/auth/pin-verify.ts` | Client verification helpers |
+
+**Rules:**
+
+1. **No OS soft keyboard for PIN** — `PinPad` uses tap digits and/or **physical keyboard** (0–9, Backspace, Enter); do not use `inputMode="numeric"` password fields for PIN.
+2. **Mobile presentation** — `PinEntryDialog` renders as a **bottom sheet** on phone (`useIsMobile`), centred dialog on tablet/desktop.
+3. **Remote verbal consultation** — operator PIN only; manager is selected by name, not PIN (`VerbalConsultationDialog`). In-person override may use manager PIN via `PinEntryTrigger` + `verifyManagerPin` (`VerbalAuthOverrideDialog`).
+4. **Verify once at entry** — PIN is verified when the pad completes; parent forms gate submit on `*PinVerified` flags (or refs if the API still needs the value). Do not re-prompt with a text field.
+5. **New PIN surfaces** — any new build requiring PIN auth must import from `src/components/auth/`; code review / agent rules treat raw PIN inputs as a blocking defect.
+
 ---
 
 ## 3. The Single-Rail Escalation Matrix (Asynchronous Verbal-Consultation Model)
@@ -109,6 +128,7 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | Mandated Checks Lookup      | `src/hooks/use-mandated-checks.ts` (or data layer equivalent) | Dynamically sources checkpoints via registry scope ('site_day' vs 'pre_trip').                   |
 | High-Trust Escape Hatch     | `src/components/auth/verbal-auth-override-dialog.tsx`         | Renders the auditable verbal authorization bypass for un-reachable manager states.               |
 | Global Escalation Intercept | `src/components/dashboard/global-escalation-interceptor.tsx`  | Real-time broadcast coordinator pop-up handling atomic RPC claims.                               |
+| Field single-select rows    | `src/components/manifest/mobile-field-button.tsx`             | `MobileFieldButton` / `MobileOptionButton` — high-contrast tap lists (§4.5).                     |
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
@@ -166,6 +186,30 @@ Mandatory inputs must give operators an **immediate, consistent** signal of what
 
 - Full-Width Rows: Standard, tiny native desktop checkboxes are strictly prohibited for operational checklists, safety gates, attendance logs, or roll-calls accessed via mobile devices or tablets.
 - Toggle Target Cards: Checklist items must be rendered as full-width, touch-friendly rows or button-cards. Tapping anywhere within the text boundary or row target must instantly toggle the entire button green (Checked/Active). Tapping it again must return the row to a neutral grey state.
+
+### 4.5 High-Contrast Field Selection (locked 2026-07-07)
+
+Field-device **single-select** controls (vehicle pickers, start-point choice, med-handover status, manifest option rows) must use the **Yada Connect vibrant token palette** from `src/styles.css` — solid semantic fills with **white foreground text**, never low-opacity tint alone for the selected state.
+
+| Component | Path | Use when |
+| :-------- | :--- | :------- |
+| `MobileFieldButton` | `src/components/manifest/mobile-field-button.tsx` | Large tap row with title + subtitle (vehicle list, manifest field actions) |
+| `MobileOptionButton` | same file | Compact option rows (med status, enum pickers) |
+
+**Visual contract (selected / active):**
+
+1. **Solid fill** — `bg-{token}` + `text-{token}-foreground` where token is `primary`, `info`, `success`, `warning`, or `destructive` (see CSS variables `--info`, `--success`, etc.). **Do not** use `/15` or `/30` opacity backgrounds as the only selected-state signal.
+2. **Strong border + ring** — `border-2 border-{token}` plus `ring-2 ring-{token}/40` and `shadow-md` so selection reads clearly in bright sunlight and on low-quality panels.
+3. **“Selected” badge** — uppercase pill on the right edge when the row is active (`MobileFieldButton` / `MobileOptionButton` render this automatically).
+4. **Idle state** — muted card/border (`border-border`, `bg-card/80`); unselected rows must not compete visually with the active row.
+
+**Anti-patterns (do not ship on field routes):**
+
+- Native `<Select>` / small dropdown triggers for primary manifest or driver init choices when vertical space allows a tap list
+- Selected row = pale tint only (e.g. `bg-sky-600/25`) without solid fill
+- Selected text that stays low-contrast grey on a tinted background
+
+**Design tokens:** Status colours are defined in `:root` / `.dark` as *“Vibrant high-contrast status colors — always paired with white text”*. Reuse those tokens via Tailwind (`bg-info`, `text-info-foreground`, `bg-tab-active`, etc.) — do not invent one-off hex values.
 
 ---
 

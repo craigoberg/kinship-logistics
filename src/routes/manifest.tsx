@@ -17,13 +17,13 @@ import {
   GripVertical,
   Users,
   UserCheck,
+  Bus,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Switch } from "@/components/ui/switch";
-import { Checkbox } from "@/components/ui/checkbox";
+import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -43,9 +43,8 @@ import {
   useStartDayCentreRun,
   useTodaysBusRunSummaries,
   usePatchTripLeg,
-  useCompleteTrip,
   useCancelTrip,
-  useConfirmedEvents,
+  useManifestPickerEvents,
   useLastEndOdometer,
   useLookupParameters,
   useReorderTripPickupLegs,
@@ -53,10 +52,11 @@ import {
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
-import { cn } from "@/lib/utils";
+import { cn, todayLocalIso, eventSpansDate } from "@/lib/utils";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type {
   TripLeg,
+  TransportTrip,
   ActiveTripBundle,
   MedicationHandoverStatus,
   TransportAsset,
@@ -76,9 +76,12 @@ import {
   STAFF_DIRECTORY,
   DEFAULT_STAFF_UUID,
   computePickupChainEndpoints,
+  resolveStaffIdWithFallback,
 } from "@/lib/data-store";
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
+import { CloseRunCard } from "@/components/manifest/close-run-card";
+import { ManifestRouteMap } from "@/components/manifest/manifest-route-map";
+import { MobileFieldButton, MobileOptionButton } from "@/components/manifest/mobile-field-button";
 // RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
 // through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
@@ -108,6 +111,7 @@ import {
   isPassengerPickupLeg,
   PickupCancelButton,
   PointerSortableList,
+  PICKUP_DRAG_GRIP_CLASS,
   usePickupCancelDialog,
   type PickupDragBind,
 } from "@/components/manifest/manage-pickups-panel";
@@ -212,17 +216,12 @@ function ManifestPage() {
 
 type InitStep = "vehicle" | "clearance" | "event";
 
-function todayDateStr(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
 function staffName(staffId: string): string {
   return STAFF_DIRECTORY.find((s) => s.id === staffId)?.name ?? "Driver";
 }
 
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
-  const today = todayDateStr();
+  const today = todayLocalIso();
   const { data: lastEndOdo = null } = useLastEndOdometer();
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
@@ -303,31 +302,49 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
           <p className="mt-1 text-sm text-muted-foreground">
             Step 1 of 3 — pick today's vehicle and record the starting odometer.
           </p>
-          <form onSubmit={proceedToClearance} className="mt-5 space-y-4">
+          <form onSubmit={proceedToClearance} className="mt-5 space-y-5">
             <div className="grid gap-2">
-              <Label htmlFor="asset">Select Vehicle</Label>
-              <Select value={assetId} onValueChange={setAssetId}>
-                <SelectTrigger id="asset" className="h-12">
-                  <SelectValue placeholder="Today's vehicle…" />
-                </SelectTrigger>
-                <SelectContent>
+              <Label>Select Vehicle</Label>
+              {activeAssets.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-border px-4 py-6 text-center text-sm text-muted-foreground">
+                  No active vehicles in the fleet — add one in Admin first.
+                </p>
+              ) : (
+                <div className="space-y-2">
                   {activeAssets.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>
-                      {a.name} · {a.regoPlate} · {a.passengerCapacity} seats
-                    </SelectItem>
+                    <MobileFieldButton
+                      key={a.id}
+                      title={a.name}
+                      subtitle={`${a.regoPlate} · ${a.passengerCapacity} seats${
+                        a.makeModel ? ` · ${a.makeModel}` : ""
+                      }`}
+                      icon={<Bus className="h-5 w-5" />}
+                      tone="info"
+                      active={assetId === a.id}
+                      onClick={() => setAssetId(a.id)}
+                      className="min-h-[4.5rem] py-4"
+                    />
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+              )}
             </div>
             <div className="grid gap-2">
-              <Label htmlFor="odo">Starting Odometer reading (KM)</Label>
-              <Input
+              <NumericEntryTrigger
                 id="odo"
-                type="number"
+                label="Starting odometer"
                 value={odo}
-                onChange={(e) => setOdo(e.target.value)}
-                placeholder="Enter starting KM"
-                className="h-14 text-lg tabular-nums"
+                onChange={setOdo}
+                placeholder="Tap to enter starting km"
+                title="Starting odometer"
+                description={
+                  lastEndOdo != null
+                    ? `Last closing reading was ${lastEndOdo} km. Enter today's start reading.`
+                    : "Enter the odometer reading where the bus is parked."
+                }
+                step={1}
+                allowDecimal={false}
+                min={1}
+                unit="km"
               />
               {lastEndOdo != null && (
                 <p className="text-[11px] text-muted-foreground">
@@ -629,8 +646,8 @@ function StartPointPicker({
     cn(
       "w-full rounded-xl border-2 px-4 py-3 text-left transition active:scale-[0.99]",
       selected
-        ? "border-green-500 bg-green-600/25 shadow-sm shadow-green-900/30"
-        : "border-border bg-card hover:border-green-400/60",
+        ? "border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40"
+        : "border-border bg-card text-foreground hover:border-success/50",
     );
 
   return (
@@ -643,9 +660,9 @@ function StartPointPicker({
         className={optionClass(choice === "depot")}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-foreground">Depot</span>
+          <span className="font-bold">Depot</span>
           {choice === "depot" && (
-            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+            <span className="rounded-full bg-success-foreground/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
               Selected
             </span>
           )}
@@ -653,7 +670,14 @@ function StartPointPicker({
             <span className="text-[10px] font-medium text-muted-foreground">Default</span>
           )}
         </div>
-        <p className="mt-1 text-sm leading-snug text-muted-foreground">{depotDisplay}</p>
+        <p
+          className={cn(
+            "mt-1 text-sm leading-snug",
+            choice === "depot" ? "opacity-95" : "text-muted-foreground",
+          )}
+        >
+          {depotDisplay}
+        </p>
       </button>
 
       <button
@@ -662,9 +686,9 @@ function StartPointPicker({
         className={optionClass(choice === "day_centre")}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-foreground">Day Centre</span>
+          <span className="font-bold">Day Centre</span>
           {choice === "day_centre" && (
-            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+            <span className="rounded-full bg-success-foreground/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
               Selected
             </span>
           )}
@@ -672,7 +696,14 @@ function StartPointPicker({
             <span className="text-[10px] font-medium text-muted-foreground">Default</span>
           )}
         </div>
-        <p className="mt-1 text-sm leading-snug text-muted-foreground">{centreDisplay}</p>
+        <p
+          className={cn(
+            "mt-1 text-sm leading-snug",
+            choice === "day_centre" ? "opacity-95" : "text-muted-foreground",
+          )}
+        >
+          {centreDisplay}
+        </p>
       </button>
 
       <button
@@ -687,14 +718,19 @@ function StartPointPicker({
         className={optionClass(choice === "alternate")}
       >
         <div className="flex items-center justify-between gap-2">
-          <span className="font-bold text-foreground">{alternateHeading}</span>
+          <span className="font-bold">{alternateHeading}</span>
           {choice === "alternate" && (
-            <span className="rounded-full bg-green-600 px-2 py-0.5 text-[10px] font-bold uppercase text-white">
+            <span className="rounded-full bg-success-foreground/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide">
               Selected
             </span>
           )}
         </div>
-        <p className="mt-1 text-sm leading-snug text-muted-foreground">
+        <p
+          className={cn(
+            "mt-1 text-sm leading-snug",
+            choice === "alternate" ? "opacity-95" : "text-muted-foreground",
+          )}
+        >
           {alternateDisplay || alternateDescription}
         </p>
       </button>
@@ -887,10 +923,15 @@ function EventPickAndStart({
   startOdometer: number;
   onBack: () => void;
 }) {
-  const { data: events = [] } = useConfirmedEvents();
+  const today = todayLocalIso();
+  const { data: picker = { events: [], todaySessionEventIds: [] } } = useManifestPickerEvents(today);
+  const events = picker.events;
+  const todaySessionEventIds = useMemo(
+    () => new Set(picker.todaySessionEventIds),
+    [picker.todaySessionEventIds],
+  );
   const startTrip = useStartTrip();
   const startDayCentreRun = useStartDayCentreRun();
-  const today = todayDateStr();
 
   // Derive today's day-of-week code (DAY-MON … DAY-SUN) from Sydney local time.
   const todayDayCode = useMemo(() => {
@@ -915,7 +956,15 @@ function EventPickAndStart({
   // the driver is on the event-picker screen, the list updates in real time.
   useRealtimeInvalidate({
     table: "event_roster_bookings",
-    queryKeys: [["events", "confirmed"]],
+    queryKeys: [["events", "manifest-picker"], ["events", "confirmed"]],
+  });
+  useRealtimeInvalidate({
+    table: "event_manifest",
+    queryKeys: [["events", "manifest-picker"], ["events", "confirmed"]],
+  });
+  useRealtimeInvalidate({
+    table: "event_day_sessions",
+    queryKeys: [["events", "manifest-picker"], ["events", "confirmed"]],
   });
   useRealtimeInvalidate({
     table: "participant_attendance_schedules",
@@ -923,8 +972,11 @@ function EventPickAndStart({
   });
 
   const todaysEvents = useMemo(
-    () => events.filter((e) => e.startDate <= today && (e.endDate ?? e.startDate) >= today),
-    [events, today],
+    () =>
+      events.filter(
+        (e) => eventSpansDate(e.startDate, e.endDate, today) || todaySessionEventIds.has(e.id),
+      ),
+    [events, today, todaySessionEventIds],
   );
 
   // Always default to Day Centre Run — drivers use this almost exclusively.
@@ -980,9 +1032,11 @@ function EventPickAndStart({
     if (!selectedEvent) return today;
     const start = selectedEvent.startDate;
     const end = selectedEvent.endDate ?? start;
-    if (today >= start && today <= end) return today;
+    if (eventSpansDate(start, end, today) || todaySessionEventIds.has(selectedEvent.id)) {
+      return today;
+    }
     return start;
-  }, [selectedEvent, today]);
+  }, [selectedEvent, today, todaySessionEventIds]);
 
   const { data: lastItineraryStop, isLoading: lastStopLoading } = useQuery({
     queryKey: ["event-last-itinerary-stop", eventId, returnSessionDate],
@@ -1043,11 +1097,21 @@ function EventPickAndStart({
   // outbound (bus stays at venue) or return (separate home run).  Inferred
   // outing kind only affects UI label; non-outing events default "outbound".
   const showDirectionPicker = !!selectedEvent;
+  const eventTransportBlocked =
+    selectedEvent?.status === "Planning" || selectedEvent?.status === "Closed";
 
   // ── Event submit ───────────────────────────────────────────────────────────
   const submitEvent = (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventId || startTrip.isPending || eventInFlightRef.current) return;
+    if (selectedEvent?.status === "Planning") {
+      toast.error("Event is still Planning — promote to Confirmed in Events first.");
+      return;
+    }
+    if (selectedEvent?.status === "Closed") {
+      toast.error("This event is closed — transport runs cannot be started.");
+      return;
+    }
     if (eventStartChoice === "alternate" && !eventAlternateAddress.trim()) {
       toast.error("Enter an alternate starting address first.");
       return;
@@ -1225,14 +1289,39 @@ function EventPickAndStart({
                 {(todaysEvents.length ? todaysEvents : events).map((e) => (
                   <SelectItem key={e.id} value={e.id}>
                     {e.title} · {e.startDate}
+                    {e.status === "Planning" ? " (Planning — confirm first)" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
+          {eventTransportBlocked && (
+            <div className="flex gap-2 rounded-lg border border-amber-500/50 bg-amber-500/10 px-4 py-3 text-sm text-amber-800 dark:text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                {selectedEvent?.status === "Planning" ? (
+                  <>
+                    <p className="font-semibold">Event still in Planning</p>
+                    <p className="mt-0.5 text-xs opacity-90">
+                      A coordinator must promote this event to <strong>Confirmed</strong> in Events before
+                      you can start an outbound or return run.
+                    </p>
+                  </>
+                ) : (
+                  <>
+                    <p className="font-semibold">Event is closed</p>
+                    <p className="mt-0.5 text-xs opacity-90">
+                      Transport runs cannot be started for a closed event.
+                    </p>
+                  </>
+                )}
+              </div>
+            </div>
+          )}
+
           {/* Direction picker — shown for every event run (§12.4.3a) */}
-          {showDirectionPicker && (
+          {showDirectionPicker && !eventTransportBlocked && (
             <div className="grid gap-2">
               <Label>Run direction</Label>
               <div className="grid grid-cols-2 gap-2">
@@ -1271,7 +1360,7 @@ function EventPickAndStart({
             </div>
           )}
 
-          {eventRunDirection === "return" && (
+          {eventRunDirection === "return" && !eventTransportBlocked && (
             <ReturnDepartFromPicker
               lastStop={
                 lastItineraryStop
@@ -1289,42 +1378,46 @@ function EventPickAndStart({
             />
           )}
 
-          <StartPointPicker
-            direction={eventRunDirection === "return" ? "afternoon" : "morning"}
-            depotAddress={defaultDepotAddress}
-            centreAddress={defaultCentreAddress}
-            choice={eventStartChoice}
-            onChoiceChange={setEventStartChoice}
-            alternateAddress={eventAlternateAddress}
-            onAlternateAddressChange={setEventAlternateAddress}
-            heading={eventRunDirection === "return" ? "Returning to" : "Starting from"}
-            alternateHeading={
-              eventRunDirection === "return"
-                ? "Other return destination (this trip only)"
-                : "Other address (this trip only)"
-            }
-            alternateDescription={
-              eventRunDirection === "return"
-                ? "Tap if the bus returns somewhere other than depot or day centre"
-                : "Tap to enter a one-off starting address"
-            }
-          />
+          {!eventTransportBlocked && (
+            <StartPointPicker
+              direction={eventRunDirection === "return" ? "afternoon" : "morning"}
+              depotAddress={defaultDepotAddress}
+              centreAddress={defaultCentreAddress}
+              choice={eventStartChoice}
+              onChoiceChange={setEventStartChoice}
+              alternateAddress={eventAlternateAddress}
+              onAlternateAddressChange={setEventAlternateAddress}
+              heading={eventRunDirection === "return" ? "Returning to" : "Starting from"}
+              alternateHeading={
+                eventRunDirection === "return"
+                  ? "Other return destination (this trip only)"
+                  : "Other address (this trip only)"
+              }
+              alternateDescription={
+                eventRunDirection === "return"
+                  ? "Tap if the bus returns somewhere other than depot or day centre"
+                  : "Tap to enter a one-off starting address"
+              }
+            />
+          )}
 
           <button
             type="submit"
-            disabled={!eventId || startTrip.isPending}
+            disabled={!eventId || startTrip.isPending || eventTransportBlocked}
             className={cn(
               "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              !eventId || startTrip.isPending
+              !eventId || startTrip.isPending || eventTransportBlocked
                 ? "bg-blue-600 opacity-60 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700",
             )}
           >
-            {startTrip.isPending
-              ? "Opening…"
-              : eventRunDirection === "return"
-                ? "Start Return Run & Open Manifest"
-                : "Start Outbound Run & Open Manifest"
+            {eventTransportBlocked
+              ? "Confirm event in Events first"
+              : startTrip.isPending
+                ? "Opening…"
+                : eventRunDirection === "return"
+                  ? "Start Return Run & Open Manifest"
+                  : "Start Outbound Run & Open Manifest"
             }
           </button>
         </form>
@@ -1350,7 +1443,7 @@ interface ActiveTripScreenProps {
 const ACTIVE_TRIP_QUERY_KEY = ["transport_trips", "active"] as const;
 
 function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
-  const { trip, legs } = bundle;
+  const { trip, legs, eventTitle } = bundle;
   const reorderPickups = useReorderTripPickupLegs();
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
@@ -1400,6 +1493,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
   const activeIsPendingPickup =
     activeLeg != null && isPassengerPickupLeg(activeLeg) && activeLeg.status === "pending";
+  const activeIsEnRoute = activeLeg?.status === "en_route";
   const activeInProgress =
     activeLeg != null && (activeLeg.status === "en_route" || activeLeg.status === "arrived");
 
@@ -1478,6 +1572,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       >
         <ActiveLegCard
           leg={shown}
+          trip={trip}
+          legs={legs}
           startAddress={startAddressForLeg(shown)}
           onCancelPickup={canCancelPickupLeg(leg) ? () => requestCancel(leg) : undefined}
           cancelDisabled={isCancelling}
@@ -1512,7 +1608,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0 flex-1 pr-3">
-            <div className="truncate text-base font-bold leading-tight">{bundle.eventTitle ?? "Daily Run"}</div>
+            <div className="truncate text-base font-bold leading-tight">{eventTitle ?? "Daily Run"}</div>
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               {trip.tripDate} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
             </div>
@@ -1524,7 +1620,13 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         </div>
       </header>
 
-      <main className="flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2">
+      <main
+        data-manifest-scroll
+        className={cn(
+          "flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
+          "overscroll-y-contain",
+        )}
+      >
         {/* Return run: boarding roll gate before first leg departs */}
         {isReturnRun && !boardingConfirmed && returnPassengers.length > 0 && (
           <ReturnBoardingRoll
@@ -1576,7 +1678,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </>
         )}
 
-        {activeInProgress && pendingPickups.length >= 2 && (
+        {activeInProgress && !activeIsEnRoute && pendingPickups.length >= 2 && (
           <div className="space-y-2">
             <div className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Upcoming stops — drag to reorder
@@ -1604,7 +1706,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </div>
         )}
 
-        {activeInProgress && pendingPickups.length === 1 && (
+        {activeInProgress && !activeIsEnRoute && pendingPickups.length === 1 && (
           renderUpcomingPickupRow(
             pendingPickups[0]!,
             completedPickupCount + 2,
@@ -1621,16 +1723,26 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </Card>
         )}
 
-        {upcomingStaticLegs.map((l) => (
-          <LegRow key={l.id} leg={l} onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined} cancelDisabled={isCancelling} />
-        ))}
+        {!activeIsEnRoute &&
+          upcomingStaticLegs.map((l) => (
+            <LegRow
+              key={l.id}
+              leg={l}
+              onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined}
+              cancelDisabled={isCancelling}
+            />
+          ))}
       </main>
 
       {pickupCancelDialog}
 
-      <footer className="sticky bottom-0 z-20 space-y-3 border-t border-border bg-card p-3 pb-[env(safe-area-inset-bottom)]">
+      <footer className="sticky bottom-0 z-20 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         {allLegsComplete ? (
-          <FinalizeShiftCard tripId={trip.id} startOdometer={trip.startOdometerKm} />
+          <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
+        ) : activeIsEnRoute ? (
+          <div className="text-center text-xs text-muted-foreground">
+            Tap Arrive at Stop when you reach the destination.
+          </div>
         ) : (
           <div className="text-center text-xs text-muted-foreground">
             Drag upcoming stops to reorder · tap Depart Stop when ready.
@@ -1667,7 +1779,7 @@ function LegRow({
       data-sort-id={drag ? leg.id : undefined}
       className={cn(
         "flex items-center justify-between gap-3 p-3 text-sm",
-        drag?.isDragging && "z-10 opacity-90 shadow-lg ring-2 ring-blue-400",
+        drag?.isDragging && "z-10 touch-none opacity-90 shadow-lg ring-2 ring-blue-400",
         done
           ? "border-green-600/40 bg-green-600/5"
           : locked || !drag
@@ -1679,8 +1791,8 @@ function LegRow({
         <button
           type="button"
           className={cn(
-            "flex h-10 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-            cancelDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing",
+            PICKUP_DRAG_GRIP_CLASS,
+            cancelDisabled && "cursor-not-allowed opacity-50",
           )}
           aria-label="Drag to reorder stop"
           disabled={cancelDisabled}
@@ -1851,6 +1963,8 @@ function ReturnBoardingRoll({
 
 function ActiveLegCard({
   leg,
+  trip,
+  legs,
   startAddress,
   onCancelPickup,
   cancelDisabled,
@@ -1861,12 +1975,13 @@ function ActiveLegCard({
   eventId,
 }: {
   leg: TripLeg;
+  trip: TransportTrip;
+  legs: TripLeg[];
   startAddress?: string | null;
   onCancelPickup?: () => void;
   cancelDisabled?: boolean;
   drag?: PickupDragBind;
   isReturnRun?: boolean;
-  /** Disable "Depart Stop" until return boarding roll is complete. */
   boardingRequired?: boolean;
   tripId: string;
   eventId?: string | null;
@@ -1916,89 +2031,108 @@ function ActiveLegCard({
   return (
     <Card
       className={cn(
-        "relative rounded-xl border-2 border-blue-500 bg-slate-900 p-4 text-white",
-        drag?.isDragging && "z-10 opacity-90 shadow-lg ring-2 ring-blue-300",
+        "rounded-xl border-2 border-blue-500 bg-slate-900 p-4 text-white",
+        drag?.isDragging && "z-10 touch-none opacity-90 shadow-lg ring-2 ring-blue-300",
       )}
     >
-      {drag && (
-        <button
-          type="button"
-          className={cn(
-            "absolute left-3 top-3 z-10 flex h-9 w-8 items-center justify-center rounded-md text-slate-400",
-            cancelDisabled ? "cursor-not-allowed opacity-50" : "cursor-grab active:cursor-grabbing",
-          )}
-          aria-label="Drag to reorder stop"
-          disabled={cancelDisabled}
-          onPointerDown={drag.onGripPointerDown}
-        >
-          <GripVertical className="h-5 w-5" />
-        </button>
-      )}
-      {onCancelPickup && (
-        <div className="absolute right-3 top-3 z-10">
-          <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
-        </div>
-      )}
-      <div
-        className={cn(
-          "flex items-center gap-2 pr-10 text-[11px] font-bold uppercase tracking-wider text-blue-300",
-          drag && "pl-10",
-        )}
-      >
-        <Navigation className="h-3.5 w-3.5" /> Active leg {leg.legIndex}
-      </div>
-      <div className="mt-1 flex items-start gap-2">
-        <MapPin className="mt-1 h-5 w-5 shrink-0 text-blue-300" />
-        <div className="min-w-0">
-          <div className="truncate text-lg font-bold leading-tight">{leg.fromLabel}</div>
-          {startAddress && (
-            <div className="mt-0.5 flex items-start gap-1.5 text-xs text-slate-300">
-              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
-              <span className="break-words">{startAddress}</span>
-            </div>
-          )}
-          <div className="text-xs text-slate-400">↓</div>
-          <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
-          {leg.targetAddress && (
-            <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
-              <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
-              <span className="break-words">{leg.targetAddress}</span>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-4">
-        {leg.status === "en_route" ? (
+      <div className="flex items-start gap-2">
+        {drag && leg.status !== "en_route" && (
           <button
             type="button"
-            disabled={busy}
-            onClick={() => runGps("end")}
-            className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
+            className={cn(
+              PICKUP_DRAG_GRIP_CLASS,
+              "text-slate-400",
+              cancelDisabled && "cursor-not-allowed opacity-50",
+            )}
+            aria-label="Drag to reorder stop"
+            disabled={cancelDisabled}
+            onPointerDown={drag.onGripPointerDown}
           >
-            🛑 Arrive at Stop
+            <GripVertical className="h-5 w-5" />
           </button>
-        ) : leg.status === "arrived" ? (
-          <ArrivedChecklist
-            leg={leg}
-            isReturnRun={isReturnRun}
-            tripId={tripId}
-            eventId={eventId}
-          />
-        ) : leg.status === "completed" ? null : boardingRequired ? (
-          <div className="flex h-14 w-full items-center justify-center rounded-xl bg-slate-700 text-sm font-bold text-slate-400">
-            ✋ Complete boarding roll above to depart
+        )}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex min-w-0 items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
+              <Navigation className="h-3.5 w-3.5 shrink-0" /> Active leg {leg.legIndex}
+            </div>
+            {onCancelPickup && leg.status !== "en_route" && (
+              <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+            )}
           </div>
-        ) : (
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => runGps("start")}
-            className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
-          >
-            🚀 Depart Stop
-          </button>
-        )}
+
+          {leg.status === "en_route" ? (
+            <div className="mt-1 min-w-0">
+              <div className="truncate text-base font-bold leading-tight">
+                {leg.fromLabel} <span className="font-normal text-slate-400">→</span> {leg.toLabel}
+              </div>
+              {leg.targetAddress && (
+                <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
+                  <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+                  <span className="break-words">{leg.targetAddress}</span>
+                </div>
+              )}
+            </div>
+          ) : (
+            <div className="mt-1 flex items-start gap-2">
+              <MapPin className="mt-1 h-5 w-5 shrink-0 text-blue-300" />
+              <div className="min-w-0">
+                <div className="truncate text-lg font-bold leading-tight">{leg.fromLabel}</div>
+                {startAddress && (
+                  <div className="mt-0.5 flex items-start gap-1.5 text-xs text-slate-300">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+                    <span className="break-words">{startAddress}</span>
+                  </div>
+                )}
+                <div className="text-xs text-slate-400">↓</div>
+                <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
+                {leg.targetAddress && (
+                  <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
+                    <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
+                    <span className="break-words">{leg.targetAddress}</span>
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+
+          {leg.status === "en_route" && (
+            <ManifestRouteMap leg={leg} trip={trip} legs={legs} className="mt-3" />
+          )}
+
+          <div className="mt-4">
+            {leg.status === "en_route" ? (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runGps("end")}
+                className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
+              >
+                🛑 Arrive at Stop
+              </button>
+            ) : leg.status === "arrived" ? (
+              <ArrivedChecklist
+                leg={leg}
+                isReturnRun={isReturnRun}
+                tripId={tripId}
+                eventId={eventId}
+              />
+            ) : leg.status === "completed" ? null : boardingRequired ? (
+              <div className="flex h-14 w-full items-center justify-center rounded-xl bg-slate-700 text-sm font-bold text-slate-400">
+                ✋ Complete boarding roll above to depart
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={busy}
+                onClick={() => runGps("start")}
+                className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
+              >
+                🚀 Depart Stop
+              </button>
+            )}
+          </div>
+        </div>
       </div>
     </Card>
   );
@@ -2045,6 +2179,8 @@ function ArrivedChecklist({
   }, [formState, storageKey]);
 
   const { loggedKm, present, medStatus, extraMed, extraNotes, unsafeDropVerbalCleared } = formState;
+  const [noShowArmed, setNoShowArmed] = useState(() => !(formState.present ?? true));
+  const [unsafeDropArmed, setUnsafeDropArmed] = useState(() => !(formState.present ?? true));
   const [showNoShow, setShowNoShow] = useState(false);
   const [showUnsafeDrop, setShowUnsafeDrop] = useState(false);
   const [verbalPending, setVerbalPending] = useState<{ description: string } | null>(null);
@@ -2109,6 +2245,30 @@ function ArrivedChecklist({
           completedAt: new Date().toISOString(),
         },
       });
+      if (
+        leg.medicationExpected &&
+        (medStatus === "collected_intact" || medStatus === "collected_damaged")
+      ) {
+        resolveStaffIdWithFallback()
+          .then((staffId) =>
+            writeToLedger({
+              staff_id: staffId,
+              category: "TRIP",
+              severity: "GREEN",
+              action_type: "MED_BAG_HANDOVER",
+              gps_lat: null,
+              gps_lng: null,
+              metadata: {
+                trip_id: tripId,
+                leg_id: leg.id,
+                event_id: eventId ?? null,
+                participant_id: participantId,
+                handover_status: medStatus,
+              },
+            }),
+          )
+          .catch((e) => console.warn("[ArrivedChecklist] MED_BAG_HANDOVER ledger failed", e));
+      }
       // Parallel RED escalation — runs after boarding completes.
       // GUARDRAILS §1.1: failure is surfaced to the operator, not swallowed.
       if (extraMed && participantId) {
@@ -2134,51 +2294,54 @@ function ArrivedChecklist({
     }
   };
 
+  const confirmLabel = unsafeDropBlocked
+    ? "🔴 Complete verbal consultation first"
+    : "Confirm & Log Leg Completion";
+
   return (
     <div className="space-y-4 rounded-lg bg-slate-800/60 p-3 text-white">
-      <div className="grid gap-2">
-        <Label htmlFor="kmlog" className="text-slate-200">
-          Logged Leg Kilometers (GPS)
-        </Label>
-        <Input
-          id="kmlog"
-          type="number"
-          inputMode="decimal"
-          className="h-12 bg-slate-950 text-base tabular-nums text-white"
-          value={loggedKm}
-          onChange={(e) => updateField("loggedKm", e.target.value)}
-        />
-      </div>
+      <NumericEntryTrigger
+        id="kmlog"
+        label="Logged leg km"
+        value={loggedKm}
+        onChange={(v) => updateField("loggedKm", v)}
+        placeholder="Tap to enter leg distance"
+        title="Logged leg kilometres"
+        description="GPS estimate pre-filled — adjust in 0.5 km steps if needed."
+        step={0.5}
+        allowDecimal
+        min={0}
+        unit="km"
+        variant="dark"
+      />
 
       {/* ── Passenger confirmation — context-sensitive ──────────────────── */}
       {isReturnRun ? (
         /* Return run: confirm safe handover at front door */
         <>
-          <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2">
-            <div>
-              <div className="flex items-center gap-1.5 text-sm font-semibold">
-                <UserCheck className="h-4 w-4 text-green-400" />
-                Passenger safely at drop-off
-              </div>
-              <div className="text-xs text-slate-400">
-                Toggle off if passenger was NOT safely handed over.
-              </div>
-            </div>
-            <Switch
-              checked={present}
-              onCheckedChange={(v) => {
-                if (v) {
-                  updateField("present", true);
-                  updateField("unsafeDropVerbalCleared", false);
-                  return;
-                }
-                updateField("present", false);
-                if (participantId) setShowUnsafeDrop(true);
-              }}
-            />
-          </div>
+          <MobileFieldButton
+            tone={unsafeDropArmed ? "warning" : "success"}
+            active={!unsafeDropArmed}
+            icon={<UserCheck className="h-5 w-5" />}
+            title={unsafeDropArmed ? "Unsafe drop?" : "Passenger safely at drop-off"}
+            subtitle={
+              unsafeDropArmed
+                ? "Tap to cancel — passenger is safe"
+                : "Tap if passenger was NOT safely handed over"
+            }
+            onClick={() => {
+              if (unsafeDropArmed) {
+                setUnsafeDropArmed(false);
+                updateField("present", true);
+                updateField("unsafeDropVerbalCleared", false);
+                return;
+              }
+              setUnsafeDropArmed(true);
+              updateField("present", false);
+            }}
+          />
 
-          {!present && participantId && (
+          {unsafeDropArmed && participantId && (
             <div className="rounded-lg border border-red-500/60 bg-red-500/10 p-3 text-sm text-red-200">
               <div className="flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
@@ -2194,8 +2357,8 @@ function ArrivedChecklist({
               {!unsafeDropVerbalCleared && (
                 <button
                   type="button"
-                  onClick={openUnsafeDropVerbal}
-                  className="mt-3 h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700"
+                  onClick={() => setShowUnsafeDrop(true)}
+                  className="mt-3 h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700 touch-manipulation"
                 >
                   🔴 Log verbal consultation
                 </button>
@@ -2217,6 +2380,7 @@ function ArrivedChecklist({
               <AlertDialogFooter>
                 <AlertDialogCancel
                   onClick={() => {
+                    setUnsafeDropArmed(false);
                     updateField("present", true);
                     setShowUnsafeDrop(false);
                   }}
@@ -2241,6 +2405,7 @@ function ArrivedChecklist({
             onOpenChange={(o) => {
               if (!o) {
                 if (!unsafeDropVerbalCleared) {
+                  setUnsafeDropArmed(false);
                   updateField("present", true);
                 }
                 setVerbalPending(null);
@@ -2287,20 +2452,31 @@ function ArrivedChecklist({
       ) : (
         /* Outbound pickup: confirm boarded + no-show flow */
         <>
-          <div className="flex items-center justify-between rounded-lg border border-slate-700 bg-slate-950/40 px-3 py-2">
-            <div>
-              <div className="text-sm font-semibold">Passenger Present &amp; Boarded</div>
-              <div className="text-xs text-slate-400">Toggle off to escalate as no-show.</div>
-            </div>
-            <Switch checked={present} onCheckedChange={(v) => updateField("present", v)} />
-          </div>
+          <MobileFieldButton
+            tone={noShowArmed ? "warning" : "info"}
+            active={!noShowArmed}
+            icon={<UserCheck className="h-5 w-5" />}
+            title={noShowArmed ? "No-show?" : "Passenger on board"}
+            subtitle={noShowArmed ? "Tap to cancel — passenger is on board" : "Tap for no-show"}
+            onClick={() => {
+              if (noShowArmed) {
+                setNoShowArmed(false);
+                updateField("present", true);
+                return;
+              }
+              setNoShowArmed(true);
+            }}
+          />
 
-          {!present && participantId && (
+          {noShowArmed && participantId && (
             <>
               <button
                 type="button"
-                onClick={() => setShowNoShow(true)}
-                className="mt-2 h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700"
+                onClick={() => {
+                  updateField("present", false);
+                  setShowNoShow(true);
+                }}
+                className="h-12 w-full rounded-xl bg-red-600 font-bold text-white transition hover:bg-red-700 touch-manipulation"
               >
                 ⚠️ Trigger No-Show Countdown
               </button>
@@ -2335,27 +2511,26 @@ function ArrivedChecklist({
           <div className="text-xs font-semibold uppercase tracking-wider text-slate-300">
             Medication Bag Handover
           </div>
-          <RadioGroup
-            value={medStatus ?? ""}
-            onValueChange={(v) => updateField("medStatus", v as MedicationHandoverStatus)}
-            className="mt-2 grid gap-2"
-          >
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="collected_intact" id={`med-intact-${leg.id}`} />
-              <span className="inline-block h-2 w-2 rounded-full bg-green-500" />
-              <span className="font-medium">Collected &amp; Intact</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="collected_damaged" id={`med-dmg-${leg.id}`} />
-              <span className="inline-block h-2 w-2 rounded-full bg-amber-500" />
-              <span className="font-medium">Collected but Damaged / Compromised</span>
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <RadioGroupItem value="expected_not_provided" id={`med-exc-${leg.id}`} />
-              <span className="inline-block h-2 w-2 rounded-full bg-red-500" />
-              <span className="font-medium">Expected but Not Provided</span>
-            </label>
-          </RadioGroup>
+          <div className="mt-2 grid gap-2">
+            <MobileOptionButton
+              selected={medStatus === "collected_intact"}
+              dotClassName="bg-green-500"
+              label="Collected & Intact"
+              onClick={() => updateField("medStatus", "collected_intact")}
+            />
+            <MobileOptionButton
+              selected={medStatus === "collected_damaged"}
+              dotClassName="bg-amber-500"
+              label="Collected but Damaged / Compromised"
+              onClick={() => updateField("medStatus", "collected_damaged")}
+            />
+            <MobileOptionButton
+              selected={medStatus === "expected_not_provided"}
+              dotClassName="bg-red-500"
+              label="Expected but Not Provided"
+              onClick={() => updateField("medStatus", "expected_not_provided")}
+            />
+          </div>
           {exceptionFlagged && (
             <div className="mt-3 flex items-start gap-2 rounded-md border border-amber-500/60 bg-amber-500/10 p-2 text-xs text-amber-200">
               <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
@@ -2366,24 +2541,30 @@ function ArrivedChecklist({
       )}
 
       {showExtraMed && (
-        <div className="rounded-lg border border-slate-700 bg-slate-950/40 p-3">
-          <label className="flex items-center gap-2 text-sm">
-            <Checkbox checked={extraMed} onCheckedChange={(v) => updateField("extraMed", v === true)} />
-            <span className="font-medium">
-              <Pill className="mr-1 inline h-4 w-4 text-blue-300" />➕ Log Unexpected Medication Bag Received
-            </span>
-          </label>
+        <div className="space-y-2">
+          <MobileFieldButton
+            tone={extraMed ? "info" : "neutral"}
+            active={extraMed}
+            icon={<Pill className="h-5 w-5" />}
+            title={
+              extraMed
+                ? "Unexpected medication logged"
+                : "Log unexpected medication bag received"
+            }
+            subtitle={extraMed ? "Tap to hide notes" : "Tap to add description"}
+            onClick={() => updateField("extraMed", !extraMed)}
+          />
           {extraMed && (
-            <div className="mt-2 grid gap-1">
+            <div className="grid gap-1">
               <Label htmlFor="xnotes" className="text-xs text-slate-300">
-                Notes / Description of unexpected medicine bag
+                Notes / description of unexpected medicine bag
               </Label>
               <Textarea
                 id="xnotes"
-                rows={2}
+                rows={3}
                 value={extraNotes}
                 onChange={(e) => updateField("extraNotes", e.target.value)}
-                className="bg-slate-950 text-white"
+                className="min-h-[5rem] bg-slate-950 text-base text-white"
                 placeholder="e.g. small white pouch · 2 inhalers labelled JS"
               />
             </div>
@@ -2394,62 +2575,15 @@ function ArrivedChecklist({
       <button
         type="button"
         disabled={blocked || patch.isPending}
-        onClick={confirm}
+        onClick={() => void confirm()}
         className={cn(
-          "mt-4 h-14 w-full rounded-xl font-bold text-white transition disabled:opacity-60",
-          unsafeDropBlocked
+          "h-14 w-full touch-manipulation rounded-xl text-lg font-bold text-white transition active:scale-[0.98] disabled:opacity-60",
+          blocked || patch.isPending
             ? "cursor-not-allowed bg-slate-700"
             : "bg-green-600 hover:bg-green-700",
         )}
       >
-        {patch.isPending
-          ? "Logging…"
-          : unsafeDropBlocked
-            ? "🔴 Complete verbal consultation first"
-            : "Confirm & Log Leg Completion"}
-      </button>
-    </div>
-  );
-}
-
-/* -------------------- Finalize -------------------- */
-
-function FinalizeShiftCard({ tripId, startOdometer }: { tripId: string; startOdometer: number }) {
-  const complete = useCompleteTrip();
-  const [odo, setOdo] = useState("");
-  const valid = odo && Number(odo) >= startOdometer;
-
-  const submit = () => {
-    if (!valid) {
-      toast.error("Ending odometer must be ≥ starting odometer", {
-        className: "border-red-700 bg-red-600 text-white font-medium",
-      });
-      return;
-    }
-    complete.mutate({ tripId, endOdometerKm: Number(odo) }, { onSuccess: () => toast.success("Daily run locked.") });
-  };
-
-  return (
-    <div className="space-y-2">
-      <Label htmlFor="endodo" className="text-xs font-bold uppercase tracking-wider">
-        Ending Odometer reading (KM)
-      </Label>
-      <Input
-        id="endodo"
-        type="number"
-        inputMode="numeric"
-        className="h-12 text-base tabular-nums"
-        value={odo}
-        onChange={(e) => setOdo(e.target.value)}
-        placeholder={`≥ ${startOdometer}`}
-      />
-      <button
-        type="button"
-        disabled={!valid || complete.isPending}
-        onClick={submit}
-        className="h-14 w-full rounded-xl bg-red-700 font-bold text-white transition hover:bg-red-800 disabled:opacity-60"
-      >
-        🏁 End Shift & Lock Daily Run Logs
+        {patch.isPending ? "Logging…" : confirmLabel}
       </button>
     </div>
   );

@@ -5,7 +5,7 @@
  *   Registry  — list all venues; create / edit / archive / clone
  *   [selected venue] — template fields + baseline sign-off history
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -61,6 +61,9 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
+import { getActiveUserProfile } from "@/lib/data-store";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
 import { VenueComplianceTab } from "./venue-compliance-tab";
@@ -999,16 +1002,20 @@ function BaselineSignoffDialog({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [evidence, setEvidence] = useState("");
   const [notes, setNotes] = useState("");
-  const [pin, setPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+
+  const managerStaffId = getActiveUserProfile()?.staffId ?? "";
 
   useEffect(() => {
     if (open) {
       setAnswers({});
       setEvidence("");
       setNotes("");
-      setPin("");
+      setManagerPinVerified(false);
+      verifiedManagerPinRef.current = "";
       setPinError(null);
     }
   }, [open]);
@@ -1019,7 +1026,7 @@ function BaselineSignoffDialog({
     return a.trim().length > 0;
   });
   const evidenceOk = evidence.trim().length >= MIN_EVIDENCE;
-  const pinOk = /^\d{4}$/.test(pin);
+  const pinOk = managerPinVerified;
   const canSubmit = allMandatoryAnswered && evidenceOk && pinOk && !busy;
 
   const handleSubmit = async () => {
@@ -1033,7 +1040,7 @@ function BaselineSignoffDialog({
 
       await submitBaselineSignoff({
         venue_id: venue.id,
-        managerPin: pin,
+        managerPin: verifiedManagerPinRef.current,
         evidence_ref: evidence.trim(),
         notes: notes.trim() || null,
         answers: answerRows,
@@ -1045,7 +1052,8 @@ function BaselineSignoffDialog({
       const msg = (e as Error).message;
       if (msg.toLowerCase().includes("pin") || msg.toLowerCase().includes("manager")) {
         setPinError(msg);
-        setPin("");
+        setManagerPinVerified(false);
+        verifiedManagerPinRef.current = "";
       } else {
         toast.error(msg);
       }
@@ -1103,29 +1111,27 @@ function BaselineSignoffDialog({
 
                 {/* Manager PIN */}
                 <div className="space-y-1.5">
-                  <Label htmlFor="signoff-pin" className="text-sm font-semibold">
+                  <Label className="text-sm font-semibold">
                     Manager PIN <span className="text-destructive">*</span>
                   </Label>
-                  <div className="flex items-center gap-3">
-                    <ShieldCheck className="h-4 w-4 text-muted-foreground shrink-0" />
-                    <Input
-                      id="signoff-pin"
-                      type="password"
-                      inputMode="numeric"
-                      pattern="[0-9]*"
-                      maxLength={4}
-                      value={pin}
-                      onChange={(e) => {
-                        const v = e.target.value.replace(/\D/g, "").slice(0, 4);
-                        setPin(v);
-                        setPinError(null);
-                      }}
-                      className={`h-11 w-28 text-center text-xl tracking-[0.5em] font-mono ${
-                        pinError ? "border-2 border-destructive" : ""
-                      }`}
-                      placeholder="----"
-                    />
-                  </div>
+                  <PinEntryTrigger
+                    label="Tap to enter manager PIN"
+                    verified={managerPinVerified}
+                    verifiedLabel="Manager PIN verified"
+                    length={4}
+                    title="Venue safety baseline sign-off"
+                    description="Immutable record — manager PIN required."
+                    disabled={!managerStaffId}
+                    required
+                    onVerify={async (p) => {
+                      await verifyManagerPin(managerStaffId, p);
+                    }}
+                    onSuccess={(p) => {
+                      verifiedManagerPinRef.current = p;
+                      setManagerPinVerified(true);
+                      setPinError(null);
+                    }}
+                  />
                   {pinError && (
                     <p className="text-sm text-destructive font-medium">{pinError}</p>
                   )}

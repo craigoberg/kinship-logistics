@@ -5,9 +5,8 @@
  * departure handover (phase → closed_orderly | closed_incident).
  */
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, verifyCoordinatorPin } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
-import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import {
   listStillCheckedIn,
@@ -37,11 +36,10 @@ async function getSession(sessionId: string): Promise<EventDaySession & { event_
   return data as EventDaySession & { event_id: string };
 }
 
-async function assertManagerPin(staffId: string, pin: string): Promise<void> {
-  const profile = await verifyStaffPin(staffId, pin);
-  if (!profile) throw new Error("Invalid manager PIN.");
-  const allowed = await canManageSystemParameters(staffId);
-  if (!allowed) throw new Error("Only Managers can open or close the event location.");
+async function assertTripLeaderPin(tripLeaderStaffId: string, pin: string): Promise<void> {
+  if (!tripLeaderStaffId) throw new Error("Assign a trip leader before opening the location.");
+  const ok = await verifyCoordinatorPin(tripLeaderStaffId, pin);
+  if (!ok) throw new Error("Invalid manager PIN.");
 }
 
 /** Hard open — event floor starts (§12.4.1). */
@@ -55,23 +53,24 @@ export async function openEventLocation(input: {
   if (!OPEN_FROM_PHASES.has(session.phase)) {
     throw new Error(`Location cannot open from phase "${session.phase}".`);
   }
-  if (!session.manager_staff_id) {
+  const tripLeaderId = session.manager_staff_id;
+  if (!tripLeaderId) {
     throw new Error("Assign a trip leader before opening the location.");
   }
 
-  const staffId = await resolveStaffIdWithFallback();
-  await assertManagerPin(staffId, input.managerPin);
+  await assertTripLeaderPin(tripLeaderId, input.managerPin);
 
   if (await hasOpenRedIssueForSession(input.sessionId)) {
     throw new Error("Open RED issue on this trip day — resolve before opening the location.");
   }
 
+  const actorStaffId = await resolveStaffIdWithFallback();
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({
       phase: "active",
-      opened_by_id: staffId,
+      opened_by_id: tripLeaderId,
       open_declared_at: nowIso,
       open_leader_notes: input.notes?.trim() || null,
     })
@@ -88,7 +87,7 @@ export async function openEventLocation(input: {
 
   const gps = await tryGetGps();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actorStaffId,
     category: "CENTRE",
     severity: "GREEN",
     action_type: "EVENT_LOCATION_OPENED",
@@ -128,15 +127,20 @@ export async function closeEventLocation(input: {
     );
   }
 
-  const staffId = await resolveStaffIdWithFallback();
-  await assertManagerPin(staffId, input.managerPin);
+  const tripLeaderId = session.manager_staff_id;
+  if (!tripLeaderId) {
+    throw new Error("Assign a trip leader before closing the location.");
+  }
 
+  await assertTripLeaderPin(tripLeaderId, input.managerPin);
+
+  const actorStaffId = await resolveStaffIdWithFallback();
   const nowIso = new Date().toISOString();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({
       phase: input.outcome,
-      closed_by_id: staffId,
+      closed_by_id: tripLeaderId,
       close_declared_at: nowIso,
       close_leader_notes: input.notes?.trim() || null,
     })
@@ -147,7 +151,7 @@ export async function closeEventLocation(input: {
 
   const gps = await tryGetGps();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actorStaffId,
     category: "CENTRE",
     severity: input.outcome === "closed_incident" ? "RED" : "GREEN",
     action_type:

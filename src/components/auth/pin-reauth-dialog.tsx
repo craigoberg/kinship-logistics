@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
 
 import {
@@ -10,74 +10,46 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { GuardianPinError, loginWithPin } from "@/lib/data-store";
+import { PinPad } from "@/components/auth/pin-pad";
+import { verifyLoginPin } from "@/components/auth/pin-verify";
+import { cn } from "@/lib/utils";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  /** Short context line, e.g. "Re-authenticate to open the Day Centre." */
   reason?: string;
-  /** Fired after loginWithPin succeeds. Parent should trigger its retry. */
   onAuthenticated: () => void;
 }
 
-/**
- * Modal PIN re-entry dialog used when a privileged API call returns 401 /
- * RLS-denied. Mirrors the auth route's 4-digit numeric pad and auto-submits
- * once the fourth digit lands. State is fully local — the parent only owns
- * `open` and the success callback.
- */
-export function PinReauthDialog({
-  open,
-  onOpenChange,
-  reason,
-  onAuthenticated,
-}: Props) {
+/** Session re-auth — on-screen PinPad (GUARDRAILS §2.3). */
+export function PinReauthDialog({ open, onOpenChange, reason, onAuthenticated }: Props) {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [shake, setShake] = useState(false);
 
-  // Reset state every time the dialog re-opens so a previous error/PIN doesn't
-  // linger between unrelated 401s.
   useEffect(() => {
     if (open) {
       setPin("");
       setError(null);
       setBusy(false);
-      // Focus after the dialog mount animation settles.
-      const t = setTimeout(() => inputRef.current?.focus(), 60);
-      return () => clearTimeout(t);
+      setShake(false);
     }
   }, [open]);
 
   const submit = async (value: string) => {
     if (busy) return;
-    if (!/^\d{4}$/.test(value)) {
-      setError("Incorrect PIN. Please try again.");
-      return;
-    }
     setBusy(true);
     setError(null);
     try {
-      const profile = await loginWithPin(value);
-      if (!profile) {
-        setError("Incorrect PIN. Please try again.");
-        setPin("");
-        inputRef.current?.focus();
-        return;
-      }
+      await verifyLoginPin(value);
       onAuthenticated();
+      onOpenChange(false);
     } catch (e) {
-      if (e instanceof GuardianPinError) {
-        setError(e.message);
-      } else {
-        console.error("[PinReauthDialog] loginWithPin failed", e);
-        setError("Sign-in failed. Check your connection and retry.");
-      }
+      setError(e instanceof Error ? e.message : "Sign-in failed. Check your connection and retry.");
       setPin("");
-      inputRef.current?.focus();
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
     } finally {
       setBusy(false);
     }
@@ -91,7 +63,7 @@ export function PinReauthDialog({
         onOpenChange(next);
       }}
     >
-      <AlertDialogContent className="max-w-sm">
+      <AlertDialogContent className="max-w-sm pb-[max(1rem,env(safe-area-inset-bottom))]">
         <AlertDialogHeader>
           <div className="mx-auto mb-1 rounded-full bg-primary/10 p-2.5 text-primary">
             <ShieldCheck className="h-6 w-6" />
@@ -101,70 +73,42 @@ export function PinReauthDialog({
           </AlertDialogTitle>
           <AlertDialogDescription className="text-center">
             Your terminal sign-in has timed out.
-            {reason ? ` ${reason}` : ""} Your mandated checks and notes are
-            preserved.
+            {reason ? ` ${reason}` : ""} Your mandated checks and notes are preserved.
           </AlertDialogDescription>
         </AlertDialogHeader>
 
-        <form
-          className="flex flex-col gap-3"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(pin);
-          }}
-        >
-          <Input
-            ref={inputRef}
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={4}
+        <div className={cn(shake && "animate-[shake_0.4s_ease-in-out]")}>
+          <PinPad
             value={pin}
-            onChange={(e) => {
-              const next = e.target.value.replace(/\D/g, "").slice(0, 4);
-              setPin(next);
+            onChange={(v) => {
+              setPin(v);
               setError(null);
-              if (next.length === 4) void submit(next);
             }}
-            onFocus={() => setError(null)}
-            className={`h-14 text-center text-2xl tracking-[1em] font-mono ${
-              error ? "border-2 border-destructive focus-visible:ring-destructive" : ""
-            }`}
-            placeholder="----"
-            aria-label="4-digit PIN"
-            aria-invalid={!!error}
+            length={4}
+            onComplete={(v) => void submit(v)}
             disabled={busy}
           />
-          {error && (
-            <p className="text-center text-sm font-medium text-destructive">
-              {error}
-            </p>
-          )}
-        </form>
+        </div>
 
-        <AlertDialogFooter className="flex-col-reverse gap-2 sm:flex-row">
+        {busy && (
+          <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Verifying…
+          </div>
+        )}
+        {error && (
+          <p className="text-center text-sm font-medium text-destructive">{error}</p>
+        )}
+
+        <AlertDialogFooter>
           <Button
             type="button"
             variant="outline"
-            className="w-full sm:w-auto"
+            className="w-full"
             onClick={() => onOpenChange(false)}
             disabled={busy}
           >
             Cancel
-          </Button>
-          <Button
-            type="button"
-            className="w-full sm:w-auto"
-            onClick={() => void submit(pin)}
-            disabled={busy || pin.length !== 4}
-          >
-            {busy ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying…
-              </>
-            ) : (
-              "Re-enter PIN"
-            )}
           </Button>
         </AlertDialogFooter>
       </AlertDialogContent>

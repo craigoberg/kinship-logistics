@@ -21,6 +21,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { PinPad } from "@/components/auth/pin-pad";
 import {
   useInsertStaffMember,
   useUpdateStaffMember,
@@ -231,21 +232,12 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               required={!isEdit}
               className="sm:col-span-2"
             >
-              <Input
+              <PinPad
                 value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                inputMode="numeric"
-                pattern="\d{4}"
-                maxLength={4}
-                placeholder="----"
-                autoComplete="off"
-                required={!isEdit}
-                aria-invalid={pinMissing || pinBadFormat}
-                className={
-                  pinMissing || pinBadFormat
-                    ? "border-destructive focus-visible:ring-destructive"
-                    : undefined
-                }
+                onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 4))}
+                length={4}
+                showConfirmKey
+                onComplete={(v) => setPin(v)}
               />
               {pinMissing && (
                 <p className="text-[11px] text-destructive">A 4-digit PIN is required for new personnel.</p>

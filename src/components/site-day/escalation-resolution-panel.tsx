@@ -1,12 +1,13 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Clock, Loader2, ShieldAlert, ShieldCheck, X } from "lucide-react";
 import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
   Dialog,
@@ -33,7 +34,6 @@ import {
   rejectEscalationProposal,
   resolveOperationalEscalation,
   subscribeToEscalation,
-  verifyStaffPin,
 } from "@/lib/data-store";
 import type { SiteIssue } from "@/lib/api/site-issues";
 
@@ -90,7 +90,8 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   });
   const claimedByName = managerNameQ.data ?? "the on-call Manager";
 
-  const [openerPin, setOpenerPin] = useState("");
+  const [openerPinVerified, setOpenerPinVerified] = useState(false);
+  const verifiedOpenerPinRef = useRef("");
   const [attempted, setAttempted] = useState(false);
 
   const acceptMutation = useMutation({
@@ -100,8 +101,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         throw new Error("Escalation has not been claimed yet.");
       if (!session.managerDecision)
         throw new Error("Manager has not proposed a decision yet.");
-      if (!/^\d{4,6}$/.test(openerPin))
-        throw new Error("Enter your 4–6 digit Opener PIN.");
+      if (!openerPinVerified) throw new Error("Opener PIN required.");
 
       const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
@@ -109,10 +109,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
           "No signed-in staff to authorise this action — please sign in again.",
         );
 
-      const ok = await verifyStaffPin(leaderStaffId, openerPin);
-      if (!ok)
-        throw new Error("Opener PIN does not match the staff who opened the day.");
-
+      const openerPin = verifiedOpenerPinRef.current;
       const planText =
         session.managerPlanText ?? escalation.resolutionNotes ?? "";
       const isGoDecision = session.managerDecision === "go";
@@ -219,8 +216,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const rejectMutation = useMutation({
     mutationFn: async (reason: string) => {
       if (!escalation) throw new Error("No escalation to reject.");
-      if (!/^\d{4,6}$/.test(openerPin))
-        throw new Error("Enter your 4–6 digit Opener PIN.");
+      if (!openerPinVerified) throw new Error("Opener PIN required.");
       const leaderStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
       if (!leaderStaffId)
         throw new Error("No signed-in staff to authorise rejection — please sign in again.");
@@ -229,7 +225,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
         escalationId: escalation.id,
         sessionId: session.id,
         openerStaffId: leaderStaffId,
-        pin: openerPin,
+        pin: verifiedOpenerPinRef.current,
         reason,
       });
     },
@@ -237,7 +233,8 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ["site-escalation"] });
       queryClient.invalidateQueries({ queryKey: ["site-issues"] });
-      setOpenerPin("");
+      setOpenerPinVerified(false);
+      verifiedOpenerPinRef.current = "";
       setRejectOpen(false);
       setRejectReason("");
       setRejectAttempted(false);
@@ -337,7 +334,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
   const decision = session.managerDecision;
   const isGo = decision === "go";
   const busy = acceptMutation.isPending || rejectMutation.isPending;
-  const pinValid = /^\d{4,6}$/.test(openerPin);
+  const pinValid = openerPinVerified;
   const actorStaffId = session.openedById ?? getActiveUserProfile()?.staffId ?? null;
   const canAct = !!actorStaffId;
 
@@ -392,33 +389,27 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label
-          htmlFor="esc-opener-pin"
-          className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-        >
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Opener PIN <span className="text-destructive">*</span>
         </Label>
-        <Input
-          id="esc-opener-pin"
-          type="password"
-          inputMode="numeric"
-          maxLength={6}
-          autoComplete="off"
-          value={openerPin}
-          onChange={(e) =>
-            setOpenerPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-          }
-          placeholder=""
-          className={
-            "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums" +
-            (attempted && !pinValid
-              ? " border-2 border-rose-600 focus-visible:ring-rose-600"
-              : "")
-          }
+        <PinEntryTrigger
+          label="Tap to sign with your PIN"
+          verified={openerPinVerified}
+          verifiedLabel="Opener PIN verified"
+          length={6}
+          title="Sign escalation review"
+          description="Confirms you accept or reject the manager's proposal."
+          disabled={!canAct}
+          required
+          onVerify={verifyOperatorPin}
+          onSuccess={(pin) => {
+            verifiedOpenerPinRef.current = pin;
+            setOpenerPinVerified(true);
+          }}
         />
         {attempted && !pinValid && (
           <span className="text-[11px] font-semibold text-rose-600">
-            Enter your 4–6 digit Opener PIN
+            Enter your Opener PIN to continue
           </span>
         )}
         {!canAct && (

@@ -7,6 +7,7 @@
  *   - Booking outbound/return transport mode patches (§12.3.2)
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
@@ -313,7 +314,10 @@ export async function listEventDaySessions(eventId: string): Promise<EventDaySes
     .select("*")
     .eq("event_id", eventId)
     .order("session_date", { ascending: true });
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMismatchError(error)) return [];
+    throw error;
+  }
 
   const rows = (data ?? []) as EventDaySession[];
   const managerIds = [
@@ -572,6 +576,110 @@ export async function updateBookingTransportModes(
     })
     .eq("id", input.booking_id);
   if (error) throw error;
+}
+
+// ============================================================================
+// Booking transport med bag (§12 / BL-014) — outings only
+// ============================================================================
+
+export type TransportMedBagRequired = "yes" | "no" | "not_set";
+
+export interface UpdateBookingTransportMedInput {
+  booking_id: string;
+  transport_med_bag_required: TransportMedBagRequired;
+  transport_med_notes?: string | null;
+}
+
+export async function updateBookingTransportMed(
+  input: UpdateBookingTransportMedInput,
+): Promise<void> {
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update({
+      transport_med_bag_required: input.transport_med_bag_required,
+      transport_med_notes: input.transport_med_notes?.trim() || null,
+    })
+    .eq("id", input.booking_id);
+  if (error) {
+    if (isUndefinedColumnError(error)) {
+      throw new Error(
+        `Transport med bag columns are not on the database yet. Run ${TRANSPORT_MED_BAG_MIGRATION} in Supabase SQL editor, then retry.`,
+      );
+    }
+    throw error;
+  }
+}
+
+/** True when driver manifest should prompt med-bag handover on outbound pickup. */
+export function transportMedBagPromptsHandover(
+  value: TransportMedBagRequired | string | null | undefined,
+): boolean {
+  return value === "yes";
+}
+
+export const TRANSPORT_MED_BAG_LABELS: Record<TransportMedBagRequired, string> = {
+  yes: "Med bag on bus",
+  no: "No med bag",
+  not_set: "Not assessed",
+};
+
+/** PostgreSQL undefined_column — migration not applied yet. */
+export function isUndefinedColumnError(error: { code?: string | null; message?: string | null } | null): boolean {
+  return isSchemaMismatchError(error);
+}
+
+export const TRANSPORT_MED_BAG_MIGRATION = "docs/sql/2026-07-07_event_roster_transport_med_bag.sql";
+
+export const PICKUP_ORDER_MIGRATION = "docs/sql/2026-07-07_event_roster_pickup_order.sql";
+
+/** Coordinator drag-order on roster — seeds manifest outbound pickup sequence. */
+export async function reorderEventRosterPickupOrder(
+  eventId: string,
+  orderedBookingIds: string[],
+): Promise<void> {
+  const results = await Promise.all(
+    orderedBookingIds.map((id, idx) =>
+      supabase
+        .from("event_roster_bookings")
+        .update({ pickup_order: (idx + 1) * 10 })
+        .eq("id", id)
+        .eq("event_id", eventId),
+    ),
+  );
+  const colErr = results.find((r) => isUndefinedColumnError(r.error));
+  if (colErr?.error) {
+    throw new Error(
+      `Pickup order column is not on the database yet. Run ${PICKUP_ORDER_MIGRATION} in Supabase SQL editor, then retry.`,
+    );
+  }
+  const otherErr = results.find((r) => r.error);
+  if (otherErr?.error) throw otherErr.error;
+}
+
+/**
+ * Per-participant outing med-bag flags. Returns null when DB column is not migrated yet.
+ */
+export async function fetchTransportMedBagByParticipant(
+  eventId: string,
+): Promise<Map<string, TransportMedBagRequired> | null> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select("participant_id, transport_med_bag_required")
+    .eq("event_id", eventId)
+    .neq("booking_status", "Cancelled");
+  if (error) {
+    if (isUndefinedColumnError(error)) return null;
+    throw error;
+  }
+  const map = new Map<string, TransportMedBagRequired>();
+  for (const r of data ?? []) {
+    const row = r as { participant_id: string; transport_med_bag_required?: string | null };
+    map.set(
+      row.participant_id,
+      (row.transport_med_bag_required ?? "not_set") as TransportMedBagRequired,
+    );
+  }
+  return map;
 }
 
 // ============================================================================

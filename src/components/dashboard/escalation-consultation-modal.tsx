@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
@@ -11,8 +11,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { cn } from "@/lib/utils";
 import { ElapsedTimer } from "@/components/ui/elapsed-timer";
@@ -234,7 +235,8 @@ function SiteDayProposalModal({
 }) {
   const queryClient = useQueryClient();
   const [notes, setNotes] = useState("");
-  const [pin, setPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [submitting, setSubmitting] = useState<null | "go" | "no_go">(null);
   const [attempted, setAttempted] = useState(false);
   const [lastError, setLastError] = useState<string | null>(null);
@@ -245,7 +247,8 @@ function SiteDayProposalModal({
   useEffect(() => {
     if (!escId) {
       setNotes("");
-      setPin("");
+      setManagerPinVerified(false);
+      verifiedManagerPinRef.current = "";
       setAttempted(false);
       setLastError(null);
     }
@@ -253,7 +256,7 @@ function SiteDayProposalModal({
 
 
   const notesValid = notes.trim().length >= 10;
-  const pinValid = /^\d{4,6}$/.test(pin);
+  const pinValid = managerPinVerified;
   const sessionMissing = !sessionLoading && !sessionId;
   const showPinError = attempted && !pinValid;
 
@@ -264,7 +267,7 @@ function SiteDayProposalModal({
       sessionId,
       claimedBy: escalation?.claimedBy,
       notesLen: notes.trim().length,
-      pinLen: pin.length,
+      pinLen: verifiedManagerPinRef.current.length,
       submitting,
     });
     if (!escalation || submitting) {
@@ -318,7 +321,7 @@ function SiteDayProposalModal({
         plan: notes.trim(),
         decision,
         managerStaffId: resolvedClaimedBy,
-        pin,
+        pin: verifiedManagerPinRef.current,
       });
 
       // 2. Mirror the notes onto the escalation row but KEEP status = claimed
@@ -455,32 +458,30 @@ function SiteDayProposalModal({
             />
 
             <div className="grid gap-1.5">
-              <Label
-                htmlFor="mgr-pin"
-                className="text-xs uppercase tracking-wide text-muted-foreground"
-              >
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                 Manager PIN <span className="text-rose-600">*</span>
               </Label>
-              <Input
-                id="mgr-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                autoComplete="off"
-                value={pin}
-                onChange={(e) =>
-                  setPin(e.target.value.replace(/\D/g, "").slice(0, 6))
-                }
-                placeholder=""
-                className={cn(
-                  "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums",
-                  showPinError &&
-                    "border-2 border-rose-600 focus-visible:ring-rose-600",
-                )}
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={6}
+                title="Propose escalation resolution"
+                description="Confirms your GO or NO-GO proposal to the on-site opener."
+                disabled={!escalation?.claimedBy}
+                onVerify={async (pin) => {
+                  const managerId = escalation?.claimedBy;
+                  if (!managerId) throw new Error("Escalation must be claimed first.");
+                  await verifyManagerPin(managerId, pin);
+                }}
+                onSuccess={(pin) => {
+                  verifiedManagerPinRef.current = pin;
+                  setManagerPinVerified(true);
+                }}
               />
               {showPinError && (
                 <span className="text-[11px] font-semibold text-rose-600">
-                  Enter your 4–6 digit Manager PIN
+                  Enter your Manager PIN to continue
                 </span>
               )}
             </div>

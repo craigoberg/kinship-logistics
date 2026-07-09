@@ -10,7 +10,8 @@
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
-import { todayLocalIso } from "@/lib/utils";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { todayLocalIso, eventSpansDate } from "@/lib/utils";
 
 export interface Participant {
   id: string;
@@ -2044,8 +2045,8 @@ function rowToEvent(r: EventManifestRow): EventManifest {
     title: r.title,
     eventTypeCode: r.event_type,
     venue: r.venue_name,
-    startDate: r.start_date,
-    endDate: r.end_date,
+    startDate: (r.start_date ?? "").slice(0, 10),
+    endDate: r.end_date ? r.end_date.slice(0, 10) : null,
     ticketPrice: Number(r.ticket_price ?? 0),
     description: r.description,
     status: r.status ?? "Planning",
@@ -2072,13 +2073,81 @@ export async function listEvents(): Promise<EventManifest[]> {
 }
 
 export async function listConfirmedEvents(): Promise<EventManifest[]> {
-  const { data, error } = await supabase
+  const { events } = await listManifestPickerEvents();
+  return events;
+}
+
+export interface ManifestPickerBundle {
+  /** Confirmed/Open events, plus Planning outings with a trip day today. */
+  events: EventManifest[];
+  /** Event IDs with an `event_day_sessions` row for the picker date. */
+  todaySessionEventIds: string[];
+}
+
+/**
+ * Driver manifest Step 3 event list (§11 / §12).
+ * Includes Confirmed/Open events and same-day Planning outings that have a trip day session.
+ */
+export async function listManifestPickerEvents(
+  asOfDate?: string,
+): Promise<ManifestPickerBundle> {
+  const today = asOfDate ?? todayLocalIso();
+
+  const { data: sessionRows, error: sessErr } = await supabase
+    .from("event_day_sessions")
+    .select("event_id")
+    .eq("session_date", today);
+  const todaySessionEventIds =
+    sessErr && isSchemaMismatchError(sessErr)
+      ? []
+      : (() => {
+          if (sessErr) throw sessErr;
+          return [
+            ...new Set((sessionRows ?? []).map((r) => (r as { event_id: string }).event_id)),
+          ];
+        })();
+
+  const { data: confirmedRows, error: confErr } = await supabase
     .from("event_manifest")
     .select("*")
     .in("status", ["Confirmed", "Open"])
     .order("start_date", { ascending: false });
-  if (error) throw error;
-  return (data ?? []).map((r) => rowToEvent(r as EventManifestRow));
+  if (confErr) throw confErr;
+
+  const confirmedIds = new Set(
+    (confirmedRows ?? []).map((r) => (r as EventManifestRow).id),
+  );
+  const extraIds = todaySessionEventIds.filter((id) => !confirmedIds.has(id));
+
+  let extraRows: EventManifestRow[] = [];
+  if (extraIds.length > 0) {
+    const { data: extras, error: extraErr } = await supabase
+      .from("event_manifest")
+      .select("*")
+      .in("id", extraIds)
+      .eq("status", "Planning");
+    if (extraErr) throw extraErr;
+    extraRows = (extras ?? []) as EventManifestRow[];
+  }
+
+  const byId = new Map<string, EventManifest>();
+  for (const r of [...(confirmedRows ?? []), ...extraRows]) {
+    const ev = rowToEvent(r as EventManifestRow);
+    byId.set(ev.id, ev);
+  }
+
+  const events = [...byId.values()].sort((a, b) => b.startDate.localeCompare(a.startDate));
+
+  // Surface today's outings first when date range or trip-day session matches.
+  const todayIds = new Set(todaySessionEventIds);
+  const todaysFirst = [...events].sort((a, b) => {
+    const aToday = eventSpansDate(a.startDate, a.endDate, today) || todayIds.has(a.id);
+    const bToday = eventSpansDate(b.startDate, b.endDate, today) || todayIds.has(b.id);
+    if (aToday !== bToday) return aToday ? -1 : 1;
+    return b.startDate.localeCompare(a.startDate);
+  });
+
+  return { events: todaysFirst, todaySessionEventIds };
 }
 
 
@@ -2272,6 +2341,15 @@ export interface EventRosterBooking {
   outboundTransportMode: string;
   /** §12.3.2 — 'bus' | 'self'. Self only on last-day outbound (enforced in API). */
   returnTransportMode: string;
+  /**
+   * Outing only — coordinator decision: does a labelled med supply travel on the bus?
+   * Driver manifest prompts handover only when `yes`. Day Centre uses schedules instead.
+   */
+  transportMedBagRequired: "yes" | "no" | "not_set";
+  /** Outing only — free text: what travels / exclusions for this trip. */
+  transportMedNotes: string | null;
+  /** Coordinator sort — seeds manifest outbound pickup leg order (lower = earlier). */
+  pickupOrder: number;
   // ── NDIS billing pipeline ────────────────────────────────────────────────
   /** Funding source, e.g. 'NDIS Plan Managed' | 'NDIS Self Managed' | 'Private'. */
   fundingClaimType: string;
@@ -2310,6 +2388,9 @@ interface BookingRow {
   dynamic_medical_notes_snapshot: string | null;
   outbound_transport_mode?: string | null;
   return_transport_mode?: string | null;
+  transport_med_bag_required?: string | null;
+  transport_med_notes?: string | null;
+  pickup_order?: number | null;
   // NDIS billing pipeline
   funding_claim_type: string | null;
   charge_code_id: string | null;
@@ -2354,6 +2435,12 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     participantStreetAddress: r.participants?.street_address ?? null,
     outboundTransportMode: r.outbound_transport_mode ?? "bus",
     returnTransportMode: r.return_transport_mode ?? "bus",
+    transportMedBagRequired: (r.transport_med_bag_required ?? "not_set") as
+      | "yes"
+      | "no"
+      | "not_set",
+    transportMedNotes: r.transport_med_notes ?? null,
+    pickupOrder: Number(r.pickup_order ?? 0),
     fundingClaimType: r.funding_claim_type ?? "NDIS Plan Managed",
     chargeCodeId: r.charge_code_id ?? null,
     quantityDelivered: Number(r.quantity_delivered ?? 1),
@@ -2370,14 +2457,33 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
 const BOOKING_PARTICIPANT_SELECT =
   "*, participants!inner(first_name, last_name, regular_pickup_address, street_address)";
 
+export function manifestPickupForBooking(b: EventRosterBooking): string | null {
+  const override = (b.tripPickupAddressOverride ?? "").trim();
+  if (override) return override;
+  const regular = (b.participantRegularPickupAddress ?? "").trim();
+  const street = (b.participantStreetAddress ?? "").trim();
+  return regular || street || null;
+}
+
+/** Sort by coordinator pickup_order when set; tie-break on created_at. */
+function sortBookingsByPickupOrder(rows: EventRosterBooking[]): EventRosterBooking[] {
+  return [...rows].sort((a, b) => {
+    const ao = a.pickupOrder ?? 0;
+    const bo = b.pickupOrder ?? 0;
+    if (ao !== bo) return ao - bo;
+    return (a.createdAt ?? "").localeCompare(b.createdAt ?? "");
+  });
+}
+
 export async function listEventBookings(eventId: string): Promise<EventRosterBooking[]> {
+  // Order by created_at only — pickup_order may not exist pre-migration (avoids 400 in network).
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(BOOKING_PARTICIPANT_SELECT)
     .eq("event_id", eventId)
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r) => rowToBooking(r as BookingRow));
+  return sortBookingsByPickupOrder((data ?? []).map((r) => rowToBooking(r as BookingRow)));
 }
 
 export interface EventBookingWithEvent extends EventRosterBooking {
@@ -2453,7 +2559,7 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
       ? input.dynamicMedicalNotesSnapshot
       : await buildMedicalAlertSnapshot(input.participantId);
 
-  const { error } = await supabase.from("event_roster_bookings").insert({
+  const insertPayload: Record<string, unknown> = {
     event_id: input.eventId,
     participant_id: input.participantId,
     booking_status: input.bookingStatus?.trim() || "Confirmed",
@@ -2467,7 +2573,10 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     trip_pickup_address_override: trimmedOverride.length > 0 ? trimmedOverride : null,
     dynamic_medical_notes_snapshot:
       snapshot && snapshot.trim().length > 0 ? snapshot : null,
-  });
+  };
+  // pickup_order is set via coordinator drag (reorderEventRosterPickupOrder) after migration.
+
+  const { error } = await supabase.from("event_roster_bookings").insert(insertPayload);
   if (error) {
     console.error("[insertEventBooking] failed", error);
     throw error;
@@ -2528,7 +2637,7 @@ export async function buildMedicalAlertSnapshot(participantId: string): Promise<
 
   const { data: medRows, error: medErr } = await supabase
     .from("participant_medication_schedules")
-    .select("medication_name, dosage, frequency, time_slot")
+    .select("medication_name, dosage, frequency, expected_time")
     .eq("participant_id", participantId)
     .eq("active", true);
   if (medErr) {
@@ -2540,12 +2649,14 @@ export async function buildMedicalAlertSnapshot(participantId: string): Promise<
       medication_name?: string | null;
       dosage?: string | null;
       frequency?: string | null;
-      time_slot?: string | null;
+      expected_time?: string | null;
     }>) {
+      const timeLabel = (m.expected_time ?? "").trim().slice(0, 5);
       const parts = [
         m.medication_name?.trim(),
         m.dosage?.trim(),
-        m.frequency?.trim() || m.time_slot?.trim() || null,
+        m.frequency?.trim() || null,
+        timeLabel ? `@ ${timeLabel}` : null,
       ].filter((p): p is string => !!p && p.length > 0);
       if (parts.length > 0) lines.push(`• ${parts.join(" · ")}`);
     }
@@ -3124,6 +3235,16 @@ function rowToTrip(r: TripRow): TransportTrip {
   };
 }
 
+/** Map a raw `trip_legs` row for API layers (e.g. transport-run-close). */
+export function mapTripLegFromDb(row: unknown): TripLeg {
+  return rowToLeg(row as LegRow);
+}
+
+/** Map a raw `transport_trips` row for API layers (e.g. transport-run-close). */
+export function mapTransportTripFromDb(row: unknown): TransportTrip {
+  return rowToTrip(row as TripRow);
+}
+
 export interface TripLeg {
   id: string;
   tripId: string;
@@ -3537,25 +3658,100 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     };
   }
 
+  const { data: statusRow, error: statusErr } = await supabase
+    .from("event_manifest")
+    .select("status")
+    .eq("id", input.eventId)
+    .single();
+  if (statusErr) throwPg("[startTrip:status]", statusErr);
+  const eventStatus = (statusRow as { status: string | null }).status ?? "Planning";
+  if (eventStatus === "Planning") {
+    throw new Error(
+      "This event is still in Planning. Promote it to Confirmed in Events before starting transport.",
+    );
+  }
+  if (eventStatus === "Closed") {
+    throw new Error("This event is closed. Cannot start a new transport run.");
+  }
+
   // 1. Build roster (ordered participants for this event) and pull every
   //    address signal needed for the 3-tier target_address fallback.
   //    Filter by transport mode when a run direction is given (§12).
-  let bookingQuery = supabase
-    .from("event_roster_bookings")
-    .select(
-      "participant_id, trip_pickup_address_override, outbound_transport_mode, return_transport_mode, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
-    )
-    .eq("event_id", input.eventId)
-    .neq("booking_status", "Cancelled")
-    .order("created_at", { ascending: true });
-  // NULL transport_mode means "bus" (JS default in rowToBooking).  Include both.
-  if (input.tripDirection === "outbound") {
-    bookingQuery = bookingQuery.or("outbound_transport_mode.eq.bus,outbound_transport_mode.is.null");
-  } else if (input.tripDirection === "return") {
-    bookingQuery = bookingQuery.or("return_transport_mode.eq.bus,return_transport_mode.is.null");
+  const participantJoin =
+    "participants!inner(first_name, last_name, regular_pickup_address, street_address)";
+  const rosterSelectBase =
+    `participant_id, trip_pickup_address_override, created_at, ${participantJoin}`;
+  const rosterSelectWithModes =
+    `participant_id, trip_pickup_address_override, created_at, outbound_transport_mode, return_transport_mode, pickup_order, ${participantJoin}`;
+
+  type StartTripBookingRow = {
+    participant_id: string;
+    trip_pickup_address_override: string | null;
+    created_at?: string | null;
+    pickup_order?: number | null;
+    outbound_transport_mode?: string | null;
+    return_transport_mode?: string | null;
+    participants:
+      | {
+          first_name: string;
+          last_name: string;
+          regular_pickup_address: string | null;
+          street_address: string | null;
+        }
+      | Array<{
+          first_name: string;
+          last_name: string;
+          regular_pickup_address: string | null;
+          street_address: string | null;
+        }>
+      | null;
+  };
+
+  let bookingRows: StartTripBookingRow[] | null = null;
+  let bookingErr: { code?: string | null; message?: string | null } | null = null;
+
+  {
+    const { data, error } = await supabase
+      .from("event_roster_bookings")
+      .select(rosterSelectWithModes)
+      .eq("event_id", input.eventId)
+      .neq("booking_status", "Cancelled")
+      .order("created_at", { ascending: true });
+    bookingRows = (data ?? []) as StartTripBookingRow[];
+    bookingErr = error;
   }
-  const { data: bookingRows, error: bookingErr } = await bookingQuery;
+
+  if (bookingErr && isSchemaMismatchError(bookingErr)) {
+    const { data, error } = await supabase
+      .from("event_roster_bookings")
+      .select(rosterSelectBase)
+      .eq("event_id", input.eventId)
+      .neq("booking_status", "Cancelled")
+      .order("created_at", { ascending: true });
+    bookingRows = (data ?? []) as StartTripBookingRow[];
+    bookingErr = error;
+  }
+
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
+
+  let resolvedBookingRows = [...(bookingRows ?? [])];
+
+  if (input.tripDirection === "outbound") {
+    resolvedBookingRows = resolvedBookingRows.filter(
+      (r) => (r.outbound_transport_mode ?? "bus") === "bus",
+    );
+  } else if (input.tripDirection === "return") {
+    resolvedBookingRows = resolvedBookingRows.filter(
+      (r) => (r.return_transport_mode ?? "bus") === "bus",
+    );
+  }
+
+  resolvedBookingRows.sort((a, b) => {
+    const ao = Number(a.pickup_order ?? 0);
+    const bo = Number(b.pickup_order ?? 0);
+    if (ao !== bo && (ao > 0 || bo > 0)) return ao - bo;
+    return (a.created_at ?? "").localeCompare(b.created_at ?? "");
+  });
 
   type RosterEntry = {
     id: string;
@@ -3563,7 +3759,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     /** Strict 3-tier fallback: override → permanent → street → null. */
     address: string | null;
   };
-  const roster: RosterEntry[] = (bookingRows ?? []).map((r) => {
+  const roster: RosterEntry[] = (resolvedBookingRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       trip_pickup_address_override: string | null;
@@ -3600,14 +3796,19 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     };
   });
 
-  // 2. Resolve event venue.
+  // 2. Resolve event venue + kind (outing vs legacy med rules).
   const { data: eventRow, error: eventErr } = await supabase
     .from("event_manifest")
-    .select("venue_name, title, start_date")
+    .select("venue_name, title, start_date, event_kind")
     .eq("id", input.eventId)
     .single();
   if (eventErr) throwPg("[startTrip:event]", eventErr);
-  const eventMeta = eventRow as { venue_name: string | null; title: string; start_date?: string };
+  const eventMeta = eventRow as {
+    venue_name: string | null;
+    title: string;
+    start_date?: string;
+    event_kind?: string | null;
+  };
   let venueLabel = eventMeta.venue_name || eventMeta.title || "Venue";
   let returnDepartAddress: string | null = null;
 
@@ -3635,10 +3836,36 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     }
   }
 
-  // 3. Resolve which participants have active medication schedules.
+  // 3. Medication handover on outbound pickup legs:
+  //    • Outings (§12): coordinator flag transport_med_bag_required = yes on booking.
+  //    • Legacy events: any active participant_medication_schedules row (unchanged).
+  //    • Return runs: always false (set below on seeds).
+  //    Day Centre runs use startDayCentreRun + schedules — not this path.
   const participantIds = roster.map((p) => p.id);
   const medSet = new Set<string>();
-  if (participantIds.length) {
+  const eventKind = eventMeta.event_kind ?? "legacy";
+  const isOutingEvent =
+    eventKind === "single_day_outing" || eventKind === "multi_day_tour";
+
+  if (isOutingEvent) {
+    const { data: medFlagRows, error: medFlagErr } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, transport_med_bag_required")
+      .eq("event_id", input.eventId)
+      .neq("booking_status", "Cancelled");
+    if (medFlagErr && !isSchemaMismatchError(medFlagErr)) {
+      throwPg("[startTrip:medBagFlags]", medFlagErr);
+    }
+    if (!medFlagErr) {
+      for (const r of medFlagRows ?? []) {
+        const row = r as { participant_id: string; transport_med_bag_required?: string | null };
+        if (row.transport_med_bag_required === "yes") {
+          medSet.add(row.participant_id);
+        }
+      }
+    }
+    // Column not migrated (42703): no med prompts until SQL migration is applied.
+  } else if (participantIds.length) {
     const { data: medRows } = await supabase
       .from("participant_medication_schedules")
       .select("participant_id")

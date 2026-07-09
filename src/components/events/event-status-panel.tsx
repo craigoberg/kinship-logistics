@@ -53,6 +53,12 @@ import { refetchEventManifest } from "@/lib/query/invalidation";
 interface Props {
   event: EventManifest;
   onStatusChanged: () => void;
+  /**
+   * When true (mobile compact header): show only the current status chip +
+   * the next-action promote/close button inline. Full ladder is hidden.
+   * When false/omitted: render the full ladder + all actions (desktop default).
+   */
+  mobileCompact?: boolean;
 }
 
 const STATUS_ORDER: EventStatus[] = ["Planning", "Confirmed", "Open", "Closed"];
@@ -97,7 +103,7 @@ const PROMOTE_CONFIRM: Record<string, string> = {
 
 const sessionsKey = (eventId: string) => ["event-day-sessions", eventId] as const;
 
-export function EventStatusPanel({ event, onStatusChanged }: Props) {
+export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false }: Props) {
   const qc = useQueryClient();
   const isOuting = event.eventKind === "single_day_outing" || event.eventKind === "multi_day_tour"
     || inferEventKind({
@@ -195,6 +201,146 @@ export function EventStatusPanel({ event, onStatusChanged }: Props) {
     }
   };
 
+  // ── Mobile compact: single status chip + action button inline ──────────
+  if (mobileCompact) {
+    return (
+      <>
+        <div className="flex flex-wrap items-center gap-2">
+          {/* Current status chip */}
+          <span
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white ${statusColor(event.status)}`}
+          >
+            {statusIcon(event.status)}
+            {event.status}
+          </span>
+
+          {canPromote && nextStatus && (
+            <Button
+              size="sm"
+              variant={nextStatus === "Closed" ? "destructive" : "default"}
+              disabled={checkingGuards || promoteMut.isPending}
+              onClick={handlePromoteClick}
+              className="h-7 text-xs"
+            >
+              {checkingGuards ? (
+                <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" />
+              ) : nextStatus === "Closed" ? (
+                <Lock className="mr-1 h-3 w-3" />
+              ) : (
+                <ShieldCheck className="mr-1 h-3 w-3" />
+              )}
+              {PROMOTE_LABELS[event.status] ?? `→ ${nextStatus}`}
+            </Button>
+          )}
+
+          {isOuting && event.status === "Open" && openSessions.length > 0 && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[11px] text-muted-foreground">Close day:</span>
+              {openSessions.map((s) => (
+                <Button
+                  key={s.id}
+                  size="sm"
+                  variant="outline"
+                  className="h-7 text-xs"
+                  onClick={() => { setCloseSessionId(s.id); setCloseOutcome("closed_orderly"); setCloseNotes(""); }}
+                >
+                  {s.session_date}
+                </Button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Promote + close-day dialogs (shared) */}
+        <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>
+                {PROMOTE_LABELS[event.status] ?? `Promote to ${nextStatus}`}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {PROMOTE_CONFIRM[event.status]}
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            {guards && !guards.ok && (
+              <div className="space-y-2 rounded-lg border-2 border-destructive/50 bg-destructive/10 p-3">
+                <div className="flex items-center gap-1.5 text-sm font-bold text-destructive">
+                  <XCircle className="h-4 w-4" />
+                  Cannot promote — unmet conditions:
+                </div>
+                <ul className="ml-5 list-disc space-y-0.5 text-sm text-destructive">
+                  {guards.blockers.map((b, i) => <li key={i}>{b}</li>)}
+                </ul>
+              </div>
+            )}
+            {guards?.ok && (
+              <div className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-700">
+                <CheckCircle2 className="h-4 w-4" />
+                All conditions met — ready to promote.
+              </div>
+            )}
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <Button
+                variant={nextStatus === "Closed" ? "destructive" : "default"}
+                disabled={!guards?.ok || promoteMut.isPending}
+                onClick={() => promoteMut.mutate()}
+              >
+                {promoteMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {PROMOTE_LABELS[event.status] ?? "Promote"}
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
+        <AlertDialog open={!!closeSessionId} onOpenChange={(o) => !o && setCloseSessionId(null)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Close day session — {closeSessionId && sessions.find((s) => s.id === closeSessionId)?.session_date}</AlertDialogTitle>
+              <AlertDialogDescription>
+                Select the outcome and provide close notes before locking the session.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <div className="space-y-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Outcome</Label>
+                <Select value={closeOutcome} onValueChange={(v) => setCloseOutcome(v as typeof closeOutcome)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="closed_orderly">Closed — orderly</SelectItem>
+                    <SelectItem value="closed_incident">Closed — incident</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Close notes (optional)</Label>
+                <Textarea value={closeNotes} onChange={(e) => setCloseNotes(e.target.value)} rows={3} placeholder="End-of-day summary…" />
+              </div>
+              {closeOutcome === "closed_incident" && (
+                <div className="flex items-start gap-2 rounded bg-destructive/10 p-2 text-xs text-destructive">
+                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                  Incident outcome will be flagged in the Trip Report.
+                </div>
+              )}
+            </div>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <Button
+                variant={closeOutcome === "closed_incident" ? "destructive" : "default"}
+                disabled={closeDayMut.isPending}
+                onClick={() => closeDayMut.mutate()}
+              >
+                {closeDayMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                Close day session
+              </Button>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+      </>
+    );
+  }
+
+  // ── Full / desktop render ─────────────────────────────────────────────
   return (
     <>
       <div className="space-y-3">

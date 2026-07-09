@@ -10,8 +10,8 @@ import {
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinPad } from "@/components/auth/pin-pad";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import {
@@ -541,16 +541,13 @@ function PinDeclarationModal({
   const [pin, setPin] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
-  const handleConfirm = async () => {
+  const handleComplete = async (value: string) => {
     if (submitting) return;
-    if (!/^\d{4}$/.test(pin)) {
-      toast.error("Enter your 4-digit onboarding PIN.");
-      return;
-    }
     setSubmitting(true);
     try {
-      await onConfirm(pin);
+      await onConfirm(value);
       setPin("");
+      onOpenChange(false);
     } catch (err) {
       toast.error("Could not save clearance", {
         description: (err as Error).message,
@@ -577,26 +574,15 @@ function PinDeclarationModal({
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-2 py-2">
-          <Label
-            htmlFor="pin-modal-input"
-            className="text-xs uppercase tracking-wide text-muted-foreground"
-          >
+          <Label className="text-xs uppercase tracking-wide text-muted-foreground">
             Driver Onboarding PIN
           </Label>
-          <Input
-            id="pin-modal-input"
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={4}
-            autoFocus
-            autoComplete="off"
+          <PinPad
             value={pin}
-            onChange={(e) =>
-              setPin(e.target.value.replace(/\D/g, "").slice(0, 4))
-            }
-            placeholder="----"
-            className="h-14 max-w-[200px] text-center text-2xl tracking-[0.6em] tabular-nums"
+            onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 4))}
+            length={4}
+            onComplete={(v) => void handleComplete(v)}
+            disabled={submitting}
           />
         </div>
         <DialogFooter className="gap-2 sm:gap-0">
@@ -607,14 +593,6 @@ function PinDeclarationModal({
             onClick={() => onOpenChange(false)}
           >
             Cancel
-          </Button>
-          <Button
-            type="button"
-            disabled={submitting || pin.length !== 4}
-            onClick={handleConfirm}
-            className="bg-emerald-600 hover:bg-emerald-700"
-          >
-            {submitting ? "Confirming…" : "Confirm & Roll"}
           </Button>
         </DialogFooter>
       </DialogContent>

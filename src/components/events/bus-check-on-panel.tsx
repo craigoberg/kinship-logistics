@@ -25,13 +25,6 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
-  Dialog,
-  DialogContent,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
-import {
   getOrCreateEventHopTrip,
   listBusManifest,
   markNotTravelling,
@@ -42,6 +35,8 @@ import {
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import type { EventVenueStop } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
+import { cn } from "@/lib/utils";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
 
 interface Props {
   event: EventManifest;
@@ -217,7 +212,7 @@ function HopRoll({ event, sessionId, sessionDate, fromStop, toStop, hopIndex }: 
       {/* Hop header */}
       <button
         type="button"
-        className="flex w-full items-center gap-3 px-4 py-3 text-left hover:bg-muted/30"
+        className="flex w-full min-h-14 touch-manipulation items-center gap-3 px-4 py-3.5 text-left hover:bg-muted/30 active:bg-muted/50"
         onClick={handleExpand}
         disabled={initialising}
       >
@@ -347,80 +342,93 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
 
   return (
     <>
-      <div className="flex items-center gap-2 px-4 py-2.5">
-        <div className="flex-1 min-w-0">
-          <span className="text-sm font-medium">{name}</span>
-          {row.carer_id && !row.participant_id && (
-            <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">Carer</span>
-          )}
-          {row.notes && (
-            <p className="text-[11px] italic text-muted-foreground truncate">{row.notes}</p>
+      <div className="px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="min-w-0 flex-1">
+            <span className="text-base font-semibold">{name}</span>
+            {row.carer_id && !row.participant_id && (
+              <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
+                Carer
+              </span>
+            )}
+            {row.notes && (
+              <p className="text-xs italic text-muted-foreground truncate">{row.notes}</p>
+            )}
+          </div>
+          {isOnBus ? (
+            <Badge className="bg-emerald-600 text-white">On bus</Badge>
+          ) : isNt ? (
+            <Badge className="bg-amber-500 text-white">Not travelling</Badge>
+          ) : (
+            <Badge variant="secondary">Expected</Badge>
           )}
         </div>
-
-        {/* Status badge */}
-        {isOnBus ? (
-          <Badge className="bg-emerald-600 text-white text-[10px]">On bus</Badge>
-        ) : isNt ? (
-          <Badge className="bg-amber-500 text-white text-[10px]">Not travelling</Badge>
-        ) : (
-          <Badge variant="secondary" className="text-[10px]">Expected</Badge>
-        )}
-
-        {/* Actions */}
-        <Button
-          size="sm"
-          variant={isOnBus ? "outline" : "default"}
-          className="h-7 shrink-0"
-          disabled={markOnBusMut.isPending || isNt}
-          onClick={() => markOnBusMut.mutate()}
+        <div className="mt-2 flex items-center gap-2">
+          <button
+            type="button"
+            disabled={markOnBusMut.isPending || isNt}
+            onClick={() => markOnBusMut.mutate()}
+          className={cn(
+            "flex h-12 min-w-[7rem] shrink-0 touch-manipulation items-center justify-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-50",
+            isOnBus
+              ? "border-emerald-500 bg-emerald-600/20 text-emerald-800"
+              : "border-primary bg-primary/10 text-primary",
+          )}
         >
           {markOnBusMut.isPending ? (
-            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            <Loader2 className="h-4 w-4 animate-spin" />
           ) : (
-            <CheckCircle2 className="h-3.5 w-3.5" />
+            <CheckCircle2 className="h-4 w-4" />
           )}
-        </Button>
+          {isOnBus ? "On bus" : "Mark on bus"}
+        </button>
 
         {!isNt && !isOnBus && (
-          <Button
-            size="sm"
-            variant="ghost"
-            className="h-7 shrink-0 text-destructive hover:text-destructive"
+          <button
+            type="button"
             onClick={() => setNtOpen(true)}
             title="Not travelling"
+            className="flex h-12 w-12 shrink-0 touch-manipulation items-center justify-center rounded-xl border-2 border-destructive/40 text-destructive transition active:scale-[0.99] hover:bg-destructive/10"
           >
-            <UserX className="h-3.5 w-3.5" />
-          </Button>
+            <UserX className="h-5 w-5" />
+          </button>
         )}
+        </div>
       </div>
 
-      {/* Not-travelling notes dialog */}
-      <Dialog open={ntOpen} onOpenChange={setNtOpen}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Not travelling — {name}</DialogTitle>
-          </DialogHeader>
-          <Textarea
-            value={ntNotes}
-            onChange={(e) => setNtNotes(e.target.value)}
-            placeholder="Reason (e.g. feeling unwell, family decision…)"
-            rows={3}
-          />
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setNtOpen(false)}>Cancel</Button>
-            <Button
-              variant="destructive"
-              disabled={markNtMut.isPending}
-              onClick={() => markNtMut.mutate()}
-            >
-              {markNtMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              <AlertTriangle className="mr-1.5 h-4 w-4" />
-              Confirm not travelling
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {/* Not-travelling bottom sheet */}
+      <BottomSheet
+        open={ntOpen}
+        onOpenChange={setNtOpen}
+        title={`Not travelling — ${name}`}
+      >
+        <Textarea
+          value={ntNotes}
+          onChange={(e) => setNtNotes(e.target.value)}
+          placeholder="Reason (e.g. feeling unwell, family decision…)"
+          rows={4}
+          className="text-base"
+        />
+        <div className="mt-4 flex flex-col gap-2">
+          <Button
+            variant="destructive"
+            className="h-14 touch-manipulation text-base"
+            disabled={markNtMut.isPending}
+            onClick={() => markNtMut.mutate()}
+          >
+            {markNtMut.isPending && <Loader2 className="mr-2 h-5 w-5 animate-spin" />}
+            <AlertTriangle className="mr-1.5 h-5 w-5" />
+            Confirm not travelling
+          </Button>
+          <Button
+            variant="outline"
+            className="h-12 touch-manipulation"
+            onClick={() => setNtOpen(false)}
+          >
+            Cancel
+          </Button>
+        </div>
+      </BottomSheet>
     </>
   );
 }

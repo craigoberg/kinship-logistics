@@ -686,6 +686,7 @@ export function useInsertLedgerEntry() {
 import {
   listEvents,
   listConfirmedEvents,
+  listManifestPickerEvents,
   findMostRecentEventByType,
   listPriorEventsForClone,
   refreshBookingMedicalSnapshot,
@@ -772,6 +773,14 @@ export function useConfirmedEvents() {
   });
 }
 
+export function useManifestPickerEvents(asOfDate?: string) {
+  return useQuery({
+    queryKey: ["events", "manifest-picker", asOfDate ?? "today"],
+    queryFn: () => listManifestPickerEvents(asOfDate),
+    staleTime: 30_000,
+  });
+}
+
 
 export function useEventBookings(eventId: string | null | undefined) {
   return useQuery({
@@ -779,6 +788,23 @@ export function useEventBookings(eventId: string | null | undefined) {
     queryFn: () => listEventBookings(eventId as string),
     enabled: !!eventId,
     staleTime: 15_000,
+  });
+}
+
+export function useReorderEventRosterPickupOrder() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({
+      eventId,
+      orderedBookingIds,
+    }: {
+      eventId: string;
+      orderedBookingIds: string[];
+    }) => reorderEventRosterPickupOrder(eventId, orderedBookingIds),
+    onSuccess: (_data, { eventId }) => {
+      void qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+    },
+    onError: (err: Error) => showRedToast("Could not save pickup order", err),
   });
 }
 
@@ -1009,6 +1035,7 @@ import {
   type LegPatch,
 } from "@/lib/data-store";
 import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
+import { reorderEventRosterPickupOrder } from "@/lib/api/event-outing";
 import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches, invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;

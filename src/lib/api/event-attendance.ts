@@ -5,6 +5,7 @@
  * Seeded from event_roster_bookings when trip leader opens location.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { listParticipants, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 
@@ -89,12 +90,23 @@ export async function seedEventAttendanceRoll(
   eventId: string,
   sessionDate: string,
 ): Promise<number> {
-  const { data: bookings, error } = await supabase
+  const withModes = "participant_id, outbound_transport_mode, return_transport_mode";
+  let result = await supabase
     .from("event_roster_bookings")
-    .select("participant_id, outbound_transport_mode, return_transport_mode")
+    .select(withModes)
     .eq("event_id", eventId)
     .neq("booking_status", "Cancelled");
-  if (error) throw error;
+
+  if (result.error && isSchemaMismatchError(result.error)) {
+    result = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id")
+      .eq("event_id", eventId)
+      .neq("booking_status", "Cancelled");
+  }
+  if (result.error) throw result.error;
+
+  const bookings = result.data ?? [];
 
   const expectedAt = defaultExpectedArrival(sessionDate);
   const payload = (bookings ?? []).map((b) => ({

@@ -18,6 +18,7 @@
  *   • Open issues at close time
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback, getEventFinanceTotals } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
@@ -120,6 +121,36 @@ async function guardPlanningToConfirmed(eventId: string): Promise<StatusGuardRes
       ],
     };
   }
+
+  const { data: rosterRows, error: rosterErr } = await supabase
+    .from("event_roster_bookings")
+    .select("id, outbound_transport_mode, transport_med_bag_required, booking_status")
+    .eq("event_id", eventId)
+    .neq("booking_status", "Cancelled");
+  if (rosterErr && !isSchemaMismatchError(rosterErr)) {
+    return { ok: false, blockers: [`DB error: ${rosterErr.message}`] };
+  }
+
+  if (!rosterErr) {
+    const busOutboundUnset = (rosterRows ?? []).filter((r) => {
+      const row = r as {
+        outbound_transport_mode: string | null;
+        transport_med_bag_required: string | null;
+      };
+      const mode = row.outbound_transport_mode ?? "bus";
+      if (mode !== "bus") return false;
+      return (row.transport_med_bag_required ?? "not_set") === "not_set";
+    });
+    if (busOutboundUnset.length > 0) {
+      return {
+        ok: false,
+        blockers: [
+          `${busOutboundUnset.length} bus passenger${busOutboundUnset.length === 1 ? "" : "s"} still need a transport med bag decision — Roster → Edit booking → Transport med bag.`,
+        ],
+      };
+    }
+  }
+
   return { ok: true, blockers: [] };
 }
 

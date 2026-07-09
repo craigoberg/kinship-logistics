@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, PhoneCall, ShieldAlert, ShieldCheck } from "lucide-react";
+import { Loader2, PhoneCall, ShieldAlert } from "lucide-react";
 
 import {
   Dialog,
@@ -12,8 +12,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin, verifyOperatorPin } from "@/components/auth/pin-verify";
 import {
   Select,
   SelectContent,
@@ -26,8 +27,6 @@ import {
   DEFAULT_STAFF_UUID,
   getActiveUserProfile,
   getStaffId,
-  verifyStaffPin,
-  verifyCoordinatorPin,
   listStaffRegistry,
 } from "@/lib/data-store";
 import {
@@ -96,19 +95,17 @@ export function VerbalAuthOverrideDialog({
   const MIN_REASON = 20;
 
   const [selectedManagerId, setSelectedManagerId] = useState("");
-  const [managerPin, setManagerPin] = useState("");
-  const [managerPinError, setManagerPinError] = useState<string | null>(null);
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
   const [reason, setReason] = useState("");
-  const [operatorPin, setOperatorPin] = useState("");
-  const [operatorPinError, setOperatorPinError] = useState<string | null>(null);
+  const [operatorPinVerified, setOperatorPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
 
   const reset = () => {
     setSelectedManagerId("");
-    setManagerPin("");
-    setManagerPinError(null);
+    setManagerPinVerified(false);
+    verifiedManagerPinRef.current = "";
     setReason("");
-    setOperatorPin("");
-    setOperatorPinError(null);
+    setOperatorPinVerified(false);
   };
 
   // Load coordinator / manager staff for the picker
@@ -137,47 +134,13 @@ export function VerbalAuthOverrideDialog({
 
   const submitMut = useMutation({
     mutationFn: async () => {
-      // --- 1. Verify operator PIN ---
       const operatorStaffId =
         getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
-      if (!/^\d{4,6}$/.test(operatorPin)) {
-        const msg = "Incorrect operator PIN. Please try again.";
-        setOperatorPinError(msg);
-        throw new Error(msg);
-      }
-      const operatorOk = await verifyStaffPin(operatorStaffId, operatorPin);
-      if (!operatorOk) {
-        const msg = "Incorrect operator PIN. Please try again.";
-        setOperatorPinError(msg);
-        setOperatorPin("");
-        throw new Error(msg);
-      }
-
-      // --- 2. Verify manager/coordinator PIN (GUARDRAILS §1.3) ---
+      if (!operatorPinVerified) throw new Error("Operator PIN required.");
       if (!selectedManagerId) throw new Error("Please select the authorising Manager.");
-      if (!/^\d{4,6}$/.test(managerPin)) {
-        const msg = "Incorrect manager PIN. Please try again.";
-        setManagerPinError(msg);
-        throw new Error(msg);
-      }
-      let managerOk: boolean;
-      try {
-        managerOk = await verifyCoordinatorPin(selectedManagerId, managerPin);
-      } catch (roleErr: unknown) {
-        // verifyCoordinatorPin throws when PIN matches but role is insufficient
-        const msg =
-          roleErr instanceof Error ? roleErr.message : "Manager role verification failed.";
-        setManagerPinError(msg);
-        throw new Error(msg);
-      }
-      if (!managerOk) {
-        const msg = "Incorrect manager PIN. Please try again.";
-        setManagerPinError(msg);
-        setManagerPin("");
-        throw new Error(msg);
-      }
+      if (!managerPinVerified) throw new Error("Manager PIN required.");
 
-      // --- 3. Ledger write — throws on failure (GUARDRAILS §1.1) ---
+      // --- Ledger write — throws on failure (GUARDRAILS §1.1) ---
       const gps = await tryGetGps();
       await writeToLedgerOrThrow({
         staff_id: operatorStaffId,
@@ -236,10 +199,12 @@ export function VerbalAuthOverrideDialog({
 
   const reasonOk = reason.trim().length >= MIN_REASON;
   const managerSelected = !!selectedManagerId;
-  const managerPinOk = /^\d{4,6}$/.test(managerPin);
-  const operatorPinOk = /^\d{4,6}$/.test(operatorPin);
   const canSubmit =
-    reasonOk && managerSelected && managerPinOk && operatorPinOk && !submitMut.isPending;
+    reasonOk &&
+    managerSelected &&
+    managerPinVerified &&
+    operatorPinVerified &&
+    !submitMut.isPending;
 
   const handleClose = (next: boolean) => {
     if (submitMut.isPending) return;
@@ -282,8 +247,8 @@ export function VerbalAuthOverrideDialog({
               value={selectedManagerId}
               onValueChange={(v) => {
                 setSelectedManagerId(v);
-                setManagerPin("");
-                setManagerPinError(null);
+                setManagerPinVerified(false);
+                verifiedManagerPinRef.current = "";
               }}
               disabled={staffQ.isLoading}
             >
@@ -324,31 +289,22 @@ export function VerbalAuthOverrideDialog({
                 Manager PIN — {selectedManager?.fullName}{" "}
                 <span className="text-destructive">*</span>
               </Label>
-              <div className="flex items-center gap-2">
-                <ShieldCheck className="h-4 w-4 shrink-0 text-amber-600" />
-                <Input
-                  type="password"
-                  inputMode="numeric"
-                  pattern="[0-9]*"
-                  maxLength={6}
-                  autoComplete="off"
-                  value={managerPin}
-                  onChange={(e) => {
-                    setManagerPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-                    if (managerPinError) setManagerPinError(null);
-                  }}
-                  placeholder="Manager PIN"
-                  aria-invalid={!!managerPinError}
-                  className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
-                    managerPinError || !managerPinOk
-                      ? "border-2 border-destructive focus-visible:ring-destructive"
-                      : ""
-                  }`}
-                />
-              </div>
-              {managerPinError && (
-                <p className="text-xs font-medium text-destructive">{managerPinError}</p>
-              )}
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={6}
+                title="Manager verbal authorization"
+                description={`Confirm ${selectedManager?.fullName ?? "manager"} authorizes this override.`}
+                required
+                onVerify={async (pin) => {
+                  await verifyManagerPin(selectedManagerId, pin);
+                }}
+                onSuccess={(pin) => {
+                  verifiedManagerPinRef.current = pin;
+                  setManagerPinVerified(true);
+                }}
+              />
             </div>
           )}
 
@@ -369,28 +325,17 @@ export function VerbalAuthOverrideDialog({
               Your Operator PIN{" "}
               <span className="text-destructive">*</span>
             </Label>
-            <Input
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              autoComplete="off"
-              value={operatorPin}
-              onChange={(e) => {
-                setOperatorPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-                if (operatorPinError) setOperatorPinError(null);
-              }}
-              placeholder="----"
-              aria-invalid={!!operatorPinError}
-              className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
-                operatorPinError || !operatorPinOk
-                  ? "border-2 border-destructive focus-visible:ring-destructive"
-                  : ""
-              }`}
+            <PinEntryTrigger
+              label="Tap to sign with your PIN"
+              verified={operatorPinVerified}
+              verifiedLabel="Operator PIN verified"
+              length={4}
+              title="Sign verbal authorization"
+              description="Confirms you recorded this verbal override accurately."
+              required
+              onVerify={verifyOperatorPin}
+              onSuccess={() => setOperatorPinVerified(true)}
             />
-            {operatorPinError && (
-              <p className="text-xs font-medium text-destructive">{operatorPinError}</p>
-            )}
           </div>
         </div>
 

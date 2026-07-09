@@ -1,11 +1,12 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, ShieldAlert, ShieldCheck, Clock } from "lucide-react";
 import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import {
   RadioGroup,
   RadioGroupItem,
@@ -39,30 +40,25 @@ interface Props {
 export function SiteLeaderHandshakePanel({ session }: Props) {
   const queryClient = useQueryClient();
   const [decision, setDecision] = useState<HandshakeDecision | "">("");
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [leaderPinVerified, setLeaderPinVerified] = useState(false);
+  const verifiedLeaderPinRef = useRef("");
 
   const waitingForManager = !session.managerAuthAt;
 
   const mutation = useMutation({
     mutationFn: async () => {
       if (!decision) throw new Error("Choose GO or NO-GO.");
-      if (!/^\d{4,}$/.test(pin)) {
-        const msg = "Incorrect PIN. Please try again.";
-        setPinError(msg);
-        throw new Error(msg);
-      }
+      if (!leaderPinVerified) throw new Error("Leader PIN required.");
       const leaderStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       return submitLeaderHandshake({
         sessionId: session.id,
         decision,
         leaderStaffId,
-        pin,
+        pin: verifiedLeaderPinRef.current,
       });
     },
     onSuccess: (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
-      setPinError(null);
       if (next.phase === "active_day") {
         toast.success("Dual-PIN handshake complete — Centre is open.");
       } else {
@@ -75,8 +71,8 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
     onError: (e: Error) => {
       const msg = e.message ?? "";
       if (/pin/i.test(msg)) {
-        setPinError("Incorrect PIN. Please try again.");
-        setPin("");
+        setLeaderPinVerified(false);
+        verifiedLeaderPinRef.current = "";
       }
       toast.error("Could not submit leader signature", {
         description: msg,
@@ -87,7 +83,7 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
   const canSubmit =
     !waitingForManager &&
     !!decision &&
-    /^\d{4,}$/.test(pin) &&
+    leaderPinVerified &&
     !mutation.isPending;
 
   if (waitingForManager) {
@@ -179,34 +175,22 @@ export function SiteLeaderHandshakePanel({ session }: Props) {
       </div>
 
       <div className="space-y-2">
-        <Label
-          htmlFor="ldr-pin"
-          className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-        >
+        <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Leader PIN
         </Label>
-        <Input
-          id="ldr-pin"
-          type="password"
-          inputMode="numeric"
-          maxLength={6}
-          autoComplete="off"
-          value={pin}
-          onChange={(e) => {
-            setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-            if (pinError) setPinError(null);
+        <PinEntryTrigger
+          label="Tap to sign with your PIN"
+          verified={leaderPinVerified}
+          verifiedLabel="Leader PIN verified"
+          length={6}
+          title="Sign leader counter-signature"
+          description="Confirms you accept or reject the manager's proposed plan."
+          onVerify={verifyOperatorPin}
+          onSuccess={(pin) => {
+            verifiedLeaderPinRef.current = pin;
+            setLeaderPinVerified(true);
           }}
-          onFocus={() => pinError && setPinError(null)}
-          placeholder="----"
-          aria-invalid={!!pinError}
-          className={cn(
-            "h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums",
-            pinError && "border-2 border-destructive focus-visible:ring-destructive",
-          )}
         />
-        {pinError && (
-          <p className="text-xs font-medium text-destructive">{pinError}</p>
-        )}
       </div>
 
       <div className="flex justify-end">

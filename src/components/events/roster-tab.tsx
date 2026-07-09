@@ -1,6 +1,6 @@
-import { Fragment, useMemo, useState } from "react";
+﻿import { Fragment, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, HeartHandshake, Pencil, Search, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, Search, UserPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -8,8 +8,10 @@ import {
   useEventBookings,
   useEventPaymentLedgerForEvent,
   useCarersRegistry,
+  useReorderEventRosterPickupOrder,
 } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
+import { manifestPickupForBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
@@ -19,7 +21,10 @@ import {
   eventActualTransportKey,
   fetchEventActualTransport,
 } from "@/lib/api/event-transport";
+import { TRANSPORT_MED_BAG_LABELS } from "@/lib/api/event-outing";
 import { EventTransportPair } from "./event-transport-badge";
+import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
+import { cn } from "@/lib/utils";
 
 interface Props {
   event: EventManifest;
@@ -40,6 +45,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+  const reorderPickup = useReorderEventRosterPickupOrder();
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
   const { data: carersAll = [] } = useCarersRegistry();
 
@@ -89,6 +95,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
       [
         b.participantName,
         b.bookingStatus,
+        manifestPickupForBooking(b) ?? "",
         (ledgerTotalsByParticipant.get(b.participantId) ?? 0).toFixed(2),
       ]
         .join(" ")
@@ -96,6 +103,286 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         .includes(n),
     );
   }, [bookings, ledgerTotalsByParticipant, query]);
+
+  const dragEnabled = !query.trim();
+  const sortableBookings = useMemo(
+    () => bookings.filter((b) => b.bookingStatus !== "Cancelled"),
+    [bookings],
+  );
+  const cancelledBookings = useMemo(
+    () => bookings.filter((b) => b.bookingStatus === "Cancelled"),
+    [bookings],
+  );
+  const sortableIds = useMemo(() => sortableBookings.map((b) => b.id), [sortableBookings]);
+  const bookingById = useMemo(
+    () => new Map(bookings.map((b) => [b.id, b])),
+    [bookings],
+  );
+
+  const handlePickupReorder = useCallback(
+    (orderedIds: string[]) => {
+      reorderPickup.mutate({ eventId: event.id, orderedBookingIds: orderedIds });
+    },
+    [event.id, reorderPickup],
+  );
+
+  type RowBind = {
+    rowRef: (el: HTMLElement | null) => void;
+    onGripPointerDown: (e: React.PointerEvent) => void;
+    isDragging: boolean;
+  };
+
+  const renderBookingRow = (
+    b: EventRosterBooking,
+    rowBind?: RowBind,
+    showDragHandle = false,
+  ) => {
+    const baselineCost = b.customPrice ?? event.ticketPrice;
+    const netLedgerSum = ledgerTotalsByParticipant.get(b.participantId) ?? 0;
+    const trueBalance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    const owes = b.bookingStatus !== "Cancelled" && trueBalance > 0;
+    const isOpen = expanded.has(b.id);
+    const pickupAddress = manifestPickupForBooking(b);
+
+    return (
+      <Fragment key={b.id}>
+        <tr
+          ref={rowBind?.rowRef}
+          className={cn(
+            "border-t border-border align-top",
+            rowBind?.isDragging && "bg-muted/50 shadow-md",
+          )}
+        >{[
+          <td key="ctrl" className="px-2 py-2 align-middle">
+            <div className="flex items-center">
+              {showDragHandle && rowBind && (
+                <button
+                  type="button"
+                  className={cn(
+                    "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                    reorderPickup.isPending
+                      ? "cursor-not-allowed opacity-50"
+                      : "cursor-grab touch-manipulation active:cursor-grabbing",
+                  )}
+                  aria-label="Drag to reorder pickup"
+                  disabled={reorderPickup.isPending}
+                  onPointerDown={rowBind.onGripPointerDown}
+                >
+                  <GripVertical className="h-4 w-4" />
+                </button>
+              )}
+              <Button
+                size="icon"
+                variant="ghost"
+                onClick={() => toggleExpanded(b.id)}
+                className="h-6 w-6 text-muted-foreground"
+                aria-label={isOpen ? "Collapse payment history" : "Expand payment history"}
+                aria-expanded={isOpen}
+              >
+                {isOpen ? (
+                  <ChevronDown className="h-4 w-4" />
+                ) : (
+                  <ChevronRight className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+          </td>,
+          <td key="participant" className="px-4 py-2">
+            <div className="font-medium">
+              {b.participantName}
+              {b.notes && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span className="ml-1.5 cursor-help text-[10px] uppercase tracking-wide text-info">
+                      ⓘ
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">{b.notes}</TooltipContent>
+                </Tooltip>
+              )}
+            </div>
+            {pickupAddress ? (
+              <div className="mt-0.5 text-xs text-muted-foreground">{pickupAddress}</div>
+            ) : (
+              <div className="mt-0.5 text-xs italic text-warning">No pickup address on file</div>
+            )}
+            {b.bringsCarer && (
+              <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-info">
+                <HeartHandshake className="h-3 w-3" />
+                +1 Carer: {(b.carerId && carersById.get(b.carerId)?.fullName) || "Unassigned"}
+                {b.carerTransportRequired && (
+                  <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
+                    <Bus className="h-3 w-3" />
+                    <span>seat</span>
+                  </span>
+                )}
+              </div>
+            )}
+            {b.notes && (
+              <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
+                “{b.notes}”
+              </div>
+            )}
+            {/* Mobile-only: booking status + transport badges stacked below name */}
+            <div className="mt-1.5 flex flex-wrap items-center gap-1 sm:hidden">
+              <span className="text-xs text-muted-foreground">{b.bookingStatus}</span>
+              {isOuting && (
+                <EventTransportPair
+                  outbound={actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode}
+                  return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
+                  plannedOutbound={b.outboundTransportMode}
+                  plannedReturn={b.returnTransportMode}
+                />
+              )}
+              {isOuting &&
+                (b.outboundTransportMode ?? "bus") === "bus" &&
+                b.bookingStatus !== "Cancelled" && (
+                  <span
+                    className={
+                      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
+                      (b.transportMedBagRequired === "yes"
+                        ? "bg-info/15 text-info"
+                        : b.transportMedBagRequired === "no"
+                          ? "bg-muted text-muted-foreground"
+                          : "bg-warning/15 text-warning")
+                    }
+                  >
+                    <Pill className="h-3 w-3" />
+                    {TRANSPORT_MED_BAG_LABELS[b.transportMedBagRequired]}
+                  </span>
+                )}
+            </div>
+          </td>,
+          <td key="status" className="hidden px-4 py-2 align-top sm:table-cell">
+            <div className="text-muted-foreground">{b.bookingStatus}</div>
+            {isOuting && (
+              <EventTransportPair
+                className="mt-1"
+                outbound={
+                  actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode
+                }
+                return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
+                plannedOutbound={b.outboundTransportMode}
+                plannedReturn={b.returnTransportMode}
+              />
+            )}
+            {isOuting &&
+              (b.outboundTransportMode ?? "bus") === "bus" &&
+              b.bookingStatus !== "Cancelled" && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <span
+                      className={
+                        "mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
+                        (b.transportMedBagRequired === "yes"
+                          ? "bg-info/15 text-info"
+                          : b.transportMedBagRequired === "no"
+                            ? "bg-muted text-muted-foreground"
+                            : "bg-warning/15 text-warning")
+                      }
+                    >
+                      <Pill className="h-3 w-3" />
+                      {TRANSPORT_MED_BAG_LABELS[b.transportMedBagRequired]}
+                    </span>
+                  </TooltipTrigger>
+                  <TooltipContent className="max-w-xs">
+                    {b.transportMedBagRequired === "yes" && b.transportMedNotes
+                      ? b.transportMedNotes
+                      : "Coordinator transport med bag decision for bus pickup."}
+                  </TooltipContent>
+                </Tooltip>
+              )}
+          </td>,
+          <td key="cost" className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+            ${fmtMoney(baselineCost)}
+            {b.customPrice != null && b.customPrice !== event.ticketPrice && (
+              <span className="ml-1 text-[10px] uppercase tracking-wide text-info">custom</span>
+            )}
+          </td>,
+          <td key="paid" className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+            ${fmtMoney(netLedgerSum)}
+          </td>,
+          <td
+            key="balance"
+            className={cn(
+              "hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell",
+              b.bookingStatus === "Cancelled"
+                ? "text-muted-foreground"
+                : trueBalance <= 0
+                  ? "text-success"
+                  : "text-warning",
+            )}
+          >
+            ${fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
+          </td>,
+          <td key="paid-badge" className="hidden px-4 py-2 text-right sm:table-cell">
+            <PaidBadge
+              baselineCost={baselineCost}
+              netLedgerSum={netLedgerSum}
+              trueBalance={trueBalance}
+              bookingStatus={b.bookingStatus}
+            />
+          </td>,
+          <td key="actions" className="px-4 py-2 text-right">
+            <div className="flex items-center justify-end gap-1">
+              {owes && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setMilestoneBooking(b)}
+                      className="h-7 w-7 text-success hover:text-success"
+                      aria-label="Record payment milestone"
+                    >
+                      <CircleDollarSign className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Record Payment Milestone</TooltipContent>
+                </Tooltip>
+              )}
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setEditBooking(b)}
+                    className="h-7 w-7 text-info hover:text-info"
+                    aria-label="Edit booking"
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Edit Booking</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    size="icon"
+                    variant="ghost"
+                    onClick={() => setNoShowFor(b)}
+                    className="h-7 w-7 text-destructive hover:text-destructive"
+                    aria-label="Trigger no-show countdown"
+                  >
+                    <AlertTriangle className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Trigger No-Show Countdown</TooltipContent>
+              </Tooltip>
+            </div>
+          </td>,
+        ]}</tr>
+        {isOpen && (
+          <tr className="border-t border-border/40 bg-muted/10">{[
+            <td key="spacer" aria-hidden />,
+            <td key="history" colSpan={7} className="p-0">
+              <BookingPaymentHistory participantId={b.participantId} eventId={event.id} />
+            </td>,
+          ]}</tr>
+        )}
+      </Fragment>
+    );
+  };
 
   const milestoneBookingWithLedger = useMemo(() => {
     if (!milestoneBooking) return null;
@@ -146,6 +433,12 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           className="h-9 pl-9"
         />
       </div>
+      {dragEnabled && sortableIds.length > 1 && (
+        <p className="text-xs text-muted-foreground">
+          Drag rows to set manifest pickup order (bus passengers). Driver can still reorder on the
+          manifest.
+        </p>
+      )}
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
@@ -166,183 +459,39 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
             <table className="w-full text-sm">
               <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
                 <tr>
-                  <th className="w-8 px-2 py-2"></th>
+                  <th className="w-14 px-2 py-2"></th>
                   <th className="px-4 py-2 font-medium">Participant</th>
-                  <th className="px-4 py-2 font-medium">Booking status</th>
-                  <th className="px-4 py-2 text-right font-medium">Booking cost</th>
-                  <th className="px-4 py-2 text-right font-medium">Total paid</th>
-                  <th className="px-4 py-2 text-right font-medium">Net balance</th>
-                  <th className="px-4 py-2 text-right font-medium">Status</th>
+                  {/* Financial columns hidden on small screens — visible from sm */}
+                  <th className="hidden px-4 py-2 font-medium sm:table-cell">Booking status</th>
+                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Booking cost</th>
+                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Total paid</th>
+                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Net balance</th>
+                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Status</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filtered.map((b) => {
-                  const baselineCost = b.customPrice ?? event.ticketPrice;
-                  const netLedgerSum = ledgerTotalsByParticipant.get(b.participantId) ?? 0;
-                  const trueBalance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
-                  const owes = b.bookingStatus !== "Cancelled" && trueBalance > 0;
-                  const isOpen = expanded.has(b.id);
-                  return (
-                    <Fragment key={b.id}>
-                      <tr className="border-t border-border align-top">
-                        <td className="px-2 py-2 align-middle">
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            onClick={() => toggleExpanded(b.id)}
-                            className="h-6 w-6 text-muted-foreground"
-                            aria-label={isOpen ? "Collapse payment history" : "Expand payment history"}
-                            aria-expanded={isOpen}
-                          >
-                            {isOpen ? (
-                              <ChevronDown className="h-4 w-4" />
-                            ) : (
-                              <ChevronRight className="h-4 w-4" />
-                            )}
-                          </Button>
-                        </td>
-                        <td className="px-4 py-2">
-                          <div className="font-medium">
-                            {b.participantName}
-                            {b.notes && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <span className="ml-1.5 cursor-help text-[10px] uppercase tracking-wide text-info">
-                                    ⓘ
-                                  </span>
-                                </TooltipTrigger>
-                                <TooltipContent className="max-w-xs">{b.notes}</TooltipContent>
-                              </Tooltip>
-                            )}
-                          </div>
-                          {b.bringsCarer && (
-                            <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-info">
-                              <HeartHandshake className="h-3 w-3" />
-                              +1 Carer: {(b.carerId && carersById.get(b.carerId)?.fullName) || "Unassigned"}
-                              {b.carerTransportRequired && (
-                                <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-                                  <Bus className="h-3 w-3" /> seat
-                                </span>
-                              )}
-                            </div>
-                          )}
-                          {isOuting && (
-                            <EventTransportPair
-                              className="mt-0.5"
-                              outbound={
-                                actualTransport.get(b.participantId)?.outbound ??
-                                b.outboundTransportMode
-                              }
-                              return={
-                                actualTransport.get(b.participantId)?.return ??
-                                b.returnTransportMode
-                              }
-                              plannedOutbound={b.outboundTransportMode}
-                              plannedReturn={b.returnTransportMode}
-                            />
-                          )}
-                          {b.notes && (
-                            <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
-                              “{b.notes}”
-                            </div>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-muted-foreground">{b.bookingStatus}</td>
-                        <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                          ${fmtMoney(baselineCost)}
-                          {b.customPrice != null && b.customPrice !== event.ticketPrice && (
-                            <span className="ml-1 text-[10px] uppercase tracking-wide text-info">
-                              custom
-                            </span>
-                          )}
-                        </td>
-                        <td className="px-4 py-2 text-right font-semibold tabular-nums">
-                          ${fmtMoney(netLedgerSum)}
-                        </td>
-                        <td
-                          className={
-                            "px-4 py-2 text-right font-semibold tabular-nums " +
-                            (b.bookingStatus === "Cancelled"
-                              ? "text-muted-foreground"
-                              : trueBalance <= 0
-                                ? "text-success"
-                                : "text-warning")
-                          }
-                        >
-                          ${fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <PaidBadge
-                            baselineCost={baselineCost}
-                            netLedgerSum={netLedgerSum}
-                            trueBalance={trueBalance}
-                            bookingStatus={b.bookingStatus}
-                          />
-                        </td>
-                        <td className="px-4 py-2 text-right">
-                          <div className="flex items-center justify-end gap-1">
-                            {owes && (
-                              <Tooltip>
-                                <TooltipTrigger asChild>
-                                  <Button
-                                    size="icon"
-                                    variant="ghost"
-                                    onClick={() => setMilestoneBooking(b)}
-                                    className="h-7 w-7 text-success hover:text-success"
-                                    aria-label="Record payment milestone"
-                                  >
-                                    <CircleDollarSign className="h-4 w-4" />
-                                  </Button>
-                                </TooltipTrigger>
-                                <TooltipContent>Record Payment Milestone</TooltipContent>
-                              </Tooltip>
-                            )}
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => setEditBooking(b)}
-                                  className="h-7 w-7 text-info hover:text-info"
-                                  aria-label="Edit booking"
-                                >
-                                  <Pencil className="h-3.5 w-3.5" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Edit Booking</TooltipContent>
-                            </Tooltip>
-                            <Tooltip>
-                              <TooltipTrigger asChild>
-                                <Button
-                                  size="icon"
-                                  variant="ghost"
-                                  onClick={() => setNoShowFor(b)}
-                                  className="h-7 w-7 text-destructive hover:text-destructive"
-                                  aria-label="Trigger no-show countdown"
-                                >
-                                  <AlertTriangle className="h-4 w-4" />
-                                </Button>
-                              </TooltipTrigger>
-                              <TooltipContent>Trigger No-Show Countdown</TooltipContent>
-                            </Tooltip>
-                          </div>
-                        </td>
-                      </tr>
-                      {isOpen && (
-                        <tr className="border-t border-border/40 bg-muted/10">
-                          <td></td>
-                          <td colSpan={7} className="p-0">
-                            <BookingPaymentHistory
-                              participantId={b.participantId}
-                              eventId={event.id}
-                            />
-                          </td>
-                        </tr>
-                      )}
-                    </Fragment>
-                  );
-                })}
+                {query.trim() ? (
+                  filtered.map((b) => renderBookingRow(b))
+                ) : (
+                  <>
+                    <PointerSortableList
+                      itemIds={sortableIds}
+                      onReorder={handlePickupReorder}
+                      disabled={reorderPickup.isPending}
+                    >
+                      {({ ids, bindRow }) =>
+                        ids.map((id) => {
+                          const b = bookingById.get(id);
+                          if (!b) return null;
+                          const bind = bindRow(id);
+                          return renderBookingRow(b, bind, true);
+                        })
+                      }
+                    </PointerSortableList>
+                    {cancelledBookings.map((b) => renderBookingRow(b))}
+                  </>
+                )}
               </tbody>
             </table>
           </TooltipProvider>

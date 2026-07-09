@@ -1,14 +1,12 @@
 import { useEffect, useRef, useState } from "react";
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { Loader2, ShieldCheck } from "lucide-react";
-
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
+
+import { PinPad } from "@/components/auth/pin-pad";
+import { verifyLoginPin } from "@/components/auth/pin-verify";
 import {
   getActiveUserRole,
-  loginWithPin,
-  GuardianPinError,
   type UserRole,
 } from "@/lib/data-store";
 
@@ -32,34 +30,21 @@ function AuthTerminal() {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  const [shake, setShake] = useState(false);
+  const submittedRef = useRef(false);
 
-  // If already signed in, bounce straight to the role's home surface.
   useEffect(() => {
     const role = getActiveUserRole();
     if (role) navigate({ to: destinationForRole(role), replace: true });
   }, [navigate]);
 
-  useEffect(() => {
-    inputRef.current?.focus();
-  }, []);
-
   const submit = async (value: string) => {
-    if (busy) return;
-    if (!/^\d{4}$/.test(value)) {
-      setError("Incorrect PIN. Please try again.");
-      return;
-    }
+    if (busy || submittedRef.current) return;
+    submittedRef.current = true;
     setBusy(true);
     setError(null);
     try {
-      const profile = await loginWithPin(value);
-      if (!profile) {
-        setError("Incorrect PIN. Please try again.");
-        setPin("");
-        inputRef.current?.focus();
-        return;
-      }
+      const profile = await verifyLoginPin(value);
       toast.success(`Welcome, ${profile.fullName}`, {
         description:
           profile.role === "driver"
@@ -68,22 +53,19 @@ function AuthTerminal() {
       });
       navigate({ to: destinationForRole(profile.role), replace: true });
     } catch (e) {
-      console.error("[auth] loginWithPin failed", e);
-      if (e instanceof GuardianPinError) {
-        setError(e.message);
-      } else {
-        setError("Sign-in failed. Check your connection and retry.");
-      }
+      submittedRef.current = false;
+      setError(e instanceof Error ? e.message : "Sign-in failed. Check your connection and retry.");
       setPin("");
-      inputRef.current?.focus();
+      setShake(true);
+      setTimeout(() => setShake(false), 400);
     } finally {
       setBusy(false);
     }
   };
 
   return (
-    <div className="flex min-h-[80vh] items-center justify-center px-4">
-      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-8 shadow-lg">
+    <div className="flex min-h-[80vh] items-center justify-center px-4 pb-[env(safe-area-inset-bottom)]">
+      <div className="w-full max-w-sm rounded-2xl border border-border bg-card p-6 shadow-lg sm:p-8">
         <div className="flex flex-col items-center gap-3 text-center">
           <div className="rounded-full bg-primary/10 p-3 text-primary">
             <ShieldCheck className="h-7 w-7" />
@@ -94,58 +76,33 @@ function AuthTerminal() {
           </p>
         </div>
 
-        <form
-          className="mt-6 flex flex-col gap-4"
-          onSubmit={(e) => {
-            e.preventDefault();
-            void submit(pin);
-          }}
-        >
-          <Input
-            ref={inputRef}
-            type="password"
-            inputMode="numeric"
-            pattern="[0-9]*"
-            maxLength={4}
-            autoFocus
+        <div className={`mt-6 ${shake ? "animate-[shake_0.4s_ease-in-out]" : ""}`}>
+          <PinPad
             value={pin}
-            onChange={(e) => {
-              const next = e.target.value.replace(/\D/g, "").slice(0, 4);
-              setPin(next);
+            onChange={(v) => {
+              setPin(v);
               setError(null);
-              if (next.length === 4) void submit(next);
+              submittedRef.current = false;
             }}
-            onFocus={() => setError(null)}
-            className={`h-16 text-center text-3xl tracking-[1.2em] font-mono ${
-              error ? "border-2 border-destructive focus-visible:ring-destructive" : ""
-            }`}
-            placeholder="----"
-            aria-label="4-digit PIN"
-            aria-invalid={!!error}
+            length={4}
+            onComplete={(v) => void submit(v)}
             disabled={busy}
           />
-          {error && (
-            <p className="text-center text-sm font-medium text-destructive">
-              {error}
-            </p>
-          )}
-          <Button
-            type="submit"
-            className="h-12 text-base"
-            disabled={busy || pin.length !== 4}
-          >
-            {busy ? (
-              <>
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" /> Verifying…
-              </>
-            ) : (
-              "Sign in"
-            )}
-          </Button>
-          <p className="text-center text-xs text-muted-foreground">
-            Drivers route to the live manifest. Coordinators land on the office dashboard.
-          </p>
-        </form>
+        </div>
+
+        {busy && (
+          <div className="mt-3 flex items-center justify-center gap-2 text-sm text-muted-foreground">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            Verifying…
+          </div>
+        )}
+        {error && (
+          <p className="mt-3 text-center text-sm font-medium text-destructive">{error}</p>
+        )}
+
+        <p className="mt-6 text-center text-xs text-muted-foreground">
+          Drivers route to the live manifest. Coordinators land on the office dashboard.
+        </p>
       </div>
     </div>
   );

@@ -96,6 +96,7 @@ export function invalidateTransportCaches(qc: QueryClient): void {
 
   // Confirmed-events picker shown to the driver before trip start.
   qc.invalidateQueries({ queryKey: ["events", "confirmed"] });
+  qc.invalidateQueries({ queryKey: ["events", "manifest-picker"] });
 
   // Participants directory Bus/Self indicator grid (reads participant_attendance_schedules).
   qc.invalidateQueries({ queryKey: ["participant-directory-indicators", "v3-split-transport"] });

@@ -16,7 +16,9 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
+import { getActiveUserProfile } from "@/lib/data-store";
 import {
   Select,
   SelectContent,
@@ -25,14 +27,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import {
   closeEventLocation,
@@ -53,8 +54,16 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   const [openDialog, setOpenDialog] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
   const [notes, setNotes] = useState("");
-  const [pin, setPin] = useState("");
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const [verifiedManagerPin, setVerifiedManagerPin] = useState("");
   const [closeOutcome, setCloseOutcome] = useState<"closed_orderly" | "closed_incident">("closed_orderly");
+
+  const resetPinState = () => {
+    setManagerPinVerified(false);
+    setVerifiedManagerPin("");
+  };
+
+  const managerStaffId = session.manager_staff_id ?? getActiveUserProfile()?.staffId ?? "";
 
   const { data: hasRed = false } = useQuery({
     queryKey: ["event-day-issues-red-check", session.id],
@@ -63,12 +72,20 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   });
 
   const openMut = useMutation({
-    mutationFn: () =>
-      openEventLocation({ sessionId: session.id, managerPin: pin, notes }),
+    mutationFn: () => {
+      if (!managerPinVerified || !verifiedManagerPin) {
+        throw new Error("Manager PIN required.");
+      }
+      return openEventLocation({
+        sessionId: session.id,
+        managerPin: verifiedManagerPin,
+        notes,
+      });
+    },
     onSuccess: () => {
       toast.success("Location opened — event floor is live.");
       setOpenDialog(false);
-      setPin("");
+      resetPinState();
       setNotes("");
       onChanged();
       qc.invalidateQueries({ queryKey: ["event-attendance-log", session.id] });
@@ -77,17 +94,21 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   });
 
   const closeMut = useMutation({
-    mutationFn: () =>
-      closeEventLocation({
+    mutationFn: () => {
+      if (!managerPinVerified || !verifiedManagerPin) {
+        throw new Error("Manager PIN required.");
+      }
+      return closeEventLocation({
         sessionId: session.id,
-        managerPin: pin,
+        managerPin: verifiedManagerPin,
         outcome: closeOutcome,
         notes,
-      }),
+      });
+    },
     onSuccess: () => {
       toast.success("Location closed.");
       setCloseDialog(false);
-      setPin("");
+      resetPinState();
       setNotes("");
       onChanged();
     },
@@ -144,14 +165,22 @@ export function EventLocationPanel({ session, onChanged }: Props) {
           <Button
             size="sm"
             disabled={!session.manager_staff_id || hasRed}
-            onClick={() => setOpenDialog(true)}
+            onClick={() => {
+              resetPinState();
+              setNotes("");
+              setOpenDialog(true);
+            }}
           >
             <Unlock className="mr-1.5 h-3.5 w-3.5" />
             Open location
           </Button>
         )}
         {canClose && (
-          <Button size="sm" variant="destructive" onClick={() => setCloseDialog(true)}>
+          <Button size="sm" variant="destructive" onClick={() => {
+            resetPinState();
+            setNotes("");
+            setCloseDialog(true);
+          }}>
             <Lock className="mr-1.5 h-3.5 w-3.5" />
             Close location
           </Button>
@@ -164,15 +193,21 @@ export function EventLocationPanel({ session, onChanged }: Props) {
         )}
       </div>
 
-      {/* Open dialog */}
-      <AlertDialog open={openDialog} onOpenChange={setOpenDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Open location?</AlertDialogTitle>
-            <AlertDialogDescription>
+      {/* Open dialog — Dialog (not AlertDialog) so nested PinEntry sheet does not block submit */}
+      <Dialog
+        open={openDialog}
+        onOpenChange={(o) => {
+          setOpenDialog(o);
+          if (!o) resetPinState();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Open location?</DialogTitle>
+            <DialogDescription>
               This starts the event floor. Arrival check-in becomes active. Manager PIN required.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Open notes (optional)</Label>
@@ -180,39 +215,56 @@ export function EventLocationPanel({ session, onChanged }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Manager PIN</Label>
-              <Input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-                placeholder="••••"
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={4}
+                title="Open event location"
+                description="Trip leader PIN required to start the event floor."
+                disabled={!managerStaffId}
+                onVerify={async (pin) => {
+                  await verifyManagerPin(managerStaffId, pin);
+                }}
+                onSuccess={(pin) => {
+                  setVerifiedManagerPin(pin);
+                  setManagerPinVerified(true);
+                }}
               />
             </div>
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setOpenDialog(false)}>
+              Cancel
+            </Button>
             <Button
-              disabled={pin.length < 4 || openMut.isPending}
+              type="button"
+              disabled={!managerPinVerified || !verifiedManagerPin || openMut.isPending}
               onClick={() => openMut.mutate()}
             >
               {openMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Open location
             </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Close dialog */}
-      <AlertDialog open={closeDialog} onOpenChange={setCloseDialog}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Close location?</AlertDialogTitle>
-            <AlertDialogDescription>
+      <Dialog
+        open={closeDialog}
+        onOpenChange={(o) => {
+          setCloseDialog(o);
+          if (!o) resetPinState();
+        }}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Close location?</DialogTitle>
+            <DialogDescription>
               Complete departure handover on the Arrival roll first. Everyone still checked in will
               block close.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
+            </DialogDescription>
+          </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Outcome</Label>
@@ -233,28 +285,40 @@ export function EventLocationPanel({ session, onChanged }: Props) {
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Manager PIN</Label>
-              <Input
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                value={pin}
-                onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, 4))}
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={4}
+                title="Close event location"
+                description="Trip leader PIN required to close the event floor."
+                disabled={!managerStaffId}
+                onVerify={async (pin) => {
+                  await verifyManagerPin(managerStaffId, pin);
+                }}
+                onSuccess={(pin) => {
+                  setVerifiedManagerPin(pin);
+                  setManagerPinVerified(true);
+                }}
               />
             </div>
           </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setCloseDialog(false)}>
+              Cancel
+            </Button>
             <Button
+              type="button"
               variant="destructive"
-              disabled={pin.length < 4 || closeMut.isPending}
+              disabled={!managerPinVerified || !verifiedManagerPin || closeMut.isPending}
               onClick={() => closeMut.mutate()}
             >
               {closeMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               Close location
             </Button>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

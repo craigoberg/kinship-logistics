@@ -2,7 +2,8 @@ import { useEffect, useState } from "react";
 import { Loader2 } from "lucide-react";
 
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { Textarea } from "@/components/ui/textarea";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { cn } from "@/lib/utils";
@@ -20,16 +21,20 @@ export interface FormalAuditState {
   responses: Record<string, { status: ChecklistStatus | null; notes: string }>;
   auditorStaffId: string;
   auditorPin: string;
+  auditorPinVerified: boolean;
   witnessStaffId: string;
   witnessPin: string;
+  witnessPinVerified: boolean;
 }
 
 export const emptyFormalAuditState: FormalAuditState = {
   responses: {},
   auditorStaffId: "",
   auditorPin: "",
+  auditorPinVerified: false,
   witnessStaffId: "",
   witnessPin: "",
+  witnessPinVerified: false,
 };
 
 interface Props {
@@ -198,18 +203,36 @@ export function FormalAuditChecklist({
           title="Auditor"
           staff={staff}
           staffId={value.auditorStaffId}
-          pin={value.auditorPin}
-          onChangeStaffId={(id) => onChange({ ...value, auditorStaffId: id })}
-          onChangePin={(p) => onChange({ ...value, auditorPin: p })}
+          pinVerified={value.auditorPinVerified}
+          onChangeStaffId={(id) =>
+            onChange({
+              ...value,
+              auditorStaffId: id,
+              auditorPin: "",
+              auditorPinVerified: false,
+            })
+          }
+          onPinVerified={(pin) =>
+            onChange({ ...value, auditorPin: pin, auditorPinVerified: true })
+          }
           excludeStaffId={value.witnessStaffId}
         />
         <PinBlock
           title="Witness"
           staff={staff}
           staffId={value.witnessStaffId}
-          pin={value.witnessPin}
-          onChangeStaffId={(id) => onChange({ ...value, witnessStaffId: id })}
-          onChangePin={(p) => onChange({ ...value, witnessPin: p })}
+          pinVerified={value.witnessPinVerified}
+          onChangeStaffId={(id) =>
+            onChange({
+              ...value,
+              witnessStaffId: id,
+              witnessPin: "",
+              witnessPinVerified: false,
+            })
+          }
+          onPinVerified={(pin) =>
+            onChange({ ...value, witnessPin: pin, witnessPinVerified: true })
+          }
           excludeStaffId={value.auditorStaffId}
         />
       </div>
@@ -228,17 +251,17 @@ function PinBlock({
   title,
   staff,
   staffId,
-  pin,
+  pinVerified,
   onChangeStaffId,
-  onChangePin,
+  onPinVerified,
   excludeStaffId,
 }: {
   title: string;
   staff: StaffMember[];
   staffId: string;
-  pin: string;
+  pinVerified: boolean;
   onChangeStaffId: (id: string) => void;
-  onChangePin: (p: string) => void;
+  onPinVerified: (pin: string) => void;
   excludeStaffId: string;
 }) {
   return (
@@ -260,14 +283,19 @@ function PinBlock({
             </option>
           ))}
       </select>
-      <Input
-        type="password"
-        inputMode="numeric"
-        maxLength={4}
-        placeholder="4-digit PIN"
-        value={pin}
-        onChange={(e) => onChangePin(e.target.value.replace(/\D/g, "").slice(0, 4))}
-        className="h-8 text-xs tracking-[0.4em]"
+      <PinEntryTrigger
+        label="Tap to enter PIN"
+        verified={pinVerified}
+        verifiedLabel={`${title} PIN verified`}
+        length={4}
+        title={`${title} sign-off`}
+        description={`Verify ${title.toLowerCase()} PIN for this formal audit.`}
+        disabled={!staffId}
+        className="h-10 text-sm"
+        onVerify={async (pin) => {
+          await verifyManagerPin(staffId, pin);
+        }}
+        onSuccess={onPinVerified}
       />
     </div>
   );
@@ -299,6 +327,8 @@ export function buildFormalAuditPayload(
     !!state.auditorStaffId &&
     !!state.witnessStaffId &&
     state.auditorStaffId !== state.witnessStaffId &&
+    state.auditorPinVerified &&
+    state.witnessPinVerified &&
     /^\d{4}$/.test(state.auditorPin) &&
     /^\d{4}$/.test(state.witnessPin);
   const valid = items.length > 0 && allMarked && failsHaveNotes && pinsOk;

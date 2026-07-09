@@ -42,6 +42,25 @@ export function todayLocalIso(): string {
   return toIsoDateString(new Date());
 }
 
+/** Normalize stored calendar dates / ISO timestamps to YYYY-MM-DD. */
+export function isoDateOnly(value: string | null | undefined): string {
+  if (!value) return "";
+  const m = /^(\d{4}-\d{2}-\d{2})/.exec(value);
+  return m?.[1] ?? "";
+}
+
+/** True when `date` falls within an event's start/end range (inclusive). */
+export function eventSpansDate(
+  startDate: string,
+  endDate: string | null | undefined,
+  date: string,
+): boolean {
+  const start = isoDateOnly(startDate);
+  const end = isoDateOnly(endDate ?? startDate);
+  if (!start || !date) return false;
+  return start <= date && end >= date;
+}
+
 /** dd-Mmm-YY (e.g. 17-Jun-26) */
 export function formatDate(input: Date | string | number | null | undefined): string {
   const d = toDate(input);

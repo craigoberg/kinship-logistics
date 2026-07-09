@@ -12,7 +12,6 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -27,9 +26,10 @@ import {
   DEFAULT_STAFF_UUID,
   getActiveUserProfile,
   getStaffId,
-  verifyStaffPin,
   listStaffRegistry,
 } from "@/lib/data-store";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import {
   tryGetGps,
   writeToLedgerOrThrow,
@@ -83,15 +83,13 @@ export function VerbalConsultationDialog({
   const [selectedManagerId, setSelectedManagerId] = useState("");
   const [contactOutcome, setContactOutcome] = useState<VerbalContactOutcome | "">("");
   const [notes, setNotes] = useState("");
-  const [operatorPin, setOperatorPin] = useState("");
-  const [operatorPinError, setOperatorPinError] = useState<string | null>(null);
+  const [operatorPinVerified, setOperatorPinVerified] = useState(false);
 
   const reset = () => {
     setSelectedManagerId("");
     setContactOutcome("");
     setNotes("");
-    setOperatorPin("");
-    setOperatorPinError(null);
+    setOperatorPinVerified(false);
   };
 
   const staffQ = useQuery({
@@ -121,18 +119,7 @@ export function VerbalConsultationDialog({
     mutationFn: async () => {
       const operatorStaffId =
         getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
-      if (!/^\d{4,6}$/.test(operatorPin)) {
-        const msg = "Incorrect operator PIN. Please try again.";
-        setOperatorPinError(msg);
-        throw new Error(msg);
-      }
-      const operatorOk = await verifyStaffPin(operatorStaffId, operatorPin);
-      if (!operatorOk) {
-        const msg = "Incorrect operator PIN. Please try again.";
-        setOperatorPinError(msg);
-        setOperatorPin("");
-        throw new Error(msg);
-      }
+      if (!operatorPinVerified) throw new Error("Operator PIN required.");
       if (!selectedManagerId) throw new Error("Please select the manager you attempted to contact.");
       if (!contactOutcome) throw new Error("Please record the contact outcome.");
 
@@ -188,7 +175,7 @@ export function VerbalConsultationDialog({
   const notesOk = notes.trim().length >= MIN_NOTES;
   const managerSelected = !!selectedManagerId;
   const outcomeSelected = contactOutcome === "manager_reached" || contactOutcome === "unable_to_contact";
-  const operatorPinOk = /^\d{4,6}$/.test(operatorPin);
+  const operatorPinOk = operatorPinVerified;
   const canSubmit =
     notesOk && managerSelected && outcomeSelected && operatorPinOk && !submitMut.isPending;
 
@@ -316,28 +303,17 @@ export function VerbalConsultationDialog({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Your operator PIN <span className="text-destructive">*</span>
             </Label>
-            <Input
-              type="password"
-              inputMode="numeric"
-              pattern="[0-9]*"
-              maxLength={6}
-              autoComplete="off"
-              value={operatorPin}
-              onChange={(e) => {
-                setOperatorPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-                if (operatorPinError) setOperatorPinError(null);
-              }}
-              placeholder="----"
-              aria-invalid={!!operatorPinError}
-              className={`h-12 max-w-[180px] text-center text-xl tracking-[0.4em] tabular-nums ${
-                operatorPinError || !operatorPinOk
-                  ? "border-2 border-destructive focus-visible:ring-destructive"
-                  : ""
-              }`}
+            <PinEntryTrigger
+              label="Tap to sign with your PIN"
+              verified={operatorPinVerified}
+              verifiedLabel="Operator PIN verified"
+              length={4}
+              title="Sign verbal consultation"
+              description="Confirms you attempted manager contact and the details above are accurate."
+              required
+              onVerify={verifyOperatorPin}
+              onSuccess={() => setOperatorPinVerified(true)}
             />
-            {operatorPinError && (
-              <p className="text-xs font-medium text-destructive">{operatorPinError}</p>
-            )}
             <p className="text-xs text-muted-foreground">
               Confirms you attempted manager contact and the details above are accurate.
             </p>

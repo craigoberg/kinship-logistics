@@ -172,46 +172,42 @@ function RollCard({
       )}
 
       {editable && !isOut && (
-        <div className="mt-2 flex flex-wrap gap-2">
+        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
           {!isIn ? (
             <Button
-              size="sm"
-              className="h-8 flex-1 min-w-[120px] gap-1.5"
+              className="h-12 min-h-12 flex-1 touch-manipulation gap-1.5 text-base"
               disabled={busy}
               onClick={onToggle}
             >
-              <Check className="h-3.5 w-3.5" />
+              <Check className="h-4 w-4" />
               Check in
             </Button>
           ) : (
             <>
               <Button
-                size="sm"
                 variant="outline"
-                className="h-8 gap-1.5"
+                className="h-12 min-h-12 touch-manipulation gap-1.5"
                 disabled={busy}
                 onClick={onToggle}
               >
                 Undo check-in
               </Button>
               <Button
-                size="sm"
                 variant="secondary"
-                className="h-8 gap-1.5"
+                className="h-12 min-h-12 flex-1 touch-manipulation gap-1.5"
                 disabled={busy}
                 onClick={() => onCheckout("bus")}
               >
-                <Bus className="h-3.5 w-3.5" />
+                <Bus className="h-4 w-4" />
                 Hand to bus
               </Button>
               <Button
-                size="sm"
                 variant="secondary"
-                className="h-8 gap-1.5"
+                className="h-12 min-h-12 flex-1 touch-manipulation gap-1.5"
                 disabled={busy}
                 onClick={() => onCheckout("self")}
               >
-                <Car className="h-3.5 w-3.5" />
+                <Car className="h-4 w-4" />
                 Self transport
               </Button>
             </>

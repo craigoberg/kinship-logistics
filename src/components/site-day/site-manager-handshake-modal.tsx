@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -11,8 +11,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { Textarea } from "@/components/ui/textarea";
 import {
   RadioGroup,
@@ -65,14 +66,14 @@ export function SiteManagerHandshakeModal({
     { plan: "" },
   );
   const [decision, setDecision] = useState<HandshakeDecision | "">("");
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
 
   // Reset PIN whenever the dialog opens. Plan is persisted across mounts.
   useEffect(() => {
     if (open) {
-      setPin("");
-      setPinError(null);
+      setManagerPinVerified(false);
+      verifiedManagerPinRef.current = "";
     }
   }, [open]);
 
@@ -83,24 +84,19 @@ export function SiteManagerHandshakeModal({
   const mutation = useMutation({
     mutationFn: async () => {
       if (!decision) throw new Error("Choose GO or NO-GO.");
-      if (!/^\d{4,}$/.test(pin)) {
-        const msg = "Incorrect PIN. Please try again.";
-        setPinError(msg);
-        throw new Error(msg);
-      }
+      if (!managerPinVerified) throw new Error("Manager PIN required.");
       const managerStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       return submitManagerHandshake({
         sessionId: context.sessionId,
         plan: form.values.plan.trim(),
         decision,
         managerStaffId,
-        pin,
+        pin: verifiedManagerPinRef.current,
       });
     },
     onSuccess: (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       form.reset();
-      setPinError(null);
       toast.success("Manager handshake recorded.", {
         description:
           decision === "go"
@@ -111,8 +107,8 @@ export function SiteManagerHandshakeModal({
     onError: (e: Error) => {
       const msg = e.message ?? "";
       if (/pin/i.test(msg)) {
-        setPinError("Incorrect PIN. Please try again.");
-        setPin("");
+        setManagerPinVerified(false);
+        verifiedManagerPinRef.current = "";
       }
       toast.error("Could not submit handshake", { description: msg });
     },
@@ -123,8 +119,10 @@ export function SiteManagerHandshakeModal({
     !managerCleared &&
     !!decision &&
     !planTooShort &&
-    /^\d{4,}$/.test(pin) &&
+    managerPinVerified &&
     !mutation.isPending;
+
+  const managerStaffId = getStaffId() || DEFAULT_STAFF_UUID;
 
   const headerTone = useMemo(() => {
     if (managerCleared && session.managerDecision === "no_go")
@@ -291,34 +289,24 @@ export function SiteManagerHandshakeModal({
             </div>
 
             <div className="space-y-2">
-              <Label
-                htmlFor="mgr-pin"
-                className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-              >
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Manager PIN
               </Label>
-              <Input
-                id="mgr-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={6}
-                autoComplete="off"
-                value={pin}
-                onChange={(e) => {
-                  setPin(e.target.value.replace(/\D/g, "").slice(0, 6));
-                  if (pinError) setPinError(null);
+              <PinEntryTrigger
+                label="Tap to enter manager PIN"
+                verified={managerPinVerified}
+                verifiedLabel="Manager PIN verified"
+                length={6}
+                title="Sign manager handshake"
+                description="Confirms the negotiated action plan and GO/NO-GO decision."
+                onVerify={async (pin) => {
+                  await verifyManagerPin(managerStaffId, pin);
                 }}
-                onFocus={() => pinError && setPinError(null)}
-                placeholder="----"
-                aria-invalid={!!pinError}
-                className={cn(
-                  "h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums",
-                  pinError && "border-2 border-destructive focus-visible:ring-destructive",
-                )}
+                onSuccess={(pin) => {
+                  verifiedManagerPinRef.current = pin;
+                  setManagerPinVerified(true);
+                }}
               />
-              {pinError && (
-                <p className="text-xs font-medium text-destructive">{pinError}</p>
-              )}
             </div>
           </div>
         )}

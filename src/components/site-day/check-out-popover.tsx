@@ -78,7 +78,7 @@ export function CheckOutPopover({ row, participantName, onCheckedOut }: Props) {
         </span>
       </PopoverTrigger>
       <PopoverContent
-        className="w-56 p-2"
+        className="w-64 p-2"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-1 px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -89,8 +89,7 @@ export function CheckOutPopover({ row, participantName, onCheckedOut }: Props) {
             <Button
               key={code}
               variant="ghost"
-              size="sm"
-              className="justify-start"
+              className="h-11 touch-manipulation justify-start text-sm"
               disabled={mut.isPending}
               onClick={() => mut.mutate(code)}
             >

@@ -1,10 +1,11 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ClipboardCheck, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 import { Card } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -110,7 +111,8 @@ export function IssueAccumulatorPanel({
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
-  const [driverPin, setDriverPin] = useState("");
+  const [driverPinVerified, setDriverPinVerified] = useState(false);
+  const verifiedDriverPinRef = useRef("");
   const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Pending RED draft awaiting verbal authorization. When non-null, the
@@ -210,9 +212,9 @@ export function IssueAccumulatorPanel({
       toast.error("Please tick the comfort declaration to continue.");
       return;
     }
-    if (!/^\d{4}$/.test(driverPin)) {
-      setPinError("Incorrect PIN. Please try again.");
-      toast.error("Incorrect PIN. Please try again.");
+    if (!driverPinVerified) {
+      setPinError("Driver PIN required.");
+      toast.error("Driver PIN required.");
       return;
     }
 
@@ -253,7 +255,7 @@ export function IssueAccumulatorPanel({
         );
       });
 
-      await submitDriverAuthorization(bundle.clearance.id, driverStaffId, driverPin);
+      await submitDriverAuthorization(bundle.clearance.id, driverStaffId, verifiedDriverPinRef.current);
       toast.success("Declaration locked in", {
         description: `${asset.name} cleared for service.`,
       });
@@ -262,7 +264,8 @@ export function IssueAccumulatorPanel({
       const msg = (err as Error).message;
       if (/pin/i.test(msg)) {
         setPinError("Incorrect PIN. Please try again.");
-        setDriverPin("");
+        setDriverPinVerified(false);
+        verifiedDriverPinRef.current = "";
       }
       toast.error("Could not save clearance", {
         description: msg,
@@ -361,30 +364,22 @@ export function IssueAccumulatorPanel({
             </div>
 
             <div className="mt-4 grid gap-1.5">
-              <Label
-                htmlFor="driver-pin"
-                className="text-xs uppercase tracking-wide text-muted-foreground"
-              >
+              <Label className="text-xs uppercase tracking-wide text-muted-foreground">
                 Driver Onboarding PIN
               </Label>
-              <Input
-                id="driver-pin"
-                type="password"
-                inputMode="numeric"
-                maxLength={4}
-                autoComplete="off"
-                value={driverPin}
-                onChange={(e) => {
-                  setDriverPin(e.target.value.replace(/\D/g, "").slice(0, 4));
-                  if (pinError) setPinError(null);
+              <PinEntryTrigger
+                label="Tap to enter driver PIN"
+                verified={driverPinVerified}
+                verifiedLabel="Driver PIN verified"
+                length={4}
+                title="Driver comfort declaration"
+                description="Confirms you are comfortable operating this vehicle today."
+                onVerify={verifyOperatorPin}
+                onSuccess={(pin) => {
+                  verifiedDriverPinRef.current = pin;
+                  setDriverPinVerified(true);
+                  setPinError(null);
                 }}
-                onFocus={() => pinError && setPinError(null)}
-                placeholder="----"
-                aria-invalid={!!pinError}
-                className={cn(
-                  "h-12 max-w-[180px] text-center text-lg tracking-[0.6em] tabular-nums",
-                  pinError && "border-2 border-destructive focus-visible:ring-destructive",
-                )}
               />
               {pinError && (
                 <p className="text-xs font-medium text-destructive">{pinError}</p>

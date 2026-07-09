@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -12,8 +12,9 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { cn } from "@/lib/utils";
 
 import type {
@@ -47,14 +48,14 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
   const [live, setLive] = useState<AssetDailyClearance | null>(
     row?.clearance ?? null,
   );
-  const [pin, setPin] = useState("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [managerPinVerified, setManagerPinVerified] = useState(false);
+  const verifiedManagerPinRef = useRef("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
     setLive(row?.clearance ?? null);
-    setPin("");
-    setPinError(null);
+    setManagerPinVerified(false);
+    verifiedManagerPinRef.current = "";
   }, [row?.clearance.id]);
 
   useEffect(() => {
@@ -80,26 +81,23 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
 
   const managerCleared = !!live?.managerAuthPinVerifiedAt;
 
+  const managerStaffId = getStaffId() || DEFAULT_STAFF_UUID;
+
   const submitManager = async () => {
     if (submitting) return;
-    if (!/^\d{4}$/.test(pin)) {
-      setPinError("Incorrect PIN. Please try again.");
-      return;
-    }
+    if (!managerPinVerified) return;
     setSubmitting(true);
-    setPinError(null);
     try {
-      const managerStaffId = getStaffId() || DEFAULT_STAFF_UUID;
       const next = await submitManagerAuthorization(
         row.clearance.id,
         managerStaffId,
-        pin,
+        verifiedManagerPinRef.current,
       );
       setLive(next);
       toast.success("Manager PIN verified — driver may now confirm.");
     } catch (err) {
-      setPinError("Incorrect PIN. Please try again.");
-      setPin("");
+      setManagerPinVerified(false);
+      verifiedManagerPinRef.current = "";
       toast.error("Manager PIN rejected", {
         description: (err as Error).message,
       });
@@ -170,28 +168,22 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
             >
               Supervisor Authorization PIN
             </Label>
-            <Input
-              id="manager-pin"
-              type="password"
-              inputMode="numeric"
-              maxLength={4}
-              autoComplete="off"
-              value={pin}
-              onChange={(e) => {
-                setPin(e.target.value.replace(/\D/g, "").slice(0, 4));
-                if (pinError) setPinError(null);
+            <PinEntryTrigger
+              label="Tap to enter manager PIN"
+              verified={managerPinVerified}
+              verifiedLabel="Manager PIN verified"
+              length={4}
+              title="Supervisor authorization"
+              description="Confirms you authorize the driver to proceed with logged issues."
+              className="mt-1"
+              onVerify={async (pin) => {
+                await verifyManagerPin(managerStaffId, pin);
               }}
-              onFocus={() => pinError && setPinError(null)}
-              placeholder="----"
-              aria-invalid={!!pinError}
-              className={
-                "mt-1 h-12 max-w-[160px] text-center text-lg tracking-[0.6em] tabular-nums" +
-                (pinError ? " border-2 border-destructive focus-visible:ring-destructive" : "")
-              }
+              onSuccess={(pin) => {
+                verifiedManagerPinRef.current = pin;
+                setManagerPinVerified(true);
+              }}
             />
-            {pinError && (
-              <p className="mt-1 text-xs font-medium text-destructive">{pinError}</p>
-            )}
           </div>
         ) : (
           <div className="flex items-center gap-2 rounded-md border border-green-600/40 bg-green-600/5 p-3 text-sm">
@@ -210,7 +202,7 @@ export function ManagerJointReviewModal({ open, onOpenChange, row }: Props) {
           {!managerCleared && (
             <Button
               onClick={submitManager}
-              disabled={submitting || pin.length !== 4}
+              disabled={submitting || !managerPinVerified}
               className="bg-red-600 hover:bg-red-700"
             >
               {submitting ? "Verifying…" : "Confirm Manager Authorization"}
