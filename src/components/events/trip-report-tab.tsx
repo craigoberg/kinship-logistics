@@ -19,11 +19,14 @@ import {
   CheckCircle2,
   Clock,
   FileText,
+  Info,
   Loader2,
   MapPin,
   Moon,
+  Phone,
   Printer,
   RefreshCw,
+  ShieldAlert,
   Sunrise,
   Users,
   Wallet,
@@ -31,7 +34,8 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { buildTripReport, type TripReport, type TripReportDaySession } from "@/lib/api/event-lifecycle";
+import { buildTripReport, type TripReport, type TripReportDaySession, type TripReportIssue } from "@/lib/api/event-lifecycle";
+import { cn } from "@/lib/utils";
 import type { EventManifest } from "@/lib/data-store";
 import { EventTransportBadge } from "./event-transport-badge";
 
@@ -138,12 +142,26 @@ export function TripReportTab({ event }: Props) {
           {report.accountabilitySummary.totalRedIssues > 0 && (
             <span className="inline-flex items-center gap-1 rounded bg-destructive/10 px-2.5 py-1 text-[11px] font-semibold text-destructive">
               <AlertTriangle className="h-3 w-3" />
-              {report.accountabilitySummary.totalRedIssues} RED accountability issue{report.accountabilitySummary.totalRedIssues > 1 ? "s" : ""}
+              {report.accountabilitySummary.totalRedIssues} RED
             </span>
           )}
           {report.accountabilitySummary.totalYellowIssues > 0 && (
             <span className="inline-flex items-center gap-1 rounded bg-yellow-500/10 px-2.5 py-1 text-[11px] font-semibold text-yellow-700">
+              <AlertTriangle className="h-3 w-3" />
               {report.accountabilitySummary.totalYellowIssues} YELLOW
+            </span>
+          )}
+          {report.accountabilitySummary.totalGreenIssues > 0 && (
+            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+              <Info className="h-3 w-3" />
+              {report.accountabilitySummary.totalGreenIssues} GREEN
+            </span>
+          )}
+          {report.accountabilitySummary.totalRedIssues === 0 &&
+            report.accountabilitySummary.totalYellowIssues === 0 &&
+            report.accountabilitySummary.totalGreenIssues === 0 && (
+            <span className="inline-flex items-center gap-1 rounded bg-emerald-500/10 px-2.5 py-1 text-[11px] font-semibold text-emerald-700">
+              <CheckCircle2 className="h-3 w-3" /> No RYGE issues logged
             </span>
           )}
         </div>
@@ -277,41 +295,114 @@ function DaySessionBlock({ day }: { day: TripReportDaySession }) {
   const hasCurfew = day.curfewTotal > 0;
   const hasMorning = day.morningTotal > 0;
   const hasBus = day.busManifestTotal > 0;
+  const hasIssues = day.issues.length > 0;
 
   return (
-    <div className="px-4 py-3">
+    <div className="px-4 py-3 space-y-3">
+      {/* Day header */}
       <div className="flex flex-wrap items-center gap-2">
         <span className="font-semibold text-sm">{fmtDate(day.sessionDate)}</span>
         {phaseBadge(day.phase)}
         {day.managerName && (
-          <span className="text-xs text-muted-foreground">Manager: {day.managerName}</span>
+          <span className="text-xs text-muted-foreground">Trip leader: {day.managerName}</span>
         )}
       </div>
 
-      <div className="mt-2 flex flex-wrap gap-4 text-[11px]">
-        {hasBus && (
-          <span className="flex items-center gap-1">
-            <Bus className="h-3 w-3 text-info" />
-            Bus: {day.busManifestOnBus}/{day.busManifestTotal} on bus
-            {day.busManifestNotTravelling > 0 && ` · ${day.busManifestNotTravelling} not travelling`}
-          </span>
+      {/* Accountability counts */}
+      {(hasBus || hasCurfew || hasMorning) && (
+        <div className="flex flex-wrap gap-4 text-[11px]">
+          {hasBus && (
+            <span className="flex items-center gap-1">
+              <Bus className="h-3 w-3 text-blue-500" />
+              Bus: {day.busManifestOnBus}/{day.busManifestTotal} on bus
+              {day.busManifestNotTravelling > 0 && ` · ${day.busManifestNotTravelling} not travelling`}
+            </span>
+          )}
+          {hasCurfew && (
+            <span className="flex items-center gap-1">
+              <Moon className="h-3 w-3" />
+              Curfew {day.curfewTime ?? ""}: {day.curfewAccounted}/{day.curfewTotal} accounted
+              {day.curfewRed > 0 && <span className="font-bold text-destructive ml-1">· {day.curfewRed} RED</span>}
+              {day.curfewYellow > 0 && <span className="font-semibold text-yellow-700 ml-1">· {day.curfewYellow} YELLOW</span>}
+            </span>
+          )}
+          {hasMorning && (
+            <span className="flex items-center gap-1">
+              <Sunrise className="h-3 w-3" />
+              Morning {day.morningRollTime ?? ""}: {day.morningAccounted}/{day.morningTotal} accounted
+              {day.morningRed > 0 && <span className="font-bold text-destructive ml-1">· {day.morningRed} RED</span>}
+              {day.morningYellow > 0 && <span className="font-semibold text-yellow-700 ml-1">· {day.morningYellow} YELLOW</span>}
+            </span>
+          )}
+        </div>
+      )}
+
+      {/* RYGE Issues Register for this day */}
+      {hasIssues && (
+        <div className="rounded-md border">
+          <div className="flex items-center gap-1.5 border-b bg-muted/30 px-3 py-1.5">
+            <ShieldAlert className="h-3.5 w-3.5 text-primary" />
+            <span className="text-[11px] font-semibold uppercase tracking-wide">Issues logged this day</span>
+          </div>
+          <div className="divide-y">
+            {day.issues.map((issue) => (
+              <ReportIssueRow key={issue.id} issue={issue} />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {!hasIssues && (
+        <p className="text-[11px] text-muted-foreground flex items-center gap-1">
+          <CheckCircle2 className="h-3 w-3 text-emerald-600" /> No issues logged for this day.
+        </p>
+      )}
+    </div>
+  );
+}
+
+const REPORT_SEV_BAR: Record<string, string> = {
+  red: "border-l-4 border-l-destructive",
+  yellow: "border-l-4 border-l-yellow-400",
+  green: "border-l-4 border-l-emerald-500",
+};
+
+function ReportIssueRow({ issue }: { issue: TripReportIssue }) {
+  const isResolved = issue.status !== "open";
+  const sevLabel = issue.severity.toUpperCase();
+  const bar = REPORT_SEV_BAR[issue.severity] ?? "";
+
+  return (
+    <div className={cn("px-3 py-2 text-xs", bar, isResolved && "opacity-60")}>
+      <div className="flex items-start gap-2">
+        {issue.isVerbalWorkaround ? (
+          <Phone className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
+        ) : issue.severity === "green" ? (
+          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-emerald-600" />
+        ) : (
+          <AlertTriangle className={cn(
+            "mt-0.5 h-3.5 w-3.5 shrink-0",
+            issue.severity === "red" ? "text-destructive" : "text-yellow-600",
+          )} />
         )}
-        {hasCurfew && (
-          <span className="flex items-center gap-1">
-            <Moon className="h-3 w-3" />
-            Curfew {day.curfewTime ?? ""}: {day.curfewAccounted}/{day.curfewTotal} accounted
-            {day.curfewRed > 0 && <span className="font-bold text-destructive ml-1">· {day.curfewRed} RED</span>}
-            {day.curfewYellow > 0 && <span className="font-semibold text-yellow-700 ml-1">· {day.curfewYellow} YELLOW</span>}
-          </span>
-        )}
-        {hasMorning && (
-          <span className="flex items-center gap-1">
-            <Sunrise className="h-3 w-3" />
-            Morning {day.morningRollTime ?? ""}: {day.morningAccounted}/{day.morningTotal} accounted
-            {day.morningRed > 0 && <span className="font-bold text-destructive ml-1">· {day.morningRed} RED</span>}
-            {day.morningYellow > 0 && <span className="font-semibold text-yellow-700 ml-1">· {day.morningYellow} YELLOW</span>}
-          </span>
-        )}
+        <div className="flex-1 min-w-0">
+          <p className="font-medium">{issue.issueDescription}</p>
+          {issue.workaroundPlan && (
+            <p className="mt-0.5 text-muted-foreground">Workaround: {issue.workaroundPlan}</p>
+          )}
+          <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
+            <span>{new Date(issue.createdAt).toLocaleString("en-AU")}</span>
+            <span className="font-semibold uppercase">{sevLabel}</span>
+            {issue.isVerbalWorkaround && (
+              <span className="font-semibold text-amber-700">Verbal workaround — Hub close-out by manager</span>
+            )}
+            {isResolved && (
+              <span className="font-semibold text-emerald-600">
+                Resolved {issue.resolvedAt ? new Date(issue.resolvedAt).toLocaleString("en-AU") : ""}
+              </span>
+            )}
+          </div>
+        </div>
       </div>
     </div>
   );

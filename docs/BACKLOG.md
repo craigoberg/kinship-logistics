@@ -23,9 +23,9 @@ Items that need a product/ops decision **before** implementation.
 
 | ID | Topic | Question / notes | Status |
 |----|--------|------------------|--------|
-| BL-001 | **Trip expense vendors** | On **Finance & P&L → Log event expense**, should vendor be **free text** (current: optional field, stored in description prefix `[Vendor: …]`) or **must link to a vendor registry** (existing or new table)? Implications: reporting, GST, duplicate names, venue registry overlap. | **discuss** |
+| BL-001 | **Trip expense vendors** | **Done 2026-07-11.** Simple `vendors` registry (Admin → Vendors). Log expense uses type-ahead picker; unknown names prompt to add to list. Vendor name stored on ledger row for MYOB alignment — no in-app AP tracking. SQL: `docs/sql/2026-07-11_vendors_registry.sql`. | **done** |
 | BL-002 | **Security RBAC mode** | Role-based access control model not yet defined. Scope likely includes: who can open/close events, trip leader vs manager PIN, manifest driver vs coordinator, Governance Hub, system parameters. Needs stakeholder workshop. Menu access matrix exists in code but live enforcement TBD. | **discuss** |
-| BL-003 | **Event-day RED verbal auth** | Outing **Incident / Fault** on manage-event modal opens `LogAnomalyModal` but **VerbalAuthOverrideDialog** for RED may not be wired at modal level (Config tab has smaller path). Align with GUARDRAILS §3 site-day pattern? | **discuss** |
+| BL-003 | **Event-day RED verbal auth** | **Done 2026-07-11 (revised).** Shared `EventDayVerbalAnomalyFlow` wires `LogAnomalyModal` → `VerbalConsultationDialog` (manager by name, operator PIN only) → `[VERBAL WORKAROUND]` issue on trip days and Manage Event **Log Issue**. Manager confirms in Hub later. | **done** |
 
 ---
 
@@ -80,6 +80,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 | BL-020 | `event_financial_ledger.vendor_name` | Live DB has **no** column; app uses description prefix. Optional migration: `docs/sql/2026-07-06_event_financial_ledger_vendor_name.sql` | **deferred** |
 | BL-021 | Venue registry & outing SQL phases | Apply / verify: `2026-07-16_venue_registry_*`, `2026-07-04_event_attendance_log_phase8.sql` on all environments | **ready** |
 | BL-057 | **Admin full DB backup / restore** | **Implemented 2026-07-11 (UI + server routes).** Admin → Backup & Restore tab. Dynamic `list_backup_tables` RPC scan; filename `yyyymmdd - Yada Connect - Full Backup.json`. Restore truncates public tables then reloads; **preserve local login** switch skips `staff_registry` (DEV dummy PINs safe on PROD→DEV restore). Requires: apply `docs/sql/2026-07-11_backup_restore_rpcs.sql`, add `SUPABASE_SERVICE_ROLE_KEY` to server `.env`. Future RBAC (`auth.users`, `role_menu_access`) → extend `AUTH_PROTECTED_TABLES` when BL-002 lands. | **done** |
+| BL-058 | **Venue safety baseline compliance gate** | **Implemented 2026-07-11.** (1) Admin → Venues list shows per-row badge: Signed off · No baseline · Review overdue · Review deferred. (2) Hard gate blocks adding an unsigned/overdue venue to any outing (create modal, event-details primary venue, itinerary stops). Deferral grace window (max 1 month) allows use with amber warning. (3) New baseline sign-off auto-resets annual compliance asset expiry +1 year. Auto-creates compliance asset on venue create/clone. Requires: run `docs/sql/2026-07-11_venue_compliance_assets.sql` to backfill existing active venues. | **done** |
 | BL-022 | `participant_financial_ledger` event linkage | No `event_id` FK — payments tagged via `[event:<uuid>]` in description. Documented in code; do not add `.eq("event_id")` queries. | **done** (2026-07-06) |
 
 ---
@@ -120,6 +121,9 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 | 2026-07-07 | BL-052: manifest active leg — big tap buttons for on-board/no-show, unexpected med, med handover; event arrival roll + bus check-on touch targets |
 | 2026-07-07 | BL-054: Close Run PIN — manifest reconciliation + operator PIN + `TRANSPORT_RUN_CLOSED` ledger |
 | 2026-07-07 | BL-053: PinPad + PinEntryDialog — all PIN surfaces migrated; GUARDRAILS §2.3 |
+| 2026-07-11 | BL-003: event-day RED verbal auth — LogAnomalyModal + VerbalConsultationDialog (remote, operator PIN only) on trip days and Manage Event |
+| 2026-07-11 | BL-001: vendor registry — Admin → Vendors, type-ahead on log expense, prompt-to-add for unknown names |
+| 2026-07-11 | BL-058: venue safety baseline compliance gate — list badge, hard event picker block, auto compliance asset creation/renewal |
 | 2026-07-07 | BL-050 SMS provider setup; BL-051 SharePoint integration setup; RBAC (BL-002) confirmed on backlog under Infrastructure & platform |
 | 2026-07-06 | BL-040: return-run leg card fully implemented — per-person boarding roll + context-sensitive drop-off mode
 | 2026-07-06 | BL-014: pickup workflow when medication not required during trip |

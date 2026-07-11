@@ -1,6 +1,7 @@
 import { supabase } from "@/integrations/supabase/client";
-import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { redHasAcceptedWorkaround } from "@/lib/site-day/red-workaround";
 
 // ============================================================================
 // site_issues_register — RYGE anomaly log tied to a site_day_session.
@@ -12,7 +13,11 @@ export type CouncilSlaCategory = "Sev 1" | "Sev 2" | "Sev 3";
 
 export interface SiteIssue {
   id: string;
-  sessionId: string;
+  sessionId: string | null;
+  /** Set for event-day issues (§12.6); null for day-centre issues. */
+  eventId: string | null;
+  /** Set for event-day issues (§12.6); null for day-centre issues. */
+  eventDaySessionId: string | null;
   reportedBy: string | null;
   severity: RygeSeverity;
   issueDescription: string;
@@ -30,7 +35,9 @@ export interface SiteIssue {
 
 interface SiteIssueRow {
   id: string;
-  session_id: string;
+  session_id: string | null;
+  event_id: string | null;
+  event_day_session_id: string | null;
   reported_by: string | null;
   severity: RygeSeverity;
   issue_description: string;
@@ -49,7 +56,9 @@ interface SiteIssueRow {
 function rowToIssue(r: SiteIssueRow): SiteIssue {
   return {
     id: r.id,
-    sessionId: r.session_id,
+    sessionId: r.session_id ?? null,
+    eventId: r.event_id ?? null,
+    eventDaySessionId: r.event_day_session_id ?? null,
     reportedBy: r.reported_by,
     severity: r.severity,
     issueDescription: r.issue_description,
@@ -190,32 +199,99 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
 }
 
 /**
- * List all open issues for a specific event day session (§12.6).
- * Used by EventIssuesCard to show issues on the event day coordinator screen.
+ * List all issues for a specific event day session (§12.6).
+ * Uses `.in()` — the same PostgREST operator used by buildTripReport (Trip Report).
+ * `.eq()` on this column was silently failing; `.in()` is confirmed to work.
  */
 export async function listEventDayIssues(eventDaySessionId: string): Promise<SiteIssue[]> {
   const { data, error } = await supabase
     .from("site_issues_register")
     .select("*")
-    .eq("event_day_session_id", eventDaySessionId)
+    .in("event_day_session_id", [eventDaySessionId])
     .order("created_at", { ascending: false });
   if (error) throw error;
   return (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
 }
 
 /**
- * Returns true if there is an open RED issue for the given event day session.
- * Used by the depart gate to block departure when a RED lock is active.
+ * List ALL issues for an event across all day sessions, using the same
+ * `.in()` pattern as buildTripReport. Callers filter by eventDaySessionId
+ * client-side to show per-day issues in EventIssuesCard.
+ */
+export async function listEventIssues(eventId: string, sessionIds: string[]): Promise<SiteIssue[]> {
+  if (sessionIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("*")
+    .in("event_day_session_id", sessionIds)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+}
+
+/**
+ * Returns true if there is a blocking open RED issue for the given event day session.
+ *
+ * Non-blocking rows (GUARDRAILS §3, §13.7):
+ *   • Verbal-workaround RED rows — `[VERBAL WORKAROUND]` prefix in issue_description
+ *   • INCIDENT/FAULT RED rows   — `[INCIDENT]` prefix in issue_description
+ *     These are filed via the global big-red button and must never gate location open.
+ *     Only venue-walkaround RED rows (no special prefix) activate the hard block.
  */
 export async function hasOpenRedIssueForSession(eventDaySessionId: string): Promise<boolean> {
-  const { count, error } = await supabase
+  const { data, error } = await supabase
     .from("site_issues_register")
-    .select("id", { count: "exact", head: true })
-    .eq("event_day_session_id", eventDaySessionId)
+    .select("id, status, issue_description, workaround_plan, workaround_accepted_at")
+    .in("event_day_session_id", [eventDaySessionId])
     .eq("status", "open")
     .eq("severity", "red");
   if (error) return false;
-  return (count ?? 0) > 0;
+  return (data ?? []).some((row) => {
+    const desc: string = row.issue_description ?? "";
+    // [INCIDENT] rows from the global INCIDENT/FAULT button never block (§13.7)
+    if (desc.startsWith("[INCIDENT]")) return false;
+    return !redHasAcceptedWorkaround({
+      id: row.id,
+      status: row.status,
+      issue_description: desc,
+      workaround_plan: row.workaround_plan,
+      workaround_accepted_at: row.workaround_accepted_at,
+    });
+  });
+}
+
+/**
+ * Canonical RYGE sort helpers (GUARDRAILS §13.9).
+ *
+ * Both variants group by severity: RED → YELLOW → GREEN.
+ * Within each group the timestamp direction differs by context:
+ *
+ *   sortByRygeOldestFirst  — Trip Report, HUB, Day Centre registers
+ *                            Oldest first: read the history in chronological order.
+ *
+ *   sortByRygeNewestFirst  — Trip Days Active Issues Register only.
+ *                            Newest first: the most recently logged issue surfaces immediately.
+ */
+const SEV_RANK: Record<string, number> = { red: 0, yellow: 1, green: 2 };
+
+export function sortByRygeOldestFirst<T extends { severity: string; createdAt: string }>(
+  issues: T[],
+): T[] {
+  return [...issues].sort((a, b) => {
+    const rankDiff = (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3);
+    if (rankDiff !== 0) return rankDiff;
+    return a.createdAt.localeCompare(b.createdAt);
+  });
+}
+
+export function sortByRygeNewestFirst<T extends { severity: string; createdAt: string }>(
+  issues: T[],
+): T[] {
+  return [...issues].sort((a, b) => {
+    const rankDiff = (SEV_RANK[a.severity] ?? 3) - (SEV_RANK[b.severity] ?? 3);
+    if (rankDiff !== 0) return rankDiff;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
 }
 
 export async function markResolved(id: string): Promise<SiteIssue> {

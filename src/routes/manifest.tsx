@@ -83,7 +83,7 @@ import { CloseRunCard } from "@/components/manifest/close-run-card";
 import { ManifestRouteMap } from "@/components/manifest/manifest-route-map";
 import { MobileFieldButton, MobileOptionButton } from "@/components/manifest/mobile-field-button";
 // RedHandshakeWaitingPanel + multi-device handshake removed — RED now flows
-// through the single-user VerbalAuthOverrideDialog inside IssueAccumulatorPanel.
+// through VerbalConsultationDialog inside IssueAccumulatorPanel.
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
@@ -100,7 +100,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
 import { writeToLedger } from "@/lib/api/ledger";
 import { raiseUnsafeDropHubIssue } from "@/lib/api/transport-unsafe-drop";
-import { VerbalConsultationDialog } from "@/components/issue-engine/verbal-consultation-dialog";
+import { VerbalConsultationDialog, formatVerbalWorkaroundDescription } from "@/components/issue-engine/verbal-consultation-dialog";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { dayCodeFromSydneyIndex } from "@/lib/api/centre-hours";
@@ -136,7 +136,7 @@ function ManifestPage() {
   const manifestQueryClient = useQueryClient();
 
   // Multi-device handshake rehydration removed — RED issues now resolve
-  // locally via VerbalAuthOverrideDialog inside IssueAccumulatorPanel. No
+  // locally via VerbalConsultationDialog inside IssueAccumulatorPanel. No
   // realtime escalation polling, no EscalationRehydrationGate, no waiting
   // panel branch.
 
@@ -2417,21 +2417,19 @@ function ArrivedChecklist({
             actionType="RED_VERBAL_CONSULTATION"
             titleOverride="RED Verbal Consultation — Unsafe Drop"
             descriptionOverride="The manager is not with you. Select who you attempted to contact, record the outcome (reached with agreed plan, or unable to contact), and sign with your operator PIN only."
-            onAccepted={async ({ managerName, contactOutcome, notes }) => {
+            onAccepted={async (payload) => {
               if (!verbalPending) return;
-              const outcomeLabel =
-                contactOutcome === "manager_reached"
-                  ? "Manager reached — agreed plan"
-                  : "Unable to contact manager";
-              const prefixed =
-                `[VERBAL WORKAROUND] ${verbalPending.description} — Consulted: ${managerName}. Outcome: ${outcomeLabel}. ${notes}`;
+              const prefixed = formatVerbalWorkaroundDescription(
+                verbalPending.description,
+                payload,
+              );
               try {
                 await raiseUnsafeDropHubIssue({
                   tripId,
                   legId: leg.id,
                   eventId: eventId ?? null,
                   description: prefixed,
-                  workaroundPlan: notes,
+                  workaroundPlan: payload.notes,
                 });
                 queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
               } catch (err) {

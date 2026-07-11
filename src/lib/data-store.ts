@@ -709,6 +709,23 @@ export function getActiveUserProfile(): ActiveUserProfile | null {
   }
 }
 
+/**
+ * Resolve a staff member's display name for HUB / audit fields.
+ * Prefers the PIN-login profile (staff_registry), then the static dev directory.
+ */
+export function resolveStaffDisplayName(staffId?: string | null): string {
+  const id = staffId ?? getStaffId();
+  const profile = getActiveUserProfile();
+  if (profile?.fullName) {
+    if (!id || id === DEFAULT_STAFF_UUID || profile.staffId === id) {
+      return profile.fullName;
+    }
+  }
+  const fromDir = STAFF_DIRECTORY.find((s) => s.id === id)?.name;
+  if (fromDir) return fromDir;
+  return profile?.fullName ?? "Unknown staff";
+}
+
 export function clearActiveUserSession(): void {
   if (typeof localStorage === "undefined") return;
   localStorage.removeItem(USER_ROLE_KEY);

@@ -33,7 +33,7 @@ import { AccountabilityRollPanel } from "./accountability-roll-panel";
 import { EventIssuesCard } from "./event-issues-card";
 import { EventLocationPanel } from "./event-location-panel";
 import { EventArrivalRollPanel } from "./event-arrival-roll-panel";
-import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
+import { EventDayVerbalAnomalyFlow } from "./event-day-verbal-anomaly-flow";
 import { isEventLocationOpen } from "@/lib/api/event-location";
 import type { EventManifest } from "@/lib/data-store";
 
@@ -456,7 +456,7 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
                     onClick={() => setAnomalyOpen(true)}
                   >
                     <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
-                    Log Issue
+                    Log Venue Issue
                   </Button>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => setExpanded(false)}>Close</Button>
@@ -468,19 +468,18 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
                 </div>
 
                 {/* Active Issues Register for this day session */}
-                <EventIssuesCard eventDaySessionId={session.id} />
+                <EventIssuesCard eventId={event.id} eventDaySessionId={session.id} />
                 </div>
               </div>
 
-              {/* Log Anomaly Modal — event-day context (§12.6) */}
-              <LogAnomalyModal
+              {/* Log Anomaly Modal — event-day context (§12.6) + verbal RED (§3) */}
+              <EventDayVerbalAnomalyFlow
+                eventId={event.id}
+                eventTitle={event.title}
+                eventDaySessionId={session.id}
+                sessionDate={session.session_date}
                 open={anomalyOpen}
                 onOpenChange={setAnomalyOpen}
-                context={{
-                  kind: "event-day",
-                  eventId: event.id,
-                  eventDaySessionId: session.id,
-                }}
               />
               </>
             )}

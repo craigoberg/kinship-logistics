@@ -1,20 +1,13 @@
 import { useState, useMemo, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, PhoneCall, ShieldAlert } from "lucide-react";
+import { Check, Loader2, PhoneCall, ShieldAlert } from "lucide-react";
 
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
-import { verifyManagerPin, verifyOperatorPin } from "@/components/auth/pin-verify";
+import { PinPad } from "@/components/auth/pin-pad";
+import { verifyManagerPin, resolveOperatorStaffIdFromPin } from "@/components/auth/pin-verify";
 import {
   Select,
   SelectContent,
@@ -23,6 +16,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { cn } from "@/lib/utils";
 import {
   DEFAULT_STAFF_UUID,
   getActiveUserProfile,
@@ -35,52 +29,26 @@ import {
   type LedgerCategory,
 } from "@/lib/api/ledger";
 
+/**
+ * @deprecated Do not use for RED escalations. All app RED paths use
+ * `VerbalConsultationDialog` (manager by name, operator PIN only).
+ * Retained on disk per preservation policy until explicit removal review.
+ */
 interface Props {
   open: boolean;
   onOpenChange: (next: boolean) => void;
-  /** Ledger category — VEHICLE for pre-trip, CENTRE for site-day. */
   ledgerCategory: LedgerCategory;
-  /** Free-text subject (e.g. "Bus 4 · ABC123" or `Day Centre · Session ${id}`). */
   subjectLabel: string;
-  /** Optional source escalation/issue id; embedded in metadata. */
   sourceId?: string | null;
-  /**
-   * Ledger `action_type` written for this verbal consultation. Defaults to
-   * the historical `VERBAL_AUTH_OVERRIDE` (high-trust escape hatch). The
-   * promoted single-user RED flow passes `RED_VERBAL_WORKAROUND`.
-   */
   actionType?: string;
-  /** Optional title override for the canonical RED variant. */
   titleOverride?: string;
-  /** Optional descriptive blurb for the canonical RED variant. */
   descriptionOverride?: string;
-  /**
-   * Called after the ledger receipt has been successfully written. Receives
-   * the authorising manager's staff ID and the verbal plan so the caller can
-   * land an open ticket in the appropriate source register with a
-   * `[VERBAL WORKAROUND]` prefix.
-   *
-   * GUARDRAILS §1.3 / §3: the manager PIN has already been verified against
-   * coordinator/manager role before `onAccepted` is invoked.
-   */
   onAccepted: (payload: { managerStaffId: string; managerName: string; reason: string }) => void;
 }
 
-/**
- * High-trust escape hatch — GUARDRAILS §3 "Single-Rail Verbal Consultation".
- *
- * Requires:
- *   1. Operator selects the authorising Manager from the coordinator staff list.
- *   2. Operator enters the Manager's PIN — verified against coordinator/manager role
- *      via `verifyCoordinatorPin()` (GUARDRAILS §1.3).
- *   3. Operator enters their own PIN.
- *   4. Operator provides ≥20-char workaround justification.
- *
- * On success, writes an immutable `RED_VERBAL_WORKAROUND` receipt to
- * `operational_ledger` (writeToLedgerOrThrow — aborts on failure per §1.1),
- * then invokes `onAccepted` so the caller inserts the `[VERBAL WORKAROUND]`
- * ticket into the appropriate source register.
- */
+type PinStep = "manager" | "operator" | null;
+
+/** GUARDRAILS §3 — portal overlay; one PIN pad at a time (no nested pop-ups). */
 export function VerbalAuthOverrideDialog({
   open,
   onOpenChange,
@@ -98,7 +66,12 @@ export function VerbalAuthOverrideDialog({
   const [managerPinVerified, setManagerPinVerified] = useState(false);
   const [reason, setReason] = useState("");
   const [operatorPinVerified, setOperatorPinVerified] = useState(false);
+  const [pinDraft, setPinDraft] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [activePinStep, setActivePinStep] = useState<PinStep>(null);
   const verifiedManagerPinRef = useRef("");
+  const verifiedOperatorStaffIdRef = useRef<string | null>(null);
 
   const reset = () => {
     setSelectedManagerId("");
@@ -106,9 +79,13 @@ export function VerbalAuthOverrideDialog({
     verifiedManagerPinRef.current = "";
     setReason("");
     setOperatorPinVerified(false);
+    verifiedOperatorStaffIdRef.current = null;
+    setPinDraft("");
+    setPinBusy(false);
+    setPinError(null);
+    setActivePinStep(null);
   };
 
-  // Load coordinator / manager staff for the picker
   const staffQ = useQuery({
     queryKey: ["staff-registry", "coordinators"],
     queryFn: async () => {
@@ -126,21 +103,66 @@ export function VerbalAuthOverrideDialog({
   });
 
   const coordinators = staffQ.data ?? [];
-
   const selectedManager = useMemo(
     () => coordinators.find((s) => s.id === selectedManagerId) ?? null,
     [coordinators, selectedManagerId],
   );
 
+  const reasonOk = reason.trim().length >= MIN_REASON;
+  const managerSelected = !!selectedManagerId;
+
+  async function verifyManagerPinInline(pin: string) {
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      await verifyManagerPin(selectedManagerId, pin);
+      verifiedManagerPinRef.current = pin;
+      setManagerPinVerified(true);
+      setPinDraft("");
+      setActivePinStep(null);
+      toast.success("Manager PIN verified");
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : "Incorrect manager PIN.");
+      setPinDraft("");
+    } finally {
+      setPinBusy(false);
+    }
+  }
+
+  async function verifyOperatorPinInline(pin: string) {
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      verifiedOperatorStaffIdRef.current = await resolveOperatorStaffIdFromPin(pin);
+      setOperatorPinVerified(true);
+      setPinDraft("");
+      setActivePinStep(null);
+      toast.success("Operator PIN verified");
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : "Incorrect operator PIN.");
+      setPinDraft("");
+    } finally {
+      setPinBusy(false);
+    }
+  }
+
+  function openPinStep(step: PinStep) {
+    setPinDraft("");
+    setPinError(null);
+    setActivePinStep(step);
+  }
+
   const submitMut = useMutation({
     mutationFn: async () => {
       const operatorStaffId =
-        getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
+        verifiedOperatorStaffIdRef.current ??
+        getActiveUserProfile()?.staffId ??
+        getStaffId() ??
+        DEFAULT_STAFF_UUID;
       if (!operatorPinVerified) throw new Error("Operator PIN required.");
       if (!selectedManagerId) throw new Error("Please select the authorising Manager.");
       if (!managerPinVerified) throw new Error("Manager PIN required.");
 
-      // --- Ledger write — throws on failure (GUARDRAILS §1.1) ---
       const gps = await tryGetGps();
       await writeToLedgerOrThrow({
         staff_id: operatorStaffId,
@@ -173,21 +195,12 @@ export function VerbalAuthOverrideDialog({
       };
     },
     onSuccess: (payload) => {
-      toast.success(
-        actionType === "RED_VERBAL_WORKAROUND"
-          ? "Verbal workaround recorded — ledger receipt written"
-          : "Verbal authorization recorded — ledger receipt written",
-        {
-          description:
-            "An immutable ledger receipt has been written. Governance Hub now shows this as an open verbal workaround.",
-        },
-      );
+      toast.success("Verbal workaround recorded — ledger receipt written");
       reset();
       onOpenChange(false);
       onAccepted(payload);
     },
     onError: (e: Error) => {
-      // Surface ledger abort errors clearly — they mean the operation cannot proceed
       toast.error(
         e.message.startsWith("[ledger]")
           ? "Ledger write failed — override aborted"
@@ -197,8 +210,6 @@ export function VerbalAuthOverrideDialog({
     },
   });
 
-  const reasonOk = reason.trim().length >= MIN_REASON;
-  const managerSelected = !!selectedManagerId;
   const canSubmit =
     reasonOk &&
     managerSelected &&
@@ -206,42 +217,52 @@ export function VerbalAuthOverrideDialog({
     operatorPinVerified &&
     !submitMut.isPending;
 
-  const handleClose = (next: boolean) => {
+  const handleClose = () => {
     if (submitMut.isPending) return;
-    if (!next) reset();
-    onOpenChange(next);
+    reset();
+    onOpenChange(false);
   };
 
-  return (
-    <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
-          <DialogTitle className="flex items-center gap-2">
+  if (!open || typeof document === "undefined") return null;
+
+  const showOperatorPinStep = managerPinVerified && reasonOk;
+
+  return createPortal(
+    <div
+      className="pointer-events-auto fixed inset-0 z-[100] flex items-end justify-center bg-black/60 p-4 sm:items-center"
+      role="presentation"
+      onClick={handleClose}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="verbal-auth-title"
+        className="flex max-h-[92dvh] w-full max-w-lg flex-col overflow-hidden rounded-t-2xl border border-border bg-background shadow-2xl sm:rounded-2xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="shrink-0 border-b border-border px-5 py-4">
+          <h2 id="verbal-auth-title" className="flex items-center gap-2 text-lg font-semibold">
             <PhoneCall className="h-5 w-5 text-amber-600" />
             {titleOverride ?? "Verbal Authorization Override"}
-          </DialogTitle>
-          <DialogDescription>
+          </h2>
+          <p className="mt-1 text-sm text-muted-foreground">
             {descriptionOverride ??
-              "Use this only when a Manager cannot complete the digital handshake. Both the Manager's coordinator PIN and your own operator PIN are required. Every field is written to the immutable ledger."}
-          </DialogDescription>
-        </DialogHeader>
+              "Complete steps 1–3 in order. PIN entry expands inline here — no second pop-up."}
+          </p>
+        </div>
 
-        <div className="space-y-4 py-1">
-          {/* Context banner */}
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
-              <span className="font-semibold">{subjectLabel}</span> — proceeding
-              without a digital Manager handshake. The Manager must physically
-              provide their coordinator PIN to authorise this override.
+              <span className="font-semibold">{subjectLabel}</span> — offline manager
+              authorisation required.
             </p>
           </div>
 
-          {/* Manager selector */}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Authorising Manager{" "}
-              <span className="text-destructive">*</span>
+              1. Authorising manager <span className="text-destructive">*</span>
             </Label>
             <Select
               value={selectedManagerId}
@@ -249,102 +270,131 @@ export function VerbalAuthOverrideDialog({
                 setSelectedManagerId(v);
                 setManagerPinVerified(false);
                 verifiedManagerPinRef.current = "";
+                setActivePinStep(null);
+                setPinDraft("");
+                setPinError(null);
               }}
-              disabled={staffQ.isLoading}
+              disabled={staffQ.isLoading || managerPinVerified}
             >
-              <SelectTrigger
-                className={
-                  !managerSelected
-                    ? "border-2 border-destructive focus:ring-destructive"
-                    : ""
-                }
-              >
-                <SelectValue
-                  placeholder={
-                    staffQ.isLoading
-                      ? "Loading staff…"
-                      : coordinators.length === 0
-                      ? "No coordinators found"
-                      : "Select authorising manager…"
-                  }
-                />
+              <SelectTrigger className={!managerSelected ? "border-2 border-destructive" : ""}>
+                <SelectValue placeholder="Select authorising manager…" />
               </SelectTrigger>
-              <SelectContent>
+              <SelectContent className="z-[110]">
                 {coordinators.map((s) => (
                   <SelectItem key={s.id} value={s.id}>
                     {s.fullName}
-                    <span className="ml-2 text-xs text-muted-foreground">
-                      ({s.role})
-                    </span>
+                    <span className="ml-2 text-xs text-muted-foreground">({s.role})</span>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+
+            {selectedManagerId && !managerPinVerified && (
+              activePinStep !== "manager" ? (
+                <Button type="button" variant="outline" className="h-12 w-full" onClick={() => openPinStep("manager")}>
+                  Enter {selectedManager?.fullName}&apos;s PIN
+                </Button>
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="mb-2 text-xs text-muted-foreground">
+                    Manager PIN — 4 digits
+                  </p>
+                  <PinPad
+                    value={pinDraft}
+                    onChange={setPinDraft}
+                    length={4}
+                    disabled={pinBusy}
+                    keyboardActive
+                    onComplete={(pin) => void verifyManagerPinInline(pin)}
+                  />
+                  {pinBusy && (
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…
+                    </p>
+                  )}
+                  {pinError && <p className="mt-2 text-xs font-medium text-destructive">{pinError}</p>}
+                  <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setActivePinStep(null)}>
+                    Hide PIN pad
+                  </Button>
+                </div>
+              )
+            )}
+            {managerPinVerified && (
+              <p className="flex items-center gap-1.5 text-sm text-green-700">
+                <Check className="h-4 w-4" /> Manager PIN verified
+              </p>
+            )}
           </div>
 
-          {/* Manager PIN */}
-          {selectedManagerId && (
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Manager PIN — {selectedManager?.fullName}{" "}
-                <span className="text-destructive">*</span>
-              </Label>
-              <PinEntryTrigger
-                label="Tap to enter manager PIN"
-                verified={managerPinVerified}
-                verifiedLabel="Manager PIN verified"
-                length={6}
-                title="Manager verbal authorization"
-                description={`Confirm ${selectedManager?.fullName ?? "manager"} authorizes this override.`}
-                required
-                onVerify={async (pin) => {
-                  await verifyManagerPin(selectedManagerId, pin);
-                }}
-                onSuccess={(pin) => {
-                  verifiedManagerPinRef.current = pin;
-                  setManagerPinVerified(true);
-                }}
-              />
-            </div>
-          )}
-
-          {/* Workaround justification */}
-          <CharacterCountedTextarea
-            label="Authorization Reason (what did the Manager approve?)"
-            value={reason}
-            onValueChange={setReason}
-            placeholder="e.g. Manager approved by phone at 0815 — proceed with Bus 4 despite cracked nearside mirror; replacement booked for 14:00."
-            minChars={MIN_REASON}
-            rows={4}
-            required
-          />
-
-          {/* Operator PIN */}
-          <div className="space-y-2">
+          <div className={cn("space-y-2", !managerPinVerified && "pointer-events-none opacity-50")}>
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Your Operator PIN{" "}
-              <span className="text-destructive">*</span>
+              2. What did the manager approve? <span className="text-destructive">*</span>
             </Label>
-            <PinEntryTrigger
-              label="Tap to sign with your PIN"
-              verified={operatorPinVerified}
-              verifiedLabel="Operator PIN verified"
-              length={4}
-              title="Sign verbal authorization"
-              description="Confirms you recorded this verbal override accurately."
+            <CharacterCountedTextarea
+              label=""
+              value={reason}
+              onValueChange={setReason}
+              placeholder="e.g. Manager approved by phone — proceed with agreed workaround."
+              minChars={MIN_REASON}
+              rows={3}
               required
-              onVerify={verifyOperatorPin}
-              onSuccess={() => setOperatorPinVerified(true)}
             />
           </div>
+
+          <div className={cn("space-y-2", !showOperatorPinStep && "pointer-events-none opacity-50")}>
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              3. Your operator PIN <span className="text-destructive">*</span>
+            </Label>
+            {!operatorPinVerified ? (
+              activePinStep !== "operator" ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-12 w-full"
+                  disabled={!showOperatorPinStep}
+                  onClick={() => openPinStep("operator")}
+                >
+                  Sign with your PIN
+                </Button>
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="mb-2 text-xs text-muted-foreground">Your 4-digit operator PIN</p>
+                  <PinPad
+                    value={pinDraft}
+                    onChange={setPinDraft}
+                    length={4}
+                    disabled={pinBusy}
+                    keyboardActive
+                    onComplete={(pin) => void verifyOperatorPinInline(pin)}
+                  />
+                  {pinBusy && (
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…
+                    </p>
+                  )}
+                  {pinError && <p className="mt-2 text-xs font-medium text-destructive">{pinError}</p>}
+                  <Button type="button" variant="ghost" size="sm" className="mt-2" onClick={() => setActivePinStep(null)}>
+                    Hide PIN pad
+                  </Button>
+                </div>
+              )
+            ) : (
+              <p className="flex items-center gap-1.5 text-sm text-green-700">
+                <Check className="h-4 w-4" /> Operator PIN verified
+              </p>
+            )}
+          </div>
+
+          <ul className="space-y-1 rounded-md border border-border bg-muted/30 p-3 text-xs text-muted-foreground">
+            <li className={managerSelected ? "text-foreground" : ""}>{managerSelected ? "✓" : "○"} Manager selected</li>
+            <li className={managerPinVerified ? "text-foreground" : ""}>{managerPinVerified ? "✓" : "○"} Manager PIN</li>
+            <li className={reasonOk ? "text-foreground" : ""}>{reasonOk ? "✓" : "○"} Reason ({reason.trim().length}/{MIN_REASON} min)</li>
+            <li className={operatorPinVerified ? "text-foreground" : ""}>{operatorPinVerified ? "✓" : "○"} Your PIN</li>
+          </ul>
         </div>
 
-        <DialogFooter>
-          <Button
-            variant="outline"
-            onClick={() => handleClose(false)}
-            disabled={submitMut.isPending}
-          >
+        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
+          <Button variant="outline" onClick={handleClose} disabled={submitMut.isPending}>
             Cancel
           </Button>
           <Button
@@ -352,13 +402,12 @@ export function VerbalAuthOverrideDialog({
             disabled={!canSubmit}
             className="bg-amber-600 text-white hover:bg-amber-700"
           >
-            {submitMut.isPending && (
-              <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />
-            )}
+            {submitMut.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             Record Override & Proceed
           </Button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+        </div>
+      </div>
+    </div>,
+    document.body,
   );
 }

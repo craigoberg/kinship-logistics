@@ -1,6 +1,6 @@
 import {
-  AUTH_PROTECTED_TABLES,
   BACKUP_FORMAT_VERSION,
+  PRESERVE_LOCAL_TABLES,
 } from "@/lib/backup-restore/constants";
 import {
   buildBackupLabel,
@@ -8,11 +8,13 @@ import {
   type BackupManifest,
   type BackupTableBundle,
 } from "@/lib/backup-restore/manifest";
+import { prepareRowsForRestore } from "@/lib/backup-restore/sanitize-rows";
 import {
   createPublishableServerClient,
   createServiceServerClient,
   getServerSupabaseUrl,
 } from "@/lib/supabase.server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 
 const PAGE_SIZE = 1000;
 
@@ -137,6 +139,41 @@ export async function verifyManagerPin(staffId: string, pin: string): Promise<vo
   }
 }
 
+async function insertRestoreRows(
+  service: SupabaseClient,
+  tableName: string,
+  rows: Record<string, unknown>[],
+  warnings: string[],
+): Promise<number> {
+  const prepared = prepareRowsForRestore(tableName, rows);
+  warnings.push(...prepared.warnings);
+  if (prepared.rows.length === 0) return 0;
+
+  const chunkSize = 500;
+  let inserted = 0;
+
+  for (let i = 0; i < prepared.rows.length; i += chunkSize) {
+    const chunk = prepared.rows.slice(i, i + chunkSize);
+    const { error } = await service.from(tableName).insert(chunk);
+    if (!error) {
+      inserted += chunk.length;
+      continue;
+    }
+
+    for (const row of chunk) {
+      const { error: rowErr } = await service.from(tableName).insert(row);
+      if (rowErr) {
+        const ref = String(row.id ?? row.key ?? row.uuid ?? "unknown");
+        warnings.push(`Skipped ${tableName} row (${ref}): ${rowErr.message}`);
+      } else {
+        inserted += 1;
+      }
+    }
+  }
+
+  return inserted;
+}
+
 export interface RestoreOptions {
   preserveAuthCredentials: boolean;
   managerStaffId: string;
@@ -164,7 +201,7 @@ export async function restoreFullBackup(
   const currentSet = new Set(currentTables);
 
   const preservedTables = options.preserveAuthCredentials
-    ? [...AUTH_PROTECTED_TABLES]
+    ? [...PRESERVE_LOCAL_TABLES]
     : [];
 
   const backupTableNames = Object.keys(manifest.tables);
@@ -180,7 +217,7 @@ export async function restoreFullBackup(
   }
   if (options.preserveAuthCredentials) {
     warnings.push(
-      `Preserved local login tables: ${preservedTables.join(", ")}. DEV dummy PINs were not overwritten.`,
+      `Preserved local tables: ${preservedTables.join(", ")}. DEV login credentials and environment config were not overwritten.`,
     );
   }
 
@@ -210,16 +247,8 @@ export async function restoreFullBackup(
       continue;
     }
 
-    const chunkSize = 500;
-    for (let i = 0; i < bundle.rows.length; i += chunkSize) {
-      const chunk = bundle.rows.slice(i, i + chunkSize);
-      const { error } = await service.from(tableName).insert(chunk);
-      if (error) {
-        throw new Error(`Restore insert failed on ${tableName}: ${error.message}`);
-      }
-    }
+    rowCount += await insertRestoreRows(service, tableName, bundle.rows, warnings);
 
-    rowCount += bundle.rows.length;
     restoredTables.push(tableName);
   }
 
@@ -228,7 +257,7 @@ export async function restoreFullBackup(
     restoredTables,
     preservedTables,
     skippedTables,
-    rowCount,
+    rowCount: rowCount,
     warnings,
   };
 }

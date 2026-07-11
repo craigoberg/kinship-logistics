@@ -1,7 +1,7 @@
-import { useState, useMemo } from "react";
+import { useState, useMemo, useRef } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Loader2, PhoneCall, ShieldAlert } from "lucide-react";
+import { Check, Loader2, PhoneCall, ShieldAlert } from "lucide-react";
 
 import {
   Dialog,
@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { PinPad } from "@/components/auth/pin-pad";
 import {
   Select,
   SelectContent,
@@ -28,8 +29,7 @@ import {
   getStaffId,
   listStaffRegistry,
 } from "@/lib/data-store";
-import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
-import { verifyOperatorPin } from "@/components/auth/pin-verify";
+import { resolveOperatorStaffIdFromPin } from "@/components/auth/pin-verify";
 import {
   tryGetGps,
   writeToLedgerOrThrow,
@@ -37,6 +37,22 @@ import {
 } from "@/lib/api/ledger";
 
 export type VerbalContactOutcome = "manager_reached" | "unable_to_contact";
+
+/** Canonical `[VERBAL WORKAROUND]` prefix for Hub register rows (GUARDRAILS §3). */
+export function formatVerbalWorkaroundDescription(
+  baseDescription: string,
+  payload: {
+    managerName: string;
+    contactOutcome: VerbalContactOutcome;
+    notes: string;
+  },
+): string {
+  const outcomeLabel =
+    payload.contactOutcome === "manager_reached"
+      ? "Manager reached — agreed plan"
+      : "Unable to contact manager";
+  return `[VERBAL WORKAROUND] ${baseDescription} — Consulted: ${payload.managerName}. Outcome: ${outcomeLabel}. ${payload.notes}`;
+}
 
 interface Props {
   open: boolean;
@@ -84,12 +100,22 @@ export function VerbalConsultationDialog({
   const [contactOutcome, setContactOutcome] = useState<VerbalContactOutcome | "">("");
   const [notes, setNotes] = useState("");
   const [operatorPinVerified, setOperatorPinVerified] = useState(false);
+  const [pinDraft, setPinDraft] = useState("");
+  const [pinBusy, setPinBusy] = useState(false);
+  const [pinError, setPinError] = useState<string | null>(null);
+  const [operatorPinOpen, setOperatorPinOpen] = useState(false);
+  const verifiedOperatorStaffIdRef = useRef<string | null>(null);
 
   const reset = () => {
     setSelectedManagerId("");
     setContactOutcome("");
     setNotes("");
     setOperatorPinVerified(false);
+    verifiedOperatorStaffIdRef.current = null;
+    setPinDraft("");
+    setPinBusy(false);
+    setPinError(null);
+    setOperatorPinOpen(false);
   };
 
   const staffQ = useQuery({
@@ -118,7 +144,10 @@ export function VerbalConsultationDialog({
   const submitMut = useMutation({
     mutationFn: async () => {
       const operatorStaffId =
-        getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
+        verifiedOperatorStaffIdRef.current ??
+        getActiveUserProfile()?.staffId ??
+        getStaffId() ??
+        DEFAULT_STAFF_UUID;
       if (!operatorPinVerified) throw new Error("Operator PIN required.");
       if (!selectedManagerId) throw new Error("Please select the manager you attempted to contact.");
       if (!contactOutcome) throw new Error("Please record the contact outcome.");
@@ -158,9 +187,11 @@ export function VerbalConsultationDialog({
       toast.success("Verbal consultation recorded — ledger receipt written", {
         description: "Your contact attempt is on record. You may proceed when the form allows.",
       });
+      // Fire onAccepted BEFORE closing so the parent's async handler runs
+      // with its current closure (verbalPending is still set at this point).
+      onAccepted(payload);
       reset();
       onOpenChange(false);
-      onAccepted(payload);
     },
     onError: (e: Error) => {
       toast.error(
@@ -179,11 +210,29 @@ export function VerbalConsultationDialog({
   const canSubmit =
     notesOk && managerSelected && outcomeSelected && operatorPinOk && !submitMut.isPending;
 
-  const handleClose = (next: boolean) => {
+  const handleClose = () => {
     if (submitMut.isPending) return;
-    if (!next) reset();
-    onOpenChange(next);
+    reset();
+    onOpenChange(false);
   };
+
+  async function verifyOperatorPinInline(pin: string) {
+    setPinBusy(true);
+    setPinError(null);
+    try {
+      const staffId = await resolveOperatorStaffIdFromPin(pin);
+      verifiedOperatorStaffIdRef.current = staffId;
+      setOperatorPinVerified(true);
+      setPinDraft("");
+      setOperatorPinOpen(false);
+      toast.success("Operator PIN verified");
+    } catch (e) {
+      setPinError(e instanceof Error ? e.message : "Incorrect operator PIN.");
+      setPinDraft("");
+    } finally {
+      setPinBusy(false);
+    }
+  }
 
   const notesLabel =
     contactOutcome === "unable_to_contact"
@@ -197,8 +246,8 @@ export function VerbalConsultationDialog({
 
   return (
     <Dialog open={open} onOpenChange={handleClose}>
-      <DialogContent className="max-w-lg">
-        <DialogHeader>
+      <DialogContent className="max-w-lg max-h-[92dvh] flex flex-col overflow-hidden p-0">
+        <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />
             {titleOverride ?? "RED Verbal Consultation"}
@@ -209,7 +258,7 @@ export function VerbalConsultationDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 py-1">
+        <div className="flex-1 space-y-4 overflow-y-auto px-5 py-4">
           <div className="flex items-start gap-2 rounded-md border border-amber-500/50 bg-amber-500/10 p-3 text-xs text-amber-800 dark:text-amber-200">
             <ShieldAlert className="mt-0.5 h-4 w-4 shrink-0" />
             <p>
@@ -303,25 +352,59 @@ export function VerbalConsultationDialog({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Your operator PIN <span className="text-destructive">*</span>
             </Label>
-            <PinEntryTrigger
-              label="Tap to sign with your PIN"
-              verified={operatorPinVerified}
-              verifiedLabel="Operator PIN verified"
-              length={4}
-              title="Sign verbal consultation"
-              description="Confirms you attempted manager contact and the details above are accurate."
-              required
-              onVerify={verifyOperatorPin}
-              onSuccess={() => setOperatorPinVerified(true)}
-            />
+            {!operatorPinVerified ? (
+              !operatorPinOpen ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="h-12 w-full"
+                  disabled={!outcomeSelected || !notesOk}
+                  onClick={() => setOperatorPinOpen(true)}
+                >
+                  Sign with your PIN
+                </Button>
+              ) : (
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="mb-2 text-xs text-muted-foreground">Your 4-digit operator PIN</p>
+                  <PinPad
+                    value={pinDraft}
+                    onChange={setPinDraft}
+                    length={4}
+                    disabled={pinBusy}
+                    keyboardActive
+                    onComplete={(pin) => void verifyOperatorPinInline(pin)}
+                  />
+                  {pinBusy && (
+                    <p className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" /> Verifying…
+                    </p>
+                  )}
+                  {pinError && <p className="mt-2 text-xs font-medium text-destructive">{pinError}</p>}
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    className="mt-2"
+                    onClick={() => setOperatorPinOpen(false)}
+                  >
+                    Hide PIN pad
+                  </Button>
+                </div>
+              )
+            ) : (
+              <p className="flex items-center gap-1.5 text-sm text-green-700">
+                <Check className="h-4 w-4" /> Operator PIN verified
+              </p>
+            )}
             <p className="text-xs text-muted-foreground">
-              Confirms you attempted manager contact and the details above are accurate.
+              Confirms you attempted manager contact and the details above are accurate. The manager
+              confirms the outcome later in the Governance Hub.
             </p>
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => handleClose(false)} disabled={submitMut.isPending}>
+        <DialogFooter className="shrink-0 border-t px-5 py-3">
+          <Button variant="outline" onClick={handleClose} disabled={submitMut.isPending}>
             Cancel
           </Button>
           <Button

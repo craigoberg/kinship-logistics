@@ -75,7 +75,7 @@ All operator and manager **authentication PIN capture** must use the canonical o
 
 1. **No OS soft keyboard for PIN** — `PinPad` uses tap digits and/or **physical keyboard** (0–9, Backspace, Enter); do not use `inputMode="numeric"` password fields for PIN.
 2. **Mobile presentation** — `PinEntryDialog` renders as a **bottom sheet** on phone (`useIsMobile`), centred dialog on tablet/desktop.
-3. **Remote verbal consultation** — operator PIN only; manager is selected by name, not PIN (`VerbalConsultationDialog`). In-person override may use manager PIN via `PinEntryTrigger` + `verifyManagerPin` (`VerbalAuthOverrideDialog`).
+3. **RED verbal consultation** — operator PIN only; manager is selected by name, never by PIN (`VerbalConsultationDialog`). Manager confirms the conversation outcome later in the Governance Hub whether they were on-site or not. There is no manager-present PIN path for app RED escalations.
 4. **Verify once at entry** — PIN is verified when the pad completes; parent forms gate submit on `*PinVerified` flags (or refs if the API still needs the value). Do not re-prompt with a text field.
 5. **New PIN surfaces** — any new build requiring PIN auth must import from `src/components/auth/`; code review / agent rules treat raw PIN inputs as a blocking defect.
 
@@ -89,8 +89,10 @@ All high-severity anomalies, RED states, and manager-level interventions converg
 
 Flow Graph:
 [Subsystem Flags RED]
-  --> Local operator opens `VerbalAuthOverrideDialog` (action_type = `RED_VERBAL_WORKAROUND`)
-  --> Operator captures Authorising Manager, ≥20-char workaround plan, and their own PIN
+  --> Local operator opens `VerbalConsultationDialog` (action_type = `RED_VERBAL_CONSULTATION`)
+  --> Operator selects manager by name (contacted or attempted), records contact outcome
+        (Manager reached — agreed plan, OR Unable to contact), ≥20-char notes, and
+        signs with their own operator PIN only — manager never enters a PIN
   --> Atomic write to `public.operational_ledger` (immutable receipt, GPS captured)
   --> Open ticket inserted into the appropriate active-issues register
         - Day Centre  → `public.site_issues_register` (severity = `red`)
@@ -99,6 +101,8 @@ Flow Graph:
       Governance Hub renders it as **Open — Operating via Verbal Workaround**
   --> Local module unblocks IMMEDIATELY; no realtime broadcast, no remote
       acknowledgment, no driver/manager handshake required
+  --> Manager later confirms or resolves the ticket in the Governance Hub
+      (on-site or remote — Hub is the authoritative close-out)
 
 - Single Source of Truth: The ledger row is the audit artefact; the source register row is the operational tracker. Both are written in the same submit transaction. If the ledger write fails, the source row is never inserted.
 - Database Safeguard: To flag verbal-workaround records for the Hub without triggering UUID-shape errors on the `owner` column, the sentinel is always carried inside `issue_description` (prefix `"[VERBAL WORKAROUND] "`), never in `owner`.
@@ -126,7 +130,7 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | Required-field style tokens | `src/lib/ui/required-field.ts`                                | Shared `requiredFieldOutline`, `requiredFieldCounterClass`, `requiredFieldRemainingHint`.      |
 | Centralized Issue Panel     | `src/components/issue-engine/issue-declaration-panel.tsx`     | Context-sensitive reentrant engine governing all RYGE checklist gates and refresh halts.         |
 | Mandated Checks Lookup      | `src/hooks/use-mandated-checks.ts` (or data layer equivalent) | Dynamically sources checkpoints via registry scope ('site_day' vs 'pre_trip').                   |
-| High-Trust Escape Hatch     | `src/components/auth/verbal-auth-override-dialog.tsx`         | Renders the auditable verbal authorization bypass for un-reachable manager states.               |
+| RED Verbal Consultation   | `src/components/issue-engine/verbal-consultation-dialog.tsx` | Remote manager contact log — manager by name, operator PIN only; Hub close-out by manager. |
 | Global Escalation Intercept | `src/components/dashboard/global-escalation-interceptor.tsx`  | Real-time broadcast coordinator pop-up handling atomic RPC claims.                               |
 | Field single-select rows    | `src/components/manifest/mobile-field-button.tsx`             | `MobileFieldButton` / `MobileOptionButton` — high-contrast tap lists (§4.5).                     |
 
@@ -1002,3 +1006,231 @@ First production slice for **Movies-style single-day**: Phases 1–3 + **Phase 8
 > **2026-07-04 — Project owner directive (initial):** Venue registry with variable safety templates (clone structure, not answers). Each venue hop = one `transport_trip`. Carers on roster. Trip leader required per calendar day. Curfew/morning breach = YELLOW → RED + SMS (Day Centre pattern). Finance and Trip Report reuse existing Event Booking module. Self-transport only first inbound and last outbound legs.
 
 > **2026-07-04 — Project owner directive (amendment — Day Centre parity):** Outings use the **same cadence as Day Centre** — transport is separate from the **event floor** at the venue (temporary centre). **Hard open** when trip leader opens location (RED blocks); **hard close** after departure handover — leader does **not** wait for last home drop-off. **Two rolls:** `event_attendance_log` (arrive/depart at venue, async) and `event_bus_manifest` (boarding per leg) — neither substitutes for the other. Group bus hops: boarding check only; no per-person floor check-in at destination when group moves together. Multi-day: check into event at first stop; curfew/morning at hotel; repeat daily until last-day hard close. No soft open/close unless legally required.
+
+---
+
+## 13. INCIDENT / FAULT Recording Model
+
+> **2026-07-11 — Project owner directive (locked).** This section documents the confirmed INCIDENT/FAULT workflow. All code that touches `IncidentIntakeDialog`, `GlobalIncidentIntakeDrawer`, `raiseOperationalIncident`, or any incident-to-Hub write path must comply with this section. Violations are blocking defects.
+
+### 13.1 The Global Button
+
+A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else.
+
+The button is **never context-specific** — available at all times so staff can report anything immediately without navigating first.
+
+### 13.2 The Two-Lane Chooser
+
+The button always opens `IncidentIntakeDialog` at the lane-chooser step:
+
+| Lane | Label | HUB destination | DB `incidentType` |
+| :-- | :-- | :-- | :-- |
+| Human / Operational | Injury, welfare, dispute, near-miss | HUB Human side | `human_operational` |
+| Equipment & Asset Fault | Bus, iPad, trolley, venue equipment — **any non-human asset** | HUB Asset side | `mechanical` |
+
+**Bus pre-trip walkaround faults are separate** — logged through the manifest issue accumulator, not this button. This button covers all other failures that occur at any point during operations.
+
+### 13.3 RYGE Severity Step (mandatory, both lanes)
+
+After selecting a lane the operator **always** sees the RYGE severity dialogue. No path skips this.
+
+| Severity | Rule | Workaround |
+| :-- | :-- | :-- |
+| GREEN | Note / near-miss / informational | Description only |
+| YELLOW | Issue present, self-resolvable | Description + workaround plan required |
+| RED | Critical | Description → verbal consultation required (§13.4) |
+
+### 13.4 RED Verbal Consultation (INCIDENT / FAULT path)
+
+RED from either lane opens `VerbalConsultationDialog` (same component as §3). Identical rules:
+
+- Manager selected **by name only** — never by PIN
+- Operator signs with **their own PIN** to attest the contact attempt
+- If manager unreachable: document all attempts (calls, times, SMS)
+- An Event Leader with Manager RBAC **may self-certify** their own RED
+- Contact failure is still recorded — the attempt itself is the compliance requirement
+
+### 13.5 Write Destinations
+
+On final submission the app writes to all applicable destinations:
+
+| Context | Writes to |
+| :-- | :-- |
+| No event open | `operational_incidents` (HUB) only |
+| Event open, no day session resolved | `operational_incidents` with `event_id` |
+| Event open + day session resolved | `operational_incidents` **AND** `site_issues_register` (both `event_id` + `event_day_session_id`) |
+
+The `site_issues_register` write ensures the incident appears in:
+- Trip Days Active Issues Register (current day **and all subsequent days** in multi-day events)
+- Trip Report
+
+The `[INCIDENT]` prefix in `issue_description` distinguishes these rows from venue-walkaround anomalies. RED rows carry the `[VERBAL WORKAROUND]` prefix per §3.
+
+**CRITICAL:** `[INCIDENT]`-prefixed rows in `site_issues_register` must **never** block location opening. Only venue-walkaround RED rows (no `[INCIDENT]` prefix) activate the RED gate in `hasOpenRedIssueForSession`.
+
+### 13.6 Context Awareness
+
+At the moment the button is pressed the app captures:
+
+| Field | Source |
+| :-- | :-- |
+| Event ID | `localStorage.yada.activeEventId` |
+| Event title | `localStorage.yada.activeEventTitle` |
+| App section | Derived from current route pathname |
+| Operator | `getStaffId()` / `resolveStaffIdWithFallback()` |
+
+All fields are stored in `operational_incidents` and in the ledger receipt.
+
+### 13.7 What this flow is NOT
+
+- Not a replacement for the **venue check-in Log Issue** (Trip Day Config tab → `LogAnomalyModal` + `EventDayVerbalAnomalyFlow`). That flow is exclusively for venue walkaround at event-open time.
+- Not a replacement for the **bus pre-trip walkaround** (manifest issue accumulator).
+
+### 13.9 Issue Display Sort Order (§13 + §12 combined rule)
+
+All RYGE issue lists rendered in the UI must group by severity **RED → YELLOW → GREEN**. The timestamp direction within each group depends on context:
+
+| Context | Within-group order | Rationale | Utility |
+| :-- | :-- | :-- | :-- |
+| Trip Days Active Issues Register | **Newest first** | Most recently logged issue surfaces at the top immediately | `sortByRygeNewestFirst` |
+| Trip Report, HUB, Day Centre registers | **Oldest first** | Chronological history; read the record in time order | `sortByRygeOldestFirst` |
+
+Both utilities are exported from `src/lib/api/site-issues.ts`. **Never display a raw unsorted issue array in the UI.**
+
+### 13.8 Implementation Anchors
+
+| Concern | Canonical path |
+| :-- | :-- |
+| Global FAB | `src/components/global/global-incident-intake-drawer.tsx` |
+| Dialog | `src/components/global/incident-intake-dialog.tsx` |
+| HUB write | `src/lib/incidents.ts` → `raiseOperationalIncident` |
+| Event-day mirror | `src/lib/api/site-issues.ts` → `createIssue` |
+| Verbal consultation | `src/components/issue-engine/verbal-consultation-dialog.tsx` |
+| Event context storage | `src/components/events/manage-event-modal.tsx` → `localStorage.yada.activeEventTitle` |
+
+---
+
+## 14. Governance Hub Structure & Issue Routing
+
+### 14.1 Three-Tab Governance Hub
+
+The Governance Hub (`/governance`) has three tabs. **RYGE severity applies equally across all three tabs** — any tab can have Red, Yellow, Green, or Escalation items. Tab membership is determined by *source/context*, not by severity.
+
+| Tab | Backing table | Purpose |
+| :-- | :-- | :-- |
+| **Human Incidents** | `operational_incidents` (`incident_type = 'human_operational'`) + `site_issues_register` | Injuries, welfare concerns, disputes, near-misses — anything involving a **person** |
+| **Maintenance & Repairs** | `maintenance_items` | Physical faults requiring repair: venue defects, broken equipment, asset failures, dented panels, graffiti |
+| **Compliance & Renewals** | `compliance_assets` | Expiry-driven items: insurance, vehicle rego, staff certs, formal audits — populated programmatically |
+
+> **Human Incidents tab** filters `operational_incidents` to `incident_type = 'human_operational'` only. Asset/mechanical incidents from the Equipment & Asset lane are tracked exclusively in Maintenance & Repairs via `maintenance_items`.
+
+> **Compliance RYGE** is computed from expiry dates (e.g. expiring within 30 days = Yellow, overdue = Red). No human manually enters compliance severity.
+
+---
+
+### 14.2 Definitive Source → HUB Tab Routing
+
+The table below is the single source of truth for all write paths. **Source determines the tab, not severity.**
+
+| Source | Context | site_issues_register | operational_incidents | maintenance_items | HUB Tab |
+| :-- | :-- | :-- | :-- | :-- | :-- |
+| **Big Red Button → Human lane** | Any | ✓ if event+session open | ✓ `human_operational` ALL RYGE | ✗ | Human Incidents |
+| **Big Red Button → Asset lane** | Any | ✓ if event+session open | ✓ `mechanical` (audit only, not shown in tab) | ✓ ALL RYGE `incident_fault` | Maintenance & Repairs |
+| **Venue Walk-around** (Log Venue Issue) | Event Trip Day | ✓ ALL RYGE | ✗ | ✓ ALL RYGE `venue_issue` | Maintenance & Repairs |
+| **Day Centre Walk-around** (site-day LogAnomalyModal) | Day Centre session | ✓ ALL RYGE + Human Incidents via `session_id` | ✗ | ✓ ALL RYGE `centre_issue` | Maintenance & Repairs |
+| **Bus / Vehicle Pre-trip Walk-around** | Pre-trip clearance | ✓ via `asset_clearance_items` | ✗ | ✓ ALL RYGE `vehicle_issue` | Maintenance & Repairs |
+| **Compliance engine** | Programmatic | ✗ | ✗ | ✗ | Compliance & Renewals |
+
+**Key rules:**
+- **GREEN issues are NOT informational-only.** A Green issue is a low-priority note (graffiti, dented panel) that still needs staff follow-up. Green issues appear in the appropriate tab based on source.
+- Walk-arounds (Venue, Day Centre, Bus) always write to **Maintenance & Repairs**.
+- The Big Red Button gate (Human vs Asset) determines the tab — consistent UX across all form contexts.
+- `operational_incidents` always receives a record for audit purposes, but only `human_operational` rows display in the Human Incidents tab.
+
+---
+
+### 14.3 INCIDENT/FAULT Button (Big Red Button) — Lane Detail
+
+```
+[Incident & Fault] → [Human / Operational] → RYGE → operational_incidents (human_operational)
+                                                    → site_issues_register (if event context)
+                  → [Equipment & Asset Fault] → RYGE → operational_incidents (mechanical, audit)
+                                                      → maintenance_items (incident_fault)
+                                                      → site_issues_register (if event context)
+```
+
+Implementation anchor: `src/components/global/incident-intake-dialog.tsx` → `commitWrite()`
+
+---
+
+### 14.4 Walk-around → Maintenance Routing Detail
+
+| Walk-around | Severity | site_issues_register | maintenance_items (source) |
+| :-- | :-- | :-- | :-- |
+| **Venue** (Log Venue Issue) | GREEN | ✓ | ✓ `venue_issue` |
+| **Venue** | YELLOW | ✓ | ✓ `venue_issue` |
+| **Venue RED** (verbal workaround) | RED | ✓ `[VERBAL WORKAROUND]` | ✓ `venue_issue` |
+| **Day Centre** | GREEN | ✓ | ✓ `centre_issue` |
+| **Day Centre** | YELLOW | ✓ | ✓ `centre_issue` |
+| **Day Centre RED** (verbal workaround) | RED | ✓ `[VERBAL WORKAROUND]` | ✓ `centre_issue` |
+| **Bus / Vehicle pre-trip** | GREEN | ✓ (clearance) | ✓ `vehicle_issue` |
+| **Bus / Vehicle pre-trip** | YELLOW | ✓ (clearance) | ✓ `vehicle_issue` |
+| **Bus / Vehicle pre-trip** | RED (verbal cleared) | ✓ (clearance) | ✓ `vehicle_issue` |
+
+Implementation anchors:
+- Venue G/Y: `src/components/site-day/log-anomaly-modal.tsx` → `onSuccess` event-day (all RYGE)
+- Venue RED: `src/components/events/event-day-verbal-anomaly-flow.tsx` → `onAccepted`
+- Day Centre G/Y: `src/components/site-day/log-anomaly-modal.tsx` → `onSuccess` site-day
+- Day Centre RED: `src/components/site-day/start-of-day-panel.tsx` → `VerbalConsultationDialog.onAccepted`
+- Bus pre-trip: `src/components/manifest/issue-accumulator-panel.tsx` → `submit()` after `submitDriverAuthorization`
+
+---
+
+### 14.5 maintenance_items Source Values
+
+| `source` value | Created by |
+| :-- | :-- |
+| `venue_issue` | Venue Walk-around (Log Venue Issue) |
+| `centre_issue` | Day Centre Walk-around (site-day LogAnomalyModal) |
+| `vehicle_issue` | Bus / Vehicle pre-trip walk-around (IssueAccumulatorPanel) |
+| `incident_fault` | Big Red Button → Equipment & Asset lane |
+| `manual` | Manually added from Maintenance & Repairs HUB tab |
+
+SQL migration: `docs/sql/2026-07-16_maintenance_items_sources.sql` — widens CHECK constraint to include `centre_issue` and `vehicle_issue`.
+
+---
+
+### 14.6 Notes & Deferrals
+
+Each maintenance item has an append-only `maintenance_notes` timeline (same philosophy as `hub_issue_notes` — no edit/delete, audit trail). Notes are rendered in the `ManageItemShell` dialog identical to Human Incidents.
+
+Deferral sets `status = "deferred"` + `deferred_until` (date) + `deferred_reason`. The item returns to the **Active** tab client-side once `deferred_until ≤ today`, without any server-side job. `defer_count` tracks repeat deferrals.
+
+Status lifecycle: `open → in_progress → [deferred ↺] → resolved → closed`
+
+---
+
+### 14.7 SQL Migrations
+
+| File | Contents |
+| :-- | :-- |
+| `docs/sql/2026-07-11_maintenance_items.sql` | Base table, RLS, grants |
+| `docs/sql/2026-07-11_maintenance_items_v2.sql` | `maintenance_notes` table + defer columns |
+| `docs/sql/2026-07-16_maintenance_items_sources.sql` | Widens source CHECK constraint for centre_issue + vehicle_issue |
+
+---
+
+### 14.8 Implementation Anchors
+
+| Concern | Canonical path |
+| :-- | :-- |
+| API | `src/lib/api/maintenance.ts` |
+| HUB panel | `src/components/admin/maintenance-panel.tsx` |
+| Hub workspace | `src/components/admin/governance-hub-workspace.tsx` |
+| Human Incidents tab query | `src/lib/api/unified-issues.ts` → `listOpenUnifiedIssues` |
+| Venue walkround auto-create (all RYGE) | `src/components/site-day/log-anomaly-modal.tsx` → `onSuccess` event-day |
+| Venue RED auto-create | `src/components/events/event-day-verbal-anomaly-flow.tsx` → `onAccepted` |
+| Day Centre walkround auto-create (G/Y) | `src/components/site-day/log-anomaly-modal.tsx` → `onSuccess` site-day |
+| Day Centre RED auto-create | `src/components/site-day/start-of-day-panel.tsx` → `VerbalConsultationDialog.onAccepted` |
+| Bus/Vehicle pre-trip auto-create | `src/components/manifest/issue-accumulator-panel.tsx` → `submit()` |
+| Incident/Fault auto-create (asset lane) | `src/components/global/incident-intake-dialog.tsx` → `commitWrite` |

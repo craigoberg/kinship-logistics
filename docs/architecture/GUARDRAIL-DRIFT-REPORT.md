@@ -7,7 +7,7 @@
 
 | Section | Model |
 |--------|--------|
-| **§3** (Single-Rail Escalation) | Async verbal consultation → `VerbalAuthOverrideDialog` → ledger → `[VERBAL WORKAROUND]` ticket → local module unblocks immediately |
+| **§3** (Single-Rail Escalation) | Async verbal consultation → `VerbalConsultationDialog` → ledger → `[VERBAL WORKAROUND]` ticket → local module unblocks immediately; manager confirms in Hub later |
 | **§8.1** (Two-Stage RED Handshake) | Alert → manager claims → manager proposes GO/NO-GO → operator accept/decline with PIN; session hard-locked |
 
 **Codebase has migrated toward §3 for new RED events.** Legacy §8 / `operational_escalations` machinery remains for historical rows.
@@ -50,7 +50,7 @@
 
 ## §3 — Single-rail verbal (current RED path)
 
-**Chain:** `log-anomaly-modal.tsx` → `VerbalAuthOverrideDialog` → ledger → parent writes register with `[VERBAL WORKAROUND]`
+**Chain:** `log-anomaly-modal.tsx` → `VerbalConsultationDialog` → ledger → parent writes register with `[VERBAL WORKAROUND]`
 
 **Wiring:** `start-of-day-panel.tsx`, `active-day-panel.tsx`, `issue-accumulator-panel.tsx`, Hub via `unified-issues.ts`
 

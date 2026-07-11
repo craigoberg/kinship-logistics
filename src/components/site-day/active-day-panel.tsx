@@ -22,7 +22,10 @@ import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { finalizeTodaysBilling } from "@/lib/api/myob-export";
 import { IssuesRegisterCard } from "./issues-register-card";
 import { LogAnomalyModal } from "./log-anomaly-modal";
-import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
+import {
+  VerbalConsultationDialog,
+  formatVerbalWorkaroundDescription,
+} from "@/components/issue-engine/verbal-consultation-dialog";
 import { createIssue, type ResponsibilityOwner } from "@/lib/api/site-issues";
 import { activeSiteIssuesKey, siteIssuesKey } from "@/hooks/use-site-issues";
 import { isAuthError } from "@/lib/api/auth-errors";
@@ -263,7 +266,7 @@ export function ActiveDayPanel({ session }: Props) {
         />
       )}
 
-      <VerbalAuthOverrideDialog
+      <VerbalConsultationDialog
         open={!!verbalPending}
         onOpenChange={(o) => {
           if (!o) setVerbalPending(null);
@@ -271,18 +274,21 @@ export function ActiveDayPanel({ session }: Props) {
         ledgerCategory="CENTRE"
         subjectLabel={`Day Centre · Session ${session.id.slice(0, 8)}`}
         sourceId={session.id}
-        actionType="RED_VERBAL_WORKAROUND"
+        actionType="RED_VERBAL_CONSULTATION"
         titleOverride="RED Verbal Consultation & Log"
-        descriptionOverride="A RED Day Centre anomaly was identified. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. The ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and the session keeps running."
-        onAccepted={async ({ managerName, reason }) => {
+        descriptionOverride="A RED Day Centre anomaly was identified. Select the manager you contacted (or attempted to reach), record the outcome, and sign with your operator PIN. The ticket lands in the Governance Hub immediately; the manager confirms later."
+        onAccepted={async (payload) => {
           if (!verbalPending) return;
-          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          const prefixed = formatVerbalWorkaroundDescription(
+            verbalPending.description,
+            payload,
+          );
           try {
             await createIssue({
               sessionId: session.id,
               severity: "red",
               issueDescription: prefixed,
-              workaroundPlan: reason,
+              workaroundPlan: payload.notes,
               owner: verbalPending.owner,
             });
             queryClient.invalidateQueries({ queryKey: siteIssuesKey(session.id) });

@@ -22,6 +22,7 @@ import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback, getEventFinanceTotals } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { sortByRygeOldestFirst } from "@/lib/api/site-issues";
 import {
   inferEventKind,
   isOutingEventKind,
@@ -376,6 +377,18 @@ export interface TripReportVenueStop {
   labelOverride: string | null;
 }
 
+export interface TripReportIssue {
+  id: string;
+  severity: "green" | "yellow" | "red";
+  issueDescription: string;
+  workaroundPlan: string | null;
+  status: string;
+  createdAt: string;
+  resolvedAt: string | null;
+  /** True when the description carries a [VERBAL WORKAROUND] prefix — open Hub ticket. */
+  isVerbalWorkaround: boolean;
+}
+
 export interface TripReportDaySession {
   sessionDate: string;
   phase: string;
@@ -395,6 +408,8 @@ export interface TripReportDaySession {
   morningAbsent: number;
   morningYellow: number;
   morningRed: number;
+  /** All RYGE issues logged against this day session (open and resolved). */
+  issues: TripReportIssue[];
 }
 
 export interface TripReportRosterEntry {
@@ -440,6 +455,7 @@ export interface TripReport {
   accountabilitySummary: {
     totalRedIssues: number;
     totalYellowIssues: number;
+    totalGreenIssues: number;
     allSessionsClosed: boolean;
   };
 }
@@ -492,7 +508,7 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
 
   // Accountability counts per day session.
   const sessionIds = daySessionRows.map((s) => s.id);
-  const [curfewResult, morningResult, busResult] = await Promise.all([
+  const [curfewResult, morningResult, busResult, issuesResult] = await Promise.all([
     sessionIds.length
       ? supabase
           .from("event_curfew_log")
@@ -511,6 +527,13 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
           .select("event_day_session_id, status")
           .in("event_day_session_id", sessionIds)
       : { data: [], error: null },
+    sessionIds.length
+      ? supabase
+          .from("site_issues_register")
+          .select("id, event_day_session_id, severity, issue_description, workaround_plan, status, created_at, resolved_at")
+          .in("event_day_session_id", sessionIds)
+          .order("created_at", { ascending: true })
+      : { data: [], error: null },
   ]);
 
   function countBy<T extends Record<string, unknown>>(
@@ -528,12 +551,37 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
   const curfewRows = (curfewResult.data ?? []) as Array<Record<string, unknown>>;
   const morningRows = (morningResult.data ?? []) as Array<Record<string, unknown>>;
   const busRows = (busResult.data ?? []) as Array<Record<string, unknown>>;
+  const allIssueRows = (issuesResult.data ?? []) as Array<{
+    id: string;
+    event_day_session_id: string;
+    severity: string;
+    issue_description: string;
+    workaround_plan: string | null;
+    status: string | null;
+    created_at: string;
+    resolved_at: string | null;
+  }>;
 
   const daySessions: TripReportDaySession[] = daySessionRows.map((s) => {
     const sid = s.id;
     const cr = sessionRows(curfewRows, sid);
     const mr = sessionRows(morningRows, sid);
     const br = sessionRows(busRows, sid);
+    const issueRows = allIssueRows.filter((r) => r.event_day_session_id === sid);
+
+    const unsortedIssues: TripReportIssue[] = issueRows.map((r) => ({
+      id: r.id,
+      severity: (r.severity as "green" | "yellow" | "red") ?? "green",
+      issueDescription: r.issue_description,
+      workaroundPlan: r.workaround_plan,
+      status: r.status ?? "open",
+      createdAt: r.created_at,
+      resolvedAt: r.resolved_at,
+      isVerbalWorkaround: (r.issue_description ?? "").includes("[VERBAL WORKAROUND]"),
+    }));
+    // Canonical RYGE sort: RED → YELLOW → GREEN, oldest first within each group (§13.9)
+    const issues = sortByRygeOldestFirst(unsortedIssues);
+
     return {
       sessionDate: s.session_date,
       phase: s.phase,
@@ -553,6 +601,7 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
       morningAbsent: mr.filter((r) => r.status === "absent").length,
       morningYellow: mr.filter((r) => r.escalation_severity === "yellow").length,
       morningRed: mr.filter((r) => r.escalation_severity === "red").length,
+      issues,
     };
   });
 
@@ -577,8 +626,10 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
 
   const confirmed = roster.filter((r) => r.bookingStatus !== "Cancelled").length;
   const cancelled = roster.filter((r) => r.bookingStatus === "Cancelled").length;
-  const totalRedIssues = daySessions.reduce((s, d) => s + d.curfewRed + d.morningRed, 0);
-  const totalYellowIssues = daySessions.reduce((s, d) => s + d.curfewYellow + d.morningYellow, 0);
+  // Accountability summary counts RYGE issues from site_issues_register (all statuses)
+  const totalRedIssues = allIssueRows.filter((r) => r.severity === "red").length;
+  const totalYellowIssues = allIssueRows.filter((r) => r.severity === "yellow").length;
+  const totalGreenIssues = allIssueRows.filter((r) => r.severity === "green").length;
   const allSessionsClosed = daySessions.every(
     (d) => d.phase === "closed_orderly" || d.phase === "closed_incident",
   );
@@ -601,6 +652,6 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
       netPnl: finance.netPnl,
     },
     rosterSummary: { confirmed, cancelled, total: roster.length },
-    accountabilitySummary: { totalRedIssues, totalYellowIssues, allSessionsClosed },
+    accountabilitySummary: { totalRedIssues, totalYellowIssues, totalGreenIssues, allSessionsClosed },
   };
 }

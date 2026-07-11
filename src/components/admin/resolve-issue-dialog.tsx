@@ -18,9 +18,58 @@ import {
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
+import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
 import { isManagerProfile } from "@/lib/governance/is-manager";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
+
+// ── Helpers for clean display ──────────────────────────────────────────────
+
+/** Strip decorative prefixes that are meaningful in DB but noisy in the UI. */
+function stripPrefixes(text: string): string {
+  return text
+    .replace(/^\[VERBAL WORKAROUND\]\s*/i, "")
+    .replace(/^\[INCIDENT\]\s*/i, "")
+    .replace(/^\[AUTOMATED_RED\]\s*/i, "")
+    .replace(/^\[ATTENDANCE\]\s*/i, "")
+    .trim();
+}
+
+/**
+ * Parse the `[Event: X · Filed from: Y]` context suffix appended by
+ * IncidentIntakeDialog. Returns the clean body text plus structured metadata.
+ */
+function parseContextSuffix(text: string): {
+  cleanText: string;
+  eventName: string | null;
+  filedFrom: string | null;
+} {
+  // Match trailing [...] block containing Filed from or Event
+  const match = text.match(
+    /\s*\[(?:Event:\s*([^·\]]+?)\s*·\s*)?(?:Filed from:\s*([^\]]+?)\s*)?\]$/,
+  );
+  if (!match) return { cleanText: text, eventName: null, filedFrom: null };
+  const idx = text.lastIndexOf(" [");
+  return {
+    cleanText: idx > 0 ? text.slice(0, idx).trim() : text,
+    eventName: match[1]?.trim() || null,
+    filedFrom: match[2]?.trim() || null,
+  };
+}
+
+const SEV_BADGE: Record<string, string> = {
+  red:    "bg-red-600 text-white",
+  yellow: "bg-yellow-400 text-black",
+  green:  "bg-emerald-600 text-white",
+};
+
+const SOURCE_LABEL_CLEAN: Record<string, string> = {
+  incident:    "Human Incident",
+  day_centre:  "Day Centre",
+  event:       "Trip Day",
+  escalation:  "Escalation",
+  renewal:     "Renewal",
+};
 
 interface Props {
   issue: UnifiedIssue;
@@ -186,21 +235,75 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     setPinOpen(true);
   };
 
+  // Parse event context suffix embedded by IncidentIntakeDialog
+  const { cleanText, eventName, filedFrom } = parseContextSuffix(issue.description ?? "");
+  const cleanTitle = stripPrefixes(cleanText || issue.title);
+
+  // Only show the extended description when it's meaningfully longer (truncation occurred)
+  const extendedDesc =
+    cleanText.length > (issue.title.length + 10) ? cleanText : null;
+
+  // Detect prefix tags for display badge
+  const hasVerbalWorkaround = /^\[VERBAL WORKAROUND\]/i.test(issue.description ?? "");
+  const hasIncidentTag = /^\[INCIDENT\]/i.test(issue.description ?? "");
+
+  // Reporter name — stored as a string on operational_incidents, may be UUID on site issues
+  const reportedBy = (raw.reported_by as string | null) ?? null;
+  const reportedByDisplay =
+    reportedBy && !reportedBy.match(/^[0-9a-f-]{36}$/i) ? reportedBy : null;
+
   const contextCard = (
-    <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{issue.sourceLabel}</Badge>
-        <span className="font-mono text-xs">{issue.category}</span>
-        {issue.subCategory && (
-          <span className="text-xs text-muted-foreground">· {issue.subCategory}</span>
+        {issue.severity && SEV_BADGE[issue.severity] && (
+          <Badge className={SEV_BADGE[issue.severity]}>
+            {issue.severity.toUpperCase()}
+          </Badge>
         )}
+        <Badge variant="secondary">
+          {SOURCE_LABEL_CLEAN[issue.source] ?? issue.sourceLabel}
+        </Badge>
+        {hasVerbalWorkaround && (
+          <Badge className="bg-amber-500 text-white text-[10px]">Verbal Workaround</Badge>
+        )}
+        {hasIncidentTag && (
+          <Badge className="bg-orange-600 text-white text-[10px]">Incident</Badge>
+        )}
+        <span className="text-xs text-muted-foreground capitalize">
+          {issue.category?.replace(/_/g, " ")}
+        </span>
       </div>
-      <div className="font-medium">{issue.title}</div>
-      {issue.description && (
-        <p className="text-xs text-muted-foreground whitespace-pre-wrap">
-          {issue.description}
-        </p>
+
+      <p className="font-medium leading-snug">{cleanTitle}</p>
+
+      {extendedDesc && extendedDesc !== cleanTitle && (
+        <p className="text-xs text-muted-foreground whitespace-pre-wrap">{extendedDesc}</p>
       )}
+
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {eventName && (
+          <>
+            <span className="font-medium text-foreground/70">Event</span>
+            <span>{eventName}</span>
+          </>
+        )}
+        {filedFrom && (
+          <>
+            <span className="font-medium text-foreground/70">Filed from</span>
+            <span>{filedFrom}</span>
+          </>
+        )}
+        {reportedByDisplay && (
+          <>
+            <span className="font-medium text-foreground/70">Reported by</span>
+            <span>{reportedByDisplay}</span>
+          </>
+        )}
+        <span className="font-medium text-foreground/70">Status</span>
+        <span className="capitalize">{String(raw.status ?? issue.status ?? "open")}</span>
+        <span className="font-medium text-foreground/70">Logged</span>
+        <span><FormattedDateTime value={issue.createdAt} /></span>
+      </div>
     </div>
   );
 

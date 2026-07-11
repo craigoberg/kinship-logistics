@@ -1,4 +1,5 @@
 import React, { useMemo, useState, useEffect } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
   CalendarDays,
@@ -26,14 +27,15 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
-import { cn, formatDate, todayLocalIso } from "@/lib/utils";
-import { inferEventKind, listEventDaySessions } from "@/lib/api/event-outing";
-import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { cn, formatDate } from "@/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
+import { inferEventKind, listEventDaySessions } from "@/lib/api/event-outing";
+import { resolveEventDaySessionForAnomaly } from "@/lib/api/event-day-anomaly";
+import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useIsMobile } from "@/hooks/use-mobile";
 import type { EventManifest } from "@/lib/data-store";
-import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
+import { IncidentIntakeDialog } from "@/components/global/incident-intake-dialog";
 import { RosterTab } from "./roster-tab";
 import { EventFinanceTab } from "./event-finance-tab";
 import { EventDetailsTab } from "./event-details-tab";
@@ -57,6 +59,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
   const { data: events = [] } = useEvents();
   const { data: types = [] } = useLookupParameters("event_types");
   const isMobile = useIsMobile();
+  const qc = useQueryClient();
 
   const event = useMemo(() => {
     if (!eventSnapshot) return null;
@@ -77,35 +80,46 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
 
   const isOuting = scopeKind !== "legacy";
 
-  const { data: daySessions = [] } = useQuery({
-    queryKey: ["event-day-sessions", event?.id ?? ""],
+  const { data: tripDaySessions = [] } = useQuery({
+    queryKey: ["event-day-sessions", event?.id],
     queryFn: () => listEventDaySessions(event!.id),
-    enabled: !!event && isOuting && open,
+    enabled: open && isOuting && !!event,
     staleTime: 30_000,
   });
 
-  const incidentSession = useMemo(() => {
-    if (!event || daySessions.length === 0) return null;
-    const today = todayLocalIso();
-    return (
-      daySessions.find((s) => s.session_date === today) ??
-      daySessions.find((s) => s.session_date === event.startDate) ??
-      daySessions[0] ??
-      null
-    );
-  }, [daySessions, event]);
+  const anomalySession = useMemo(() => {
+    if (!event || !isOuting) return null;
+    return resolveEventDaySessionForAnomaly(tripDaySessions, event);
+  }, [event, isOuting, tripDaySessions]);
 
+  const openIncidentFlow = () => {
+    setIncidentOpen(true);
+  };
+
+  // Store event context for GlobalIncidentIntakeDrawer (§13.6)
   useEffect(() => {
     if (!open || !event) return;
     localStorage.setItem("yada.activeEventId", event.id);
+    localStorage.setItem("yada.activeEventTitle", event.title);
     return () => {
       localStorage.removeItem("yada.activeEventId");
+      localStorage.removeItem("yada.activeEventTitle");
+      localStorage.removeItem("yada.activeEventDaySessionId");
     };
-  }, [open, event?.id]);
+  }, [open, event?.id, event?.title]);
+
+  // Keep active day session fresh so INCIDENT/FAULT can link to the right day
+  useEffect(() => {
+    if (!open || !anomalySession) return;
+    localStorage.setItem("yada.activeEventDaySessionId", anomalySession.id);
+  }, [open, anomalySession?.id]);
 
   // Collapse expanded header whenever the modal closes / reopens
   useEffect(() => {
-    if (!open) setHeaderExpanded(false);
+    if (!open) {
+      setHeaderExpanded(false);
+      setIncidentOpen(false);
+    }
   }, [open]);
 
   const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = useMemo(() => [
@@ -133,14 +147,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
     <Button
       type="button"
       size="sm"
-      onClick={() => {
-        if (!incidentSession) {
-          toast.message("Seed trip days first — open the Trip days tab.");
-          setTab("days");
-          return;
-        }
-        setIncidentOpen(true);
-      }}
+      onClick={openIncidentFlow}
       className={cn(
         "shrink-0 gap-1.5 rounded-full border-2 border-red-500/80 bg-red-600/90 px-3 py-2",
         "text-[11px] font-bold uppercase tracking-wide text-white shadow-lg shadow-red-900/30",
@@ -155,19 +162,20 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
   /** Mobile compact header — title, current status chip, promote button, expand toggle. */
   const mobileHeader = (
     <div className="px-4 pt-4 pb-3">
-      {/* Row 1: title + incident button */}
-      <div className="flex items-start justify-between gap-2">
+      {/* Row 1: title — pr-10 keeps the sheet close (X) tappable */}
+      <div className="pr-10">
         <h2 className="text-lg font-bold leading-tight">{event.title}</h2>
-        {incidentButton}
       </div>
 
-      {/* Row 2: current status chip + expand toggle */}
+      {/* Row 2: status chip, incident button, expand toggle */}
       <div className="mt-2 flex items-center justify-between gap-2">
         <EventStatusPanel
           event={event}
           mobileCompact
           onStatusChanged={() => {}}
         />
+        <div className="flex shrink-0 items-center gap-2">
+          {incidentButton}
         <button
           type="button"
           onClick={() => setHeaderExpanded((x) => !x)}
@@ -181,6 +189,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
             <>Details <ChevronDown className="h-3.5 w-3.5" /></>
           )}
         </button>
+        </div>
       </div>
 
       {/* Expandable metadata */}
@@ -215,32 +224,30 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
   /** Desktop full header — unchanged from original. */
   const desktopHeader = (
     <div className="border-b border-border bg-card px-6 pt-5 pb-3">
-      <div className="flex items-start justify-between gap-3 pr-8">
-        <DialogHeader className="min-w-0 flex-1 space-y-1 text-left">
-          <DialogTitle className="text-xl">{event.title}</DialogTitle>
-          <DialogDescription className="flex flex-wrap items-center gap-2 text-xs">
-            <span className="rounded-full bg-primary/15 px-2 py-0.5 font-semibold uppercase tracking-wide text-primary">
-              {typeLabel}
+      <DialogHeader className="space-y-1 pr-8 text-left">
+        <DialogTitle className="text-xl">{event.title}</DialogTitle>
+        <DialogDescription className="flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-full bg-primary/15 px-2 py-0.5 font-semibold uppercase tracking-wide text-primary">
+            {typeLabel}
+          </span>
+          {isOuting && (
+            <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-semibold uppercase tracking-wide text-amber-600">
+              {scopeKind === "multi_day_tour" ? "Multi-day tour" : "Single-day outing"}
             </span>
-            {isOuting && (
-              <span className="rounded-full bg-amber-500/15 px-2 py-0.5 font-semibold uppercase tracking-wide text-amber-600">
-                {scopeKind === "multi_day_tour" ? "Multi-day tour" : "Single-day outing"}
-              </span>
-            )}
-            <span className="text-muted-foreground">{event.venue}</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="font-mono tabular-nums text-muted-foreground">{dateLabel}</span>
-            <span className="text-muted-foreground">·</span>
-            <span className="font-semibold tabular-nums text-white">
-              ${event.ticketPrice.toFixed(2)}
-            </span>
-          </DialogDescription>
-        </DialogHeader>
-        {incidentButton}
-      </div>
+          )}
+          <span className="text-muted-foreground">{event.venue}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="font-mono tabular-nums text-muted-foreground">{dateLabel}</span>
+          <span className="text-muted-foreground">·</span>
+          <span className="font-semibold tabular-nums text-white">
+            ${event.ticketPrice.toFixed(2)}
+          </span>
+        </DialogDescription>
+      </DialogHeader>
 
-      <div className="mt-3">
+      <div className="mt-3 flex items-start justify-between gap-3">
         <EventStatusPanel event={event} onStatusChanged={() => {}} />
+        {incidentButton}
       </div>
 
       {/* Horizontally scrollable tabs */}
@@ -330,14 +337,19 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
     <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
   );
 
-  const anomalyModal = isOuting && incidentSession ? (
-    <LogAnomalyModal
+  // Incident / Fault dialog — fires from the top-right header button (§13).
+  const incidentDialog = isOuting && event ? (
+    <IncidentIntakeDialog
       open={incidentOpen}
       onOpenChange={setIncidentOpen}
       context={{
-        kind: "event-day",
+        pathLabel: "Event management",
         eventId: event.id,
-        eventDaySessionId: incidentSession.id,
+        eventTitle: event.title,
+        eventDaySessionId: anomalySession?.id,
+      }}
+      onFiled={() => {
+        qc.invalidateQueries({ queryKey: ["event-day-issues", anomalySession?.id ?? ""] });
       }}
     />
   ) : null;
@@ -376,7 +388,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
             )}
           </SheetContent>
         </Sheet>
-        {anomalyModal}
+        {incidentDialog}
       </>
     );
   }
@@ -398,7 +410,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
           )}
         </DialogContent>
       </Dialog>
-      {anomalyModal}
+      {incidentDialog}
     </>
   );
 }

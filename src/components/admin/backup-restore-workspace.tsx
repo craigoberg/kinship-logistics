@@ -1,9 +1,17 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, Database, Download, Loader2, Upload } from "lucide-react";
+import {
+  AlertTriangle,
+  CheckCircle2,
+  Database,
+  Download,
+  Loader2,
+  Upload,
+} from "lucide-react";
 
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -15,7 +23,15 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
 import { Switch } from "@/components/ui/switch";
 import {
   Table,
@@ -52,12 +68,109 @@ function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
 }
 
+function useAnimatedActiveStep(running: boolean, maxStep: number, intervalMs = 9000) {
+  const [step, setStep] = useState(1);
+
+  useEffect(() => {
+    if (!running) {
+      setStep(1);
+      return;
+    }
+    setStep(1);
+    const id = window.setInterval(() => {
+      setStep((s) => (s < maxStep ? s + 1 : s));
+    }, intervalMs);
+    return () => window.clearInterval(id);
+  }, [running, maxStep, intervalMs]);
+
+  return step;
+}
+
+function stepState(
+  index: number,
+  activeIndex: number,
+  running: boolean,
+): "done" | "active" | "pending" {
+  if (!running && index <= activeIndex) return "done";
+  if (index < activeIndex) return "done";
+  if (index === activeIndex) return "active";
+  return "pending";
+}
+
+function IndeterminateProgress() {
+  const [value, setValue] = useState(12);
+
+  useEffect(() => {
+    const id = window.setInterval(() => {
+      setValue((v) => (v >= 88 ? 12 : v + 4));
+    }, 450);
+    return () => window.clearInterval(id);
+  }, []);
+
+  return <Progress value={value} className="h-2" />;
+}
+
+function OperationProgressDialog({
+  open,
+  title,
+  description,
+  steps,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  steps: { label: string; state: "done" | "active" | "pending" }[];
+}) {
+  return (
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent
+        className="max-w-md"
+        onPointerDownOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => e.preventDefault()}
+      >
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <IndeterminateProgress />
+        <ul className="space-y-2 text-sm">
+          {steps.map((step) => (
+            <li key={step.label} className="flex items-center gap-2">
+              {step.state === "done" ? (
+                <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600" />
+              ) : step.state === "active" ? (
+                <Loader2 className="h-4 w-4 shrink-0 animate-spin text-primary" />
+              ) : (
+                <span className="h-4 w-4 shrink-0 rounded-full border border-muted-foreground/40" />
+              )}
+              <span
+                className={
+                  step.state === "active"
+                    ? "font-medium text-foreground"
+                    : "text-muted-foreground"
+                }
+              >
+                {step.label}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <p className="text-xs text-muted-foreground">
+          Do not close this page until the operation completes.
+        </p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 export function BackupRestoreWorkspace() {
   const profile = useMemo(() => getActiveUserProfile(), []);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [pendingManifest, setPendingManifest] = useState<BackupManifest | null>(null);
   const [confirmRestoreOpen, setConfirmRestoreOpen] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
+  const [restoreProgressOpen, setRestoreProgressOpen] = useState(false);
+  const [backupProgressOpen, setBackupProgressOpen] = useState(false);
   const [preserveAuth, setPreserveAuth] = useState(shouldDefaultPreserveAuth);
   const [managerStaffId, setManagerStaffId] = useState(profile?.staffId ?? "");
 
@@ -90,6 +203,7 @@ export function BackupRestoreWorkspace() {
 
   const backupMut = useMutation({
     mutationFn: downloadFullBackup,
+    onMutate: () => setBackupProgressOpen(true),
     onSuccess: ({ manifest }) => {
       saveBackupToDisk(manifest);
       toast.success("Backup saved", {
@@ -99,6 +213,7 @@ export function BackupRestoreWorkspace() {
     },
     onError: (e: Error) =>
       toast.error("Backup failed", { description: e.message }),
+    onSettled: () => setBackupProgressOpen(false),
   });
 
   const restoreMut = useMutation({
@@ -114,7 +229,6 @@ export function BackupRestoreWorkspace() {
       });
     },
     onSuccess: (result) => {
-      setPinOpen(false);
       setConfirmRestoreOpen(false);
       setPendingManifest(null);
       toast.success("Restore completed", {
@@ -127,11 +241,33 @@ export function BackupRestoreWorkspace() {
     },
     onError: (e: Error) =>
       toast.error("Restore failed", { description: e.message }),
+    onSettled: () => setRestoreProgressOpen(false),
   });
 
   const protectedTables = getProtectedTableLabels();
   const summary = summaryQ.data;
   const managers = managersQ.data ?? [];
+
+  const backupActiveStep = useAnimatedActiveStep(backupProgressOpen, 2, 6000);
+  const restoreActiveStep = useAnimatedActiveStep(restoreProgressOpen, 3, 9000);
+
+  const backupSteps = [
+    { label: "Discovering public tables", state: stepState(0, backupActiveStep, backupProgressOpen) },
+    { label: "Reading row data from Supabase", state: stepState(1, backupActiveStep, backupProgressOpen) },
+    { label: "Preparing download file", state: stepState(2, backupActiveStep, backupProgressOpen) },
+  ] as const;
+
+  const restoreSteps = [
+    { label: "Manager PIN verified", state: "done" as const },
+    {
+      label: preserveAuth
+        ? "Truncating tables (preserving local login & config)"
+        : "Truncating existing tables",
+      state: stepState(1, restoreActiveStep, restoreProgressOpen),
+    },
+    { label: "Inserting rows from backup", state: stepState(2, restoreActiveStep, restoreProgressOpen) },
+    { label: "Finalising restore", state: stepState(3, restoreActiveStep, restoreProgressOpen) },
+  ];
 
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
@@ -267,9 +403,9 @@ export function BackupRestoreWorkspace() {
               Preserve local login credentials
             </Label>
             <p className="text-xs text-muted-foreground">
-              Keeps <code>{protectedTables.join(", ")}</code> untouched so DEV dummy
-              PINs are not overwritten by a PROD restore. Extend when RBAC lands
-              (BL-002).
+              Keeps <code>{protectedTables.join(", ")}</code> untouched — DEV
+              dummy PINs, SMS config, and export state are not overwritten by a
+              PROD restore.
             </p>
           </div>
           <Switch
@@ -359,12 +495,40 @@ export function BackupRestoreWorkspace() {
         open={pinOpen}
         onOpenChange={setPinOpen}
         title="Authorise restore"
-        description="Enter the selected manager's PIN. This cannot be undone."
+        description="Enter the selected manager's PIN. Restore begins after verification."
         length={4}
-        busy={restoreMut.isPending}
         onVerify={async (pin) => {
-          await restoreMut.mutateAsync(pin);
+          const staffId = managerStaffId || profile?.staffId;
+          if (!staffId) throw new Error("Select the authorising manager.");
+          await verifyManagerPin(staffId, pin);
         }}
+        onSuccess={(pin) => {
+          setPinOpen(false);
+          setRestoreProgressOpen(true);
+          restoreMut.mutate(pin);
+        }}
+      />
+
+      <OperationProgressDialog
+        open={backupProgressOpen}
+        title="Creating backup"
+        description={
+          summary
+            ? `Exporting ${summary.tableCount} tables (${summary.rowCount.toLocaleString()} rows) to JSON.`
+            : "Scanning database tables and building backup file."
+        }
+        steps={backupSteps}
+      />
+
+      <OperationProgressDialog
+        open={restoreProgressOpen}
+        title="Restore in progress"
+        description={
+          pendingManifest
+            ? `${pendingManifest.label} — ${pendingManifest.tableCount} tables, ${pendingManifest.rowCount.toLocaleString()} rows.`
+            : "Reloading database from backup file."
+        }
+        steps={restoreSteps}
       />
     </div>
   );

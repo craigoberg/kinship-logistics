@@ -2,6 +2,22 @@
 export const AUTH_PROTECTED_TABLES = ["staff_registry"] as const;
 
 /**
+ * Environment-specific config — preserved alongside login credentials when
+ * restoring PROD → DEV so SMS recipients, thresholds, etc. stay local.
+ */
+export const ENV_PROTECTED_TABLES = [
+  "system_parameters",
+  "offline_sync_logs",
+  "myob_export_batches",
+] as const;
+
+/** All tables skipped when "Preserve local login credentials" is enabled. */
+export const PRESERVE_LOCAL_TABLES = [
+  ...AUTH_PROTECTED_TABLES,
+  ...ENV_PROTECTED_TABLES,
+] as const;
+
+/**
  * Future RBAC tables — extend this list when BL-002 lands. Auth schema tables
  * (auth.users, sessions, etc.) are outside public.list_backup_tables() scope.
  */

@@ -14,6 +14,7 @@ import {
   type FleetAssetInput,
   type FleetAssetPatch,
 } from "@/lib/api/fleet";
+import { createVendor, listVendors, type Vendor } from "@/lib/api/vendors";
 import { listTransportAssets } from "@/lib/data-store";
 
 import {
@@ -1235,3 +1236,30 @@ export function useCancelTransportRequest() {
     onSuccess: (requestDate) => invalidateTransportRequestCaches(qc, requestDate),
   });
 }
+
+// ---------------------------------------------------------------------------
+// Vendors registry
+// ---------------------------------------------------------------------------
+
+export function useVendors() {
+  return useQuery({
+    queryKey: ["vendors", "active"],
+    queryFn: () => listVendors("active"),
+    staleTime: 30_000,
+  });
+}
+
+export function useCreateVendor() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (name: string) => createVendor(name),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["vendors"] });
+    },
+    onError: (err: Error) => {
+      toast.error("Could not add vendor", { description: err.message });
+    },
+  });
+}
+
+export type { Vendor };

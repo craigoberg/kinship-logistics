@@ -1,4 +1,4 @@
-import { AUTH_PROTECTED_TABLES } from "@/lib/backup-restore/constants";
+import { AUTH_PROTECTED_TABLES, PRESERVE_LOCAL_TABLES } from "@/lib/backup-restore/constants";
 import {
   backupFilename,
   buildBackupLabel,
@@ -42,6 +42,10 @@ export function shouldDefaultPreserveAuth(): boolean {
 }
 
 export function getProtectedTableLabels(): readonly string[] {
+  return PRESERVE_LOCAL_TABLES;
+}
+
+export function getAuthProtectedTableLabels(): readonly string[] {
   return AUTH_PROTECTED_TABLES;
 }
 

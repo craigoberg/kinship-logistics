@@ -20,7 +20,10 @@ import {
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
 import { IssuesRegisterCard } from "./issues-register-card";
-import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
+import {
+  VerbalConsultationDialog,
+  formatVerbalWorkaroundDescription,
+} from "@/components/issue-engine/verbal-consultation-dialog";
 import {
   openSession,
   countActiveSchedulesForToday,
@@ -35,6 +38,8 @@ import {
   redHasAcceptedWorkaround,
   effectiveWorkaroundText,
 } from "@/lib/site-day/red-workaround";
+import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
+import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
 
 interface Props {
   sessionId: string;
@@ -427,7 +432,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
             className="h-10 w-full justify-center gap-2 text-xs text-amber-700 hover:bg-amber-500/10 hover:text-amber-800"
             onClick={() => setVerbalOverrideOpen(true)}
           >
-            ☎ Manager unreachable? Record a Verbal Authorization Override
+            ☎ Manager unreachable? Record verbal consultation
           </Button>
         )}
       </div>
@@ -477,8 +482,8 @@ export function StartOfDayPanel({ sessionId }: Props) {
         }
       />
 
-      {/* Canonical RED path — Verbal Consultation & Log */}
-      <VerbalAuthOverrideDialog
+      {/* Canonical RED path — remote verbal consultation */}
+      <VerbalConsultationDialog
         open={!!verbalPending}
         onOpenChange={(o) => {
           if (!o) setVerbalPending(null);
@@ -486,23 +491,46 @@ export function StartOfDayPanel({ sessionId }: Props) {
         ledgerCategory="CENTRE"
         subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
         sourceId={sessionId}
-        actionType="RED_VERBAL_WORKAROUND"
+        actionType="RED_VERBAL_CONSULTATION"
         titleOverride="RED Verbal Consultation & Log"
-        descriptionOverride="A RED Day Centre anomaly was identified. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. The ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and the session unblocks."
-        onAccepted={async ({ managerName, reason }) => {
+        descriptionOverride="A RED Day Centre anomaly was identified. Select the manager you contacted (or attempted to reach), record the outcome, and sign with your operator PIN. The ticket lands in the Governance Hub immediately; the manager confirms later."
+        onAccepted={async (payload) => {
           if (!verbalPending) return;
-          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          const prefixed = formatVerbalWorkaroundDescription(
+            verbalPending.description,
+            payload,
+          );
           try {
             const { createIssue } = await import("@/lib/api/site-issues");
-            await createIssue({
+            const issue = await createIssue({
               sessionId,
               severity: "red",
               issueDescription: prefixed,
-              workaroundPlan: reason,
+              workaroundPlan: payload.notes,
               owner: verbalPending.owner,
             });
             queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
             queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+
+            // RED Day Centre walkround issues also land in Maintenance (§14.2).
+            (async () => {
+              try {
+                const staffId = getStaffId() || (await resolveStaffIdWithFallback());
+                const reporterName = resolveStaffDisplayName(staffId);
+                await createMaintenanceItem({
+                  title: verbalPending.description.slice(0, 120),
+                  description: prefixed,
+                  severity: "red",
+                  source: "centre_issue",
+                  sourceRefId: issue.id,
+                  locationLabel: `Day Centre — Session ${sessionId.slice(0, 8)}`,
+                  reportedBy: reporterName,
+                });
+                queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
+              } catch (maintErr) {
+                console.error("[StartOfDayPanel] maintenance_items mirror failed", maintErr);
+              }
+            })();
           } catch (err) {
             console.error("[StartOfDayPanel] verbal-workaround issue insert failed", err);
             toast.error("Verbal workaround logged to ledger, but Hub sync failed", {
@@ -513,13 +541,16 @@ export function StartOfDayPanel({ sessionId }: Props) {
         }}
       />
 
-      {/* Verbal Authorization Override — legacy "open day despite blockers" escape hatch. */}
-      <VerbalAuthOverrideDialog
+      {/* Open day despite blockers — remote verbal consultation receipt */}
+      <VerbalConsultationDialog
         open={verbalOverrideOpen}
         onOpenChange={setVerbalOverrideOpen}
         ledgerCategory="CENTRE"
         subjectLabel={`Day Centre · Session ${sessionId.slice(0, 8)}`}
         sourceId={sessionId}
+        actionType="VERBAL_AUTH_OVERRIDE"
+        titleOverride="Verbal Consultation — Open Despite Blockers"
+        descriptionOverride="Blocking issues remain. Select the manager you contacted (or attempted to reach), record the outcome, and sign with your operator PIN. The manager confirms in the Governance Hub later."
         onAccepted={() => {
           setConfirmOpen(true);
         }}

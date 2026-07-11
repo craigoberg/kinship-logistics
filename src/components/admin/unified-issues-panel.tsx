@@ -43,19 +43,60 @@ interface Props {
   onManageRenewal?: (assetId: string) => void;
 }
 
-const SOURCE_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }> = [
-  { value: "all", label: "All sources" },
+const CATEGORY_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }> = [
+  { value: "all", label: "All categories" },
   { value: "day_centre", label: "Day Centre" },
+  { value: "event", label: "Trip Day" },
   { value: "incident", label: "Incident" },
   { value: "escalation", label: "Escalation" },
 ];
 
-const SOURCE_BADGE: Record<UnifiedIssueSource, string> = {
+const CATEGORY_BADGE: Record<UnifiedIssueSource, string> = {
   day_centre: "bg-sky-600 text-white",
+  event: "bg-teal-600 text-white",
   incident: "bg-orange-600 text-white",
   escalation: "bg-destructive text-destructive-foreground",
   renewal: "bg-violet-600 text-white",
 };
+
+function issueUpdatedAt(issue: UnifiedIssue): string {
+  const raw = (issue.raw ?? {}) as Record<string, unknown>;
+  return String(raw.updated_at ?? raw.created_at ?? issue.createdAt);
+}
+
+function issueLocationReporter(issue: UnifiedIssue): {
+  location: string | null;
+  reporter: string | null;
+} {
+  const raw = (issue.raw ?? {}) as Record<string, unknown>;
+  const reporterRaw = String(raw.reported_by ?? "").trim();
+  const reporter =
+    reporterRaw && !/^[0-9a-f-]{36}$/i.test(reporterRaw) ? reporterRaw : null;
+
+  if (issue.source === "incident") {
+    const desc = String(raw.description ?? issue.description ?? "");
+    const eventMatch = desc.match(/\[Event:\s*([^·\]]+)/);
+    const filedMatch = desc.match(/Filed from:\s*([^\]]+)/);
+    const eventName = eventMatch?.[1]?.trim() ?? null;
+    const filedFrom = filedMatch?.[1]?.trim() ?? null;
+    return {
+      location: eventName ? `Event: ${eventName}` : filedFrom,
+      reporter,
+    };
+  }
+
+  if (issue.source === "escalation") {
+    return {
+      location: String(raw.vehicle_info ?? issue.subCategory ?? "").trim() || null,
+      reporter: String(raw.driver_name ?? "").trim() || null,
+    };
+  }
+
+  return {
+    location: issue.source === "event" ? "Trip Day" : "Day Centre",
+    reporter,
+  };
+}
 
 function severityBadge(sev: UnifiedSeverity) {
   if (sev === "red")
@@ -77,7 +118,7 @@ function IssuesTable({
   onManageRenewal?: (assetId: string) => void;
 }) {
   const q = useUnifiedIssues(tab);
-  const [sourceFilter, setSourceFilter] = useState<UnifiedIssueSource | "all">(
+  const [categoryFilter, setCategoryFilter] = useState<UnifiedIssueSource | "all">(
     "all",
   );
   const [severityFilter, setSeverityFilter] = useState<
@@ -89,7 +130,7 @@ function IssuesTable({
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const filtered = all.filter((i) => {
-      if (sourceFilter !== "all" && i.source !== sourceFilter) return false;
+      if (categoryFilter !== "all" && i.source !== categoryFilter) return false;
       if (severityFilter !== "all" && i.severity !== severityFilter) return false;
       if (needle) {
         const hay = `${i.title} ${i.description} ${i.category} ${i.subCategory ?? ""}`.toLowerCase();
@@ -98,15 +139,15 @@ function IssuesTable({
       return true;
     });
     return sortUnifiedIssuesByRygeThenExpiry(filtered);
-  }, [all, sourceFilter, severityFilter, search]);
+  }, [all, categoryFilter, severityFilter, search]);
 
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
           {tab === "active"
-            ? "Central queue for every open operational issue — walkthrough anomalies, incidents, gate escalations, and overdue renewals."
-            : "Issues currently parked: deferred for a future action or awaiting a Council response."}
+            ? "Open issues needing attention now. Deferred issues are hidden until their deadline is close — no news is good news."
+            : "Issues currently parked: deferred for a future action or awaiting a Council response. Items return to the Active tab automatically when their deadline is near."}
         </p>
         <div className="flex items-center gap-2">
           {q.isFetching && (
@@ -120,16 +161,16 @@ function IssuesTable({
 
       <div className="flex flex-wrap items-end gap-3">
         <div className="space-y-1">
-          <Label className="text-xs text-muted-foreground">Source</Label>
+          <Label className="text-xs text-muted-foreground">Category</Label>
           <Select
-            value={sourceFilter}
-            onValueChange={(v) => setSourceFilter(v as UnifiedIssueSource | "all")}
+            value={categoryFilter}
+            onValueChange={(v) => setCategoryFilter(v as UnifiedIssueSource | "all")}
           >
             <SelectTrigger className="h-8 w-40">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {SOURCE_OPTIONS.map((o) => (
+              {CATEGORY_OPTIONS.map((o) => (
                 <SelectItem key={o.value} value={o.value}>
                   {o.label}
                 </SelectItem>
@@ -183,35 +224,40 @@ function IssuesTable({
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead>Source</TableHead>
-              <TableHead>Severity</TableHead>
+              <TableHead className="w-20">Severity</TableHead>
+              <TableHead className="w-32">Category</TableHead>
               <TableHead>Issue</TableHead>
-              <TableHead className="w-[160px] whitespace-nowrap">Created</TableHead>
-              <TableHead className="w-28 text-right" />
+              <TableHead className="w-[160px] whitespace-nowrap">Logged</TableHead>
+              <TableHead className="hidden md:table-cell">Location / Reporter</TableHead>
+              <TableHead className="hidden lg:table-cell w-[160px] whitespace-nowrap">Updated</TableHead>
+              <TableHead className="w-28">Status</TableHead>
+              <TableHead className="w-24 text-right" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {q.isLoading ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-3">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-3">
                   Loading…
                 </TableCell>
               </TableRow>
             ) : visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground py-3">
+                <TableCell colSpan={8} className="text-center text-muted-foreground py-3">
                   {tab === "active"
-                    ? "No open issues match the current filters."
+                    ? "No open issues need attention right now. Check the Awaiting tab for deferred items."
                     : "Nothing deferred or awaiting Council."}
                 </TableCell>
               </TableRow>
             ) : (
-              visible.map((i) => (
+              visible.map((i) => {
+                const { location, reporter } = issueLocationReporter(i);
+                return (
                 <TableRow key={i.key}>
-                  <TableCell className="py-3">
-                    <Badge className={SOURCE_BADGE[i.source]}>{i.sourceLabel}</Badge>
-                  </TableCell>
                   <TableCell className="py-3">{severityBadge(i.severity)}</TableCell>
+                  <TableCell className="py-3">
+                    <Badge className={CATEGORY_BADGE[i.source]}>{i.sourceLabel}</Badge>
+                  </TableCell>
                   <TableCell className="max-w-[28rem] py-3">
                     <div className="font-medium truncate">{i.title}</div>
                     {i.source === "escalation" && (() => {
@@ -237,6 +283,17 @@ function IssuesTable({
                   <TableCell className="w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
                     <FormattedDateTime value={i.createdAt} />
                   </TableCell>
+                  <TableCell className="hidden md:table-cell text-xs text-muted-foreground py-3">
+                    {location && <div>{location}</div>}
+                    {reporter && <div className="text-muted-foreground/70">{reporter}</div>}
+                    {!location && !reporter && "—"}
+                  </TableCell>
+                  <TableCell className="hidden lg:table-cell w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
+                    <FormattedDateTime value={issueUpdatedAt(i)} />
+                  </TableCell>
+                  <TableCell className="py-3">
+                    <span className="text-xs capitalize">{i.status.replace(/_/g, " ")}</span>
+                  </TableCell>
                   <TableCell className="text-right py-3">
                     {i.source === "renewal" ? (
                       <Button size="sm" onClick={() => onManageRenewal?.(i.sourceRowId)}>
@@ -249,7 +306,8 @@ function IssuesTable({
                     )}
                   </TableCell>
                 </TableRow>
-              ))
+                );
+              })
             )}
           </TableBody>
         </Table>

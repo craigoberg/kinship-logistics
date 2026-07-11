@@ -36,6 +36,16 @@ import { useQuery } from "@tanstack/react-query";
 import { listVenues } from "@/lib/api/venues";
 import { inferEventKind } from "@/lib/api/event-outing";
 import { DatePicker } from "@/components/ui/date-picker";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 
 interface Props {
   open: boolean;
@@ -60,6 +70,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   const [cloneOpen, setCloneOpen] = useState(false);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEvent();
+  const gate = useVenueGate();
   const { data: priorEvents = [], isLoading: priorLoading } = usePriorEventsForClone();
   const { data: venues = [] } = useQuery({
     queryKey: ["venues", "active"],
@@ -326,9 +337,13 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                 </Label>
                 <Select
                   value={primaryVenueId ?? ""}
-                  onValueChange={(v) => { mark(setPrimaryVenueId)(v || null); }}
+                  onValueChange={async (v) => {
+                    const ok = await gate.checkVenue(v || null);
+                    if (!ok) return;
+                    mark(setPrimaryVenueId)(v || null);
+                  }}
                 >
-                  <SelectTrigger>
+                  <SelectTrigger disabled={gate.checking}>
                     <SelectValue placeholder="Select from registry…" />
                   </SelectTrigger>
                   <SelectContent>
@@ -339,8 +354,26 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                     ))}
                   </SelectContent>
                 </Select>
+                {gate.warningMessage && (
+                  <p className="text-xs text-amber-600">{gate.warningMessage}</p>
+                )}
               </div>
             )}
+
+            <AlertDialog
+              open={!!gate.blockedMessage}
+              onOpenChange={(o) => !o && gate.clearMessages()}
+            >
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Venue cannot be used</AlertDialogTitle>
+                  <AlertDialogDescription>{gate.blockedMessage}</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogAction onClick={gate.clearMessages}>OK</AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
 
             {/* Venue name (free-text fallback for legacy / display label override) */}
             <div className="space-y-2">

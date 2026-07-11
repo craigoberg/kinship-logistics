@@ -35,18 +35,30 @@ export async function fetchApprovedRedWorkarounds(
   return out;
 }
 
+export function isVerbalWorkaroundDescription(description: string | null | undefined): boolean {
+  return (description ?? "").includes("[VERBAL WORKAROUND]");
+}
+
 export function redHasAcceptedWorkaround(
   issue: {
     id: string;
     status: string | null;
     workaround_plan?: string | null;
     workaroundPlan?: string | null;
+    issue_description?: string | null;
+    issueDescription?: string | null;
+    workaround_accepted_at?: string | null;
+    workaroundAcceptedAt?: string | null;
   },
   escalationMap?: EscalationWorkaroundMap | null,
 ): boolean {
   if (issue.status === "workaround_accepted") return true;
+  const acceptedAt = issue.workaround_accepted_at ?? issue.workaroundAcceptedAt ?? null;
+  if (acceptedAt) return true;
   const plan = issue.workaround_plan ?? issue.workaroundPlan ?? null;
   if (plan && plan.trim()) return true;
+  const desc = issue.issue_description ?? issue.issueDescription ?? "";
+  if (isVerbalWorkaroundDescription(desc)) return true;
   if (escalationMap && escalationMap.get(issue.id)?.trim()) return true;
   return false;
 }

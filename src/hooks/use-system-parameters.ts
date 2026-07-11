@@ -138,6 +138,34 @@ export function useComplianceWarningDays(): { default: number; shortCycle: numbe
   return { default: def, shortCycle };
 }
 
+/**
+ * Days before expiry that a compliance asset first appears on the Governance
+ * Hub Active tab. Items with expiry further away than this (and RYGE = green)
+ * stay hidden. Should be wider than the yellow warning threshold.
+ * Default: 60 days. Configured via Admin → System Parameters.
+ */
+export function useComplianceHubVisibilityDays(): number {
+  return useSystemParameter<number>("compliance_hub_visibility_days", 60);
+}
+
+/**
+ * Days before a compliance asset deferral deadline expires that the item
+ * moves from the Deferred tab back to the Active tab.
+ * Default: 7 days. Configured via Admin → System Parameters.
+ */
+export function useComplianceDeferRewarnDays(): number {
+  return useSystemParameter<number>("compliance_defer_rewarn_days", 7);
+}
+
+/**
+ * Days before a deferred open issue deadline expires that it resurfaces on
+ * the Active issues tab. Default: 7 days.
+ * Configured via Admin → System Parameters.
+ */
+export function useIssueDeferRewarnDays(): number {
+  return useSystemParameter<number>("issue_defer_rewarn_days", 7);
+}
+
 export function useCouncilEmailTo(): string {
   return useSystemParameter<string>("site_management.council_email_to", "");
 }

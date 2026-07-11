@@ -164,6 +164,9 @@ export async function upsertVenue(input: UpsertVenueInput): Promise<Venue> {
     p_venue_id: (data as Venue).id,
   });
 
+  // Auto-create annual compliance asset (best-effort).
+  await ensureVenueComplianceAsset(data as Venue).catch(() => null);
+
   await writeToLedger({
     staff_id: actor,
     category: "CENTRE",
@@ -322,6 +325,9 @@ export async function cloneVenue(sourceVenueId: string, newName: string): Promis
     if (fErr) throw fErr;
   }
 
+  // Auto-create annual compliance asset for the clone (best-effort).
+  await ensureVenueComplianceAsset(newVenue as Venue).catch(() => null);
+
   await writeToLedger({
     staff_id: actor,
     category: "CENTRE",
@@ -419,6 +425,9 @@ export async function submitBaselineSignoff(
     },
   });
 
+  // Reset annual compliance expiry to today + 1 year (best-effort).
+  await renewVenueComplianceAssetAfterSignoff(input.venue_id).catch(() => null);
+
   return signoff as VenueSafetyBaselineSignoff;
 }
 
@@ -457,4 +466,221 @@ export async function getBaselineSignoffAnswers(
     .eq("signoff_id", signoffId);
   if (error) throw error;
   return (data ?? []) as VenueSafetyAnswer[];
+}
+
+// ============================================================================
+// Batch baseline status — for venue list display
+// ============================================================================
+
+export interface VenueBaselineStatus {
+  venue_id: string;
+  signoff: VenueSafetyBaselineSignoff | null;
+}
+
+/**
+ * Fetch the latest baseline sign-off for each venue in one round-trip.
+ * Returns a map keyed by venue_id.
+ */
+export async function batchLatestBaselineSignoffs(
+  venueIds: string[],
+): Promise<Map<string, VenueSafetyBaselineSignoff | null>> {
+  const result = new Map<string, VenueSafetyBaselineSignoff | null>(
+    venueIds.map((id) => [id, null]),
+  );
+  if (venueIds.length === 0) return result;
+
+  const { data, error } = await supabase
+    .from("venue_safety_baseline_signoffs")
+    .select("*")
+    .in("venue_id", venueIds)
+    .order("signed_off_at", { ascending: false });
+  if (error) throw error;
+
+  // Keep only the first (latest) signoff per venue.
+  for (const row of (data ?? []) as VenueSafetyBaselineSignoff[]) {
+    if (!result.get(row.venue_id)) {
+      result.set(row.venue_id, row);
+    }
+  }
+  return result;
+}
+
+// ============================================================================
+// Venue usability gate (§12.2.2 — strict compliance)
+// ============================================================================
+
+export type VenueUseReason =
+  | "ok"
+  | "no_baseline"
+  | "compliance_overdue"
+  | "compliance_deferred_expired"
+  | "compliance_deferred_grace";
+
+export interface VenueUsability {
+  canUse: boolean;
+  reason: VenueUseReason;
+  /** Human-readable message for the blocking/warning dialog. */
+  message: string;
+  latestSignoff: VenueSafetyBaselineSignoff | null;
+}
+
+/**
+ * Strict gate: a venue can only be used in an outing if:
+ *   1. It has at least one baseline sign-off.
+ *   2. Its annual compliance asset is not overdue — OR it is within a valid
+ *      defer window (next_action_at > today, max 1 month from expiry).
+ */
+export async function getVenueUsability(venueId: string): Promise<VenueUsability> {
+  const [signoff, complianceRows] = await Promise.all([
+    getLatestBaselineSignoff(venueId),
+    supabase
+      .from("compliance_assets")
+      .select("expiry_date, next_action_at, status")
+      .eq("subject_table", "venues")
+      .eq("subject_id", venueId)
+      .eq("type", "venue_annual_review")
+      .eq("status", "active")
+      .order("expiry_date", { ascending: false })
+      .limit(1),
+  ]);
+
+  if (!signoff) {
+    return {
+      canUse: false,
+      reason: "no_baseline",
+      message:
+        "This venue has no completed safety baseline sign-off. Go to Admin → Venues to complete the sign-off before using this venue for an outing.",
+      latestSignoff: null,
+    };
+  }
+
+  const asset = (complianceRows.data ?? [])[0] as {
+    expiry_date: string | null;
+    next_action_at: string | null;
+    status: string;
+  } | undefined;
+
+  // No compliance asset yet — venue is usable (asset auto-created on next save).
+  if (!asset || !asset.expiry_date) {
+    return { canUse: true, reason: "ok", message: "", latestSignoff: signoff };
+  }
+
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const expiry = new Date(asset.expiry_date);
+  expiry.setHours(0, 0, 0, 0);
+
+  if (expiry >= today) {
+    return { canUse: true, reason: "ok", message: "", latestSignoff: signoff };
+  }
+
+  // Compliance is overdue — check for active deferral.
+  if (asset.next_action_at) {
+    const deferUntil = new Date(asset.next_action_at);
+    deferUntil.setHours(0, 0, 0, 0);
+    if (deferUntil >= today) {
+      return {
+        canUse: true,
+        reason: "compliance_deferred_grace",
+        message: `Annual safety review for this venue is overdue but deferred until ${asset.next_action_at.slice(0, 10)}. A new baseline sign-off is required before that date.`,
+        latestSignoff: signoff,
+      };
+    }
+    // Deferral window has also expired.
+    return {
+      canUse: false,
+      reason: "compliance_deferred_expired",
+      message: `The annual safety review deferral for this venue has expired (was due ${asset.next_action_at.slice(0, 10)}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
+      latestSignoff: signoff,
+    };
+  }
+
+  return {
+    canUse: false,
+    reason: "compliance_overdue",
+    message: `The annual safety review for this venue is overdue (expired ${asset.expiry_date}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
+    latestSignoff: signoff,
+  };
+}
+
+// ============================================================================
+// Compliance asset helpers — auto-create + reset on sign-off
+// ============================================================================
+
+/**
+ * Ensure a venue_annual_review compliance asset exists for a venue.
+ * Called after venue create and clone. Idempotent — skips if one already exists.
+ */
+export async function ensureVenueComplianceAsset(
+  venue: Pick<Venue, "id" | "name" | "created_at">,
+): Promise<void> {
+  const { count } = await supabase
+    .from("compliance_assets")
+    .select("id", { count: "exact", head: true })
+    .eq("subject_table", "venues")
+    .eq("subject_id", venue.id)
+    .eq("type", "venue_annual_review")
+    .eq("status", "active");
+
+  if ((count ?? 0) > 0) return; // already exists
+
+  const expiryDate = (() => {
+    const d = new Date(venue.created_at);
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  const actor = await resolveStaffIdWithFallback().catch(() => null);
+
+  await supabase.from("compliance_assets").insert({
+    category: "VENUE",
+    type: "venue_annual_review",
+    name: `Annual Safety Review — ${venue.name}`,
+    description: `Annual baseline sign-off required for ${venue.name}. Must be renewed each year by a manager completing a new physical baseline review.`,
+    subject_table: "venues",
+    subject_id: venue.id,
+    expiry_date: expiryDate,
+    next_action_at: null,
+    action_module: "generic_resolve",
+    config: {
+      yellow_days: 60,
+      red_days: 14,
+      handshake: "single",
+    },
+    status: "active",
+    created_by: actor,
+  });
+}
+
+/**
+ * After a new baseline sign-off is submitted, reset the venue's annual compliance
+ * asset expiry to today + 1 year and clear any active deferral.
+ * Best-effort — does not throw if asset not found.
+ */
+export async function renewVenueComplianceAssetAfterSignoff(
+  venueId: string,
+): Promise<void> {
+  const newExpiry = (() => {
+    const d = new Date();
+    d.setFullYear(d.getFullYear() + 1);
+    return d.toISOString().slice(0, 10);
+  })();
+
+  // Find the active compliance asset.
+  const { data } = await supabase
+    .from("compliance_assets")
+    .select("id")
+    .eq("subject_table", "venues")
+    .eq("subject_id", venueId)
+    .eq("type", "venue_annual_review")
+    .eq("status", "active")
+    .limit(1)
+    .maybeSingle();
+
+  if (!data) return; // no asset yet — will be created on next venue load
+
+  await supabase
+    .from("compliance_assets")
+    .update({ expiry_date: newExpiry, next_action_at: null })
+    .eq("id", (data as { id: string }).id);
 }

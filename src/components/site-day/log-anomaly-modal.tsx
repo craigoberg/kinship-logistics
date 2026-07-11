@@ -23,10 +23,12 @@ import {
   type ResponsibilityOwner,
   type RygeSeverity,
 } from "@/lib/api/site-issues";
+import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
+import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
 import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 // `raiseOperationalEscalation` + `setPhase` removed: RED no longer triggers a
-// multi-device handshake. The local operator now opens a VerbalAuthOverrideDialog
+// multi-device handshake. The local operator now opens a VerbalConsultationDialog
 // directly via the `onRedRequested` callback below.
 
 /**
@@ -50,7 +52,7 @@ export type AnomalyContext =
       sessionId: string;
       /**
        * Site-day RED: invoked instead of writing a site_issues_register row.
-       * The parent panel opens VerbalAuthOverrideDialog and, on acceptance,
+       * The parent panel opens VerbalConsultationDialog and, on acceptance,
        * writes the `[VERBAL WORKAROUND]` open ticket itself.
        */
       onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
@@ -66,19 +68,21 @@ export type AnomalyContext =
         workaround: string | null;
         owner: ResponsibilityOwner;
       }) => void;
-      /** Pre-trip RED — parent opens VerbalAuthOverrideDialog. */
+      /** Pre-trip RED — parent opens VerbalConsultationDialog. */
       onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
     }
   | {
       /**
        * Event-day coordinator context (§12.6).
        * Issues are written to site_issues_register with event_id and
-       * event_day_session_id set. RED hands off to VerbalAuthOverrideDialog
+       * event_day_session_id set. RED hands off to VerbalConsultationDialog
        * via onRedRequested, same as site-day.
        */
       kind: "event-day";
       eventId: string;
       eventDaySessionId: string;
+      /** Optional venue/session label for maintenance item context. */
+      locationLabel?: string;
       onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
     };
 
@@ -133,7 +137,7 @@ const SEVERITY_CHIPS: Array<{
 ];
 
 // `triggerEscalation` event broadcaster removed — RED now opens the local
-// VerbalAuthOverrideDialog instead of dispatching a multi-device alert.
+// VerbalConsultationDialog instead of dispatching a multi-device alert.
 
 export function LogAnomalyModal({
   open,
@@ -195,7 +199,7 @@ export function LogAnomalyModal({
       if (context.kind === "pre-trip") {
         if (values.severity === "red") {
           // Single-user verbal flow: hand off to the parent to open the
-          // VerbalAuthOverrideDialog. No DB writes here.
+          // VerbalConsultationDialog. No DB writes here.
           context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
           return { kind: "pre-trip", severity: "red" as RygeSeverity } as const;
         }
@@ -231,7 +235,7 @@ export function LogAnomalyModal({
       const sId = context.sessionId;
 
       if (values.severity === "red") {
-        // Single-user verbal flow: parent opens VerbalAuthOverrideDialog and,
+        // Single-user verbal flow: parent opens VerbalConsultationDialog and,
         // on acceptance, writes the `[VERBAL WORKAROUND]` site_issues_register
         // ticket. The session phase is NOT flipped to `escalated_lock`.
         context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
@@ -250,14 +254,41 @@ export function LogAnomalyModal({
     },
     onSuccess: (result) => {
       if (result.kind === "site-day-red" || result.kind === "event-day-red") {
-        // Parent opens VerbalAuthOverrideDialog; just close the modal.
+        // Parent opens VerbalConsultationDialog; just close the modal.
         reset();
         onOpenChange(false);
         return;
       }
       if (result.kind === "event-day") {
+        const eventCtx = context as Extract<AnomalyContext, { kind: "event-day" }>;
+        // Invalidate the event-level cache (primary — used by EventIssuesCard).
+        queryClient.invalidateQueries({ queryKey: ["event-all-issues", eventCtx.eventId] });
+        // Legacy session-scoped key — kept for any stale subscribers.
         queryClient.invalidateQueries({ queryKey: ["event-day-issues", result.eventDaySessionId] });
         queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
+
+        // ALL venue walkround RYGE issues land in Maintenance & Repairs (§14.2).
+        // Green = low-priority note (graffiti, dented panel); still needs follow-up.
+        (async () => {
+          try {
+              const staffId = getStaffId() || (await resolveStaffIdWithFallback());
+              const reporterName = resolveStaffDisplayName(staffId);
+            await createMaintenanceItem({
+              title: result.issue.issueDescription.slice(0, 120),
+              description: result.issue.issueDescription,
+              severity: result.issue.severity as "green" | "yellow" | "red",
+              source: "venue_issue",
+              sourceRefId: result.issue.id,
+              eventId: eventCtx.eventId,
+              locationLabel: eventCtx.locationLabel ?? null,
+              reportedBy: reporterName,
+            });
+            queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
+          } catch (err) {
+            console.error("[LogAnomalyModal] maintenance_items mirror failed", err);
+          }
+        })();
+
         toast.success(`${result.issue.severity.toUpperCase()} issue logged on event day.`);
         reset();
         onOpenChange(false);
@@ -284,6 +315,28 @@ export function LogAnomalyModal({
           },
         });
         queryClient.refetchQueries({ queryKey: siteIssuesKey(sId) });
+
+        // ALL Day Centre walkround RYGE issues land in Maintenance & Repairs (§14.2).
+        // GREEN = low-priority note (graffiti, damage); still needs staff follow-up.
+        (async () => {
+          try {
+              const staffId = getStaffId() || (await resolveStaffIdWithFallback());
+              const reporterName = resolveStaffDisplayName(staffId);
+            await createMaintenanceItem({
+              title: issue.issueDescription.slice(0, 120),
+              description: issue.issueDescription,
+              severity: issue.severity as "green" | "yellow" | "red",
+              source: "centre_issue",
+              sourceRefId: issue.id,
+              locationLabel: `Day Centre — Session ${sId.slice(0, 8)}`,
+              reportedBy: reporterName,
+            });
+            queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
+          } catch (err) {
+            console.error("[LogAnomalyModal] centre maintenance_items mirror failed", err);
+          }
+        })();
+
         reset();
         onOpenChange(false);
         if (issue.severity === "yellow") {

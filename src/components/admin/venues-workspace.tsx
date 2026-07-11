@@ -67,9 +67,11 @@ import { getActiveUserProfile } from "@/lib/data-store";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
 import { VenueComplianceTab } from "./venue-compliance-tab";
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import {
   addVenueTemplateField,
   archiveVenue,
+  batchLatestBaselineSignoffs,
   cloneVenue,
   deleteVenueTemplateField,
   getLatestBaselineSignoff,
@@ -85,12 +87,14 @@ import {
   type Venue,
   type VenueSafetyBaselineSignoff,
   type VenueTemplateField,
+  type VenueUseReason,
 } from "@/lib/api/venues";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
 
 // ─── Query keys ────────────────────────────────────────────────────────────
 
 const VENUES_KEY = ["venues", "all"] as const;
+const VENUES_BASELINE_BATCH_KEY = ["venues", "baseline-batch"] as const;
 const venueFieldsKey = (id: string) => ["venue-template-fields", id] as const;
 const venueSignoffsKey = (id: string) => ["venue-baseline-signoffs", id] as const;
 
@@ -108,6 +112,47 @@ function statusBadge(status: Venue["status"]) {
   if (status === "archived")
     return <Badge variant="secondary">Archived</Badge>;
   return <Badge className="bg-emerald-600 text-white">Active</Badge>;
+}
+
+function baselineBadge(
+  signoff: VenueSafetyBaselineSignoff | null | undefined,
+  complianceReason?: VenueUseReason,
+) {
+  if (signoff === undefined) return null; // still loading
+
+  if (!signoff) {
+    return (
+      <Badge className="bg-amber-500 text-black gap-1">
+        <ShieldCheck className="h-3 w-3" />
+        No baseline
+      </Badge>
+    );
+  }
+
+  if (complianceReason === "compliance_overdue" || complianceReason === "compliance_deferred_expired") {
+    return (
+      <Badge className="bg-destructive text-destructive-foreground gap-1">
+        <ShieldCheck className="h-3 w-3" />
+        Review overdue
+      </Badge>
+    );
+  }
+
+  if (complianceReason === "compliance_deferred_grace") {
+    return (
+      <Badge className="bg-yellow-500 text-black gap-1">
+        <ShieldCheck className="h-3 w-3" />
+        Review deferred
+      </Badge>
+    );
+  }
+
+  return (
+    <Badge className="bg-emerald-600 text-white gap-1">
+      <CheckCircle2 className="h-3 w-3" />
+      Signed off
+    </Badge>
+  );
 }
 
 // ─── Main workspace ─────────────────────────────────────────────────────────
@@ -129,6 +174,18 @@ export function VenuesWorkspace() {
     queryKey: VENUES_KEY,
     queryFn: () => listVenues(),
     staleTime: 60_000,
+  });
+
+  const activeVenueIds = useMemo(
+    () => venues.filter((v) => v.status === "active").map((v) => v.id),
+    [venues],
+  );
+
+  const { data: baselineMap } = useQuery({
+    queryKey: [...VENUES_BASELINE_BATCH_KEY, activeVenueIds.join(",")],
+    queryFn: () => batchLatestBaselineSignoffs(activeVenueIds),
+    enabled: activeVenueIds.length > 0,
+    staleTime: 30_000,
   });
 
   const visible = useMemo(() => {
@@ -221,6 +278,9 @@ export function VenuesWorkspace() {
                   {statusBadge(v.status)}
                   {riskBadge(v.risk_tier)}
                   <span className="text-xs text-muted-foreground capitalize">{v.venue_type}</span>
+                  {v.status === "active" && baselineBadge(
+                    baselineMap ? (baselineMap.get(v.id) ?? null) : undefined,
+                  )}
                 </div>
                 {v.street_address && (
                   <p className="mt-0.5 text-xs text-muted-foreground truncate">
@@ -406,7 +466,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
               <CheckCircle2 className="h-4 w-4 text-emerald-600" />
               <span className="text-sm font-medium">
                 Baseline signed off{" "}
-                <FormattedDateTime iso={latestSignoff.signed_off_at} />
+                <FormattedDateTime value={latestSignoff.signed_off_at} />
               </span>
             </>
           ) : (
@@ -472,6 +532,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
           onOpenChange={(open) => !open && setSignoffOpen(false)}
           onSigned={() => {
             void qc.invalidateQueries({ queryKey: venueSignoffsKey(venue.id) });
+            void qc.invalidateQueries({ queryKey: VENUES_BASELINE_BATCH_KEY });
             onInvalidate();
             setSignoffOpen(false);
           }}
@@ -654,31 +715,61 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
 // ─── Sign-off history ────────────────────────────────────────────────────────
 
 function SignoffHistory({ signoffs }: { signoffs: VenueSafetyBaselineSignoff[] }) {
+  const { data: staff = [] } = useStaffRegistry();
+  const staffById = useMemo(
+    () => new Map(staff.map((s) => [s.id, s.fullName])),
+    [staff],
+  );
+
   if (signoffs.length === 0) {
     return (
       <p className="py-8 text-center text-sm text-muted-foreground">
-        No baseline sign-offs recorded yet.
+        No baseline sign-offs recorded yet. Use the &quot;Sign baseline&quot; button above.
       </p>
     );
   }
+
   return (
-    <div className="divide-y p-0">
-      {signoffs.map((s) => (
-        <div key={s.id} className="px-4 py-3 space-y-0.5">
-          <div className="flex items-center gap-2">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600 shrink-0" />
-            <span className="text-sm font-medium">
-              <FormattedDateTime iso={s.signed_off_at} />
-            </span>
-          </div>
-          <p className="text-xs text-muted-foreground ml-5.5">
-            Evidence: {s.evidence_ref}
-          </p>
-          {s.notes && (
-            <p className="text-xs text-muted-foreground ml-5.5">{s.notes}</p>
-          )}
-        </div>
-      ))}
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="border-b bg-muted/30 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            <th className="px-4 py-2.5 text-left whitespace-nowrap">#</th>
+            <th className="px-4 py-2.5 text-left whitespace-nowrap">Date signed off</th>
+            <th className="px-4 py-2.5 text-left whitespace-nowrap">Manager</th>
+            <th className="px-4 py-2.5 text-left whitespace-nowrap">Evidence ref</th>
+            <th className="px-4 py-2.5 text-left">Notes</th>
+          </tr>
+        </thead>
+        <tbody className="divide-y">
+          {signoffs.map((s, idx) => {
+            const managerName = s.signed_off_by_staff_id
+              ? (staffById.get(s.signed_off_by_staff_id) ?? "Unknown")
+              : "—";
+            const rowNum = signoffs.length - idx; // most recent = highest number
+            return (
+              <tr key={s.id} className="hover:bg-muted/20">
+                <td className="px-4 py-3 text-muted-foreground tabular-nums">{rowNum}</td>
+                <td className="px-4 py-3 whitespace-nowrap">
+                  <div className="flex items-center gap-1.5">
+                    <CheckCircle2 className="h-3.5 w-3.5 shrink-0 text-emerald-600" />
+                    <FormattedDateTime value={s.signed_off_at} />
+                  </div>
+                </td>
+                <td className="px-4 py-3 whitespace-nowrap font-medium">{managerName}</td>
+                <td className="px-4 py-3 max-w-[180px]">
+                  <span className="block truncate text-muted-foreground" title={s.evidence_ref}>
+                    {s.evidence_ref}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-muted-foreground">
+                  {s.notes ?? <span className="text-muted-foreground/50">—</span>}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
     </div>
   );
 }

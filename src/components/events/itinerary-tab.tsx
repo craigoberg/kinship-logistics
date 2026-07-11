@@ -39,6 +39,7 @@ import {
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
 import { cn } from "@/lib/utils";
 import { listVenues } from "@/lib/api/venues";
+import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 import {
   deleteEventVenueStop,
   listEventVenueStops,
@@ -158,9 +159,12 @@ function DayItinerary({ event, date, stops, venues, onInvalidate }: DayItinerary
   const [deleteTarget, setDeleteTarget] = useState<EventVenueStop | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reordering, setReordering] = useState(false);
+  const gate = useVenueGate();
 
   const handleAdd = async () => {
     if (!addVenueId) return;
+    const ok = await gate.checkVenue(addVenueId);
+    if (!ok) return; // gate.blockedMessage set — dialog renders below
     setAdding(true);
     try {
       await upsertEventVenueStop({
@@ -249,12 +253,15 @@ function DayItinerary({ event, date, stops, venues, onInvalidate }: DayItinerary
             </Select>
             <Button
               size="sm"
-              disabled={!addVenueId || adding}
+              disabled={!addVenueId || adding || gate.checking}
               onClick={handleAdd}
             >
-              {adding ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
+              {adding || gate.checking ? <Loader2 className="h-4 w-4 animate-spin" /> : "Add"}
             </Button>
           </div>
+          {gate.warningMessage && (
+            <p className="text-xs text-amber-600">{gate.warningMessage}</p>
+          )}
           <Input
             value={addLabel}
             onChange={(e) => setAddLabel(e.target.value)}
@@ -348,6 +355,22 @@ function DayItinerary({ event, date, stops, venues, onInvalidate }: DayItinerary
           </PointerSortableList>
         </div>
       )}
+
+      {/* Compliance block dialog */}
+      <AlertDialog
+        open={!!gate.blockedMessage}
+        onOpenChange={(o) => !o && gate.clearMessages()}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Venue cannot be used</AlertDialogTitle>
+            <AlertDialogDescription>{gate.blockedMessage}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel onClick={gate.clearMessages}>OK</AlertDialogCancel>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteTarget} onOpenChange={(o) => !o && setDeleteTarget(null)}>

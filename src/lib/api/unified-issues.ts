@@ -9,6 +9,7 @@ import { resolveStaffIdWithFallback } from "@/lib/data-store";
 
 export type UnifiedIssueSource =
   | "day_centre"
+  | "event"
   | "incident"
   | "escalation"
   | "renewal";
@@ -33,6 +34,7 @@ export interface UnifiedIssue {
 
 const SOURCE_LABELS: Record<UnifiedIssueSource, string> = {
   day_centre: "Day Centre",
+  event: "Trip Day",
   incident: "Incident",
   escalation: "Escalation",
   renewal: "Renewal",
@@ -63,11 +65,18 @@ export type UnifiedIssueTab = "active" | "awaiting";
  *                    `deferred` or `awaiting_external` (escalated to
  *                    Council). Renewals + escalations are omitted from
  *                    this tab — they have their own resolution surfaces.
+ *
+ * deferRewarnDays (default 7) — how many days before a deferral deadline
+ *   expires that the issue resurfaces on the Active tab. Issues with a
+ *   live deferral more than `deferRewarnDays` in the future are excluded
+ *   from Active ("No News Is Good News"). Once within the window they
+ *   reappear so managers are notified before the deadline lapses.
  */
 export async function listOpenUnifiedIssues(
-  options: { tab?: UnifiedIssueTab } = {},
+  options: { tab?: UnifiedIssueTab; deferRewarnDays?: number } = {},
 ): Promise<UnifiedIssue[]> {
   const tab: UnifiedIssueTab = options.tab ?? "active";
+  const deferRewarnMs = (options.deferRewarnDays ?? 7) * 86_400_000;
 
   // Latest note per (source, source_row_id), used to detect "currently
   // deferred" issues for any source (incident / escalation / renewal /
@@ -88,11 +97,14 @@ export async function listOpenUnifiedIssues(
     for (const r of (data ?? []) as Array<Record<string, unknown>>) {
       const sev = (r.severity as UnifiedSeverity) ?? null;
       const status = String(r.status ?? "open");
+      const isEventRow = !!(r.event_id as string | null);
+      const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
+      const baseLabel = isEventRow ? "Trip Day" : "Day Centre";
       const label =
-        status === "deferred" ? "Day Centre · Deferred" : "Day Centre · Council";
+        status === "deferred" ? `${baseLabel} · Deferred` : `${baseLabel} · Council`;
       out.push({
-        key: `day_centre:${r.id as string}`,
-        source: "day_centre",
+        key: `${source}:${r.id as string}`,
+        source,
         sourceLabel: label,
         category: sev ? sev.toUpperCase() : "NOTE",
         subCategory:
@@ -100,11 +112,12 @@ export async function listOpenUnifiedIssues(
             ? (r.council_severity as string | null) ?? "Council"
             : (r.deferred_until as string | null) ?? "Deferred",
         severity: sev,
-        title: String(r.issue_description ?? "Day Centre anomaly").slice(0, 120),
+        title: String(r.issue_description ?? (isEventRow ? "Trip Day venue issue" : "Day Centre anomaly")).slice(0, 120),
         description: String(r.issue_description ?? ""),
         status,
         createdAt: String(r.created_at ?? new Date().toISOString()),
         sourceRowId: String(r.id),
+        eventId: (r.event_id as string | null) ?? null,
         raw: r,
       });
     }
@@ -122,10 +135,13 @@ export async function listOpenUnifiedIssues(
       .select("*")
       .eq("status", "open")
       .order("created_at", { ascending: false }),
+    // §14 routing: only human_operational incidents belong in Human Incidents tab.
+    // mechanical / asset incidents are tracked in Maintenance & Repairs via maintenance_items.
     supabase
       .from("operational_incidents")
       .select("*")
       .eq("status", "pending")
+      .eq("incident_type", "human_operational")
       .order("created_at", { ascending: false }),
     // Escalations: keep visible across the three live phases so an
     // approved-but-awaiting-operator-acknowledgment row does not silently
@@ -142,26 +158,32 @@ export async function listOpenUnifiedIssues(
 
   const out: UnifiedIssue[] = [];
 
-  if (!siteIssuesRes.error) {
-    for (const r of (siteIssuesRes.data ?? []) as Array<Record<string, unknown>>) {
-      const sev = (r.severity as UnifiedSeverity) ?? null;
-      out.push({
-        key: `day_centre:${r.id as string}`,
-        source: "day_centre",
-        sourceLabel: SOURCE_LABELS.day_centre,
-        category: sev ? sev.toUpperCase() : "NOTE",
-        subCategory: (r.owner as string | null) ?? null,
-        severity: sev,
-        title: String(r.issue_description ?? "Day Centre anomaly").slice(0, 120),
-        description: String(r.issue_description ?? ""),
-        status: String(r.status ?? "open"),
-        createdAt: String(r.created_at ?? new Date().toISOString()),
-        sourceRowId: String(r.id),
-        raw: r,
-      });
-    }
-  } else {
-    console.warn("[unified-issues] site_issues_register failed", siteIssuesRes.error);
+  // Throw so React Query surfaces the error in the UI (isError=true).
+  if (siteIssuesRes.error) {
+    throw new Error(
+      `site_issues_register: ${siteIssuesRes.error.message ?? siteIssuesRes.error.code ?? "query failed"}`,
+    );
+  }
+  for (const r of (siteIssuesRes.data ?? []) as Array<Record<string, unknown>>) {
+    const sev = (r.severity as UnifiedSeverity) ?? null;
+    const isEventRow = !!(r.event_id as string | null);
+    const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
+    const fallbackTitle = isEventRow ? "Trip Day venue issue" : "Day Centre anomaly";
+    out.push({
+      key: `${source}:${r.id as string}`,
+      source,
+      sourceLabel: SOURCE_LABELS[source],
+      category: sev ? sev.toUpperCase() : "NOTE",
+      subCategory: (r.owner as string | null) ?? null,
+      severity: sev,
+      title: String(r.issue_description ?? fallbackTitle).slice(0, 120),
+      description: String(r.issue_description ?? ""),
+      status: String(r.status ?? "open"),
+      createdAt: String(r.created_at ?? new Date().toISOString()),
+      sourceRowId: String(r.id),
+      eventId: (r.event_id as string | null) ?? null,
+      raw: r,
+    });
   }
 
   if (!incidentsRes.error) {
@@ -221,11 +243,18 @@ export async function listOpenUnifiedIssues(
 
 
 
-  // Filter out any issue whose latest timeline note is a still-live defer.
+  // Filter out deferred issues — but only when the deferral deadline is
+  // further away than the rewarn window. Once inside the window the issue
+  // resurfaces on the Active tab so managers see it before the defer lapses.
+  const now = Date.now();
   const filtered = out.filter((i) => {
     const k = `${i.source}:${i.sourceRowId}`;
     const d = deferState.get(k);
-    return !(d && d.deferredUntil.getTime() > Date.now());
+    if (!d) return true; // not deferred — always show
+    const msUntilDefer = d.deferredUntil.getTime() - now;
+    if (msUntilDefer <= 0) return true; // defer has already lapsed — show
+    // Hidden only while the deadline is comfortably in the future.
+    return msUntilDefer <= deferRewarnMs;
   });
 
   return filtered;
@@ -293,7 +322,8 @@ async function fetchDeferredNonDayCentreIssues(
   for (const [key, d] of deferState.entries()) {
     if (d.deferredUntil.getTime() <= now) continue;
     const [src, id] = key.split(":", 2);
-    if (src === "day_centre") continue; // handled via site_issues_register.status
+    // site_issues_register-backed sources are handled via the status column — skip
+    if (src === "day_centre" || src === "event") continue;
     targets.push({ source: src as UnifiedIssueSource, id, until: d.deferredUntil });
   }
   if (targets.length === 0) return [];
@@ -419,7 +449,7 @@ export async function resolveUnifiedIssue(
   //    source flip races or fails.
   await writeToLedger({
     staff_id: staffId,
-    category: issue.source === "day_centre" ? "CENTRE" : "VEHICLE",
+    category: (issue.source === "day_centre" || issue.source === "event") ? "CENTRE" : "VEHICLE",
     severity: severityToLedger(issue.severity),
     action_type: "governance.issue_resolved",
     gps_lat: gps?.lat ?? null,
@@ -437,7 +467,7 @@ export async function resolveUnifiedIssue(
   });
 
   // 2) Flip the source row.
-  if (issue.source === "day_centre") {
+  if (issue.source === "day_centre" || issue.source === "event") {
     const { error } = await supabase
       .from("site_issues_register")
       .update({ status: "resolved", resolved_at: nowIso })
@@ -689,10 +719,10 @@ export async function deferUnifiedIssue(
     metadata: { deferred_until: args.untilIso },
   });
 
-  // 2) For day_centre rows, also flip the row off the active list.
-  //    Other source tables don't carry a 'deferred' status today — the
-  //    timeline note is the audit trail.
-  if (issue.source === "day_centre") {
+  // 2) For site_issues_register rows (day_centre + event), also flip the row.
+  //    Other source tables don't carry a 'deferred' status — timeline note is
+  //    the audit trail.
+  if (issue.source === "day_centre" || issue.source === "event") {
     const { error: writeErr } = await supabase
       .from("site_issues_register")
       .update({
@@ -713,7 +743,7 @@ export async function deferUnifiedIssue(
   const gps = await tryGetGps();
   await writeToLedger({
     staff_id: staffId,
-    category: issue.source === "day_centre" ? "CENTRE" : "VEHICLE",
+    category: (issue.source === "day_centre" || issue.source === "event") ? "CENTRE" : "VEHICLE",
     severity: severityToLedger(issue.severity),
     action_type: "governance.issue_deferred",
     gps_lat: gps?.lat ?? null,
@@ -750,7 +780,7 @@ export async function escalateUnifiedIssueToCouncil(
     metadata: { council_severity: args.councilSeverity },
   });
 
-  if (issue.source === "day_centre") {
+  if (issue.source === "day_centre" || issue.source === "event") {
     const { error: writeErr } = await supabase
       .from("site_issues_register")
       .update({
@@ -767,7 +797,7 @@ export async function escalateUnifiedIssueToCouncil(
   const gps = await tryGetGps();
   await writeToLedger({
     staff_id: staffId,
-    category: issue.source === "day_centre" ? "CENTRE" : "VEHICLE",
+    category: (issue.source === "day_centre" || issue.source === "event") ? "CENTRE" : "VEHICLE",
     severity: severityToLedger(issue.severity),
     action_type: "governance.council_escalated",
     gps_lat: gps?.lat ?? null,

@@ -13,6 +13,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { DatePicker } from "@/components/ui/date-picker";
 import { LookupSelect } from "@/components/lookups/lookup-select";
 import { useUpdateEvent, useLookupParameters } from "@/hooks/use-supabase-data";
@@ -22,6 +31,7 @@ import { listVenues } from "@/lib/api/venues";
 import { ensureEventItineraryStops, inferEventKind, seedEventDaySessions } from "@/lib/api/event-outing";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
 import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 
 interface Props {
   event: EventManifest;
@@ -46,6 +56,7 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
   const [ticketPrice, setTicketPrice] = useState(event.ticketPrice.toFixed(2));
   const [description, setDescription] = useState(event.description ?? "");
   const mutation = useUpdateEvent();
+  const gate = useVenueGate();
   const { data: eventTypes = [] } = useLookupParameters("event_types");
   const { data: venues = [] } = useQuery({
     queryKey: ["venues", "active"],
@@ -207,13 +218,15 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
             </Label>
             <Select
               value={primaryVenueId ?? ""}
-              onValueChange={(v) => {
+              onValueChange={async (v) => {
+                const ok = await gate.checkVenue(v || null);
+                if (!ok) return; // blocked — gate.blockedMessage set
                 setPrimaryVenueId(v || null);
                 const picked = venues.find((x) => x.id === v);
                 if (picked) setVenue(picked.name);
               }}
             >
-              <SelectTrigger>
+              <SelectTrigger disabled={gate.checking}>
                 <SelectValue placeholder="Select from registry…" />
               </SelectTrigger>
               <SelectContent>
@@ -224,8 +237,27 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
                 ))}
               </SelectContent>
             </Select>
+            {gate.warningMessage && (
+              <p className="text-xs text-amber-600">{gate.warningMessage}</p>
+            )}
           </div>
         )}
+
+        {/* Compliance block dialog */}
+        <AlertDialog
+          open={!!gate.blockedMessage}
+          onOpenChange={(o) => !o && gate.clearMessages()}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Venue cannot be used</AlertDialogTitle>
+              <AlertDialogDescription>{gate.blockedMessage}</AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogAction onClick={gate.clearMessages}>OK</AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
 
         <div className="space-y-2">
           <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

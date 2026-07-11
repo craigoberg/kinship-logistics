@@ -12,7 +12,10 @@ import { cn } from "@/lib/utils";
 
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
 import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
-import { VerbalAuthOverrideDialog } from "@/components/issue-engine/verbal-auth-override-dialog";
+import {
+  VerbalConsultationDialog,
+  formatVerbalWorkaroundDescription,
+} from "@/components/issue-engine/verbal-consultation-dialog";
 import { supabase } from "@/integrations/supabase/client";
 
 import type {
@@ -25,11 +28,15 @@ import {
   DEFAULT_STAFF_UUID,
   getStaffId,
   insertAssetClearanceWithItems,
+  resolveStaffIdWithFallback,
+  resolveStaffDisplayName,
   submitDriverAuthorization,
 } from "@/lib/data-store";
+import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
+import { useQueryClient } from "@tanstack/react-query";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 // RedHandshakeWaitingPanel removed — single-user verbal flow replaces the
-// multi-device handshake; RED issues now route through VerbalAuthOverrideDialog.
+// multi-device handshake; RED issues now route through VerbalConsultationDialog.
 
 const COMFORT_DECLARATION_TEXT =
   "I confirm that all issues have been cleanly recorded, appropriate workarounds are deployed, and I am personally comfortable, oriented, and acting in accordance with my signed Organization Onboarding Guidelines to operate safely today.";
@@ -38,7 +45,7 @@ const PRE_TRIP_TAG = "[Pre-trip]";
 
 /**
  * GUARDRAILS §3: "red-verbal-cleared" is a local sentinel marking a RED issue
- * that has been formally authorised via VerbalAuthOverrideDialog (manager PIN
+ * that has been formally authorised via VerbalConsultationDialog (operator PIN
  * verified, ledger receipt written). It is never persisted — it only prevents
  * `hasRed` from blocking the final submit after the workaround is on record.
  */
@@ -108,6 +115,7 @@ export function IssueAccumulatorPanel({
   onCleared,
   onBack,
 }: Props) {
+  const queryClient = useQueryClient();
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
@@ -116,7 +124,7 @@ export function IssueAccumulatorPanel({
   const [pinError, setPinError] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   // Pending RED draft awaiting verbal authorization. When non-null, the
-  // VerbalAuthOverrideDialog is open and gates the next ledger + incident
+  // VerbalConsultationDialog is open and gates the next ledger + incident
   // write.
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
@@ -259,6 +267,36 @@ export function IssueAccumulatorPanel({
       toast.success("Declaration locked in", {
         description: `${asset.name} cleared for service.`,
       });
+
+      // ALL bus/vehicle pre-trip issues land in Maintenance & Repairs (§14.2).
+      // GREEN = low-priority note (dented panel, dirty windows); still needs follow-up.
+      if (issues.length > 0) {
+        (async () => {
+          try {
+            const staffId = getStaffId() || (await resolveStaffIdWithFallback());
+            const reporterName = resolveStaffDisplayName(staffId);
+            const locationLabel = `${asset.name} (${asset.regoPlate}) — Pre-trip ${dateStr}`;
+            for (const issue of issues) {
+              const sev =
+                issue.severity === "red-verbal-cleared"
+                  ? "red"
+                  : (issue.severity as "green" | "yellow" | "red");
+              await createMaintenanceItem({
+                title: issue.text.slice(0, 120),
+                description: issue.text,
+                severity: sev,
+                source: "vehicle_issue",
+                locationLabel,
+                reportedBy: reporterName,
+              });
+            }
+            queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
+          } catch (maintErr) {
+            console.error("[IssueAccumulatorPanel] maintenance_items mirror failed", maintErr);
+          }
+        })();
+      }
+
       onCleared();
     } catch (err) {
       const msg = (err as Error).message;
@@ -411,7 +449,7 @@ export function IssueAccumulatorPanel({
 
       {/* Reentrant unified Issue/Escalation engine — pre-trip context.
           Green/Yellow → accumulator + operational_incidents write-through.
-          Red          → open VerbalAuthOverrideDialog (single-user verbal
+          Red          → open VerbalConsultationDialog (remote verbal
                          consultation) and, on accept, write a sev1
                          operational_incidents row with the canonical
                          "[VERBAL WORKAROUND]" prefix. */}
@@ -472,7 +510,7 @@ export function IssueAccumulatorPanel({
       />
 
       {/* Canonical RED path — Verbal Consultation & Log */}
-      <VerbalAuthOverrideDialog
+      <VerbalConsultationDialog
         open={!!verbalPending}
         onOpenChange={(o) => {
           if (!o) setVerbalPending(null);
@@ -480,12 +518,15 @@ export function IssueAccumulatorPanel({
         ledgerCategory="VEHICLE"
         subjectLabel={`${asset.name} · ${asset.regoPlate}`}
         sourceId={null}
-        actionType="RED_VERBAL_WORKAROUND"
+        actionType="RED_VERBAL_CONSULTATION"
         titleOverride="RED Verbal Consultation & Log"
-        descriptionOverride="A RED anomaly was identified on the walkaround. Document the manager you spoke with offline, the agreed safety workaround, and sign with your operator PIN. This ticket lands in the Governance Hub immediately as 'Open — Operating via Verbal Workaround' and your local workspace unblocks straight away."
-        onAccepted={async ({ managerName, reason }) => {
+        descriptionOverride="A RED anomaly was identified on the walkaround. Select the manager you contacted (or attempted to reach), record the outcome, and sign with your operator PIN. This ticket lands in the Governance Hub immediately; the manager confirms later."
+        onAccepted={async (payload) => {
           if (!verbalPending) return;
-          const prefixed = `[VERBAL WORKAROUND] ${verbalPending.description} — Authorising Manager: ${managerName}. Plan: ${reason}`;
+          const prefixed = formatVerbalWorkaroundDescription(
+            verbalPending.description,
+            payload,
+          );
           const localId = freshId();
           // Use "red-verbal-cleared" sentinel so hasRed stays false and the
           // final submit unblocks immediately (GUARDRAILS §3 — "local module

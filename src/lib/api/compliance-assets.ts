@@ -287,6 +287,80 @@ export function isComplianceAssetLiveDeferred(
   return !!(d && d.deferredUntil.getTime() > Date.now());
 }
 
+/**
+ * Returns how many days until a date string (ISO) from today (floor).
+ * Negative when the date is in the past.
+ */
+function daysUntil(isoDate: string | null | undefined): number {
+  if (!isoDate) return Infinity;
+  const expiry = new Date(isoDate);
+  expiry.setHours(0, 0, 0, 0);
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return Math.floor((expiry.getTime() - today.getTime()) / 86_400_000);
+}
+
+/**
+ * Determines whether a compliance asset should appear on the Active tab of
+ * the Governance Hub ("No News Is Good News" filter).
+ *
+ * Visible on Active when ANY of:
+ *   1. RYGE is red or yellow (already approaching / overdue).
+ *   2. Not deferred, and expiry is within `visibilityDays` (green but enter
+ *      the preparation window — show so managers can plan).
+ *   3. Live-deferred, but deferral deadline is within `deferRewarnDays`
+ *      (deadline approaching — return to Active so it is not forgotten).
+ *
+ * Hidden from Active when:
+ *   - Not deferred, green, AND expiry is more than `visibilityDays` away
+ *     (nothing to do yet).
+ *   - Live-deferred, AND deferral deadline is more than `deferRewarnDays`
+ *     away (safely parked — stays on the Deferred tab only).
+ */
+export function isComplianceAssetActionable(
+  asset: ComplianceAsset,
+  deferMap: Map<string, LiveComplianceDefer>,
+  params: {
+    warningDays: { default: number; shortCycle: number };
+    visibilityDays: number;
+    deferRewarnDays: number;
+  },
+): boolean {
+  const defer = deferMap.get(asset.id);
+  const isLiveDeferred = !!(defer && defer.deferredUntil.getTime() > Date.now());
+
+  if (isLiveDeferred) {
+    // Show on Active only when the deferral deadline is imminent.
+    const daysUntilDefer = daysUntil(defer!.deferredUntil.toISOString());
+    return daysUntilDefer <= params.deferRewarnDays;
+  }
+
+  // Not deferred — show when RYGE is not green, or within visibility window.
+  const ryge = computeRyge(asset, params.warningDays);
+  if (ryge === "red" || ryge === "yellow") return true;
+
+  // Green: show only within the visibility window.
+  return daysUntil(asset.expiry_date) <= params.visibilityDays;
+}
+
+/**
+ * Determines whether a compliance asset should appear on the Deferred tab.
+ * An asset is on the Deferred tab only when:
+ *   - it is live-deferred, AND
+ *   - the deferral deadline is NOT yet within the rewarn window
+ *     (once inside rewarn window it moves back to the Active tab instead).
+ */
+export function isComplianceAssetParked(
+  asset: ComplianceAsset,
+  deferMap: Map<string, LiveComplianceDefer>,
+  deferRewarnDays: number,
+): boolean {
+  const defer = deferMap.get(asset.id);
+  if (!defer || defer.deferredUntil.getTime() <= Date.now()) return false;
+  const daysUntilDefer = daysUntil(defer.deferredUntil.toISOString());
+  return daysUntilDefer > deferRewarnDays;
+}
+
 /** Append a `[RESOLVED]` line after domain completion from the Manage shell. */
 export async function appendComplianceAssetResolveNote(
   assetId: string,

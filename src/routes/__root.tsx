@@ -149,7 +149,7 @@ function RoleAwareGuardians() {
     typeof window !== "undefined" ? getActiveUserRole() : null;
 
   // Multi-device RED interceptor removed — every RED now flows through the
-  // canonical VerbalAuthOverrideDialog locally. Drivers keep the route
+  // canonical VerbalConsultationDialog locally. Drivers keep the route
   // rehydration guardian; everyone keeps the global incident intake drawer.
   return (
     <>

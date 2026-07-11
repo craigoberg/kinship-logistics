@@ -331,23 +331,38 @@ export function ManageComplianceAssetDialog({
   );
 
   const contextCard = (
-    <div className="space-y-3 rounded-md border bg-muted/30 p-3 text-sm">
+    <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
-        <Badge variant="secondary">{asset.category}</Badge>
-        <span className="font-mono text-xs">{asset.type}</span>
         {rygeBadge(asset, warningDays)}
+        <Badge variant="secondary">{asset.category}</Badge>
+        <span className="font-mono text-xs text-muted-foreground">{asset.type}</span>
       </div>
-      <div className="font-medium">{asset.name}</div>
+      <p className="font-medium leading-snug">{asset.name}</p>
       {asset.description && (
         <p className="text-xs text-muted-foreground whitespace-pre-wrap">
           {asset.description}
         </p>
       )}
-      {asset.expiry_date && (
-        <p className="text-xs text-muted-foreground">
-          Current expiry: <FormattedDate value={asset.expiry_date} />
-        </p>
-      )}
+      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        {asset.expiry_date && (
+          <>
+            <span className="font-medium text-foreground/70">Expires</span>
+            <span><FormattedDate value={asset.expiry_date} /></span>
+          </>
+        )}
+        {(asset as Record<string, unknown>).associated_entity_name && (
+          <>
+            <span className="font-medium text-foreground/70">Entity</span>
+            <span>{String((asset as Record<string, unknown>).associated_entity_name)}</span>
+          </>
+        )}
+        {asset.category && (
+          <>
+            <span className="font-medium text-foreground/70">Category</span>
+            <span>{asset.category}</span>
+          </>
+        )}
+      </div>
     </div>
   );
 

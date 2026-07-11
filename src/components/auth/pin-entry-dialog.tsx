@@ -164,7 +164,7 @@ export function PinEntryDialog({
       <Sheet open={open} onOpenChange={(o) => !isBusy && onOpenChange(o)}>
         <SheetContent
           side="bottom"
-          className="rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]"
+          className="z-[110] rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]"
         >
           <SheetHeader className="sr-only">
             <SheetTitle>{title}</SheetTitle>
@@ -178,7 +178,7 @@ export function PinEntryDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !isBusy && onOpenChange(o)}>
-      <DialogContent className="max-w-sm">
+      <DialogContent className="z-[110] max-w-sm">
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}
