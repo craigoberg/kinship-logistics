@@ -12,12 +12,13 @@ import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
 import { CentreOperatingHoursWorkspace } from "@/components/admin/centre-operating-hours-workspace";
 import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-workspace";
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
+import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
 
 export const Route = createFileRoute("/admin")({
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "fleet" | "venues" | "parameters" | "hours" | "access";
+type AdminTab = "lookups" | "fleet" | "venues" | "parameters" | "hours" | "access" | "backup";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
@@ -28,7 +29,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet vehicles, venues, lookup parameters, tunable system thresholds, and role access.
+          Manage fleet vehicles, venues, lookup parameters, tunable system thresholds, role access, and database backups.
         </p>
       </header>
 
@@ -40,6 +41,7 @@ function AdminPage() {
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
           <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
           <TabsTrigger value="access">Menu Access</TabsTrigger>
+          <TabsTrigger value="backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
           <AdminLookupWorkspace />
@@ -58,6 +60,9 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="access">
           <MenuAccessMatrix />
+        </TabsContent>
+        <TabsContent value="backup">
+          <BackupRestoreWorkspace />
         </TabsContent>
       </Tabs>
     </div>

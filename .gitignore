@@ -16,6 +16,11 @@ dist-ssr
 .nitro
 *.local
 
+# Secrets — never commit real credentials (especially on a public repo)
+.env
+.env.*
+!.env.example
+
 # Wrangler / Cloudflare
 .wrangler/
 .dev.vars

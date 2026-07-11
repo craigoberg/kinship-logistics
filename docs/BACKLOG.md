@@ -79,6 +79,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 |----|------|-------|--------|
 | BL-020 | `event_financial_ledger.vendor_name` | Live DB has **no** column; app uses description prefix. Optional migration: `docs/sql/2026-07-06_event_financial_ledger_vendor_name.sql` | **deferred** |
 | BL-021 | Venue registry & outing SQL phases | Apply / verify: `2026-07-16_venue_registry_*`, `2026-07-04_event_attendance_log_phase8.sql` on all environments | **ready** |
+| BL-057 | **Admin full DB backup / restore** | **Implemented 2026-07-11 (UI + server routes).** Admin → Backup & Restore tab. Dynamic `list_backup_tables` RPC scan; filename `yyyymmdd - Yada Connect - Full Backup.json`. Restore truncates public tables then reloads; **preserve local login** switch skips `staff_registry` (DEV dummy PINs safe on PROD→DEV restore). Requires: apply `docs/sql/2026-07-11_backup_restore_rpcs.sql`, add `SUPABASE_SERVICE_ROLE_KEY` to server `.env`. Future RBAC (`auth.users`, `role_menu_access`) → extend `AUTH_PROTECTED_TABLES` when BL-002 lands. | **done** |
 | BL-022 | `participant_financial_ledger` event linkage | No `event_id` FK — payments tagged via `[event:<uuid>]` in description. Documented in code; do not add `.eq("event_id")` queries. | **done** (2026-07-06) |
 
 ---
