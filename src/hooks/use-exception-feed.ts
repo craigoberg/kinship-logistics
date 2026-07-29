@@ -28,6 +28,43 @@ import {
   useOperationalTodayIso,
 } from "@/lib/operational-clock";
 
+/** PostgREST GET URLs blow up past ~100 UUIDs in an `in.()` filter. */
+const HUB_NOTE_ID_CHUNK = 80;
+
+/**
+ * Latest hub_issue_notes.stamped_at per source_row_id for day_centre|event rows.
+ * Chunks the id list so Dashboard tiles don't 400 on long URLs.
+ */
+async function fetchLatestHubNoteTimes(
+  ids: string[],
+  label: string,
+): Promise<Map<string, string>> {
+  const latestNote = new Map<string, string>();
+  if (ids.length === 0) return latestNote;
+
+  for (let i = 0; i < ids.length; i += HUB_NOTE_ID_CHUNK) {
+    const chunk = ids.slice(i, i + HUB_NOTE_ID_CHUNK);
+    const { data: notes, error: notesErr } = await supabase
+      .from("hub_issue_notes")
+      .select("source_row_id, stamped_at")
+      .in("source", ["day_centre", "event"])
+      .in("source_row_id", chunk)
+      .order("stamped_at", { ascending: false });
+    if (notesErr) {
+      console.warn(`[exception-feed] hub notes for ${label} failed`, notesErr);
+      continue;
+    }
+    for (const n of (notes ?? []) as Array<{
+      source_row_id: string;
+      stamped_at: string;
+    }>) {
+      if (!latestNote.has(n.source_row_id)) {
+        latestNote.set(n.source_row_id, n.stamped_at);
+      }
+    }
+  }
+  return latestNote;
+}
 // Presence-gated medication alerts: dashboard must NOT surface a med
 // exception for a participant who isn't physically in our custody. We
 // load today's client_attendance_log once and only yield exceptions for
@@ -771,22 +808,7 @@ async function fetchTodayOpenRedIssues(warnMs: number): Promise<ActiveRedInciden
   if (!data || data.length === 0) return [];
 
   const ids = (data as Array<{ id: string }>).map((r) => r.id);
-
-  // Latest hub note per issue (site_issues_register → day_centre | event)
-  const { data: notes, error: notesErr } = await supabase
-    .from("hub_issue_notes")
-    .select("source_row_id, stamped_at")
-    .in("source", ["day_centre", "event"])
-    .in("source_row_id", ids)
-    .order("stamped_at", { ascending: false });
-  if (notesErr) {
-    console.warn("[exception-feed] hub notes for active RED failed", notesErr);
-  }
-
-  const latestNote = new Map<string, string>();
-  for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
-    if (!latestNote.has(n.source_row_id)) latestNote.set(n.source_row_id, n.stamped_at);
-  }
+  const latestNote = await fetchLatestHubNoteTimes(ids, "active RED");
 
   const now = operationalNowMs();
   return (data as Array<{ id: string; issue_description: string; created_at: string }>).map((r) => {
@@ -844,22 +866,7 @@ async function fetchStaleHubIssues(
   if (!data || data.length === 0) return [];
 
   const ids = (data as Array<{ id: string }>).map((r) => r.id);
-
-  // Latest hub note per issue (site_issues_register → day_centre | event)
-  const { data: notes, error: notesErr } = await supabase
-    .from("hub_issue_notes")
-    .select("source_row_id, stamped_at")
-    .in("source", ["day_centre", "event"])
-    .in("source_row_id", ids)
-    .order("stamped_at", { ascending: false });
-  if (notesErr) {
-    console.warn("[exception-feed] hub notes for stale Hub failed", notesErr);
-  }
-
-  const latestNote = new Map<string, string>();
-  for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
-    if (!latestNote.has(n.source_row_id)) latestNote.set(n.source_row_id, n.stamped_at);
-  }
+  const latestNote = await fetchLatestHubNoteTimes(ids, "stale Hub");
 
   const now = operationalNowMs();
   const out: HubHumanIncidentRow[] = [];
