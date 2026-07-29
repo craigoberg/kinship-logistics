@@ -47,3 +47,15 @@ function computeIsTestBuild(): boolean {
 }
 
 export const IS_TEST_BUILD: boolean = computeIsTestBuild();
+
+/** Badge for the amber SIM bar — from `VITE_APP_LANE` (public build flag). */
+export type AppLaneBadge = "DEV" | "TEST";
+
+export function getAppLaneBadge(): AppLaneBadge {
+  const lane = String(import.meta.env.VITE_APP_LANE ?? "").toLowerCase();
+  if (lane === "test") return "TEST";
+  if (lane === "dev") return "DEV";
+  // Local Vite without an explicit lane still reads as DEV workshop.
+  if (import.meta.env.DEV) return "DEV";
+  return "DEV";
+}

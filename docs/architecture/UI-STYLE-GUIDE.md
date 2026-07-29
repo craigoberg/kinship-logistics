@@ -96,6 +96,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Manifest odometer soft-warn** | **Defined** | Caution callout (`CAUTION_CALLOUT_*`) + Accept checkbox / Use suggested | Init start vs last; leg logged vs GPS; Close Run end vs start+Σ | Soft only — no Hub issue. Thresholds `manifest.odo_*`. Fleet Correct odometer = Admin number + justification (BL-096) |
 | **Manifest offline / pending sync banner** | **Defined** | `ManifestOfflineBanner` | Active `/manifest` run | Amber when offline; blue while syncing; Retry via `FieldActionButton`; Close Run blocked until outbox empty (BL-082) |
 | **DEV/TEST simulate offline** | **Defined** | `Switch` on same amber SIM row as clock (`DevOperationalClockBar`) | `IS_TEST_BUILD` only (DEV + TEST) | Forces `isAppOnline()` false for Manifest outbox QA — not a production control (BL-082) |
+| **DEV/TEST lane badge on SIM bar** | **Defined** | Centre label `DEV` / `TEST` from `getAppLaneBadge()` (`VITE_APP_LANE`) | Amber SIM row only | Distinguishes Cursor/DEV host vs Vercel TEST; not a security control |
 | **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. |
 | **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. |
 | **Event Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Event Deliver Check-In | Was BottomSheet-on-Check-In (BL-013). Picker still Bus (Rx) vs Self; finalize is the wide row. |
@@ -475,6 +476,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 | 2026-07-28 | Day session login | Email + password then PIN on `/auth` — BL-099 thin gate (not full RBAC) |
 | 2026-07-27 | Infectious home-safe (A.1) | Centre + Trip entry; in-care → disposition taps + handover + Manager PIN (outcome not route); not-in-care → exclude only — BL-084 |
 | 2026-07-27 | Infectious exclusion / clear to return | Day Centre + Hub BottomSheets; Manager PIN; Health & Safety Hub area; Band 2 tile — BL-084 Phase A |
+| 2026-07-29 | DEV/TEST lane badge | Centre `DEV`/`TEST` on amber SIM bar from `VITE_APP_LANE` |
 | 2026-07-27 | DEV/TEST simulate offline | Same amber SIM row as clock (single strip) — BL-082 QA |
 | 2026-07-26 | DEV simulate offline | `Switch` on DEV bar → `simulated-offline.ts` — BL-082 QA |
 | 2026-07-26 | Manifest offline banner | `ManifestOfflineBanner` + Close Run blocked while outbox pending — BL-082 mid-run Alpha |
