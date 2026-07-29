@@ -772,13 +772,16 @@ async function fetchTodayOpenRedIssues(warnMs: number): Promise<ActiveRedInciden
 
   const ids = (data as Array<{ id: string }>).map((r) => r.id);
 
-  // Latest hub note per issue (source = 'site_issue')
-  const { data: notes } = await supabase
+  // Latest hub note per issue (site_issues_register → day_centre | event)
+  const { data: notes, error: notesErr } = await supabase
     .from("hub_issue_notes")
     .select("source_row_id, stamped_at")
-    .eq("source", "site_issue")
+    .in("source", ["day_centre", "event"])
     .in("source_row_id", ids)
     .order("stamped_at", { ascending: false });
+  if (notesErr) {
+    console.warn("[exception-feed] hub notes for active RED failed", notesErr);
+  }
 
   const latestNote = new Map<string, string>();
   for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
@@ -842,13 +845,16 @@ async function fetchStaleHubIssues(
 
   const ids = (data as Array<{ id: string }>).map((r) => r.id);
 
-  // Latest hub note per issue
-  const { data: notes } = await supabase
+  // Latest hub note per issue (site_issues_register → day_centre | event)
+  const { data: notes, error: notesErr } = await supabase
     .from("hub_issue_notes")
     .select("source_row_id, stamped_at")
-    .eq("source", "site_issue")
+    .in("source", ["day_centre", "event"])
     .in("source_row_id", ids)
     .order("stamped_at", { ascending: false });
+  if (notesErr) {
+    console.warn("[exception-feed] hub notes for stale Hub failed", notesErr);
+  }
 
   const latestNote = new Map<string, string>();
   for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
