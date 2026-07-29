@@ -4,7 +4,9 @@
 
 CREATE TABLE IF NOT EXISTS public.hub_issue_notes (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  source        text NOT NULL CHECK (source IN ('day_centre','incident','escalation','renewal')),
+  -- 'event' added 2026-07-26 (Trip Day / Movies Hub resolve). Live DBs: run
+  -- 2026-07-26_hub_issue_notes_event_source.sql to widen an existing CHECK.
+  source        text NOT NULL CHECK (source IN ('day_centre','event','incident','escalation','renewal')),
   source_row_id text NOT NULL,
   note          text NOT NULL,
   kind          text NOT NULL DEFAULT 'append'

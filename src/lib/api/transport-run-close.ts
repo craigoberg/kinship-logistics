@@ -16,13 +16,16 @@ import {
   isPassengerPickupLeg,
   mapTripLegFromDb,
   mapTransportTripFromDb,
+  setAssetCurrentOdometerKm,
   type TransportTrip,
   type TripLeg,
 } from "@/lib/data-store";
+import { finalizeEventVenueHop } from "@/lib/api/event-hop-transport";
 
 export type RunCloseKind =
   | "event_outbound"
   | "event_return"
+  | "event_venue_hop"
   | "day_centre_morning"
   | "day_centre_afternoon"
   | "event_legacy";
@@ -49,6 +52,8 @@ const ATTESTATION: Record<RunCloseKind, string> = {
     "All bus passengers on this manifest are delivered or accounted for at the venue. Issues this run are logged, or none occurred.",
   event_return:
     "All bus passengers are safely at their drop-off. Issues this run are logged, or none occurred.",
+  event_venue_hop:
+    "All passengers on this hop are boarded and delivered to the next stop. Issues this run are logged, or none occurred.",
   event_legacy:
     "All legs on this manifest are complete and passengers accounted for.",
   day_centre_morning:
@@ -58,6 +63,7 @@ const ATTESTATION: Record<RunCloseKind, string> = {
 };
 
 export function inferRunCloseKind(trip: TransportTrip): RunCloseKind {
+  if (trip.tripKind === "event_venue_hop") return "event_venue_hop";
   if (trip.eventId) {
     return trip.tripReturn === "none" ? "event_outbound" : "event_return";
   }
@@ -269,5 +275,18 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
     },
   });
 
-  return completeTrip(input.tripId, input.endOdometerKm);
+  const closed = await completeTrip(input.tripId, input.endOdometerKm);
+
+  // Canonical fleet estimate for next start + Admin service scheduling (BL-096).
+  const assetId = closed.assetId ?? trip.assetId;
+  if (assetId) {
+    try {
+      await setAssetCurrentOdometerKm(assetId, input.endOdometerKm);
+    } catch (err) {
+      console.error("[closeTransportRun] current_odometer_km update failed", err);
+    }
+  }
+
+  await finalizeEventVenueHop(closed);
+  return closed;
 }

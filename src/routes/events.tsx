@@ -1,6 +1,6 @@
-import { useMemo, useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { Plus, Search, CalendarRange, ArrowRight, X } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { Plus, Search, CalendarRange, ArrowRight, Compass, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -13,12 +13,24 @@ import { ManageEventModal } from "@/components/events/manage-event-modal";
 
 export const Route = createFileRoute("/events")({
   ssr: false,
+  validateSearch: (s: Record<string, unknown>) => ({
+    manage: typeof s.manage === "string" ? s.manage : undefined,
+    tab:
+      s.tab === "roster" ||
+      s.tab === "finance" ||
+      s.tab === "details" ||
+      s.tab === "itinerary" ||
+      s.tab === "days" ||
+      s.tab === "report"
+        ? s.tab
+        : undefined,
+  }),
   head: () => ({
     meta: [
-      { title: "Events — Yada Connect" },
+      { title: "Event Manage — Yada Connect" },
       {
         name: "description",
-        content: "Event manifest, roster bookings, and per-event P&L for the Yada operations team.",
+        content: "Office event setup — roster, milestones, finance, and Trip Report for the Yada operations team.",
       },
     ],
   }),
@@ -94,9 +106,13 @@ function eventSearchHaystack(e: EventManifest, typeLabel: string): string {
 }
 
 function EventsPage() {
+  const search = Route.useSearch();
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<EventManifest | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
+  const [manageTab, setManageTab] = useState<
+    "roster" | "finance" | "details" | "itinerary" | "days" | "report" | undefined
+  >(undefined);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<EventStatus>>(
     () => new Set(DEFAULT_STATUS_FILTER),
@@ -107,6 +123,16 @@ function EventsPage() {
   const { data: events = [], isLoading, error } = useEvents();
   const { data: types = [] } = useLookupParameters("event_types");
   const typeLabel = (code: string) => types.find((t) => t.code === code)?.displayName ?? code;
+
+  // Deep-link from Event Deliver Close Trip → Trip Report
+  useEffect(() => {
+    if (!search.manage || events.length === 0) return;
+    const match = events.find((e) => e.id === search.manage);
+    if (!match) return;
+    setSelected(match);
+    setManageTab(search.tab);
+    setManageOpen(true);
+  }, [search.manage, search.tab, events]);
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
@@ -153,7 +179,7 @@ function EventsPage() {
       <header className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">
-            Event Management Dashboard
+            Event Manage
           </h2>
           <p className="text-sm text-muted-foreground">
             {isLoading
@@ -312,19 +338,35 @@ function EventsPage() {
                     <td className="whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums text-white">
                       ${e.ticketPrice.toFixed(2)}
                     </td>
-                    <td className="px-4 py-2 text-right">
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="gap-1"
-                        onClick={() => {
-                          setSelected(e);
-                          setManageOpen(true);
-                        }}
-                      >
-                        Manage Event
-                        <ArrowRight className="h-3.5 w-3.5" />
-                      </Button>
+                    <td className="whitespace-nowrap px-4 py-2 text-right align-middle">
+                      <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-8 min-w-[5.75rem] shrink-0 gap-1 px-3"
+                          onClick={() => {
+                            setSelected(e);
+                            setManageTab(undefined);
+                            setManageOpen(true);
+                          }}
+                        >
+                          Manage
+                          <ArrowRight className="h-3.5 w-3.5" />
+                        </Button>
+                        {(e.status === "Open" || e.status === "Confirmed") && (
+                          <Button
+                            asChild
+                            size="sm"
+                            variant="default"
+                            className="h-8 shrink-0 gap-1 px-2 text-xs"
+                          >
+                            <Link to="/event-deliver" search={{ eventId: e.id }}>
+                              <Compass className="h-3 w-3" />
+                              Run
+                            </Link>
+                          </Button>
+                        )}
+                      </div>
                     </td>
                   </tr>
                 );
@@ -335,7 +377,15 @@ function EventsPage() {
       )}
 
       <CreateEventModal open={createOpen} onOpenChange={setCreateOpen} />
-      <ManageEventModal event={selected} open={manageOpen} onOpenChange={setManageOpen} />
+      <ManageEventModal
+        event={selected}
+        open={manageOpen}
+        initialTab={manageTab}
+        onOpenChange={(o) => {
+          setManageOpen(o);
+          if (!o) setManageTab(undefined);
+        }}
+      />
     </div>
   );
 }

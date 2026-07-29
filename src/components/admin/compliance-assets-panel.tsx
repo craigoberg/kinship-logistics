@@ -19,21 +19,20 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
+import { HubListCard } from "@/components/governance/hub-list-card";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import {
   useComplianceDeferRewarnDays,
   useComplianceHubVisibilityDays,
   useComplianceWarningDays,
+  useComplianceUrgencyParams,
 } from "@/hooks/use-system-parameters";
+import {
+  computeHubUrgency,
+  type UrgencyParams,
+} from "@/lib/governance/hub-workflow-status";
+import { fetchLatestHubActivityMap } from "@/lib/api/unified-issues";
 import { getActiveUserProfile } from "@/lib/data-store";
 import {
   computeRyge,
@@ -78,10 +77,12 @@ function complianceAssetSortDate(
   return asset.expiry_date;
 }
 
-function AssetsTable({
+function AssetsList({
   tab,
   assets,
   deferMap,
+  activityMap,
+  urgencyParams,
   canManage,
   isLoading,
   isError,
@@ -92,6 +93,9 @@ function AssetsTable({
   tab: ComplianceAssetTab;
   assets: ComplianceAsset[];
   deferMap: Map<string, { deferredUntil: Date }>;
+  /** latestStampedAt per asset.id from hub_issue_notes where source='renewal'. */
+  activityMap: Map<string, string>;
+  urgencyParams: UrgencyParams;
   canManage: boolean;
   isLoading: boolean;
   isError: boolean;
@@ -293,89 +297,83 @@ function AssetsTable({
         </Card>
       )}
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-[100px]">Severity</TableHead>
-              <TableHead className="w-[140px] whitespace-nowrap">Category</TableHead>
-              <TableHead>Asset</TableHead>
-              <TableHead className="w-[110px] whitespace-nowrap">Expiry</TableHead>
-              <TableHead className="w-[160px] whitespace-nowrap">Updated</TableHead>
-              <TableHead className="w-28 text-right" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-3 text-center text-muted-foreground">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            ) : visible.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={6} className="py-3 text-center text-muted-foreground">
-                  {hasSearch
-                    ? "No assets match your search."
-                    : tab === "active"
-                      ? showAll
-                        ? "No compliance assets found."
-                        : "Nothing needs attention right now. Use \"Show all upcoming\" to see the full schedule."
-                      : "Nothing parked right now."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              visible.map((a) => {
-                const defer = deferMap.get(a.id);
-                const isDeferred = isComplianceAssetLiveDeferred(a.id, deferMap);
-                return (
-                  <TableRow key={a.id}>
-                    <TableCell className="w-[100px] py-3">
-                      {rygeBadge(a, warningDays)}
-                    </TableCell>
-                    <TableCell className="w-[140px] whitespace-nowrap py-3">
-                      <Badge
-                        className={
-                          CATEGORY_BADGE[a.category.toUpperCase()] ?? DEFAULT_CATEGORY_BADGE
-                        }
-                      >
-                        {a.category}
-                      </Badge>
-                    </TableCell>
-                    <TableCell className="max-w-[28rem] py-3">
-                      <div className="truncate font-medium">{a.name}</div>
-                      {a.description && (
-                        <div className="line-clamp-2 text-xs text-muted-foreground">
-                          {a.description}
-                        </div>
-                      )}
-                      {isDeferred && defer && (
-                        <div className="mt-1 text-[10px] text-amber-700 dark:text-amber-300">
-                          Deferred until{" "}
-                          <FormattedDateTime value={defer.deferredUntil.toISOString()} />
-                          {tab === "active" && " · deadline approaching"}
-                        </div>
-                      )}
-                    </TableCell>
-                    <TableCell className="w-[110px] whitespace-nowrap py-3 tabular-nums text-sm">
-                      <FormattedDate value={a.expiry_date} />
-                    </TableCell>
-                    <TableCell className="w-[160px] whitespace-nowrap py-3 text-xs tabular-nums text-muted-foreground">
-                      <FormattedDateTime value={a.updated_at} />
-                    </TableCell>
-                    <TableCell className="py-3 text-right">
-                      {canManage && (
-                        <Button size="sm" onClick={() => onManage(a)}>
-                          Manage
-                        </Button>
-                      )}
-                    </TableCell>
-                  </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
+      <div className="space-y-2">
+        {isLoading ? (
+          <div className="py-8 text-center text-sm text-muted-foreground">
+            <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+          </div>
+        ) : visible.length === 0 ? (
+          <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+            {hasSearch
+              ? "No assets match your search."
+              : tab === "active"
+                ? showAll
+                  ? "No compliance assets found."
+                  : "Nothing needs attention right now. Use \"Show all upcoming\" to see the full schedule."
+                : "Nothing parked right now."}
+          </div>
+        ) : (
+          visible.map((a) => {
+            const defer = deferMap.get(a.id);
+            const isDeferred = isComplianceAssetLiveDeferred(a.id, deferMap);
+            const nowMs = Date.now();
+            const lastHubNoteAt = activityMap.get(a.id);
+            const lastActivityMs = lastHubNoteAt
+              ? new Date(lastHubNoteAt).getTime()
+              : null;
+            const deferredUntilMs = defer?.deferredUntil
+              ? defer.deferredUntil.getTime()
+              : null;
+            const urgency = computeHubUrgency({
+              nowMs,
+              createdAtMs: new Date(a.updated_at).getTime(),
+              lastActivityMs,
+              deferredUntilMs,
+              params: urgencyParams,
+            });
+            return (
+              <HubListCard
+                key={a.id}
+                ariaLabel={canManage ? `Manage ${a.name}` : a.name}
+                summary={a.name}
+                body={
+                  <p className="text-sm font-medium leading-snug line-clamp-2">{a.name}</p>
+                }
+                onClick={canManage ? () => onManage(a) : undefined}
+                disabled={!canManage}
+                badges={
+                  <>
+                    {rygeBadge(a, warningDays)}
+                    <Badge
+                      className={
+                        CATEGORY_BADGE[a.category.toUpperCase()] ?? DEFAULT_CATEGORY_BADGE
+                      }
+                    >
+                      {a.category}
+                    </Badge>
+                  </>
+                }
+                urgency={urgency}
+                meta={
+                  <>
+                    {isDeferred && defer && (
+                      <div className="font-medium text-amber-700 dark:text-amber-300">
+                        Deferred until{" "}
+                        <FormattedDateTime value={defer.deferredUntil.toISOString()} />
+                        {tab === "active" && " · deadline approaching"}
+                      </div>
+                    )}
+                    <div className="tabular-nums">
+                      Expiry <FormattedDate value={a.expiry_date} />
+                      {" · "}
+                      Updated <FormattedDateTime value={lastHubNoteAt ?? a.updated_at} />
+                    </div>
+                  </>
+                }
+              />
+            );
+          })
+        )}
       </div>
     </div>
   );
@@ -418,6 +416,14 @@ export function ComplianceAssetsPanel({
   const deferMap = deferQ.data ?? new Map();
   const assets = listQ.data ?? [];
 
+  const activityQ = useQuery({
+    queryKey: [...COMPLIANCE_ASSETS_KEY, "activity-map"],
+    queryFn: () => fetchLatestHubActivityMap("renewal"),
+    staleTime: 30_000,
+  });
+  const activityMap = activityQ.data ?? new Map<string, string>();
+
+  const urgencyParams = useComplianceUrgencyParams();
   const deferRewarnDays = useComplianceDeferRewarnDays();
 
   // Count assets that are safely parked (on the Deferred tab, not returning
@@ -477,10 +483,12 @@ export function ComplianceAssetsPanel({
         </div>
 
         <TabsContent value="active" className="mt-4">
-          <AssetsTable
+          <AssetsList
             tab="active"
             assets={assets}
             deferMap={deferMap}
+            activityMap={activityMap}
+            urgencyParams={urgencyParams}
             canManage={canManage}
             isLoading={listQ.isLoading || deferQ.isLoading}
             isError={listQ.isError}
@@ -491,10 +499,12 @@ export function ComplianceAssetsPanel({
         </TabsContent>
 
         <TabsContent value="awaiting" className="mt-4">
-          <AssetsTable
+          <AssetsList
             tab="awaiting"
             assets={assets}
             deferMap={deferMap}
+            activityMap={activityMap}
+            urgencyParams={urgencyParams}
             canManage={canManage}
             isLoading={listQ.isLoading || deferQ.isLoading}
             isError={listQ.isError}

@@ -8,17 +8,18 @@
 // ============================================================================
 
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
+import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
-
-
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
+export type ClientArrivalChoice = "bus" | "self";
 export type AttendanceStatus =
   | "expected"
   | "checked_in"
@@ -35,6 +36,8 @@ export interface ClientAttendanceRow {
   expectedArrivalAt: string;
   expectedDepartureAt: string | null;
   arrivalMethod: ArrivalMethod;
+  /** Floor Check-In: bus_runs.code when arrival_method=bus (BL-013 Day Centre parity). */
+  arrivalBusRunCode: string | null;
   checkedInAt: string | null;
   checkedInBy: string | null;
   checkedOutAt: string | null;
@@ -60,6 +63,7 @@ interface DbRow {
   expected_arrival_at: string;
   expected_departure_at: string | null;
   arrival_method: ArrivalMethod;
+  arrival_bus_run_code?: string | null;
   checked_in_at: string | null;
   checked_in_by: string | null;
   checked_out_at: string | null;
@@ -86,6 +90,7 @@ function toRow(r: DbRow): ClientAttendanceRow {
     expectedArrivalAt: r.expected_arrival_at,
     expectedDepartureAt: r.expected_departure_at ?? null,
     arrivalMethod: r.arrival_method,
+    arrivalBusRunCode: r.arrival_bus_run_code ?? null,
     checkedInAt: r.checked_in_at,
     checkedInBy: r.checked_in_by,
     checkedOutAt: r.checked_out_at,
@@ -120,12 +125,88 @@ const WEEKDAY_INDEX: Record<string, number> = {
 
 
 function mapTransportToMethod(transportRule: string | null): ArrivalMethod {
-  const v = (transportRule ?? "").toLowerCase();
-  if (v.includes("bus") || v.includes("pickup")) return "bus";
-  if (v.includes("private") || v.includes("self") || v.includes("family"))
+  const v = (transportRule ?? "").trim().toLowerCase();
+  if (!v) return "other";
+  // Bus run codes (R1, R2, BUSRUN-1, …) and explicit bus/pickup wording.
+  if (
+    v.includes("bus") ||
+    v.includes("pickup") ||
+    v.includes("run") ||
+    /^r\d+\b/.test(v)
+  ) {
+    return "bus";
+  }
+  if (v.includes("private") || v.includes("self") || v.includes("family")) {
     return "private";
+  }
   if (v.includes("walk")) return "walk_in";
   return "other";
+}
+
+/** Friendly roll badge when only the coarse arrival_method enum is available. */
+export function arrivalMethodBadgeLabel(method: ArrivalMethod): string {
+  switch (method) {
+    case "private":
+      return "Self";
+    case "walk_in":
+      return "Walk-in";
+    case "bus":
+      return "Bus";
+    default:
+      return "Other";
+  }
+}
+
+/**
+ * Today's schedule inbound transport labels keyed by participant
+ * (e.g. R1, R2, TRN-SELF) for Day Centre roll badges.
+ */
+export async function loadInboundTransportLabelsForToday(): Promise<
+  Record<string, string>
+> {
+  return loadTransportLabelsForToday("inbound");
+}
+
+/**
+ * Today's schedule outbound transport labels keyed by participant
+ * for Day Centre check-out method chips.
+ */
+export async function loadOutboundTransportLabelsForToday(): Promise<
+  Record<string, string>
+> {
+  return loadTransportLabelsForToday("outbound");
+}
+
+async function loadTransportLabelsForToday(
+  direction: "inbound" | "outbound",
+): Promise<Record<string, string>> {
+  const dow = getSydneyDayIndex();
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .select(
+      "participant_id, inbound_transport, outbound_transport, transport_required, day_of_week, active",
+    )
+    .eq("active", true);
+  if (error) throw error;
+
+  const out: Record<string, string> = {};
+  for (const s of data ?? []) {
+    const row = s as {
+      participant_id: string;
+      inbound_transport?: string | null;
+      outbound_transport?: string | null;
+      transport_required?: string | null;
+      day_of_week?: string | null;
+    };
+    if (WEEKDAY_INDEX[String(row.day_of_week)] !== dow) continue;
+    const primary =
+      direction === "inbound"
+        ? row.inbound_transport
+        : row.outbound_transport;
+    const label = (primary ?? row.transport_required ?? "").trim();
+    if (label) out[row.participant_id] = label;
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -333,12 +414,42 @@ async function autoCloseYellowIssue(
 export async function toggleCheckIn(
   row: ClientAttendanceRow,
 ): Promise<ClientAttendanceRow> {
+  // Guard: checkout sheet click-through must not undo / re-check a departed row.
+  if (row.status === "checked_out" || row.checkedOutAt) {
+    throw new Error("Already checked out — use Adjust if you need to correct this.");
+  }
+  if (row.status === "absent") {
+    throw new Error("Marked absent — cannot toggle check-in.");
+  }
+
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const isCheckedIn = row.status === "checked_in";
+  if (!isCheckedIn && row.participantId) {
+    const { assertNotInfectiousExcluded } = await import(
+      "@/lib/api/infectious-exclusion"
+    );
+    await assertNotInfectiousExcluded(row.participantId, "centre");
+  }
   const next = isCheckedIn
     ? { status: "expected" as AttendanceStatus, checked_in_at: null, checked_in_by: null }
     : { status: "checked_in" as AttendanceStatus, checked_in_at: nowIso, checked_in_by: staffId };
+
+  // Re-read before write — blocks the sheet click-through race where checkout
+  // lands milliseconds before this undo.
+  const { data: fresh, error: freshErr } = await supabase
+    .from("client_attendance_log")
+    .select("status, checked_out_at")
+    .eq("id", row.id)
+    .single();
+  if (freshErr) throw freshErr;
+  if (
+    fresh.status === "checked_out" ||
+    fresh.status === "absent" ||
+    fresh.checked_out_at
+  ) {
+    throw new Error("Already checked out — cannot change check-in.");
+  }
 
   const { data, error } = await supabase
     .from("client_attendance_log")
@@ -404,6 +515,136 @@ export async function toggleCheckIn(
   return finalRow;
 }
 
+/**
+ * Day Centre Check-In with actual arrival method (BL-013 parity).
+ * Schedule inbound label stays Planned; this stamps actual bus vs self (+ run).
+ */
+export async function recordClientArrival(
+  row: ClientAttendanceRow,
+  input: {
+    arrival: ClientArrivalChoice;
+    busRunCode?: string | null;
+    alsoCheckIn?: boolean;
+  },
+): Promise<ClientAttendanceRow> {
+  if (row.status === "checked_out" || row.checkedOutAt) {
+    throw new Error("Already checked out — cannot change arrival.");
+  }
+  if (row.status === "absent") {
+    throw new Error("Marked absent — reinstate before recording arrival.");
+  }
+
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = operationalNowIso();
+  const isSelf = input.arrival === "self";
+  const runCode = isSelf
+    ? null
+    : (input.busRunCode ?? "").trim() || null;
+  const alsoCheckIn = input.alsoCheckIn ?? row.status === "expected";
+
+  // BL-084 — block centre check-in while infectious exclusion is active.
+  if (alsoCheckIn && row.status === "expected" && row.participantId) {
+    const { assertNotInfectiousExcluded } = await import(
+      "@/lib/api/infectious-exclusion"
+    );
+    await assertNotInfectiousExcluded(row.participantId, "centre");
+  }
+
+  const patch: Record<string, unknown> = {
+    arrival_method: (isSelf ? "private" : "bus") as ArrivalMethod,
+    arrival_bus_run_code: runCode,
+  };
+  if (alsoCheckIn && row.status === "expected") {
+    patch.status = "checked_in" as AttendanceStatus;
+    patch.checked_in_at = nowIso;
+    patch.checked_in_by = staffId;
+  }
+
+  let { data, error } = await supabase
+    .from("client_attendance_log")
+    .update(patch)
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error && isSchemaMismatchError(error)) {
+    throw new Error(
+      "Arrival bus run column is not on the database yet. Run docs/sql/2026-07-26_day_centre_arrival_bus_run.sql first.",
+    );
+  }
+  if (error) throw error;
+
+  const gps = await tryGetGps();
+  const checkedInNow = alsoCheckIn && row.status === "expected";
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: checkedInNow
+      ? "ATTENDANCE_CHECKIN"
+      : "ATTENDANCE_ARRIVAL_METHOD",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      arrival_method: isSelf ? "private" : "bus",
+      arrival_bus_run_code: runCode,
+      prior_arrival_method: row.arrivalMethod,
+      expected_arrival_at: row.expectedArrivalAt,
+    },
+  });
+
+  let finalRow = toRow(data as DbRow);
+  if (checkedInNow) {
+    const outcome = await autoCloseYellowIssue(
+      finalRow,
+      "System Auto-Close: Client arrived safely.",
+      staffId,
+    );
+    if (outcome.kind === "red_left_open") {
+      await writeToLedger({
+        staff_id: staffId,
+        category: "CLIENT",
+        severity: "RED",
+        action_type: "ATTENDANCE_RED_CHECKIN_WHILE_OPEN",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: {
+          attendance_id: row.id,
+          issue_id: outcome.issueId,
+          participant_id: row.participantId,
+          reason:
+            "Client arrived; RED issue remains open for manager review.",
+        },
+      });
+    } else if (
+      outcome.kind === "yellow_closed" ||
+      outcome.kind === "already_closed"
+    ) {
+      const { data: refreshed } = await supabase
+        .from("client_attendance_log")
+        .select("*")
+        .eq("id", row.id)
+        .single();
+      if (refreshed) finalRow = toRow(refreshed as DbRow);
+    }
+  }
+  return finalRow;
+}
+
+/** True when a schedule inbound label means self / family (not bus). */
+export function scheduleLabelIsSelf(label: string | null | undefined): boolean {
+  const v = (label ?? "").trim().toLowerCase();
+  if (!v) return false;
+  return (
+    v.includes("self") ||
+    v.includes("private") ||
+    v.includes("family") ||
+    v.includes("walk")
+  );
+}
+
 // ---------------------------------------------------------------------------
 // Per-card "Adjust Expected Time" — operator pushes a single client's
 // expected arrival forward/backward. If the new time pulls the row back
@@ -445,7 +686,7 @@ export async function updateExpectedArrival(
   });
 
   // Did the new time pull the row back inside the YELLOW threshold?
-  const overdueMins = Math.floor((Date.now() - Date.parse(newIso)) / 60_000);
+  const overdueMins = Math.floor((operationalNowMs() - Date.parse(newIso)) / 60_000);
   if (overdueMins < yellowThresholdMins) {
     await autoCloseYellowIssue(
       row,
@@ -510,7 +751,7 @@ export async function bulkDeferGroup(
   let yellowsAutoCleared = 0;
   for (const r of targets) {
     const u = updates.find((x) => x.id === r.id)!;
-    const overdueMins = Math.floor((Date.now() - Date.parse(u.next)) / 60_000);
+    const overdueMins = Math.floor((operationalNowMs() - Date.parse(u.next)) / 60_000);
     if (overdueMins < yellowThresholdMins && r.escalationIssueId) {
       const outcome = await autoCloseYellowIssue(
         r,
@@ -769,7 +1010,7 @@ export async function sweepOverdueArrivals(
   participantNames: Record<string, string>,
 ): Promise<SweepResult> {
   const roll = await listAttendanceRoll(sessionId);
-  const now = Date.now();
+  const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
 
@@ -1077,7 +1318,7 @@ export async function checkOutParticipant(
   vector: DepartureVector,
 ): Promise<CheckOutResult> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
   const { data, error } = await supabase
     .from("client_attendance_log")
@@ -1085,6 +1326,10 @@ export async function checkOutParticipant(
       status: "checked_out" as AttendanceStatus,
       checked_out_at: nowIso,
       checked_out_by: staffId,
+      // Departure accounts for presence — clear stale arrival RED badge so
+      // "Escalated — Manager notified" does not linger after checkout.
+      escalation_severity: null,
+      escalation_raised_at: null,
     })
     .eq("id", row.id)
     .select("*")
@@ -1155,7 +1400,7 @@ export async function sweepOverdueDepartures(
   participantNames: Record<string, string>,
 ): Promise<SweepResult> {
   const roll = await listAttendanceRoll(sessionId);
-  const now = Date.now();
+  const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
 

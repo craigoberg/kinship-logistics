@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 
@@ -24,7 +25,10 @@ export async function getLastExportedAt(): Promise<string | null> {
     .order("exported_at", { ascending: false })
     .limit(1)
     .maybeSingle();
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMismatchError(error)) return null;
+    throw error;
+  }
   return (data?.exported_at as string | undefined) ?? null;
 }
 
@@ -47,8 +51,18 @@ interface BillingReadyDbRow {
   expected_service: string;
   ndis_cancellation_reason: string | null;
   billing_state: string | null;
-  // Joined participant
-  participants: { id: string; full_name: string } | null;
+  participants:
+    | { first_name: string; last_name: string }
+    | Array<{ first_name: string; last_name: string }>
+    | null;
+}
+
+function participantDisplayName(
+  participants: BillingReadyDbRow["participants"],
+): string {
+  const p = Array.isArray(participants) ? participants[0] : participants;
+  if (!p) return "Unknown";
+  return `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim() || "Unknown";
 }
 
 /**
@@ -63,19 +77,25 @@ export async function listBillingReadyRows(
   const { data, error } = await supabase
     .from("attendance_roster_logs")
     .select(
-      "id, roster_date, participant_id, expected_service, ndis_cancellation_reason, billing_state, participants:participant_id ( id, full_name )",
+      "id, roster_date, participant_id, expected_service, ndis_cancellation_reason, billing_state, participants(first_name, last_name)",
     )
     .eq("billing_state", "audited_ready_for_billing")
     .gte("roster_date", rangeStart)
     .lte("roster_date", rangeEnd)
     .order("roster_date", { ascending: true });
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      console.warn("[listBillingReadyRows] schema mismatch — MYOB billing columns missing?", error);
+      return [];
+    }
+    throw error;
+  }
 
   return ((data ?? []) as unknown as BillingReadyDbRow[]).map((r) => ({
     logId: r.id,
     rosterDate: r.roster_date,
     participantId: r.participant_id,
-    participantName: r.participants?.full_name ?? "Unknown",
+    participantName: participantDisplayName(r.participants),
     serviceCode: r.expected_service ?? "",
     hours: 1,
     rate: 0,

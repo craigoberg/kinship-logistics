@@ -11,6 +11,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import {
   Select,
   SelectContent,
@@ -151,10 +152,9 @@ export function ScheduledMedicationModal({
           </Field>
           <div className="grid gap-4 sm:grid-cols-2">
             <Field label="Expected time">
-              <Input
-                type="time"
+              <HalfHourTimeField
                 value={expectedTime}
-                onChange={(e) => track(setExpectedTime)(e.target.value)}
+                onChange={track(setExpectedTime)}
               />
             </Field>
             <Field label="Frequency">

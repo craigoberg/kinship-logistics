@@ -27,6 +27,7 @@ import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintena
 import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
 import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
+import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
 // `raiseOperationalEscalation` + `setPhase` removed: RED no longer triggers a
 // multi-device handshake. The local operator now opens a VerbalConsultationDialog
 // directly via the `onRedRequested` callback below.
@@ -110,31 +111,6 @@ const makeInitial = (severity: RygeSeverity): AnomalyDraft => ({
   description: "",
   workaround: "",
 });
-
-const SEVERITY_CHIPS: Array<{
-  value: RygeSeverity;
-  label: string;
-  classes: string;
-}> = [
-  {
-    value: "green",
-    label: "Green · No action",
-    classes:
-      "border-green-600/60 bg-green-600/10 text-green-700 data-[state=on]:bg-green-600 data-[state=on]:text-white",
-  },
-  {
-    value: "yellow",
-    label: "Yellow · Workaround in place",
-    classes:
-      "border-yellow-500/60 bg-yellow-500/10 text-yellow-700 data-[state=on]:bg-yellow-400 data-[state=on]:text-black",
-  },
-  {
-    value: "red",
-    label: "Red · Manager escalation",
-    classes:
-      "border-red-600/60 bg-red-600/10 text-red-700 data-[state=on]:bg-red-600 data-[state=on]:text-white",
-  },
-];
 
 // `triggerEscalation` event broadcaster removed — RED now opens the local
 // VerbalConsultationDialog instead of dispatching a multi-device alert.
@@ -265,6 +241,10 @@ export function LogAnomalyModal({
         queryClient.invalidateQueries({ queryKey: ["event-all-issues", eventCtx.eventId] });
         // Legacy session-scoped key — kept for any stale subscribers.
         queryClient.invalidateQueries({ queryKey: ["event-day-issues", result.eventDaySessionId] });
+        // Open-location RED gate on EventLocationPanel.
+        queryClient.invalidateQueries({
+          queryKey: ["event-day-issues-red-check", result.eventDaySessionId],
+        });
         queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
 
         // ALL venue walkround RYGE issues land in Maintenance & Repairs (§14.2).
@@ -373,7 +353,6 @@ export function LogAnomalyModal({
   const canSubmit = descriptionOk && workaroundOk && !mutation.isPending;
 
   const handleClose = (next: boolean) => {
-    if (mutation.isPending) return;
     onOpenChange(next);
   };
 
@@ -414,24 +393,22 @@ export function LogAnomalyModal({
               Severity
             </Label>
             <div className="flex flex-wrap gap-2">
-              {SEVERITY_CHIPS.map((chip) => {
+              {RYGE_SEVERITY_CHIPS.map((chip) => {
                 const active = values.severity === chip.value;
                 return (
                   <button
                     key={chip.value}
                     type="button"
-                    data-state={active ? "on" : "off"}
                     onClick={() => {
                       if (chip.value === "yellow") {
                         setValues({ severity: "yellow" });
                       } else {
-                        // Green and Red both clear any stale workaround draft.
                         setValues({ severity: chip.value, workaround: "" });
                       }
                     }}
                     className={cn(
-                      "rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors",
-                      chip.classes,
+                      "rounded-full border-2 px-4 py-1.5 text-xs font-bold transition-colors",
+                      active ? chip.activeClass : chip.idleClass,
                     )}
                   >
                     {chip.label}
@@ -489,9 +466,8 @@ export function LogAnomalyModal({
           <Button
             variant="outline"
             onClick={() => handleClose(false)}
-            disabled={mutation.isPending}
           >
-            Cancel
+            Close
           </Button>
           <Button
             onClick={() => {

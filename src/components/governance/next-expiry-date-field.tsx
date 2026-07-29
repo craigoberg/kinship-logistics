@@ -79,7 +79,7 @@ export function NextExpiryDateField({
     !!min &&
     startOfDay(value).getTime() <= min.getTime();
 
-  const defaultHelper = `From last expiry ${format(base, "dd/MM/yyyy")}: choose a preset or edit the date.`;
+  const defaultHelper = `From last expiry ${format(base, "dd-MMM-yy")}: choose a preset or edit the date.`;
 
   return (
     <div className="space-y-2">
@@ -114,14 +114,14 @@ export function NextExpiryDateField({
         value={value}
         onChange={handleDateChange}
         placeholder="Select date"
-        dateFormat="dd/MM/yyyy"
+        dateFormat="dd-MMM-yy"
         className={requiredFieldOutline(invalid, "h-9 text-sm")}
         disabledDates={min ? (d) => startOfDay(d).getTime() <= min.getTime() : undefined}
       />
       <span className="text-[11px] text-muted-foreground">{helper ?? defaultHelper}</span>
       {invalid && min && (
         <span className="text-[11px] font-medium text-destructive">
-          Must be after {format(min, "dd/MM/yyyy")}.
+          Must be after {format(min, "dd-MMM-yy")}.
         </span>
       )}
     </div>

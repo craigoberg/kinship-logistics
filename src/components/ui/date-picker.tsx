@@ -11,6 +11,12 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 
+export type DatePickerCaptionLayout =
+  | "label"
+  | "dropdown"
+  | "dropdown-months"
+  | "dropdown-years";
+
 export interface DatePickerProps {
   value?: Date;
   onChange: (date?: Date) => void;
@@ -21,6 +27,48 @@ export interface DatePickerProps {
   disabledDates?: (date: Date) => boolean;
   /** Optional date format string (date-fns). Defaults to "PPP". */
   dateFormat?: string;
+  /**
+   * Caption navigation. Default `label` (‹ › months only).
+   * Use `dropdown` for DOB / far-history dates so year and month jump without 70× clicks.
+   */
+  captionLayout?: DatePickerCaptionLayout;
+  /** Earliest navigable month (pairs with `captionLayout="dropdown"`). */
+  startMonth?: Date;
+  /** Latest navigable month. */
+  endMonth?: Date;
+  /** Newest years first in the year dropdown (recommended for DOB). */
+  reverseYears?: boolean;
+  /** Initial month shown when opening with no `value`. */
+  defaultMonth?: Date;
+}
+
+const DOB_YEAR_SPAN = 120;
+
+/**
+ * Canonical props for date-of-birth fields: month + year dropdowns,
+ * newest years first, last 120 years through today (no future DOBs).
+ */
+export function getDobDatePickerProps(now = new Date()): Pick<
+  DatePickerProps,
+  | "captionLayout"
+  | "reverseYears"
+  | "startMonth"
+  | "endMonth"
+  | "defaultMonth"
+  | "disabledDates"
+> {
+  const endOfToday = new Date(now);
+  endOfToday.setHours(23, 59, 59, 999);
+
+  return {
+    captionLayout: "dropdown",
+    reverseYears: true,
+    startMonth: new Date(now.getFullYear() - DOB_YEAR_SPAN, 0),
+    endMonth: new Date(now.getFullYear(), now.getMonth()),
+    // Open near a typical adult DOB so the year list isn't pinned on "today".
+    defaultMonth: new Date(now.getFullYear() - 40, 0),
+    disabledDates: (date) => date > endOfToday,
+  };
 }
 
 /**
@@ -36,6 +84,11 @@ export function DatePicker({
   className,
   disabledDates,
   dateFormat = REGIONAL_DATE_FORMAT,
+  captionLayout = "label",
+  startMonth,
+  endMonth,
+  reverseYears,
+  defaultMonth,
 }: DatePickerProps) {
   const [isOpen, setIsOpen] = React.useState(false);
 
@@ -51,7 +104,7 @@ export function DatePicker({
             className,
           )}
         >
-          <CalendarIcon className="mr-2 h-4 w-4 text-slate-700" />
+          <CalendarIcon className="mr-2 h-4 w-4 text-muted-foreground" />
           {value ? (
             format(value, dateFormat)
           ) : (
@@ -68,6 +121,11 @@ export function DatePicker({
             setIsOpen(false);
           }}
           disabled={disabledDates}
+          captionLayout={captionLayout}
+          startMonth={startMonth}
+          endMonth={endMonth}
+          reverseYears={reverseYears}
+          defaultMonth={value ?? defaultMonth}
           initialFocus
           className="p-3 pointer-events-auto"
         />

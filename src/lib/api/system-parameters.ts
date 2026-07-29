@@ -33,6 +33,25 @@ export interface UpdateSystemParameterResult {
   newValue: JsonValue;
 }
 
+/** PostgREST 404 when set_system_parameter RPC is not deployed yet. */
+function isMissingSetSystemParameterRpc(
+  error: { code?: string | null; message?: string | null; details?: string | null } | null,
+): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+  const blob = `${error.message ?? ""} ${error.details ?? ""}`.toLowerCase();
+  return (
+    blob.includes("set_system_parameter") ||
+    blob.includes("could not find the function") ||
+    blob.includes("function not found") ||
+    blob.includes("404")
+  );
+}
+
+function toJsonbValue(value: JsonValue): unknown {
+  return value as unknown as object;
+}
+
 async function rpcIsManager(principalId: string): Promise<boolean> {
   const { data, error } = await supabase.rpc("is_manager", {
     _user_id: principalId,
@@ -102,28 +121,29 @@ export async function updateSystemParameter(
 
   const rpc = await supabase.rpc("set_system_parameter", {
     _key: args.key,
-    _value: args.newValue,
+    _value: toJsonbValue(args.newValue),
     _staff_id: staffId,
     _justification: justification,
   });
   if (!rpc.error) {
     return { key: args.key, oldValue, newValue: args.newValue };
   }
-  const rpcMissing =
-    rpc.error.code === "PGRST202" ||
-    rpc.error.message.toLowerCase().includes("set_system_parameter");
-  if (!rpcMissing) throw rpc.error;
+  if (!isMissingSetSystemParameterRpc(rpc.error)) throw rpc.error;
 
-  // 2. Fallback for previews before the DB migration has been applied.
+  // Fallback when RPC is not deployed — requires permissive system_parameters UPDATE for anon.
   const { error: updErr } = await supabase
     .from("system_parameters")
     .update({
-      value: args.newValue as unknown as object,
+      value: toJsonbValue(args.newValue),
       updated_by: staffId,
       updated_at: new Date().toISOString(),
     })
     .eq("key", args.key);
-  if (updErr) throw updErr;
+  if (updErr) {
+    throw new Error(
+      `${updErr.message} — run docs/sql/2026-07-12_system_parameters_pin_save.sql in Supabase if saves fail from the PIN terminal.`,
+    );
+  }
 
   // 3. Audit ledger entry — best effort.
   await writeToLedger({

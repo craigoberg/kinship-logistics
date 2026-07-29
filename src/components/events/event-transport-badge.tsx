@@ -9,13 +9,22 @@ interface Props {
   mode: string;
   /** Optional prefix, e.g. "Out" or "Ret". */
   prefix?: string;
+  /**
+   * BL-069 — when mode is bus, show run short label (R1/R2) instead of "Bus".
+   * Ignored for self / private.
+   */
+  runLabel?: string | null;
   className?: string;
 }
 
 /** Colored bus/self badge — matches Participants directory (blue bus, slate self). */
-export function EventTransportBadge({ mode, prefix, className }: Props) {
+export function EventTransportBadge({ mode, prefix, runLabel, className }: Props) {
   const normalized = normalizeEventTransportMode(mode);
-  const label = eventTransportLabel(mode);
+  const base = eventTransportLabel(mode);
+  const label =
+    normalized === "bus" && runLabel && runLabel.trim() && runLabel.trim().toUpperCase() !== "BUS"
+      ? runLabel.trim().toUpperCase()
+      : base;
   return (
     <span
       className={cn(
@@ -34,6 +43,9 @@ interface PairProps {
   return: string;
   plannedOutbound?: string;
   plannedReturn?: string;
+  /** BL-069 short labels e.g. R1 / R2 for bus modes. */
+  outboundRunLabel?: string | null;
+  returnRunLabel?: string | null;
   className?: string;
 }
 
@@ -43,6 +55,8 @@ export function EventTransportPair({
   return: returnMode,
   plannedOutbound,
   plannedReturn,
+  outboundRunLabel,
+  returnRunLabel,
   className,
 }: PairProps) {
   const outChanged = plannedOutbound != null && outbound !== plannedOutbound;
@@ -51,7 +65,7 @@ export function EventTransportPair({
   return (
     <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
       <div className="flex flex-col gap-0.5">
-        <EventTransportBadge mode={outbound} prefix="Out" />
+        <EventTransportBadge mode={outbound} prefix="Out" runLabel={outboundRunLabel} />
         {outChanged && (
           <span className="text-[9px] text-muted-foreground line-through">
             Planned {eventTransportLabel(plannedOutbound!)}
@@ -59,7 +73,7 @@ export function EventTransportPair({
         )}
       </div>
       <div className="flex flex-col gap-0.5">
-        <EventTransportBadge mode={returnMode} prefix="Ret" />
+        <EventTransportBadge mode={returnMode} prefix="Ret" runLabel={returnRunLabel} />
         {retChanged && (
           <span className="text-[9px] text-muted-foreground line-through">
             Planned {eventTransportLabel(plannedReturn!)}

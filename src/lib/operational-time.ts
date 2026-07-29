@@ -98,13 +98,44 @@ function sydneyLocalTimeToUtcIso(args: {
   return new Date(utcMs).toISOString();
 }
 
-export function getSydneyIsoDate(date: Date = new Date()): string {
-  const { year, month, day } = dateParts(date);
+/**
+ * Convert a Sydney wall-clock date + HH:mm into a UTC Date.
+ * Used by the DEV operational clock override and roll-deadline seeding.
+ */
+export function sydneyWallClockToUtcDate(dateIso: string, hhmm: string): Date {
+  const dm = /^(\d{4})-(\d{2})-(\d{2})$/.exec(dateIso.trim());
+  const tm = /^(\d{1,2}):(\d{2})$/.exec(hhmm.trim());
+  if (!dm || !tm) return new Date(NaN);
+  const iso = sydneyLocalTimeToUtcIso({
+    year: Number(dm[1]),
+    month: Number(dm[2]),
+    day: Number(dm[3]),
+    hour: Math.min(23, Math.max(0, Number(tm[1]))),
+    minute: Math.min(59, Math.max(0, Number(tm[2]))),
+  });
+  return new Date(iso);
+}
+
+/** Injectable "now" for DEV clock override — set by operational-clock.ts on load. */
+let operationalNowProvider: () => Date = () => new Date();
+
+export function setOperationalNowProvider(fn: () => Date): void {
+  operationalNowProvider = fn;
+}
+
+/** Live or simulated operational instant (Sydney-aware when overridden). */
+export function resolveOperationalNow(): Date {
+  return operationalNowProvider();
+}
+
+export function getSydneyIsoDate(date?: Date): string {
+  const { year, month, day } = dateParts(date ?? resolveOperationalNow());
   return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
 }
 
-export function getSydneyDayIndex(date: Date = new Date()): number {
-  return WEEKDAY_INDEX[WEEKDAY_FORMATTER.format(date)] ?? date.getDay();
+export function getSydneyDayIndex(date?: Date): number {
+  const d = date ?? resolveOperationalNow();
+  return WEEKDAY_INDEX[WEEKDAY_FORMATTER.format(d)] ?? d.getDay();
 }
 
 // Map Sydney-local weekday → the canonical DAY-XXX code stored in
@@ -119,16 +150,16 @@ const SYDNEY_DAY_CODES = [
   "DAY-SAT",
 ] as const;
 
-export function todaysSydneyDayCode(date: Date = new Date()): string {
+export function todaysSydneyDayCode(date?: Date): string {
   return SYDNEY_DAY_CODES[getSydneyDayIndex(date)] ?? "DAY-MON";
 }
 
 export function getSydneyTimeTodayIso(
   hour: number,
   minute: number,
-  date: Date = new Date(),
+  date?: Date,
 ): string {
-  const { year, month, day } = dateParts(date);
+  const { year, month, day } = dateParts(date ?? resolveOperationalNow());
   return sydneyLocalTimeToUtcIso({ year, month, day, hour, minute });
 }
 
@@ -139,7 +170,7 @@ export function getSydneyTimeTodayIso(
  */
 export function sydneyTimeTodayFromClock(
   hhmm: string | null | undefined,
-  date: Date = new Date(),
+  date?: Date,
 ): string {
   const m = /^(\d{1,2}):(\d{2})$/.exec((hhmm ?? "").trim());
   const hour = m ? Math.min(23, Math.max(0, Number(m[1]))) : 9;
@@ -155,10 +186,10 @@ export function isoToSydneyClock(iso: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Canonical app-wide date/time formatters (project standard).
-//   Date:      dd-MM-yy           e.g. 26-06-26
-//   Time:      HH:mm              e.g. 14:30
-//   Date/Time: dd-MM-yy / HH:mm   e.g. 26-06-26 / 14:30
+// Canonical app-wide date/time formatters (project standard — GUARDRAILS §5.3).
+//   Date:      dd-MMM-yy           e.g. 11-Jul-26
+//   Time:      HH:mm               e.g. 14:30
+//   Date/Time: dd-MMM-yy / HH:mm   e.g. 11-Jul-26 / 14:30
 // Pure helpers — use browser-local time. Render via a client-only span when
 // embedded in SSR'd markup to avoid hydration mismatches.
 // ---------------------------------------------------------------------------
@@ -173,7 +204,7 @@ function toSafeDate(input: string | Date | null | undefined): Date | null {
 
 export function formatDateStandard(input: string | Date | null | undefined): string {
   const d = toSafeDate(input);
-  return d ? dfFormat(d, "dd-MM-yy") : "—";
+  return d ? dfFormat(d, "dd-MMM-yy") : "—";
 }
 
 export function formatTimeStandard(input: string | Date | null | undefined): string {
@@ -183,5 +214,5 @@ export function formatTimeStandard(input: string | Date | null | undefined): str
 
 export function formatDateTimeStandard(input: string | Date | null | undefined): string {
   const d = toSafeDate(input);
-  return d ? dfFormat(d, "dd-MM-yy / HH:mm") : "—";
+  return d ? dfFormat(d, "dd-MMM-yy / HH:mm") : "—";
 }

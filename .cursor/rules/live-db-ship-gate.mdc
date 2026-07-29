@@ -1,0 +1,105 @@
+---
+description: Standard ship cadence — SQL handoff, agent-verified migrations, hard refresh, live probes, smoke tests (all work, not backlog-only)
+alwaysApply: true
+---
+
+# Live DB ship gate — get it right, not fast
+
+**User directive:** Quality over speed. Spend credits validating on live Supabase so the user spends time on **new features**, not debugging quick-and-dirty builds.
+
+PIN terminal uses the **anon** publishable key. Every write path needs anon grants + RLS verified on **live** DB.
+
+This cadence applies to **every implementation** — not backlog items only.
+
+---
+
+## Standard session cadence
+
+### A. Agent ships code + SQL (if any)
+
+1. Trace one user action end-to-end (UI → API → table/RPC → **anon** RLS).
+2. Probe live DB **before** handoff when touching schema, RPCs, or saves.
+3. Provide SQL file(s) under `docs/sql/` (idempotent, legacy-safe).
+4. Provide **post-migration validation queries** (see below).
+5. Provide **targeted smoke tests** (3–5 concrete UI steps) — not full regression.
+
+### B. User runs SQL + hard refresh
+
+User replies in standard form when done, e.g. *"SQL loaded without errors"* and *"hard refresh done"*.
+
+**Note:** Supabase SQL Editor often ends with **"Success. No rows returned"** for DDL/GRANT/policy scripts — that is **normal** and not proof the migration worked.
+
+### C. Agent verifies migration on live DB (preferred — do this before user UI tests)
+
+After user confirms SQL ran, **agent runs the validation queries** via Shell (REST / read-only probes using `.env` keys). Do not ask the user to UI-test until probes pass.
+
+Report what was checked and what came back. If probes fail, fix SQL/code — do not send user on a debug loop.
+
+### D. User runs targeted smoke tests only after C passes
+
+---
+
+## Post-migration validation (mandatory with every SQL handoff)
+
+For each migration, include in the handoff:
+
+1. **What "no rows returned" means** for that script (DDL only — expected).
+2. **One or more validation queries** the user *or agent* can run that **should return rows**, e.g.:
+
+```sql
+-- After 2026-07-12_tour_roll_call_defaults.sql — expect 2 rows:
+SELECT key, value FROM system_parameters
+WHERE key IN ('default_evening_roll_call_time', 'default_morning_roll_call_time');
+
+-- After 2026-07-12_system_parameters_pin_save.sql — expect function + policy:
+SELECT proname FROM pg_proc WHERE proname = 'set_system_parameter';
+```
+
+3. **Expected result shape** (row count, sample values) so user can paste back OR agent confirms via live query.
+
+Agent preference: user says *"SQL done"* → **agent runs equivalent REST/SQL probes** → then smoke tests.
+
+---
+
+## When the user reports a failure (FIRST response)
+
+If they have **not** confirmed both, ask before debugging code:
+
+1. **SQL migration(s) run without errors?** (list paths from this session)
+2. **Hard refresh done?** (Ctrl+Shift+R)
+
+If they confirm both and agent has **not** yet run post-migration validation this session, **run validation probes first** — then investigate code.
+
+---
+
+## Live DB probes (mandatory for DB/API/save work)
+
+Use **Shell** + network. Credentials from `.env` (`VITE_SUPABASE_URL`, `VITE_SUPABASE_PUBLISHABLE_KEY`).
+
+| Probe | Method |
+|--------|--------|
+| Columns exist | `GET /rest/v1/<table>?select=<cols>&limit=1` |
+| Keys / seed data | Filtered `select` on expected rows |
+| RPC exists | `POST /rest/v1/rpc/<name>` or catalog query |
+| Anon can write | Policy + grant check; test pattern from prior fixes |
+
+`docs/architecture/live_supabase_schema.json` is a hint — **live queries win**.
+
+Never assume column names (`full_name`, `auth_user_id`, etc.) — verify on live.
+
+---
+
+## Anon write checklist
+
+- [ ] `GRANT` to `anon`
+- [ ] Permissive RLS for `anon` OR `SECURITY DEFINER` RPC granted to `anon`
+- [ ] `authenticated`-only policies **break** PIN sessions
+
+---
+
+## Do not
+
+- Hand off with only "run this SQL" and no validation queries.
+- Treat "No rows returned" as migration success without follow-up SELECT.
+- Mark ready for UI test before agent post-migration probes (when user said SQL is done).
+- Optimize for smallest diff at the cost of live alignment.

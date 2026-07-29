@@ -1,8 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
+  getAssetCurrentOdometer,
   listTransportAssets,
+  resolveStaffIdWithFallback,
+  setAssetCurrentOdometerKm,
   type TransportAsset,
 } from "@/lib/data-store";
+import { writeToLedger } from "@/lib/api/ledger";
+import { canManageSystemParameters } from "@/lib/api/system-parameters";
 
 export type { TransportAsset };
 
@@ -13,42 +18,87 @@ export async function listFleet(): Promise<TransportAsset[]> {
 }
 
 /**
- * Latest known odometer reading for an asset, derived from
- * asset_daily_clearance.start_odometer (highest value wins). Returns null
- * if no clearance has ever been recorded.
+ * Latest known odometer — prefers transport_assets.current_odometer_km (BL-096),
+ * then clearance / trip fallbacks via getAssetCurrentOdometer.
  */
 export async function getLatestOdometer(assetId: string): Promise<number | null> {
-  const { data, error } = await supabase
-    .from("asset_daily_clearance")
-    .select("start_odometer")
-    .eq("asset_id", assetId)
-    .order("start_odometer", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (error) {
-    console.error("[getLatestOdometer] failed", error);
-    return null;
-  }
-  if (!data) return null;
-  const v = (data as { start_odometer: number | string }).start_odometer;
-  return v == null ? null : Number(v);
+  return getAssetCurrentOdometer(assetId);
 }
 
-/** Batched latest-odo lookup for every asset in `ids`. */
+/**
+ * Manager office correction of fleet current estimated KM (BL-096).
+ * Soft field warnings do not create Hub issues — this is the cleanup path.
+ */
+export async function correctFleetOdometer(args: {
+  assetId: string;
+  newKm: number;
+  justification: string;
+}): Promise<void> {
+  const justification = args.justification.trim();
+  if (justification.length < 10) {
+    throw new Error("Justification must be at least 10 characters.");
+  }
+  if (!Number.isFinite(args.newKm) || args.newKm < 0 || args.newKm > 10_000_000) {
+    throw new Error("Enter a valid odometer reading (km).");
+  }
+
+  const staffId = await resolveStaffIdWithFallback();
+  const allowed = await canManageSystemParameters(staffId);
+  if (!allowed) {
+    throw new Error("Only staff with a Manager role can correct fleet odometer.");
+  }
+
+  const oldKm = await getAssetCurrentOdometer(args.assetId);
+  await setAssetCurrentOdometerKm(args.assetId, args.newKm);
+
+  await writeToLedger({
+    staff_id: staffId,
+    category: "VEHICLE",
+    severity: "GREEN",
+    action_type: "TRANSPORT_ODOMETER_CORRECTED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      asset_id: args.assetId,
+      old_odometer_km: oldKm,
+      new_odometer_km: args.newKm,
+      justification,
+      corrected_by: staffId,
+    },
+  });
+}
+
+/** Batched latest-odo lookup for every asset in `ids`. Prefers current_odometer_km. */
 export async function getLatestOdometers(
   ids: string[],
 ): Promise<Record<string, number | null>> {
   if (ids.length === 0) return {};
+  const out: Record<string, number | null> = {};
+  for (const id of ids) out[id] = null;
+
+  const { data: assets, error: assetErr } = await supabase
+    .from("transport_assets")
+    .select("id, current_odometer_km")
+    .in("id", ids);
+  if (!assetErr && assets) {
+    for (const r of assets as { id: string; current_odometer_km?: number | string | null }[]) {
+      if (r.current_odometer_km == null || r.current_odometer_km === "") continue;
+      const v = Number(r.current_odometer_km);
+      if (Number.isFinite(v)) out[r.id] = v;
+    }
+  }
+
+  const missing = ids.filter((id) => out[id] == null);
+  if (missing.length === 0) return out;
+
   const { data, error } = await supabase
     .from("asset_daily_clearance")
     .select("asset_id, start_odometer")
-    .in("asset_id", ids);
+    .in("asset_id", missing);
   if (error) {
     console.error("[getLatestOdometers] failed", error);
-    return {};
+    return out;
   }
-  const out: Record<string, number | null> = {};
-  for (const id of ids) out[id] = null;
   for (const r of (data ?? []) as { asset_id: string; start_odometer: number | string }[]) {
     const v = Number(r.start_odometer);
     if (!Number.isFinite(v)) continue;

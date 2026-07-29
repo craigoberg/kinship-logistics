@@ -5,7 +5,8 @@ import {
   listComplianceAssets,
   type ComplianceAsset,
 } from "@/lib/api/compliance-assets";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
+import { formatDate } from "@/lib/utils";
 
 export type UnifiedIssueSource =
   | "day_centre"
@@ -30,6 +31,10 @@ export interface UnifiedIssue {
   sourceRowId: string;
   eventId?: string | null;
   raw: unknown;
+  /** ISO timestamp of the most recent hub_issue_note for this issue; null if none. */
+  lastActivityAt: string | null;
+  /** ISO timestamp of the current active defer deadline; null = not deferred. */
+  deferredUntil: string | null;
 }
 
 const SOURCE_LABELS: Record<UnifiedIssueSource, string> = {
@@ -39,6 +44,48 @@ const SOURCE_LABELS: Record<UnifiedIssueSource, string> = {
   escalation: "Escalation",
   renewal: "Renewal",
 };
+
+/**
+ * Trip Day when event FKs set, or legacy trip-roll description (§12.6).
+ *
+ * Do NOT treat bare `[AUTOMATED_RED]` as a trip issue — Day Centre attendance /
+ * departure sweeps use that prefix with `session_id` only (no event FKs).
+ */
+function isTripDaySiteIssue(r: Record<string, unknown>): boolean {
+  if (r.event_id || r.event_day_session_id) return true;
+  // Explicit Day Centre session row → never trip.
+  if (r.session_id && !r.event_id && !r.event_day_session_id) return false;
+  const desc = String(r.issue_description ?? "");
+  return /\[(?:CURFEW|EVENING ROLL|MORNING ROLL|TRIP ABSENT)\]/i.test(desc)
+    || /\[AUTOMATED_RED\].*(?:MORNING ROLL|EVENING ROLL|CURFEW)/i.test(desc);
+}
+
+async function fetchEventTitlesById(
+  eventIds: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(eventIds.filter(Boolean))];
+  const map = new Map<string, string>();
+  if (unique.length === 0) return map;
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("id, title")
+    .in("id", unique);
+  if (error) {
+    console.warn("[unified-issues] event title lookup failed", error);
+    return map;
+  }
+  for (const row of data ?? []) {
+    const id = String((row as { id: string }).id);
+    const title = String((row as { title?: string }).title ?? "").trim();
+    if (id && title) map.set(id, title);
+  }
+  return map;
+}
+
+function tripDaySourceLabel(eventTitle: string | null | undefined): string {
+  const t = (eventTitle ?? "").trim();
+  return t ? `Trip Day · ${t}` : SOURCE_LABELS.event;
+}
 
 function severityToLedger(sev: UnifiedSeverity): LedgerSeverity {
   if (sev === "red") return "RED";
@@ -54,86 +101,202 @@ function incidentSevToUnified(sev: string | null | undefined): UnifiedSeverity {
   return null;
 }
 
-export type UnifiedIssueTab = "active" | "awaiting";
+export type UnifiedIssueTab = "active" | "deferred" | "resolved";
 
 /**
- * Fetch every open operational issue across the four source tables in
- * parallel and normalise them to a single shape for the Governance Hub.
+ * Fetch operational issues for the Governance Hub Human Incidents tab.
  *
- * tab = "active"   → open / pending rows (current default behaviour).
- * tab = "awaiting" → site_issues_register rows whose status is
- *                    `deferred` or `awaiting_external` (escalated to
- *                    Council). Renewals + escalations are omitted from
- *                    this tab — they have their own resolution surfaces.
+ * tab = "active"   → open / pending rows (deferrals hidden until rewarn window).
+ * tab = "deferred" → site_issues_register deferred + council awaiting, plus
+ *                    cross-source hub_note deferrals.
+ * tab = "resolved" → resolved site issues, incidents, and fully acked escalations.
  *
- * deferRewarnDays (default 7) — how many days before a deferral deadline
- *   expires that the issue resurfaces on the Active tab. Issues with a
- *   live deferral more than `deferRewarnDays` in the future are excluded
- *   from Active ("No News Is Good News"). Once within the window they
- *   reappear so managers are notified before the deadline lapses.
+ * deferRewarnMs (default 3_600_000 = 1 hour) — how many milliseconds before a
+ *   deferral deadline that the issue resurfaces on the Active tab. Human issues
+ *   default to 1 hour; pass the value from useIssueDeferRewarnMs().
  */
 export async function listOpenUnifiedIssues(
-  options: { tab?: UnifiedIssueTab; deferRewarnDays?: number } = {},
+  options: { tab?: UnifiedIssueTab; deferRewarnMs?: number; /** @deprecated use deferRewarnMs */ deferRewarnDays?: number } = {},
 ): Promise<UnifiedIssue[]> {
   const tab: UnifiedIssueTab = options.tab ?? "active";
-  const deferRewarnMs = (options.deferRewarnDays ?? 7) * 86_400_000;
+  // Prefer ms; fall back to legacy days param if caller hasn't migrated yet.
+  const deferRewarnMs =
+    (options.deferRewarnMs ?? ((options.deferRewarnDays ?? 0) * 86_400_000)) || 3_600_000;
 
-  // Latest note per (source, source_row_id), used to detect "currently
-  // deferred" issues for any source (incident / escalation / renewal /
-  // day_centre). A defer is "live" when the latest note is kind='defer'
-  // and metadata.deferred_until is in the future.
-  const deferState = await fetchLatestDeferStateMap();
+  // Combined note-state: latest defer + latest activity per issue.
+  const { deferState, activityAt } = await fetchNoteStateMaps();
 
-  if (tab === "awaiting") {
+  if (tab === "deferred") {
     const { data, error } = await supabase
       .from("site_issues_register")
       .select("*")
       .in("status", ["deferred", "awaiting_external"])
       .order("created_at", { ascending: false });
     if (error) {
-      console.warn("[unified-issues] awaiting tab fetch failed", error);
+      console.warn("[unified-issues] deferred tab fetch failed", error);
     }
     const out: UnifiedIssue[] = [];
-    for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+    const deferredRows = (data ?? []) as Array<Record<string, unknown>>;
+    const deferredTitles = await fetchEventTitlesById(
+      deferredRows
+        .map((r) => r.event_id as string | null)
+        .filter((id): id is string => !!id),
+    );
+    for (const r of deferredRows) {
       const sev = (r.severity as UnifiedSeverity) ?? null;
       const status = String(r.status ?? "open");
-      const isEventRow = !!(r.event_id as string | null);
+      const isEventRow = isTripDaySiteIssue(r);
       const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
-      const baseLabel = isEventRow ? "Trip Day" : "Day Centre";
+      const eventId = (r.event_id as string | null) ?? null;
+      const desc = String(r.issue_description ?? "");
+      const isHealthSafety =
+        String(r.issue_area ?? "") === "health_safety" ||
+        desc.includes("[HEALTH & SAFETY]");
+      const baseLabel = isEventRow
+        ? tripDaySourceLabel(eventId ? deferredTitles.get(eventId) : null)
+        : isHealthSafety
+          ? "Health & Safety"
+          : "Day Centre";
       const label =
         status === "deferred" ? `${baseLabel} · Deferred` : `${baseLabel} · Council`;
+      const key = `${source}:${String(r.id)}`;
       out.push({
-        key: `${source}:${r.id as string}`,
+        key,
         source,
         sourceLabel: label,
         category: sev ? sev.toUpperCase() : "NOTE",
         subCategory:
           status === "awaiting_external"
             ? (r.council_severity as string | null) ?? "Council"
-            : (r.deferred_until as string | null) ?? "Deferred",
+            : isHealthSafety
+              ? "Health & Safety"
+              : (r.deferred_until as string | null) ?? "Deferred",
         severity: sev,
-        title: String(r.issue_description ?? (isEventRow ? "Trip Day venue issue" : "Day Centre anomaly")).slice(0, 120),
-        description: String(r.issue_description ?? ""),
+        title: (desc || (isEventRow ? "Trip Day venue issue" : "Day Centre anomaly")).slice(0, 120),
+        description: desc,
         status,
         createdAt: String(r.created_at ?? new Date().toISOString()),
         sourceRowId: String(r.id),
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
+        lastActivityAt: activityAt.get(key) ?? null,
+        deferredUntil: (r.deferred_until as string | null) ?? deferState.get(key)?.deferredUntil.toISOString() ?? null,
       });
     }
 
     // Cross-source deferrals: surface any non-day_centre issue whose
     // latest timeline note is a still-live defer.
-    const extras = await fetchDeferredNonDayCentreIssues(deferState);
+    const extras = await fetchDeferredNonDayCentreIssues(deferState, activityAt);
     out.push(...extras);
     return out;
   }
 
+  if (tab === "resolved") {
+    const [siteRes, incRes, escRes] = await Promise.all([
+      supabase
+        .from("site_issues_register")
+        .select("*")
+        .eq("status", "resolved")
+        .order("resolved_at", { ascending: false })
+        .limit(300),
+      supabase
+        .from("operational_incidents")
+        .select("*")
+        .eq("status", "resolved")
+        .eq("incident_type", "human_operational")
+        .order("created_at", { ascending: false })
+        .limit(300),
+      supabase
+        .from("operational_escalations")
+        .select("*")
+        .not("operator_acknowledged_at", "is", null)
+        .order("resolved_at", { ascending: false })
+        .limit(300),
+    ]);
+
+    const out: UnifiedIssue[] = [];
+
+    for (const r of (siteRes.data ?? []) as Array<Record<string, unknown>>) {
+      const sev = (r.severity as UnifiedSeverity) ?? null;
+      const isEventRow = isTripDaySiteIssue(r);
+      const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
+      const key = `${source}:${String(r.id)}`;
+      out.push({
+        key,
+        source,
+        sourceLabel: SOURCE_LABELS[source],
+        category: sev ? sev.toUpperCase() : "NOTE",
+        subCategory: (r.owner as string | null) ?? null,
+        severity: sev,
+        title: String(r.issue_description ?? "Resolved issue").slice(0, 120),
+        description: String(r.issue_description ?? ""),
+        status: "resolved",
+        createdAt: String(r.created_at ?? new Date().toISOString()),
+        sourceRowId: String(r.id),
+        eventId: (r.event_id as string | null) ?? null,
+        raw: r,
+        lastActivityAt: activityAt.get(key) ?? null,
+        deferredUntil: null,
+      });
+    }
+
+    if (!incRes.error) {
+      for (const r of (incRes.data ?? []) as Array<Record<string, unknown>>) {
+        const sev = incidentSevToUnified(r.severity as string | null);
+        const key = `incident:${String(r.id)}`;
+        out.push({
+          key,
+          source: "incident",
+          sourceLabel: SOURCE_LABELS.incident,
+          category: String(r.incident_type ?? "incident").replace("_", " "),
+          subCategory: (r.event_id as string | null) ?? null,
+          severity: sev,
+          title: String(r.description ?? "Operational incident").slice(0, 120),
+          description: String(r.description ?? ""),
+          status: "resolved",
+          createdAt: String(r.created_at ?? new Date().toISOString()),
+          sourceRowId: String(r.id),
+          eventId: (r.event_id as string | null) ?? null,
+          raw: r,
+          lastActivityAt: activityAt.get(key) ?? null,
+          deferredUntil: null,
+        });
+      }
+    }
+
+    if (!escRes.error) {
+      for (const r of (escRes.data ?? []) as Array<Record<string, unknown>>) {
+        const key = `escalation:${String(r.id)}`;
+        out.push({
+          key,
+          source: "escalation",
+          sourceLabel: SOURCE_LABELS.escalation,
+          category: String(r.gate_id ?? "escalation"),
+          subCategory: (r.vehicle_info as string | null) ?? null,
+          severity: "red",
+          title: `Escalation ${String(r.id ?? "").slice(0, 8)}`,
+          description: `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"} (${r.vehicle_info ?? "vehicle"}).`,
+          status: "resolved",
+          createdAt: String(r.created_at ?? new Date().toISOString()),
+          sourceRowId: String(r.id),
+          raw: r,
+          lastActivityAt: activityAt.get(key) ?? null,
+          deferredUntil: null,
+        });
+      }
+    }
+
+    out.sort((a, b) => (a.createdAt < b.createdAt ? 1 : -1));
+    return out;
+  }
+
   const [siteIssuesRes, incidentsRes, escalationsRes] = await Promise.all([
+    // Include deferred rows so rewarn-window items resurface on the Active tab.
     supabase
       .from("site_issues_register")
       .select("*")
-      .eq("status", "open")
+      // open + deferred + accepted workarounds (still operating — not Hub-resolved yet)
+      .in("status", ["open", "deferred", "workaround_accepted"])
       .order("created_at", { ascending: false }),
     // §14 routing: only human_operational incidents belong in Human Incidents tab.
     // mechanical / asset incidents are tracked in Maintenance & Repairs via maintenance_items.
@@ -164,33 +327,60 @@ export async function listOpenUnifiedIssues(
       `site_issues_register: ${siteIssuesRes.error.message ?? siteIssuesRes.error.code ?? "query failed"}`,
     );
   }
-  for (const r of (siteIssuesRes.data ?? []) as Array<Record<string, unknown>>) {
+  const siteRows = (siteIssuesRes.data ?? []) as Array<Record<string, unknown>>;
+  const eventTitles = await fetchEventTitlesById(
+    siteRows
+      .map((r) => r.event_id as string | null)
+      .filter((id): id is string => !!id),
+  );
+
+  for (const r of siteRows) {
     const sev = (r.severity as UnifiedSeverity) ?? null;
-    const isEventRow = !!(r.event_id as string | null);
+    const isEventRow = isTripDaySiteIssue(r);
     const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
     const fallbackTitle = isEventRow ? "Trip Day venue issue" : "Day Centre anomaly";
+    const key = `${source}:${String(r.id)}`;
+    const eventId = (r.event_id as string | null) ?? null;
+    const issueArea = String(r.issue_area ?? "");
+    const desc = String(r.issue_description ?? "");
+    const isHealthSafety =
+      issueArea === "health_safety" ||
+      desc.includes("[HEALTH & SAFETY]") ||
+      desc.includes("[INFECTIOUS EXCLUSION]");
     out.push({
-      key: `${source}:${r.id as string}`,
+      key,
       source,
-      sourceLabel: SOURCE_LABELS[source],
+      sourceLabel: isEventRow
+        ? tripDaySourceLabel(eventId ? eventTitles.get(eventId) : null)
+        : isHealthSafety
+          ? "Health & Safety"
+          : SOURCE_LABELS[source],
       category: sev ? sev.toUpperCase() : "NOTE",
-      subCategory: (r.owner as string | null) ?? null,
+      subCategory: isHealthSafety
+        ? "Health & Safety"
+        : (r.owner as string | null) ?? null,
       severity: sev,
-      title: String(r.issue_description ?? fallbackTitle).slice(0, 120),
-      description: String(r.issue_description ?? ""),
+      title: desc
+        ? desc.slice(0, 120)
+        : fallbackTitle,
+      description: desc,
       status: String(r.status ?? "open"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
       sourceRowId: String(r.id),
-      eventId: (r.event_id as string | null) ?? null,
+      eventId,
       raw: r,
+      lastActivityAt: activityAt.get(key) ?? null,
+      deferredUntil: (r.deferred_until as string | null) ?? null,
     });
   }
 
   if (!incidentsRes.error) {
     for (const r of (incidentsRes.data ?? []) as Array<Record<string, unknown>>) {
       const sev = incidentSevToUnified(r.severity as string | null);
+      const key = `incident:${String(r.id)}`;
+      const deferEntry = deferState.get(key);
       out.push({
-        key: `incident:${r.id as string}`,
+        key,
         source: "incident",
         sourceLabel: SOURCE_LABELS.incident,
         category: String(r.incident_type ?? "incident").replace("_", " "),
@@ -203,6 +393,8 @@ export async function listOpenUnifiedIssues(
         sourceRowId: String(r.id),
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
+        lastActivityAt: activityAt.get(key) ?? null,
+        deferredUntil: deferEntry?.deferredUntil.toISOString() ?? null,
       });
     }
   } else {
@@ -214,8 +406,10 @@ export async function listOpenUnifiedIssues(
       const status = String(r.status ?? "pending");
       const awaitingAck =
         status === "resolved_approved" && r.operator_acknowledged_at == null;
+      const key = `escalation:${String(r.id)}`;
+      const deferEntry = deferState.get(key);
       out.push({
-        key: `escalation:${r.id as string}`,
+        key,
         source: "escalation",
         sourceLabel: awaitingAck
           ? `${SOURCE_LABELS.escalation} · Workaround — awaiting operator ack`
@@ -231,6 +425,8 @@ export async function listOpenUnifiedIssues(
         createdAt: String(r.created_at ?? new Date().toISOString()),
         sourceRowId: String(r.id),
         raw: r,
+        lastActivityAt: activityAt.get(key) ?? null,
+        deferredUntil: deferEntry?.deferredUntil.toISOString() ?? null,
       });
     }
   } else {
@@ -248,20 +444,29 @@ export async function listOpenUnifiedIssues(
   // resurfaces on the Active tab so managers see it before the defer lapses.
   const now = Date.now();
   const filtered = out.filter((i) => {
-    const k = `${i.source}:${i.sourceRowId}`;
-    const d = deferState.get(k);
+    // day_centre / event: defer is tracked on the row's deferred_until column.
+    if (i.source === "day_centre" || i.source === "event") {
+      if (i.status !== "deferred") return true; // open — always show
+      const deferUntilStr = i.deferredUntil;
+      if (!deferUntilStr) return true; // deferred but no date — show
+      const deferMs = new Date(deferUntilStr).getTime();
+      if (deferMs <= now) return true; // already lapsed — show
+      return (deferMs - now) <= deferRewarnMs; // show only if within rewarn
+    }
+
+    // All other sources: defer tracked via hub_issue_notes.
+    const d = deferState.get(`${i.source}:${i.sourceRowId}`);
     if (!d) return true; // not deferred — always show
     const msUntilDefer = d.deferredUntil.getTime() - now;
-    if (msUntilDefer <= 0) return true; // defer has already lapsed — show
-    // Hidden only while the deadline is comfortably in the future.
-    return msUntilDefer <= deferRewarnMs;
+    if (msUntilDefer <= 0) return true; // already lapsed — show
+    return msUntilDefer <= deferRewarnMs; // show only if within rewarn
   });
 
   return filtered;
 }
 
 // ---------------------------------------------------------------------------
-// Cross-source deferral helpers (read latest hub_issue_notes per issue)
+// Cross-source note-state helpers (read latest hub_issue_notes per issue)
 // ---------------------------------------------------------------------------
 
 interface LiveDefer {
@@ -270,41 +475,87 @@ interface LiveDefer {
   stampedAt: string;
 }
 
+interface NoteStateMaps {
+  /** Latest defer note per `${source}:${sourceRowId}` (kind='defer' as most recent note). */
+  deferState: Map<string, LiveDefer>;
+  /** Latest stamped_at (any kind) per `${source}:${sourceRowId}`. */
+  activityAt: Map<string, string>;
+}
+
 /**
- * Build a map of `${source}:${sourceRowId}` → live defer state by reading
- * the latest note per issue from `hub_issue_notes`. An issue is "live
- * deferred" only when its LATEST note is kind='defer' (any later
- * append/resolve note cancels the defer).
+ * Single-pass read of hub_issue_notes returning both the defer state AND the
+ * latest activity timestamp per issue. One query serves both needs.
  */
-async function fetchLatestDeferStateMap(): Promise<Map<string, LiveDefer>> {
-  const map = new Map<string, LiveDefer>();
+async function fetchNoteStateMaps(): Promise<NoteStateMaps> {
+  const deferState = new Map<string, LiveDefer>();
+  const activityAt = new Map<string, string>();
+
   const { data, error } = await supabase
     .from("hub_issue_notes")
     .select("source, source_row_id, note, kind, stamped_at, metadata")
     .order("stamped_at", { ascending: false })
     .limit(2000);
   if (error) {
-    console.warn("[unified-issues] fetchLatestDeferStateMap failed", error);
-    return map;
+    console.warn("[unified-issues] fetchNoteStateMaps failed", error);
+    return { deferState, activityAt };
   }
-  const seen = new Set<string>();
+
+  const seenForDefer = new Set<string>();
   for (const r of (data ?? []) as Array<Record<string, unknown>>) {
     const key = `${String(r.source)}:${String(r.source_row_id)}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    if (r.kind !== "defer") continue;
-    const meta = (r.metadata as Record<string, unknown> | null) ?? null;
-    const untilStr = meta && typeof meta.deferred_until === "string"
-      ? (meta.deferred_until as string)
-      : null;
-    if (!untilStr) continue;
-    const until = new Date(untilStr);
-    if (Number.isNaN(until.getTime())) continue;
-    map.set(key, {
-      deferredUntil: until,
-      note: String(r.note ?? ""),
-      stampedAt: String(r.stamped_at),
-    });
+
+    // Latest activity: first occurrence (desc order) wins.
+    if (!activityAt.has(key)) {
+      activityAt.set(key, String(r.stamped_at));
+    }
+
+    // Defer state: only the LATEST note per issue matters. If it is kind='defer'
+    // with a valid deferred_until, the issue is "live deferred".
+    if (!seenForDefer.has(key)) {
+      seenForDefer.add(key);
+      if (r.kind !== "defer") continue;
+      const meta = (r.metadata as Record<string, unknown> | null) ?? null;
+      const untilStr = meta && typeof meta.deferred_until === "string"
+        ? (meta.deferred_until as string)
+        : null;
+      if (!untilStr) continue;
+      const until = new Date(untilStr);
+      if (Number.isNaN(until.getTime())) continue;
+      deferState.set(key, {
+        deferredUntil: until,
+        note: String(r.note ?? ""),
+        stampedAt: String(r.stamped_at),
+      });
+    }
+  }
+
+  return { deferState, activityAt };
+}
+
+/**
+ * Returns a Map<sourceRowId → latestStampedAt> for a single source.
+ * Used by panels (e.g. Compliance Assets) that need last-activity data
+ * for urgency badging without running a full note-state scan.
+ */
+export async function fetchLatestHubActivityMap(
+  source: UnifiedIssueSource,
+): Promise<Map<string, string>> {
+  const map = new Map<string, string>();
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("source_row_id, stamped_at")
+    .eq("source", source)
+    .order("stamped_at", { ascending: false })
+    .limit(1000);
+  if (error) {
+    console.warn("[unified-issues] fetchLatestHubActivityMap failed", error);
+    return map;
+  }
+  for (const r of (data ?? []) as Array<Record<string, unknown>>) {
+    const rowId = String(r.source_row_id);
+    if (!map.has(rowId)) {
+      map.set(rowId, String(r.stamped_at));
+    }
   }
   return map;
 }
@@ -312,10 +563,11 @@ async function fetchLatestDeferStateMap(): Promise<Map<string, LiveDefer>> {
 /**
  * Fetch incident / escalation / renewal rows that are currently
  * live-deferred (latest note is a defer with future deferred_until) and
- * surface them in the Awaiting / Deferred tab.
+ * surface them in the Deferred tab.
  */
 async function fetchDeferredNonDayCentreIssues(
   deferState: Map<string, LiveDefer>,
+  activityAt: Map<string, string>,
 ): Promise<UnifiedIssue[]> {
   const now = Date.now();
   const targets: Array<{ source: UnifiedIssueSource; id: string; until: Date }> = [];
@@ -351,9 +603,10 @@ async function fetchDeferredNonDayCentreIssues(
 
   for (const r of (incRes.data ?? []) as Array<Record<string, unknown>>) {
     const sev = incidentSevToUnified(r.severity as string | null);
-    const meta = deferState.get(`incident:${r.id}`)!;
+    const key = `incident:${String(r.id)}`;
+    const meta = deferState.get(key)!;
     out.push({
-      key: `incident:${r.id as string}`,
+      key,
       source: "incident",
       sourceLabel: `${SOURCE_LABELS.incident} · Deferred`,
       category: String(r.incident_type ?? "incident").replace("_", " "),
@@ -366,13 +619,16 @@ async function fetchDeferredNonDayCentreIssues(
       sourceRowId: String(r.id),
       eventId: (r.event_id as string | null) ?? null,
       raw: r,
+      lastActivityAt: activityAt.get(key) ?? null,
+      deferredUntil: meta.deferredUntil.toISOString(),
     });
   }
 
   for (const r of (escRes.data ?? []) as Array<Record<string, unknown>>) {
-    const meta = deferState.get(`escalation:${r.id}`)!;
+    const key = `escalation:${String(r.id)}`;
+    const meta = deferState.get(key)!;
     out.push({
-      key: `escalation:${r.id as string}`,
+      key,
       source: "escalation",
       sourceLabel: `${SOURCE_LABELS.escalation} · Deferred`,
       category: String(r.gate_id ?? "gate"),
@@ -384,24 +640,29 @@ async function fetchDeferredNonDayCentreIssues(
       createdAt: String(r.created_at ?? new Date().toISOString()),
       sourceRowId: String(r.id),
       raw: r,
+      lastActivityAt: activityAt.get(key) ?? null,
+      deferredUntil: meta.deferredUntil.toISOString(),
     });
   }
 
   for (const a of renRes.data as ComplianceAsset[]) {
-    const meta = deferState.get(`renewal:${a.id}`)!;
+    const key = `renewal:${a.id}`;
+    const meta = deferState.get(key)!;
     out.push({
-      key: `renewal:${a.id}`,
+      key,
       source: "renewal",
       sourceLabel: `${SOURCE_LABELS.renewal} · Deferred`,
       category: a.category,
       subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
       severity: computeRyge(a),
       title: a.name,
-      description: (a.description ?? "") + (a.expiry_date ? ` (expires ${a.expiry_date})` : ""),
+      description: (a.description ?? "") + (a.expiry_date ? ` (expires ${formatDate(a.expiry_date)})` : ""),
       status: a.status,
       createdAt: a.updated_at,
       sourceRowId: a.id,
       raw: a,
+      lastActivityAt: activityAt.get(key) ?? null,
+      deferredUntil: meta.deferredUntil.toISOString(),
     });
   }
 
@@ -473,6 +734,25 @@ export async function resolveUnifiedIssue(
       .update({ status: "resolved", resolved_at: nowIso })
       .eq("id", issue.sourceRowId);
     if (error) throw error;
+
+    // Clear attendance-roll RED/YELLOW badges so floor UI does not keep
+    // saying "Manager notified" after Hub resolve.
+    if (issue.source === "day_centre") {
+      await supabase
+        .from("client_attendance_log")
+        .update({
+          escalation_severity: null,
+          escalation_raised_at: null,
+        })
+        .eq("escalation_issue_id", issue.sourceRowId);
+      await supabase
+        .from("client_attendance_log")
+        .update({
+          departure_severity: null,
+          departure_raised_at: null,
+        })
+        .eq("departure_issue_id", issue.sourceRowId);
+    }
   } else if (issue.source === "incident") {
     const { error } = await supabase
       .from("operational_incidents")
@@ -533,10 +813,14 @@ function pad2(n: number): string {
   return n < 10 ? `0${n}` : String(n);
 }
 
-/** Browser-local stamp in dd-mm-yy/hh:mm. */
+const STAMP_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] as const;
+
+/** Browser-local stamp in dd-Mmm-yy / HH:mm (GUARDRAILS §5.3). */
 function formatStamp(d: Date): string {
-  const yy = String(d.getFullYear()).slice(-2);
-  return `${pad2(d.getDate())}-${pad2(d.getMonth() + 1)}-${yy}/${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+  const dd = pad2(d.getDate());
+  const mmm = STAMP_MONTHS[d.getMonth()];
+  const yy = String(d.getFullYear() % 100).padStart(2, "0");
+  return `${dd}-${mmm}-${yy} / ${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
 }
 
 export interface HubIssueNote {
@@ -601,6 +885,49 @@ async function insertHubNote(args: {
     metadata: args.metadata ?? null,
   });
   if (error) throw error;
+}
+
+/**
+ * Office acknowledges review has begun — stamps the Hub timeline so wait
+ * time from logged → review started is auditable (BL-060).
+ */
+export async function startUnifiedIssueReview(issue: UnifiedIssue): Promise<void> {
+  const staffId = await resolveStaffIdWithFallback().catch(() => null);
+  const author = resolveStaffDisplayName(staffId);
+  await insertHubNote({
+    source: issue.source,
+    sourceRowId: issue.sourceRowId,
+    note: `Review started by ${author}.`,
+    kind: "append",
+    metadata: { review_started: true, started_by: staffId },
+  });
+}
+
+/** Keys `${source}:${sourceRowId}` with an office review-started stamp. */
+export async function fetchHubReviewStartedKeySet(): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .select("source, source_row_id, note, metadata")
+    .order("stamped_at", { ascending: false })
+    .limit(5000);
+  if (error) {
+    console.warn("[unified-issues] fetchHubReviewStartedKeySet failed", error);
+    return new Set();
+  }
+  const keys = new Set<string>();
+  for (const r of data ?? []) {
+    const row = r as Record<string, unknown>;
+    const meta = row.metadata as Record<string, unknown> | null;
+    const note = String(row.note ?? "");
+    if (
+      meta?.review_started === true ||
+      /^Review started/i.test(note) ||
+      note === "Work started."
+    ) {
+      keys.add(`${row.source}:${row.source_row_id}`);
+    }
+  }
+  return keys;
 }
 
 /**

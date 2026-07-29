@@ -1,7 +1,7 @@
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
 import { supabase } from "@/integrations/supabase/client";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, verifyStaffPin, resolveStaffDisplayName } from "@/lib/data-store";
 import { tryGetGps, writeToLedger } from "@/lib/api/ledger";
 
 // ---------------------------------------------------------------------------
@@ -186,9 +186,13 @@ export interface ComplianceHubNote {
   metadata: Record<string, unknown> | null;
 }
 
+const HUB_STAMP_MONTHS = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"] as const;
 function formatHubStamp(d: Date): string {
   const pad = (n: number) => (n < 10 ? `0${n}` : String(n));
-  return `${pad(d.getDate())}-${pad(d.getMonth() + 1)}-${String(d.getFullYear()).slice(-2)}/${pad(d.getHours())}:${pad(d.getMinutes())}`;
+  const dd = pad(d.getDate());
+  const mmm = HUB_STAMP_MONTHS[d.getMonth()];
+  const yy = String(d.getFullYear() % 100).padStart(2, "0");
+  return `${dd}-${mmm}-${yy} / ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
 export function renderComplianceNoteLine(n: ComplianceHubNote): string {
@@ -475,6 +479,18 @@ export async function appendComplianceAssetNote(
     note: `${trimmed}${evidenceSuffix}`,
     kind: "append",
     metadata: evidence ? { evidence_ref: evidence } : undefined,
+  });
+}
+
+/** Stamp review-started on the compliance Hub timeline (BL-060). */
+export async function startComplianceAssetReview(assetId: string): Promise<void> {
+  const staffId = await resolveStaffIdWithFallback().catch(() => null);
+  const author = resolveStaffDisplayName(staffId);
+  await insertComplianceHubNote({
+    assetId,
+    note: `Review started by ${author}.`,
+    kind: "append",
+    metadata: { review_started: true, started_by: staffId },
   });
 }
 

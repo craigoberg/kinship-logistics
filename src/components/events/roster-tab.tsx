@@ -1,6 +1,7 @@
 ﻿import { Fragment, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, Search, UserPlus, Users } from "lucide-react";
+import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
@@ -9,10 +10,12 @@ import {
   useEventPaymentLedgerForEvent,
   useCarersRegistry,
   useReorderEventRosterPickupOrder,
+  useLookupParameters,
 } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
-import { manifestPickupForBooking } from "@/lib/data-store";
+import { LOOKUP_CATEGORIES, manifestPickupForBooking } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
+import { AddGuestBookingModal } from "./add-guest-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
@@ -25,6 +28,7 @@ import { TRANSPORT_MED_BAG_LABELS } from "@/lib/api/event-outing";
 import { EventTransportPair } from "./event-transport-badge";
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
 import { cn } from "@/lib/utils";
+import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 
 interface Props {
   event: EventManifest;
@@ -40,6 +44,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
+  const [guestOpen, setGuestOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
@@ -56,11 +61,23 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     staleTime: 30_000,
   });
 
+  const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const busRunOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
+
   const carersById = useMemo(() => {
     const m = new Map<string, (typeof carersAll)[number]>();
     carersAll.forEach((c) => m.set(c.id, c));
     return m;
   }, [carersAll]);
+
+  const runLabelFor = useCallback(
+    (mode: string | null | undefined, runCode: string | null | undefined) => {
+      if ((mode ?? "bus") !== "bus") return null;
+      if (!runCode?.trim()) return null;
+      return eventBusRunShortLabel(runCode, busRunOpts);
+    },
+    [busRunOpts],
+  );
 
   const activeBookings = useMemo(
     () => bookings.filter((b) => b.bookingStatus !== "Cancelled"),
@@ -190,6 +207,14 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           <td key="participant" className="px-4 py-2">
             <div className="font-medium">
               {b.participantName}
+              {b.isGuestBooking && (
+                <Badge
+                  variant="outline"
+                  className="ml-1.5 align-middle text-[10px] uppercase"
+                >
+                  Guest
+                </Badge>
+              )}
               {b.notes && (
                 <Tooltip>
                   <TooltipTrigger asChild>
@@ -232,6 +257,14 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
                   plannedOutbound={b.outboundTransportMode}
                   plannedReturn={b.returnTransportMode}
+                  outboundRunLabel={runLabelFor(
+                    actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode,
+                    b.outboundBusRunCode,
+                  )}
+                  returnRunLabel={runLabelFor(
+                    actualTransport.get(b.participantId)?.return ?? b.returnTransportMode,
+                    b.returnBusRunCode,
+                  )}
                 />
               )}
               {isOuting &&
@@ -264,6 +297,14 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                 return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
                 plannedOutbound={b.outboundTransportMode}
                 plannedReturn={b.returnTransportMode}
+                outboundRunLabel={runLabelFor(
+                  actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode,
+                  b.outboundBusRunCode,
+                )}
+                returnRunLabel={runLabelFor(
+                  actualTransport.get(b.participantId)?.return ?? b.returnTransportMode,
+                  b.returnBusRunCode,
+                )}
               />
             )}
             {isOuting &&
@@ -417,6 +458,17 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
               ({activeBookings.length} pax + {carerSeats} carer{carerSeats === 1 ? "" : "s"})
             </span>
           </div>
+          {isOuting && (
+            <Button
+              type="button"
+              variant="secondary"
+              onClick={() => setGuestOpen(true)}
+              className="gap-1.5"
+            >
+              <UserRoundPlus className="h-4 w-4" />
+              Add guest
+            </Button>
+          )}
           <Button onClick={() => setAddOpen(true)} className="gap-1.5">
             <UserPlus className="h-4 w-4" />
             Add Participant to Roster
@@ -503,6 +555,12 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         onOpenChange={setAddOpen}
         event={event}
         existingBookings={bookings}
+      />
+
+      <AddGuestBookingModal
+        open={guestOpen}
+        onOpenChange={setGuestOpen}
+        event={event}
       />
 
       <RecordPaymentMilestoneModal

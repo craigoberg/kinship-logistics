@@ -6,9 +6,11 @@
  * Guard rules (§12, GUARDRAILS §1.1):
  *   • Planning   → Confirmed: all day sessions must have a manager assigned.
  *   • Confirmed  → Open:      event start_date ≤ today; all itinerary stops exist.
- *   • Open       → Closed:    all day sessions must be closed (phase closed_orderly
- *                             or closed_incident); then billingLocked = true.
+ *   • Open       → Closed:    all day sessions closed; no open RED; return transport
+ *                             complete; final-day departure cleared (BL-088); then
+ *                             billingLocked = true.
  *   • Closed is terminal — no further status changes permitted.
+ *   • Day open/close sequencing: BL-088 / event-lifecycle-gates.ts
  *
  * Trip Report = read-only aggregate of:
  *   • Event metadata + venue itinerary
@@ -17,13 +19,20 @@
  *   • Finance summary (revenue / expenses / P&L)
  *   • Open issues at close time
  */
-import { supabase } from "@/integrations/supabase/client";
+import { assessEventReturnTransport } from "@/lib/api/event-transport";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback, getEventFinanceTotals } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { sortByRygeOldestFirst } from "@/lib/api/site-issues";
 import {
+  assertDaySessionCloseable,
+  assertFinalDayDepartureComplete,
+  isDaySessionClosed,
+} from "@/lib/api/event-lifecycle-gates";
+import {
+  assessOvernightHotelItinerary,
   inferEventKind,
   isOutingEventKind,
   seedEventDaySessions,
@@ -31,7 +40,9 @@ import {
   listEventDaySessions,
 } from "@/lib/api/event-outing";
 import { fetchActualTransportForSessions } from "@/lib/api/event-transport";
-import { todayLocalIso } from "@/lib/utils";
+import { archiveGuestParticipantsForEvent } from "@/lib/api/event-guest";
+import { operationalNowIso } from "@/lib/operational-clock";
+import { todayLocalIso, formatDate } from "@/lib/utils";
 
 // ============================================================================
 // Types
@@ -43,6 +54,8 @@ export interface StatusGuardResult {
   ok: boolean;
   /** Human-readable list of unmet conditions. Empty when ok=true. */
   blockers: string[];
+  /** BL-098 — non-blocking Confirm warnings (e.g. incomplete guest intake). */
+  warnings?: string[];
 }
 
 // ============================================================================
@@ -152,7 +165,21 @@ async function guardPlanningToConfirmed(eventId: string): Promise<StatusGuardRes
     }
   }
 
-  return { ok: true, blockers: [] };
+  const hotel = await assessOvernightHotelItinerary(eventId);
+  if (!hotel.ok) {
+    return { ok: false, blockers: hotel.blockers };
+  }
+
+  // BL-098 — incomplete guest bookings warn on Confirm (Open location hard-blocks).
+  const { listIncompleteGuestBookings, formatGuestIncompleteMessage } =
+    await import("@/lib/api/event-guest");
+  const incompleteGuests = await listIncompleteGuestBookings(eventId);
+  const warnings =
+    incompleteGuests.length > 0
+      ? [formatGuestIncompleteMessage(incompleteGuests)]
+      : [];
+
+  return { ok: true, blockers: [], warnings };
 }
 
 /** Confirmed → Open: start_date ≤ today (local timezone); at least one venue stop per day. */
@@ -161,7 +188,7 @@ async function guardConfirmedToOpen(eventId: string, startDate: string): Promise
   if (startDate > today) {
     return {
       ok: false,
-      blockers: [`Event starts ${startDate} — cannot open before start date (today is ${today}).`],
+      blockers: [`Event starts ${formatDate(startDate)} — cannot open before start date (today is ${formatDate(today)}).`],
     };
   }
 
@@ -186,12 +213,26 @@ async function guardConfirmedToOpen(eventId: string, startDate: string): Promise
     .eq("event_id", eventId);
   if (sessErr) return { ok: false, blockers: [`DB error: ${sessErr.message}`] };
 
+  // Every day session must have at least one venue stop.
+  const stopDates = new Set((stops as { session_date: string }[]).map((s) => s.session_date));
+  const daysWithNoStops = (sessions ?? [])
+    .filter((s) => !stopDates.has((s as { session_date: string }).session_date))
+    .map((s) => formatDate((s as { session_date: string }).session_date));
+  if (daysWithNoStops.length > 0) {
+    return {
+      ok: false,
+      blockers: [
+        `Add at least one venue stop for: ${daysWithNoStops.join(", ")} — Itinerary tab.`,
+      ],
+    };
+  }
+
   const unmanaged = (sessions ?? []).filter(
     (s) => !(s as { manager_staff_id: string | null }).manager_staff_id,
   );
   if (unmanaged.length > 0) {
     const dates = unmanaged
-      .map((s) => (s as { session_date: string }).session_date)
+      .map((s) => formatDate((s as { session_date: string }).session_date))
       .join(", ");
     return {
       ok: false,
@@ -199,6 +240,11 @@ async function guardConfirmedToOpen(eventId: string, startDate: string): Promise
         `Assign a trip leader for: ${dates} — Trip days tab → expand the date → pick leader → Save.`,
       ],
     };
+  }
+
+  const hotel = await assessOvernightHotelItinerary(eventId);
+  if (!hotel.ok) {
+    return { ok: false, blockers: hotel.blockers };
   }
 
   return { ok: true, blockers: [] };
@@ -213,10 +259,7 @@ async function guardOpenToClosed(eventId: string): Promise<StatusGuardResult> {
   if (error) return { ok: false, blockers: [`DB error: ${error.message}`] };
 
   const sessions = data ?? [];
-  const open = sessions.filter((s) => {
-    const phase = (s as { phase: string }).phase;
-    return phase !== "closed_orderly" && phase !== "closed_incident";
-  });
+  const open = sessions.filter((s) => !isDaySessionClosed((s as { phase: string }).phase));
 
   if (open.length > 0) {
     const dates = open.map((s) => (s as { session_date: string }).session_date).join(", ");
@@ -243,6 +286,31 @@ async function guardOpenToClosed(eventId: string): Promise<StatusGuardResult> {
         ],
       };
     }
+  }
+
+  try {
+    await assertFinalDayDepartureComplete(eventId);
+  } catch (e) {
+    return { ok: false, blockers: [(e as Error).message] };
+  }
+
+  const transport = await assessEventReturnTransport(eventId);
+  if (transport.hasActiveTrip) {
+    return {
+      ok: false,
+      blockers: [
+        "An active transport run is still open. Close the manifest run before closing the event.",
+      ],
+    };
+  }
+  if (transport.needsReturnRun) {
+    const n = transport.busReturnPassengerCount;
+    return {
+      ok: false,
+      blockers: [
+        `Return transport home is not complete (${n} bus passenger${n === 1 ? "" : "s"}). Driver must finish Return home from Manifest → One-off Event before closing the event.`,
+      ],
+    };
   }
 
   return { ok: true, blockers: [] };
@@ -272,11 +340,63 @@ function nextStatus(from: EventStatus): EventStatus | null {
   return idx >= 0 && idx < STATUS_SEQUENCE.length - 1 ? STATUS_SEQUENCE[idx + 1] : null;
 }
 
+/**
+ * BL-088 integrity — if the event was marked Closed while trip days are still
+ * open, reopen office status so Close day / Close event can finish cleanly.
+ */
+export async function repairEventStatusIfDaysStillOpen(
+  eventId: string,
+): Promise<"Open" | null> {
+  const { data: ev, error } = await supabase
+    .from("event_manifest")
+    .select("status")
+    .eq("id", eventId)
+    .single();
+  if (error || !ev) return null;
+  if ((ev as { status: string }).status !== "Closed") return null;
+
+  const sessions = await listEventDaySessions(eventId);
+  const anyOpen = sessions.some((s) => !isDaySessionClosed(s.phase));
+  if (!anyOpen) return null;
+
+  const { error: updErr } = await supabase
+    .from("event_manifest")
+    .update({
+      status: "Open",
+      billing_locked: false,
+      closed_at: null,
+      closed_by_id: null,
+    })
+    .eq("id", eventId);
+  if (updErr) throw new Error(`Could not reopen event status: ${updErr.message}`);
+
+  const staffId = await resolveStaffIdWithFallback();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "YELLOW",
+    action_type: "EVENT_STATUS_REOPENED_DAYS_OPEN",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      event_id: eventId,
+      reason: "Closed while day sessions still open — status repaired to Open (BL-088).",
+    },
+  });
+
+  return "Open";
+}
+
 export async function promoteEventStatus(
   eventId: string,
   startDate: string,
   currentStatus: EventStatus,
-): Promise<{ newStatus: EventStatus }> {
+): Promise<{
+  newStatus: EventStatus;
+  guestsArchived?: number;
+  guestsSkipped?: number;
+  guestArchiveError?: string;
+}> {
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can change event status.");
 
@@ -328,7 +448,26 @@ export async function promoteEventStatus(
     metadata: { event_id: eventId, from: currentStatus, to: next },
   });
 
-  return { newStatus: next };
+  if (next !== "Closed") {
+    return { newStatus: next };
+  }
+
+  // BL-098 — archive guests after Close; never roll back billing lock.
+  try {
+    const archive = await archiveGuestParticipantsForEvent(eventId);
+    return {
+      newStatus: next,
+      guestsArchived: archive.archivedIds.length,
+      guestsSkipped: archive.skippedIds.length,
+    };
+  } catch (e) {
+    return {
+      newStatus: next,
+      guestsArchived: 0,
+      guestsSkipped: 0,
+      guestArchiveError: (e as Error).message,
+    };
+  }
 }
 
 /** Close a specific event_day_session (orderly or incident). Manager-only. */
@@ -340,8 +479,26 @@ export async function closeEventDaySession(
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can close day sessions.");
 
+  const { data: session, error: getErr } = await supabase
+    .from("event_day_sessions")
+    .select("id, event_id, session_date, phase")
+    .eq("id", sessionId)
+    .single();
+  if (getErr || !session) {
+    throw new Error(`Trip day not found: ${getErr?.message ?? "unknown"}`);
+  }
+  if (isDaySessionClosed((session as { phase: string }).phase)) {
+    throw new Error("Day session is already closed.");
+  }
+
+  await assertDaySessionCloseable({
+    eventId: (session as { event_id: string }).event_id,
+    sessionId,
+    sessionDate: (session as { session_date: string }).session_date,
+  });
+
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
   const { error } = await supabase
     .from("event_day_sessions")
@@ -482,7 +639,7 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
       .order("stop_order"),
     supabase
       .from("event_roster_bookings")
-      .select("*, participants!inner(first_name, last_name)")
+      .select("*, participants!event_roster_bookings_participant_id_fkey!inner(first_name, last_name)")
       .eq("event_id", eventId)
       .order("created_at"),
     listEventDaySessions(eventId),
@@ -630,15 +787,19 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
   const totalRedIssues = allIssueRows.filter((r) => r.severity === "red").length;
   const totalYellowIssues = allIssueRows.filter((r) => r.severity === "yellow").length;
   const totalGreenIssues = allIssueRows.filter((r) => r.severity === "green").length;
-  const allSessionsClosed = daySessions.every(
-    (d) => d.phase === "closed_orderly" || d.phase === "closed_incident",
-  );
+  const allSessionsClosed =
+    daySessions.length === 0 ||
+    daySessions.every((d) => isDaySessionClosed(d.phase));
+  const rawStatus = (ev.status as string) ?? "Planning";
+  // Never advertise Closed while trip days are still open (BL-088 integrity).
+  const status =
+    rawStatus === "Closed" && !allSessionsClosed ? "Open" : rawStatus;
 
   return {
     eventId,
     title: ev.title as string,
     eventKind: (ev.event_kind as string) ?? "legacy",
-    status: (ev.status as string) ?? "Planning",
+    status,
     startDate: ev.start_date as string,
     endDate: (ev.end_date as string | null) ?? null,
     primaryVenueName: vName,

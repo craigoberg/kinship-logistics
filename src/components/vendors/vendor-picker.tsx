@@ -7,6 +7,11 @@ import {
   PopoverAnchor,
   PopoverContent,
 } from "@/components/ui/popover";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { findVendorByName, type Vendor } from "@/lib/api/vendors";
 
@@ -74,20 +79,25 @@ export function VendorPicker({
               aria-autocomplete="list"
               className="rounded-r-none border-r-0 focus-visible:z-10"
             />
-            <Button
-              type="button"
-              variant="outline"
-              size="icon"
-              disabled={disabled}
-              aria-label="Show vendor list"
-              className="shrink-0 rounded-l-none border-l-0 px-2.5"
-              onClick={() => {
-                setOpen((prev) => !prev);
-                inputRef.current?.focus();
-              }}
-            >
-              <ChevronsUpDown className="h-4 w-4 opacity-60" />
-            </Button>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="icon"
+                  disabled={disabled}
+                  aria-label="Show vendor list"
+                  className="shrink-0 rounded-l-none border-l-0 px-2.5"
+                  onClick={() => {
+                    setOpen((prev) => !prev);
+                    inputRef.current?.focus();
+                  }}
+                >
+                  <ChevronsUpDown className="h-4 w-4 opacity-60" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Show vendor list</TooltipContent>
+            </Tooltip>
           </div>
         </PopoverAnchor>
 

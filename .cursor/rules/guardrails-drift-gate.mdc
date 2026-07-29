@@ -11,6 +11,9 @@ alwaysApply: true
 
 1. **First:** Bring frontend code up to date with the **live Supabase database** — apply feature changes made before the crash.
 2. **Do NOT execute** drift remediation (ledger abort semantics, RED model cleanup, ActiveIssuesRegister unification, dead-code removal, GUARDRAILS doc edits) until step 1 is complete and the user explicitly approves.
+3. **Ship gate (all work):** `.cursor/rules/live-db-ship-gate.mdc` — SQL handoff with validation queries; user confirms SQL + hard refresh; **agent probes live DB before UI smoke tests**; targeted smoke steps. Correctness over speed.
+4. **RBAC forward compat (all work):** `.cursor/rules/rbac-forward-compat.mdc` + GUARDRAILS §2.4 — BL-002 deferred until last; do not ship auth-only gates, authenticated-only operational RLS, or identity patterns that block two-tier session.
+5. **UI style guide (all UI work):** `.cursor/rules/ui-style-guide.mdc` + `docs/architecture/UI-STYLE-GUIDE.md` — use **Defined** patterns; **ask user** before any **TBD** Submit/dropdown/input style; update guide after agreement.
 
 ## Quick reference — intended vs legacy RED model
 
@@ -37,3 +40,12 @@ When touching `/manifest`, transport trip start, or pickup reorder:
 - **Active manifest:** Single unified leg list; drag reorder on leg rows; no separate reorder panel.
 - **Chain rule:** Reorder must recompute drivable from→to via `computePickupChainEndpoints` / `reorderTripPickupLegs` — bus never teleports.
 - **Consistency:** Same UX for Day Centre runs and event trips (single- and multi-day).
+
+## Event Deliver group status (GUARDRAILS §12.13.8 — locked 2026-07-14; amended 2026-07-18)
+
+When touching `/event-deliver`:
+
+- Show **Group status** banner on the trip day view (below location panel).
+- Timeline: all checked in → **morning roll (Day 2+)** → board bus (Manifest) per hop → at destination → return → **evening roll (non-final nights)**.
+- Gate: do not start programme / release hop until morning roll is complete (`openVenueStop` / `prepareEventHopManifest`).
+- Do not add a second participant-state store — derive from attendance, stops, bus manifest, trip legs, and morning/curfew logs.

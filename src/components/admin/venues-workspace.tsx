@@ -11,18 +11,19 @@ import { toast } from "sonner";
 import {
   Archive,
   CheckCircle2,
-  ChevronRight,
   ClipboardCheck,
   Copy,
+  FolderOpen,
   Loader2,
-  MapPin,
   Pencil,
   Plus,
+  Search,
   ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -49,6 +50,14 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   AlertDialog,
   AlertDialogCancel,
   AlertDialogContent,
@@ -60,7 +69,7 @@ import {
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
-import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { getActiveUserProfile } from "@/lib/data-store";
@@ -90,6 +99,18 @@ import {
   type VenueUseReason,
 } from "@/lib/api/venues";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
+
+const VENUE_TYPE_LABELS: Record<string, string> = {
+  general: "General",
+  park: "Park / outdoor",
+  hotel: "Hotel / accommodation",
+  cinema: "Cinema / theatre",
+  museum: "Museum / gallery",
+  sports: "Sports / recreation",
+  restaurant: "Restaurant / café",
+  shopping: "Shopping centre",
+  club: "Club / social venue",
+};
 
 // ─── Query keys ────────────────────────────────────────────────────────────
 
@@ -227,14 +248,17 @@ export function VenuesWorkspace() {
         </p>
       </div>
 
-      {/* Toolbar */}
-      <div className="flex flex-wrap items-center gap-2">
-        <Input
-          placeholder="Search venues…"
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="h-9 w-56"
-        />
+      {/* Toolbar — match Vendors */}
+      <div className="flex flex-wrap items-center gap-3">
+        <div className="relative min-w-[200px] flex-1">
+          <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search venue name, type, address…"
+            className="pl-9"
+          />
+        </div>
         <Select
           value={statusFilter}
           onValueChange={(v) => setStatusFilter(v as "active" | "all")}
@@ -247,86 +271,105 @@ export function VenuesWorkspace() {
             <SelectItem value="all">All</SelectItem>
           </SelectContent>
         </Select>
-        <div className="flex-1" />
         <Button size="sm" onClick={() => setEditing("new")}>
-          <Plus className="mr-1.5 h-4 w-4" />
-          Add Venue
+          <Plus className="mr-1 h-4 w-4" />
+          Add venue
         </Button>
       </div>
 
-      {/* List */}
-      {isLoading ? (
-        <div className="flex justify-center py-10">
-          <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-        </div>
-      ) : visible.length === 0 ? (
-        <p className="py-8 text-center text-sm text-muted-foreground">
-          No venues found. Add one to get started.
-        </p>
-      ) : (
-        <div className="divide-y rounded-lg border">
-          {visible.map((v) => (
-            <div
-              key={v.id}
-              className="flex items-start gap-3 px-4 py-3 hover:bg-muted/40 cursor-pointer"
-              onClick={() => setSelected(v)}
-            >
-              <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-              <div className="flex-1 min-w-0">
-                <div className="flex flex-wrap items-center gap-2">
-                  <span className="font-medium text-sm">{v.name}</span>
-                  {statusBadge(v.status)}
-                  {riskBadge(v.risk_tier)}
-                  <span className="text-xs text-muted-foreground capitalize">{v.venue_type}</span>
-                  {v.status === "active" && baselineBadge(
-                    baselineMap ? (baselineMap.get(v.id) ?? null) : undefined,
-                  )}
-                </div>
-                {v.street_address && (
-                  <p className="mt-0.5 text-xs text-muted-foreground truncate">
-                    {v.street_address}
-                  </p>
-                )}
-              </div>
-              <div
-                className="flex items-center gap-1 shrink-0"
-                onClick={(e) => e.stopPropagation()}
-              >
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  title="Edit"
-                  onClick={() => setEditing(v)}
+      <div className="rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              <TableHead>Venue</TableHead>
+              <TableHead className="w-36">Type</TableHead>
+              <TableHead className="w-24">Risk</TableHead>
+              <TableHead className="w-36">Baseline</TableHead>
+              <TableHead className="w-24">Status</TableHead>
+              <TableHead className="w-36" />
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {isLoading ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  Loading venues…
+                </TableCell>
+              </TableRow>
+            ) : visible.length === 0 ? (
+              <TableRow>
+                <TableCell colSpan={6} className="text-center text-muted-foreground">
+                  No venues match this filter.
+                </TableCell>
+              </TableRow>
+            ) : (
+              visible.map((v) => (
+                <TableRow
+                  key={v.id}
+                  className={selected?.id === v.id ? "bg-muted/50" : undefined}
                 >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  title="Clone"
-                  onClick={() => setCloneSource(v)}
-                >
-                  <Copy className="h-3.5 w-3.5" />
-                </Button>
-                {v.status === "active" && (
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    className="h-7 w-7 text-muted-foreground hover:text-destructive"
-                    title="Archive"
-                    onClick={() => setArchiveTarget(v)}
-                  >
-                    <Archive className="h-3.5 w-3.5" />
-                  </Button>
-                )}
-                <ChevronRight className="h-4 w-4 text-muted-foreground" />
-              </div>
-            </div>
-          ))}
-        </div>
-      )}
+                  <TableCell>
+                    <div className="font-medium">{v.name}</div>
+                    {v.street_address ? (
+                      <div className="text-xs text-muted-foreground truncate max-w-[280px]">
+                        {v.street_address}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {VENUE_TYPE_LABELS[v.venue_type] ?? v.venue_type}
+                  </TableCell>
+                  <TableCell>{riskBadge(v.risk_tier)}</TableCell>
+                  <TableCell>
+                    {v.status === "active"
+                      ? baselineBadge(
+                          baselineMap ? (baselineMap.get(v.id) ?? null) : undefined,
+                        )
+                      : (
+                        <span className="text-xs text-muted-foreground">—</span>
+                      )}
+                  </TableCell>
+                  <TableCell>{statusBadge(v.status)}</TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      <IconActionButton
+                        className="h-8 w-8"
+                        onClick={() => setSelected(v)}
+                        tooltip="Open template & baseline"
+                      >
+                        <FolderOpen className="h-4 w-4" />
+                      </IconActionButton>
+                      <IconActionButton
+                        className="h-8 w-8"
+                        onClick={() => setEditing(v)}
+                        tooltip="Edit venue"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </IconActionButton>
+                      <IconActionButton
+                        className="h-8 w-8"
+                        onClick={() => setCloneSource(v)}
+                        tooltip="Clone venue"
+                      >
+                        <Copy className="h-4 w-4" />
+                      </IconActionButton>
+                      {v.status === "active" && (
+                        <IconActionButton
+                          className="h-8 w-8"
+                          onClick={() => setArchiveTarget(v)}
+                          tooltip="Archive venue"
+                        >
+                          <Archive className="h-4 w-4" />
+                        </IconActionButton>
+                      )}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))
+            )}
+          </TableBody>
+        </Table>
+      </div>
 
       {/* Venue detail side-panel */}
       {selected && (
@@ -638,15 +681,13 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
                 </div>
               </div>
               {!f.is_system_core && (
-                <Button
-                  variant="ghost"
-                  size="icon"
+                <IconActionButton
                   className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
-                  title="Remove field"
+                  tooltip="Remove template field"
                   onClick={() => handleDelete(f)}
                 >
                   <Trash2 className="h-3.5 w-3.5" />
-                </Button>
+                </IconActionButton>
               )}
             </div>
           ))}
@@ -696,7 +737,7 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
               variant="outline"
               onClick={() => setAddOpen(false)}
             >
-              Cancel
+              Close
             </Button>
             <Button
               size="sm"
@@ -978,9 +1019,9 @@ function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetPr
           </div>
         </div>
 
-        <SheetFooter className="mt-6 gap-2">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={mut.isPending}>
-            Cancel
+        <SheetFooter className="mt-6 gap-2 sm:justify-between">
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button onClick={() => mut.mutate()} disabled={!canSave || mut.isPending}>
             {mut.isPending ? (
@@ -1054,8 +1095,8 @@ function CloneVenueDialog({ open, source, onOpenChange, onCloned }: CloneDialogP
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button
             onClick={handleClone}
@@ -1233,8 +1274,8 @@ function BaselineSignoffDialog({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>
             {busy ? (
@@ -1270,20 +1311,14 @@ function AnswerField({
       </Label>
 
       {field.answer_type === "yes_no" ? (
-        <div className="flex gap-2">
-          {["Yes", "No"].map((opt) => (
-            <button
+        <div className="grid grid-cols-2 gap-2">
+          {(["Yes", "No"] as const).map((opt) => (
+            <MobileOptionButton
               key={opt}
-              type="button"
+              label={opt}
+              selected={value === opt}
               onClick={() => onChange(opt)}
-              className={`rounded-md border px-4 py-1.5 text-sm font-medium transition-colors ${
-                value === opt
-                  ? "border-primary bg-primary text-primary-foreground"
-                  : "border-input bg-background hover:bg-muted"
-              }`}
-            >
-              {opt}
-            </button>
+            />
           ))}
         </div>
       ) : field.answer_type === "number" ? (

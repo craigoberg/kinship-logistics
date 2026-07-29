@@ -1,14 +1,26 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
+import {
+  isSimulatedOffline,
+  subscribeSimulatedOffline,
+} from "@/lib/simulated-offline";
 
+/**
+ * Effective online status for the app.
+ * Respects DEV "Simulate offline" switch (BL-082) as well as navigator.onLine.
+ */
 export function useOnlineStatus(): boolean {
-  // Default to true during SSR/hydration to avoid server/client mismatches.
-  // The real value is set once the effect runs on the client.
-  const [online, setOnline] = useState<boolean>(true);
+  // Default true during SSR/hydration to avoid server/client mismatches.
+  const [browserOnline, setBrowserOnline] = useState(true);
+  const simOffline = useSyncExternalStore(
+    subscribeSimulatedOffline,
+    isSimulatedOffline,
+    () => false,
+  );
 
   useEffect(() => {
-    setOnline(navigator.onLine);
-    const on = () => setOnline(true);
-    const off = () => setOnline(false);
+    setBrowserOnline(navigator.onLine);
+    const on = () => setBrowserOnline(true);
+    const off = () => setBrowserOnline(false);
     window.addEventListener("online", on);
     window.addEventListener("offline", off);
     return () => {
@@ -17,5 +29,6 @@ export function useOnlineStatus(): boolean {
     };
   }, []);
 
-  return online;
+  if (simOffline) return false;
+  return browserOnline;
 }

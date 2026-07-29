@@ -2,11 +2,14 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { GripVertical, UserX } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { cn } from "@/lib/utils";
 import type { BusRunRosterEntry, TripLeg } from "@/lib/data-store";
 import { isPassengerPickupLeg } from "@/lib/data-store";
 import { useCancelTripPickup } from "@/hooks/use-supabase-data";
+import {
+  VerbalConsultationDialog,
+  formatVerbalWorkaroundDescription,
+} from "@/components/issue-engine/verbal-consultation-dialog";
 
 export { isPassengerPickupLeg };
 
@@ -46,64 +49,74 @@ export function canCancelPickupLeg(leg: TripLeg): boolean {
   return isPassengerPickupLeg(leg) && leg.status !== "completed";
 }
 
-/** Shared cancel flow — use from ActiveLegCard and LegRow. */
-export function usePickupCancelDialog(tripId: string) {
+/** Shared cancel flow — RED verbal manager confirmation (GUARDRAILS §3 / §11.6). */
+export function usePickupCancelDialog(
+  tripId: string,
+  options?: { eventId?: string | null },
+) {
   const cancelPickup = useCancelTripPickup();
   const [cancelTarget, setCancelTarget] = useState<TripLeg | null>(null);
 
   const requestCancel = (leg: TripLeg) => setCancelTarget(leg);
 
-  const confirmCancel = () => {
-    if (!cancelTarget) return;
-    const name = cancelTarget.toLabel;
-    cancelPickup.mutate(
-      {
-        legId: cancelTarget.id,
-        tripId,
-        participantName: name,
-        reason: "Office advised passenger called in sick / not travelling today.",
-      },
-      {
-        onSuccess: (result) => {
-          setCancelTarget(null);
-          toast.success(`${name} pickup cancelled`, {
-            description: result.smsDispatched
-              ? "Manager SMS sent · YELLOW issue opened in Hub."
-              : "YELLOW issue opened in Hub for manager follow-up.",
-          });
-        },
-      },
-    );
-  };
-
   const dialog = (
-    <BottomSheet
+    <VerbalConsultationDialog
       open={!!cancelTarget}
-      onOpenChange={(o) => !o && setCancelTarget(null)}
-      title={`Cancel pickup for ${cancelTarget?.toLabel}?`}
-      description="The driver will skip this stop and move to the next passenger. This sends an SMS alert to managers and creates a YELLOW issue in the Governance Hub for follow-up."
-      className="border-t-2 border-amber-500/60"
-    >
-      <div className="flex flex-col gap-2">
-        <Button
-          type="button"
-          className="h-14 touch-manipulation bg-amber-600 text-base hover:bg-amber-700"
-          disabled={cancelPickup.isPending}
-          onClick={confirmCancel}
-        >
-          {cancelPickup.isPending ? "Cancelling…" : "Cancel pickup"}
-        </Button>
-        <Button
-          type="button"
-          variant="outline"
-          className="h-12 touch-manipulation"
-          disabled={cancelPickup.isPending}
-          onClick={() => setCancelTarget(null)}
-        >
-          Keep stop
-        </Button>
-      </div>
-    </BottomSheet>
+      onOpenChange={(o) => {
+        if (!o && !cancelPickup.isPending) setCancelTarget(null);
+      }}
+      ledgerCategory="TRIP"
+      subjectLabel={
+        cancelTarget
+          ? `${cancelTarget.toLabel} · Leg ${cancelTarget.legIndex} pickup`
+          : "Pickup cancel"
+      }
+      sourceId={cancelTarget?.id ?? null}
+      actionType="RED_VERBAL_CONSULTATION"
+      titleOverride="RED Verbal Consultation — Cancel Pickup"
+      descriptionOverride="Cancelling a pickup is not a driver-only decision. Confirm you spoke with (or attempted) a Manager, record the agreed reason, and sign with your operator PIN. A RED ticket lands in the Governance Hub; managers are SMS-alerted."
+      onAccepted={(payload) => {
+        if (!cancelTarget) return;
+        const name = cancelTarget.toLabel;
+        const baseDescription =
+          `Pickup cancelled for ${name} — driver skipping stop and continuing the run.`;
+        const hubDescription = formatVerbalWorkaroundDescription(
+          baseDescription,
+          payload,
+        );
+        cancelPickup.mutate(
+          {
+            legId: cancelTarget.id,
+            tripId,
+            participantName: name,
+            eventId: options?.eventId ?? null,
+            reason: payload.notes,
+            verbal: {
+              managerStaffId: payload.managerStaffId,
+              managerName: payload.managerName,
+              contactOutcome: payload.contactOutcome,
+              notes: payload.notes,
+              hubDescription,
+            },
+          },
+          {
+            onSuccess: (result) => {
+              setCancelTarget(null);
+              toast.success(`${name} pickup cancelled`, {
+                description: result.smsDispatched
+                  ? "Manager SMS sent · RED Hub ticket opened for follow-up."
+                  : "RED Hub ticket opened for manager follow-up.",
+              });
+            },
+            onError: (err: Error) => {
+              toast.error("Could not cancel pickup", {
+                description: err.message,
+              });
+            },
+          },
+        );
+      }}
+    />
   );
 
   return { requestCancel, dialog, isCancelling: cancelPickup.isPending };
@@ -192,6 +205,7 @@ export function PointerSortableList({
   }) => ReactNode;
 }) {
   const [order, setOrder] = useState(itemIds);
+  const orderRef = useRef(itemIds);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
   const dragRef = useRef<{
     id: string;
@@ -202,6 +216,7 @@ export function PointerSortableList({
 
   useEffect(() => {
     setOrder(itemIds);
+    orderRef.current = itemIds;
   }, [itemIds.join("|")]);
 
   const swapByPointerY = useCallback((clientY: number, activeId: string) => {
@@ -223,6 +238,7 @@ export function PointerSortableList({
       const next = [...prev];
       const [moved] = next.splice(fromIndex, 1);
       next.splice(toIndex, 0, moved);
+      orderRef.current = next;
       return next;
     });
   }, []);
@@ -239,10 +255,8 @@ export function PointerSortableList({
       unlockScrollAncestors(dragRef.current.lockedScroll);
       dragRef.current = null;
       setDragId(null);
-      setOrder((current) => {
-        onReorder(current);
-        return current;
-      });
+      // Call parent outside setState — onReorder triggers ActiveTripScreen updates.
+      onReorder([...orderRef.current]);
     };
 
     window.addEventListener("pointermove", onPointerMove, { passive: false });

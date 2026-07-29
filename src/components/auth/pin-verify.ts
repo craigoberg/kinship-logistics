@@ -1,5 +1,6 @@
 import {
   verifyCoordinatorPin,
+  verifyStaffPin,
   loginWithPin,
   GuardianPinError,
 } from "@/lib/data-store";
@@ -30,6 +31,19 @@ export async function resolveOperatorStaffIdFromPin(pin: string): Promise<string
 /** Verify a 4-digit operator PIN (any active staff holder). */
 export async function verifyOperatorPin(pin: string): Promise<void> {
   await resolveOperatorStaffIdFromPin(pin);
+}
+
+/** Verify PIN belongs to a specific staff member (e.g. meal preparer attest). */
+export async function verifyNamedStaffPin(
+  staffId: string,
+  pin: string,
+): Promise<void> {
+  if (!staffId) throw new Error("Select the staff member first.");
+  if (!/^\d{4,6}$/.test(pin)) {
+    throw new Error("Incorrect PIN. Please try again.");
+  }
+  const ok = await verifyStaffPin(staffId, pin);
+  if (!ok) throw new Error("Incorrect PIN. Please try again.");
 }
 
 /** Verify a manager/coordinator PIN (4–6 digits). */

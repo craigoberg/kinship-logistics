@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Save, AlertTriangle, TrendingDown, MapPin, RefreshCw, HeartPulse } from "lucide-react";
 import {
@@ -12,6 +13,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -25,9 +28,13 @@ import {
   useUpdateEventBooking,
   useCarersForParticipant,
   useRefreshBookingSnapshot,
+  useLookupParameters,
 } from "@/hooks/use-supabase-data";
 import type { EventRosterBooking } from "@/lib/data-store";
+import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { updateBookingTransportModes, updateBookingTransportMed, type TransportMedBagRequired } from "@/lib/api/event-outing";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { eventBusRunOptions } from "@/lib/event-bus-runs";
 
 interface Props {
   open: boolean;
@@ -75,12 +82,18 @@ export function EditRosterBookingModal({
   const [tripPickupOverride, setTripPickupOverride] = useState<string>("");
   const [outboundMode, setOutboundMode] = useState<"bus" | "self">("bus");
   const [returnMode, setReturnMode] = useState<"bus" | "self">("bus");
+  const [outboundBusRunCode, setOutboundBusRunCode] = useState<string | null>(null);
+  const [returnBusRunCode, setReturnBusRunCode] = useState<string | null>(null);
   const [medBagRequired, setMedBagRequired] = useState<TransportMedBagRequired>("not_set");
   const [medBagNotes, setMedBagNotes] = useState("");
   const [snapshotDisplay, setSnapshotDisplay] = useState<string | null>(null);
+  const qc = useQueryClient();
   const mutation = useUpdateEventBooking();
   const refreshSnapshot = useRefreshBookingSnapshot();
   const { data: carers = [] } = useCarersForParticipant(booking?.participantId ?? null);
+  const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const busRunOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
+  const defaultRunCode = busRunOpts[0]?.code ?? null;
 
   const collected = booking?.amountPaid ?? 0;
 
@@ -100,6 +113,8 @@ export function EditRosterBookingModal({
       setTripPickupOverride(booking.tripPickupAddressOverride ?? "");
       setOutboundMode((booking.outboundTransportMode as "bus" | "self") ?? "bus");
       setReturnMode((booking.returnTransportMode as "bus" | "self") ?? "bus");
+      setOutboundBusRunCode(booking.outboundBusRunCode ?? null);
+      setReturnBusRunCode(booking.returnBusRunCode ?? null);
       setMedBagRequired(booking.transportMedBagRequired ?? "not_set");
       setMedBagNotes(booking.transportMedNotes ?? "");
       setSnapshotDisplay(booking.dynamicMedicalNotesSnapshot);
@@ -144,7 +159,18 @@ export function EditRosterBookingModal({
   if (!booking) return null;
 
   const canSubmit =
-    dirty && !mutation.isPending && bookingStatus.length > 0 && !refundInvalid;
+    dirty &&
+    !mutation.isPending &&
+    bookingStatus.length > 0 &&
+    !refundInvalid &&
+    (outboundMode !== "bus" ||
+      busRunOpts.length === 0 ||
+      !!outboundBusRunCode ||
+      !!defaultRunCode) &&
+    (returnMode !== "bus" ||
+      busRunOpts.length === 0 ||
+      !!returnBusRunCode ||
+      !!defaultRunCode);
 
   const submit = async () => {
     if (!canSubmit) return;
@@ -176,42 +202,40 @@ export function EditRosterBookingModal({
         bringsCarer,
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
-        participantTransportRequired: participantTransport,
+        participantTransportRequired: isOuting ? outboundMode === "bus" : participantTransport,
         tripPickupAddressOverride: overrideChanged
           ? newOverride.length > 0
             ? newOverride
             : null
           : undefined,
       });
-      // Persist outing transport modes if changed.
+      // Persist outing transport modes and med bag — always write when isOuting
+      // so change-detection edge cases cannot silently drop a save.
       if (isOuting) {
-        const origOut = (booking.outboundTransportMode ?? "bus") as "bus" | "self";
-        const origRet = (booking.returnTransportMode ?? "bus") as "bus" | "self";
-        if (outboundMode !== origOut || returnMode !== origRet) {
-          await updateBookingTransportModes({
-            booking_id: booking.id,
-            outbound_transport_mode: outboundMode,
-            return_transport_mode: returnMode,
-          });
-        }
+        await updateBookingTransportModes({
+          booking_id: booking.id,
+          outbound_transport_mode: outboundMode,
+          return_transport_mode: returnMode,
+          outbound_bus_run_code:
+            outboundMode === "bus"
+              ? outboundBusRunCode ?? defaultRunCode
+              : null,
+          return_bus_run_code:
+            returnMode === "bus" ? returnBusRunCode ?? defaultRunCode : null,
+        });
 
         const resolvedMed: TransportMedBagRequired =
           outboundMode === "self" ? "no" : medBagRequired;
-        const origMed = booking.transportMedBagRequired ?? "not_set";
-        const origNotes = (booking.transportMedNotes ?? "").trim();
-        const newNotes = medBagNotes.trim();
-        if (
-          resolvedMed !== origMed ||
-          newNotes !== origNotes ||
-          (outboundMode === "self" && origMed !== "no")
-        ) {
-          await updateBookingTransportMed({
-            booking_id: booking.id,
-            transport_med_bag_required: resolvedMed,
-            transport_med_notes: resolvedMed === "yes" ? newNotes || null : null,
-          });
-        }
+        await updateBookingTransportMed({
+          booking_id: booking.id,
+          transport_med_bag_required: resolvedMed,
+          transport_med_notes: resolvedMed === "yes" ? medBagNotes.trim() || null : null,
+        });
       }
+
+      // Final invalidation after ALL writes (transport + med bag) are done,
+      // so the roster card refetches the fully-updated row.
+      await qc.invalidateQueries({ queryKey: ["event_roster_bookings", booking.eventId] });
 
       toast.success("Booking updated", {
         description: result.refundLedger
@@ -221,8 +245,8 @@ export function EditRosterBookingModal({
             : `${booking.participantName} → ${bookingStatus}`,
       });
       onOpenChange(false);
-    } catch {
-      /* raw error surfaced via hook onError toast */
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save booking");
     }
   };
 
@@ -365,14 +389,14 @@ export function EditRosterBookingModal({
                     <Label className="text-[10px] font-semibold uppercase tracking-wide text-destructive">
                       Refund Date
                     </Label>
-                    <Input
-                      type="date"
-                      value={refundDate}
-                      onChange={(e) => {
-                        setRefundDate(e.target.value);
+                    <DatePicker
+                      value={parseIsoDateLocal(refundDate)}
+                      onChange={(d) => {
+                        setRefundDate(d ? toIsoDateString(d) : "");
                         setDirty(true);
                       }}
-                      className="bg-background"
+                      dateFormat="dd-MMM-yy"
+                      className="h-9 text-sm bg-background"
                     />
                   </div>
                   {refundInvalid && (
@@ -389,19 +413,21 @@ export function EditRosterBookingModal({
             </div>
           )}
 
-          {/* ----- Transport logistics ----- */}
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Client requires bus transport?
-            </Label>
-            <Switch
-              checked={participantTransport}
-              onCheckedChange={(v) => {
-                setParticipantTransport(v);
-                setDirty(true);
-              }}
-            />
-          </div>
+          {/* ----- Transport logistics (legacy non-outing events only) ----- */}
+          {!isOuting && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Client requires bus transport?
+              </Label>
+              <Switch
+                checked={participantTransport}
+                onCheckedChange={(v) => {
+                  setParticipantTransport(v);
+                  setDirty(true);
+                }}
+              />
+            </div>
+          )}
 
           {/* ----- Outing transport modes (§12.3.2) ----- */}
           {isOuting && (
@@ -414,7 +440,13 @@ export function EditRosterBookingModal({
                   <Label className="text-xs font-semibold">Outbound</Label>
                   <Select
                     value={outboundMode}
-                    onValueChange={(v) => { setOutboundMode(v as "bus" | "self"); setDirty(true); }}
+                    onValueChange={(v) => {
+                      const mode = v as "bus" | "self";
+                      setOutboundMode(mode);
+                      if (mode === "self") setOutboundBusRunCode(null);
+                      else if (!outboundBusRunCode) setOutboundBusRunCode(defaultRunCode);
+                      setDirty(true);
+                    }}
                   >
                     <SelectTrigger className="h-8 text-sm">
                       <SelectValue />
@@ -430,7 +462,13 @@ export function EditRosterBookingModal({
                   <Label className="text-xs font-semibold">Return</Label>
                   <Select
                     value={returnMode}
-                    onValueChange={(v) => { setReturnMode(v as "bus" | "self"); setDirty(true); }}
+                    onValueChange={(v) => {
+                      const mode = v as "bus" | "self";
+                      setReturnMode(mode);
+                      if (mode === "self") setReturnBusRunCode(null);
+                      else if (!returnBusRunCode) setReturnBusRunCode(defaultRunCode);
+                      setDirty(true);
+                    }}
                   >
                     <SelectTrigger className="h-8 text-sm">
                       <SelectValue />
@@ -443,6 +481,44 @@ export function EditRosterBookingModal({
                   <p className="text-[10px] text-muted-foreground">Self = last-day outbound only.</p>
                 </div>
               </div>
+              {outboundMode === "bus" && busRunOpts.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Outbound bus run</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {busRunOpts.map((opt) => (
+                      <MobileFieldButton
+                        key={`out-${opt.code}`}
+                        title={opt.shortLabel}
+                        subtitle={opt.displayName}
+                        active={(outboundBusRunCode ?? defaultRunCode) === opt.code}
+                        onClick={() => {
+                          setOutboundBusRunCode(opt.code);
+                          setDirty(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
+              {returnMode === "bus" && busRunOpts.length > 0 && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs font-semibold">Return bus run</Label>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {busRunOpts.map((opt) => (
+                      <MobileFieldButton
+                        key={`ret-${opt.code}`}
+                        title={opt.shortLabel}
+                        subtitle={opt.displayName}
+                        active={(returnBusRunCode ?? defaultRunCode) === opt.code}
+                        onClick={() => {
+                          setReturnBusRunCode(opt.code);
+                          setDirty(true);
+                        }}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

@@ -19,9 +19,11 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import {
   Dialog,
   DialogContent,
@@ -38,7 +40,10 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { FormattedDate } from "@/components/ui/formatted-time";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import {
   computeRyge,
@@ -225,9 +230,13 @@ function AssetRow({ asset, warningDays, onEdit }: AssetRowProps) {
           )}
         </div>
       </div>
-      <Button size="sm" variant="ghost" className="h-7 px-2 shrink-0" onClick={onEdit}>
+      <IconActionButton
+        className="h-7 w-7 shrink-0"
+        onClick={onEdit}
+        tooltip="Edit compliance asset"
+      >
         <Pencil className="h-3.5 w-3.5" />
-      </Button>
+      </IconActionButton>
     </div>
   );
 }
@@ -294,18 +303,15 @@ function AssetFormDialog({ open, onOpenChange, venue, existing, onSaved }: FormD
         </DialogHeader>
 
         <div className="space-y-3">
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
-              Asset name <span className="text-destructive">*</span>
-            </Label>
-            <CharacterCountedInput
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              minLength={3}
-              maxLength={120}
-              placeholder="e.g. Public Liability Insurance 2026/27"
-            />
-          </div>
+          <CharacterCountedInput
+            label="Asset name"
+            value={name}
+            onValueChange={setName}
+            minChars={3}
+            maxChars={120}
+            counterMode="minimum"
+            placeholder="e.g. Public Liability Insurance 2026/27"
+          />
 
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Asset type</Label>
@@ -333,10 +339,10 @@ function AssetFormDialog({ open, onOpenChange, venue, existing, onSaved }: FormD
 
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold">Expiry date</Label>
-            <Input
-              type="date"
-              value={expiryDate}
-              onChange={(e) => setExpiryDate(e.target.value)}
+            <DatePicker
+              value={parseIsoDateLocal(expiryDate)}
+              onChange={(d) => setExpiryDate(d ? toIsoDateString(d) : "")}
+              dateFormat="dd-MMM-yy"
               className="h-9"
             />
             <p className="text-[10px] text-muted-foreground">
@@ -346,12 +352,10 @@ function AssetFormDialog({ open, onOpenChange, venue, existing, onSaved }: FormD
 
           {isEdit && (
             <div className="flex items-center gap-2 rounded border border-destructive/30 bg-destructive/5 px-3 py-2">
-              <input
-                type="checkbox"
+              <Checkbox
                 id="archive-check"
                 checked={archive}
-                onChange={(e) => setArchive(e.target.checked)}
-                className="rounded"
+                onCheckedChange={(v) => setArchive(v === true)}
               />
               <Label htmlFor="archive-check" className="text-xs font-medium cursor-pointer text-destructive">
                 Archive this asset
@@ -359,29 +363,20 @@ function AssetFormDialog({ open, onOpenChange, venue, existing, onSaved }: FormD
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <Label className="text-xs font-semibold">
-              Change justification <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              value={justification}
-              onChange={(e) => setJustification(e.target.value)}
-              rows={2}
-              placeholder="Min. 20 characters — reason for adding / updating this asset…"
-              className={
-                justification.length > 0 && justification.trim().length < 20
-                  ? "border-2 border-destructive"
-                  : ""
-              }
-            />
-            <p className="text-[10px] text-muted-foreground">
-              {justification.trim().length}/20 min characters
-            </p>
-          </div>
+          <CharacterCountedTextarea
+            label="Change justification"
+            value={justification}
+            onValueChange={setJustification}
+            rows={2}
+            minChars={20}
+            maxChars={500}
+            counterMode="minimum"
+            placeholder="Reason for adding / updating this asset…"
+          />
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           <Button
             disabled={!canSave || saveMut.isPending}
             onClick={() => saveMut.mutate()}

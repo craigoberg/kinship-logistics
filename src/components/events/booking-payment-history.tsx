@@ -35,7 +35,7 @@ export function BookingPaymentHistory({ participantId, eventId }: Props) {
   }
   if (entries.length === 0) {
     return (
-      <div className="px-6 py-3 text-xs italic text-muted-foreground">
+      <div className="mx-6 my-3 rounded-lg border border-dashed bg-muted/30 py-4 text-center text-xs text-muted-foreground">
         No recorded payment milestones for this booking yet.
       </div>
     );

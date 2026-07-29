@@ -7,6 +7,7 @@ import {
   RefreshCw,
   Settings,
   CalendarRange,
+  Compass,
   Contact2,
   Route as RouteIcon,
   Scale,
@@ -19,9 +20,10 @@ import { BottomSheet } from "@/components/ui/bottom-sheet";
 export const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { to: "/day", label: "Day Centre", icon: Sun, exact: false },
+  { to: "/event-deliver", label: "Event Deliver", icon: Compass, exact: false },
+  { to: "/events", label: "Event Manage", icon: CalendarRange, exact: false },
   { to: "/governance", label: "Governance Hub", icon: Scale, exact: false },
   { to: "/participants", label: "Participants", icon: Users, exact: false },
-  { to: "/events", label: "Events", icon: CalendarRange, exact: false },
   { to: "/staff", label: "Staff", icon: Contact2, exact: false },
   { to: "/transport", label: "Transport", icon: Truck, exact: false },
   { to: "/manifest", label: "Manifest", icon: RouteIcon, exact: false },
@@ -30,7 +32,7 @@ export const NAV_ITEMS = [
 ] as const;
 
 /** Always-visible quick links on the mobile dock (most-used destinations). */
-const DOCK_PATHS = ["/", "/day", "/events", "/manifest"] as const;
+const DOCK_PATHS = ["/", "/day", "/event-deliver", "/manifest"] as const;
 
 const DOCK_ITEMS = NAV_ITEMS.filter((item) =>
   (DOCK_PATHS as readonly string[]).includes(item.to),

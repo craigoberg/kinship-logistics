@@ -6,7 +6,9 @@ import { toast } from "sonner";
 import {
   AlertOctagon,
   AlertTriangle,
+  BedDouble,
   CheckCircle2,
+  FileWarning,
   Pill,
   ShieldAlert,
   ShieldCheck,
@@ -14,6 +16,8 @@ import {
   Stethoscope,
   Truck,
   UserCheck,
+  UserX,
+  Wrench,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -30,9 +34,20 @@ import {
   useMedicationScheduleExceptions,
   useStartEndDayAnomalies,
   useComplianceCategories,
+  useMaintenanceTileFeed,
+  useNoShowTileFeed,
+  useRollCallBreachFeed,
+  useActiveRedIncidentsFeed,
+  useHubHumanIncidentsFeed,
+  useInfectiousExclusionsFeed,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
+import {
+  useAttendanceNoShowRedHours,
+  useRollCallGraceMinutes,
+  useIssueUrgencyParams,
+} from "@/hooks/use-system-parameters";
 
 function todayStr(): string {
   const d = new Date();
@@ -109,6 +124,21 @@ export function OperationsExceptionHub() {
   const { data: dayAnomalyRows } = useStartEndDayAnomalies();
   const { data: categories } = useComplianceCategories();
 
+  // BL-066 — urgency params reused for human incident tiles
+  const issueUrgency        = useIssueUrgencyParams();
+  const noShowRedHours      = useAttendanceNoShowRedHours();
+  const rollCallGraceMinutes = useRollCallGraceMinutes();
+
+  const { data: maintenanceRows = [] }    = useMaintenanceTileFeed();
+  const { data: noShowRows = [] }         = useNoShowTileFeed({ redHours: noShowRedHours });
+  const { data: rollCallRows = [] }       = useRollCallBreachFeed({ graceMinutes: rollCallGraceMinutes });
+  const { data: activeRedRows = [] }      = useActiveRedIncidentsFeed({ warnHours: issueUrgency.activeYellowMs / 3_600_000 });
+  const { data: hubHumanRows = [] }       = useHubHumanIncidentsFeed({
+    warnHours: issueUrgency.activeYellowMs / 3_600_000,
+    redHours:  issueUrgency.activeRedMs    / 3_600_000,
+  });
+  const { data: infectiousRows = [] }     = useInfectiousExclusionsFeed();
+
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
   const liveRows: BucketRow[] = medExceptions.map((m) => ({
@@ -134,24 +164,46 @@ export function OperationsExceptionHub() {
   }));
 
 
-  // Operational tiles (live signals — not driven by the registry).
+  const hubLink = (icon: React.ReactNode, label: string) => (
+    <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
+      <Link to="/governance">{icon}{label}</Link>
+    </Button>
+  );
+
+  // Operational tiles — Band 1 (safety) → Band 2 (health/transport) → Band 4 (governance).
   const operationalBuckets: Bucket[] = [
+    // ── Band 1: Person Safety ──────────────────────────────────────────────
     {
-      id: "medication",
-      anchorId: "exception-section-medication",
-      label: "Medication Schedules",
-      icon: Pill,
+      id: "no-show",
+      anchorId: "exception-section-no-show",
+      label: "No-Show / Missing",
+      icon: UserX,
       isLive: true,
-      rows: medScheduleBucketRows,
+      rows: noShowRows,
     },
     {
-      id: "on-road",
-      anchorId: "exception-section-onroad",
-      label: "On-Road Issues",
+      id: "roll-call",
+      anchorId: "exception-section-roll-call",
+      label: "Roll Call Breach",
+      icon: BedDouble,
+      isLive: true,
+      rows: rollCallRows,
+    },
+    {
+      id: "active-red",
+      anchorId: "exception-section-active-red",
+      label: "Active RED Incidents",
       icon: AlertOctagon,
       isLive: true,
-      rows: liveRows,
+      rows: activeRedRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<AlertOctagon className="mr-1 h-3.5 w-3.5" />, "View in Hub"),
+      })),
     },
+    // ── Band 2: Health & Transport ─────────────────────────────────────────
     {
       id: "day-anomaly",
       anchorId: "exception-section-day-anomaly",
@@ -179,6 +231,65 @@ export function OperationsExceptionHub() {
             ) : null}
           </div>
         ),
+      })),
+    },
+    {
+      id: "infectious-exclusion",
+      anchorId: "exception-section-infectious",
+      label: "Infectious Exclusion",
+      icon: ShieldAlert,
+      isLive: true,
+      rows: infectiousRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<ShieldAlert className="mr-1 h-3.5 w-3.5" />, "Clear in Hub"),
+      })),
+    },
+    {
+      id: "medication",
+      anchorId: "exception-section-medication",
+      label: "Medication Schedules",
+      icon: Pill,
+      isLive: true,
+      rows: medScheduleBucketRows,
+    },
+    {
+      id: "on-road",
+      anchorId: "exception-section-onroad",
+      label: "On-Road Med Alert",
+      icon: Truck,
+      isLive: true,
+      rows: liveRows,
+    },
+    // ── Band 4: Governance ─────────────────────────────────────────────────
+    {
+      id: "hub-human",
+      anchorId: "exception-section-hub-human",
+      label: "Human Issues",
+      icon: FileWarning,
+      isLive: false,
+      rows: hubHumanRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<FileWarning className="mr-1 h-3.5 w-3.5" />, "View in Hub"),
+      })),
+    },
+    {
+      id: "maintenance",
+      anchorId: "exception-section-maintenance",
+      label: "Maintenance",
+      icon: Wrench,
+      isLive: false,
+      rows: maintenanceRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<Wrench className="mr-1 h-3.5 w-3.5" />, "Open in Hub"),
       })),
     },
   ];
@@ -224,6 +335,16 @@ export function OperationsExceptionHub() {
   const buckets: Bucket[] = [...operationalBuckets, ...registryBuckets];
 
 
+  // Assign buckets to bands by ID — new tiles auto-land in Band 4 if not listed.
+  const BAND1_IDS = new Set(["no-show", "roll-call", "active-red"]);
+  const BAND2_IDS = new Set(["day-anomaly", "infectious-exclusion", "medication", "on-road"]);
+  const BAND3_IDS = new Set(["hub-human"]);
+
+  const band1 = buckets.filter((b) => BAND1_IDS.has(b.id));
+  const band2 = buckets.filter((b) => BAND2_IDS.has(b.id));
+  const band3 = buckets.filter((b) => BAND3_IDS.has(b.id));
+  const band4 = buckets.filter((b) => !BAND1_IDS.has(b.id) && !BAND2_IDS.has(b.id) && !BAND3_IDS.has(b.id));
+
   const drillBuckets = buckets.filter((b) => b.rows.length > 0);
 
   const handleTileClick = (b: Bucket) => {
@@ -232,8 +353,9 @@ export function OperationsExceptionHub() {
   };
 
   return (
-    <Card className="space-y-3 p-3">
-      <header className="flex items-center justify-between gap-3">
+    <div className="space-y-3">
+      {/* Hub header */}
+      <div className="flex items-center justify-between gap-3 px-1">
         <div className="flex items-center gap-2">
           <ShieldAlert className="h-5 w-5 text-destructive" />
           <h3 className="text-base font-semibold">Operations Exception Hub</h3>
@@ -245,13 +367,45 @@ export function OperationsExceptionHub() {
           </span>
           {isLoading ? "Checking…" : "Live"}
         </div>
-      </header>
-
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-        {buckets.map((b) => (
-          <StatusTile key={b.id} bucket={b} onClick={() => handleTileClick(b)} />
-        ))}
       </div>
+
+      <BandSection
+        label="Band 1 — Person Safety"
+        description="Immediate risk to life or physical safety"
+        dotCls="bg-rose-500"
+        headerCls="bg-rose-50 dark:bg-rose-950/40"
+        borderCls="border-rose-300 dark:border-rose-800"
+        buckets={band1}
+        onTileClick={handleTileClick}
+      />
+      <BandSection
+        label="Band 2 — Health & Wellbeing"
+        description="Medication, medical transport, daily health"
+        dotCls="bg-amber-500"
+        headerCls="bg-amber-50 dark:bg-amber-950/40"
+        borderCls="border-amber-300 dark:border-amber-800"
+        buckets={band2}
+        onTileClick={handleTileClick}
+      />
+      <BandSection
+        label="Band 3 — Support Quality"
+        description="Incident response and Hub follow-up"
+        dotCls="bg-sky-500"
+        headerCls="bg-sky-50 dark:bg-sky-950/40"
+        borderCls="border-sky-300 dark:border-sky-800"
+        buckets={band3}
+        onTileClick={handleTileClick}
+      />
+      <BandSection
+        label="Band 4 — Compliance & Governance"
+        description="Asset compliance, maintenance, and regulatory obligations"
+        dotCls="bg-indigo-500"
+        headerCls="bg-indigo-50 dark:bg-indigo-950/40"
+        borderCls="border-indigo-300 dark:border-indigo-800"
+        buckets={band4}
+        onTileClick={handleTileClick}
+        wrapTiles
+      />
 
       <WallCalendar />
 
@@ -273,8 +427,72 @@ export function OperationsExceptionHub() {
           }}
         />
       )}
+    </div>
+  );
+}
 
-    </Card>
+interface BandSectionProps {
+  label: string;
+  description: string;
+  dotCls: string;
+  headerCls: string;
+  borderCls: string;
+  buckets: Bucket[];
+  onTileClick: (b: Bucket) => void;
+  /** When true, tiles wrap into multiple rows (Band 4 compliance). */
+  wrapTiles?: boolean;
+}
+
+function BandSection({
+  label,
+  description,
+  dotCls,
+  headerCls,
+  borderCls,
+  buckets,
+  onTileClick,
+  wrapTiles = false,
+}: BandSectionProps) {
+  const worstBand = worstSeverity(buckets.flatMap((b) => b.rows));
+  const allClear  = worstBand === null;
+
+  return (
+    <div className={cn("overflow-hidden rounded-lg border", borderCls)}>
+      {/* Band header */}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-3 border-b px-3 py-2",
+          headerCls,
+          borderCls.replace("border-", "border-b-"),
+        )}
+      >
+        <div className="flex items-center gap-2">
+          <span className={cn("h-2.5 w-2.5 shrink-0 rounded-full", dotCls)} />
+          <span className="text-xs font-bold uppercase tracking-widest">{label}</span>
+          <span className="hidden text-xs text-muted-foreground sm:inline">— {description}</span>
+        </div>
+        {allClear && (
+          <span className="flex items-center gap-1 text-xs font-medium text-green-700 dark:text-green-400">
+            <CheckCircle2 className="h-3.5 w-3.5" />
+            All clear
+          </span>
+        )}
+      </div>
+
+      {/* Tile grid */}
+      <div
+        className={cn(
+          "p-2.5",
+          wrapTiles
+            ? "grid grid-cols-2 gap-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6"
+            : "grid grid-cols-2 gap-2 sm:grid-cols-3",
+        )}
+      >
+        {buckets.map((b) => (
+          <StatusTile key={b.id} bucket={b} onClick={() => onTileClick(b)} />
+        ))}
+      </div>
+    </div>
   );
 }
 

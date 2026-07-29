@@ -12,16 +12,11 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
 import {
   markAttendanceAbsent,
   updateExpectedArrival,
@@ -127,7 +122,7 @@ export function AdjustExpectedTimeModal({
   const canMarkAbsent = !!reasonCode && operatorPinVerified && !busy;
 
   return (
-    <Dialog open={!!row} onOpenChange={(o) => !o && !busy && onClose(false)}>
+    <Dialog open={!!row} onOpenChange={(o) => !o && onClose(false)}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Adjust Expected Time</DialogTitle>
@@ -139,12 +134,10 @@ export function AdjustExpectedTimeModal({
         </DialogHeader>
         <div className="space-y-2 py-2">
           <Label htmlFor="adjust-time">New expected arrival</Label>
-          <input
+          <HalfHourTimeField
             id="adjust-time"
-            type="time"
             value={hhmm}
-            onChange={(e) => setHhmm(e.target.value)}
-            className="w-full rounded-md border border-input bg-background px-3 py-2 text-base text-slate-900"
+            onChange={setHhmm}
           />
         </div>
 
@@ -165,25 +158,20 @@ export function AdjustExpectedTimeModal({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Absence reason
             </Label>
-            <Select
-              value={reasonCode}
-              onValueChange={(v) => {
-                setReasonCode(v);
-                setPinError(null);
-              }}
-              disabled={busy}
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Select reason…" />
-              </SelectTrigger>
-              <SelectContent>
-                {ABSENCE_REASONS.map((r) => (
-                  <SelectItem key={r.code} value={r.code}>
-                    {r.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            <div className="space-y-1.5">
+              {ABSENCE_REASONS.map((r) => (
+                <MobileOptionButton
+                  key={r.code}
+                  selected={reasonCode === r.code}
+                  label={r.label}
+                  disabled={busy}
+                  onClick={() => {
+                    setReasonCode(r.code);
+                    setPinError(null);
+                  }}
+                />
+              ))}
+            </div>
           </div>
 
           <div className="space-y-1.5">
@@ -240,11 +228,10 @@ export function AdjustExpectedTimeModal({
 
         <DialogFooter>
           <Button
-            variant="ghost"
+            variant="outline"
             onClick={() => onClose(false)}
-            disabled={busy}
           >
-            Cancel
+            Close
           </Button>
           <Button onClick={() => updateMut.mutate()} disabled={busy}>
             {updateMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

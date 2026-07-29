@@ -25,6 +25,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LookupSelect } from "@/components/lookups/lookup-select";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { VendorPicker } from "@/components/vendors/vendor-picker";
 import { useInsertEventLedger, useVendors } from "@/hooks/use-supabase-data";
 import {
@@ -154,10 +156,11 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                   Transaction date
                 </Label>
-                <Input
-                  type="date"
-                  value={transactionDate}
-                  onChange={(e) => mark(setTransactionDate)(e.target.value)}
+                <DatePicker
+                  value={parseIsoDateLocal(transactionDate)}
+                  onChange={(d) => mark(setTransactionDate)(d ? toIsoDateString(d) : "")}
+                  dateFormat="dd-MMM-yy"
+                  className="h-9 text-sm"
                 />
               </div>
               <div className="space-y-2">
@@ -216,7 +219,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
 
           <DialogFooter>
             <Button variant="outline" onClick={() => onOpenChange(false)}>
-              Cancel
+              Close
             </Button>
             <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
               <Plus className="h-4 w-4" />
@@ -240,7 +243,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={saving}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button
               variant="outline"
               disabled={saving}

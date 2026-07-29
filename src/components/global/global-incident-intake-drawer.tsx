@@ -33,7 +33,7 @@ function useHarvestedContext(): {
       return { vehicleId, pathLabel: "Driver manifest" };
     }
 
-    if (pathname.startsWith("/events")) {
+    if (pathname.startsWith("/events") || pathname.startsWith("/event-deliver")) {
       const eventId = ls?.getItem("yada.activeEventId") ?? undefined;
       const eventTitle = ls?.getItem("yada.activeEventTitle") ?? undefined;
       const eventDaySessionId = ls?.getItem("yada.activeEventDaySessionId") ?? undefined;
@@ -41,7 +41,7 @@ function useHarvestedContext(): {
         eventId,
         eventTitle,
         eventDaySessionId,
-        pathLabel: eventTitle ? `Event: ${eventTitle}` : "Events",
+        pathLabel: eventTitle ? `Event: ${eventTitle}` : "Event Deliver",
       };
     }
 

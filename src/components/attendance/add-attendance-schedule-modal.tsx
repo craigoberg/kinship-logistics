@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LookupSelect } from "@/components/lookups/lookup-select";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import {
   LOOKUP_CATEGORIES,
   type AttendanceSchedule,
@@ -395,15 +396,10 @@ export function AddAttendanceScheduleModal({
               >
                 Expected arrival time
               </Label>
-              <input
+              <HalfHourTimeField
                 id="sched-arrival"
-                type="time"
                 value={arrivalTime}
-                onChange={(e) => {
-                  setArrivalTime(e.target.value);
-                  setDirty(true);
-                }}
-                className="w-full rounded-md border border-input bg-input px-3 py-2 text-sm text-foreground [color-scheme:dark]"
+                onChange={(v) => { setArrivalTime(v); setDirty(true); }}
               />
             </div>
             <div className="space-y-2">
@@ -413,15 +409,10 @@ export function AddAttendanceScheduleModal({
               >
                 Expected departure time
               </Label>
-              <input
+              <HalfHourTimeField
                 id="sched-departure"
-                type="time"
                 value={departureTime}
-                onChange={(e) => {
-                  setDepartureTime(e.target.value);
-                  setDirty(true);
-                }}
-                className="w-full rounded-md border border-input bg-input px-3 py-2 text-sm text-foreground [color-scheme:dark]"
+                onChange={(v) => { setDepartureTime(v); setDirty(true); }}
               />
             </div>
           </div>

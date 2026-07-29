@@ -8,6 +8,7 @@
  *      docs/sql/2026-07-11_maintenance_items_v2.sql
  */
 import { supabase } from "@/integrations/supabase/client";
+import { formatDate, formatDateTime } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -45,6 +46,8 @@ export interface MaintenanceItem {
   resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** Timestamp of the most recent maintenance note; null if no notes yet. */
+  lastNoteAt: string | null;
 }
 
 export interface MaintenanceNote {
@@ -91,6 +94,7 @@ function rowToItem(r: Record<string, any>): MaintenanceItem {
     resolvedAt: r.resolved_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    lastNoteAt: r.last_note_at ?? null,
   };
 }
 
@@ -109,22 +113,30 @@ function rowToNote(r: Record<string, any>): MaintenanceNote {
 
 /** Format a note as a single monospace timeline line (matching hub_issue_notes style). */
 export function renderMaintenanceNote(n: MaintenanceNote): string {
-  const dt = new Date(n.createdAt).toLocaleString("en-AU", {
-    day: "numeric",
-    month: "short",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+  const dt = formatDateTime(n.createdAt);
   return `[${dt}${n.author ? ` · ${n.author}` : ""}] ${n.noteText}`;
 }
 
 /**
- * Returns true if a deferred item should be shown on the Active tab
- * because its deferred_until date has passed.
+ * Returns true if a deferred item should be shown on the Active tab,
+ * considering both an overdue deadline AND the rewarn window (items
+ * resurface `deferRewarnMs` before their deadline so managers see them
+ * in advance). Pass 0 for deferRewarnMs to get old "overdue only" behaviour.
  */
-export function isDeferredItemOverdue(item: MaintenanceItem): boolean {
+export function isDeferredItemVisible(
+  item: MaintenanceItem,
+  deferRewarnMs = 0,
+): boolean {
   if (item.status !== "deferred" || !item.deferredUntil) return false;
-  return new Date(item.deferredUntil) <= new Date();
+  const deferMs = new Date(item.deferredUntil).getTime();
+  const now = Date.now();
+  // Already past the deadline, OR within the rewarn window.
+  return now >= deferMs || (deferMs - now) <= deferRewarnMs;
+}
+
+/** @deprecated Use isDeferredItemVisible(item, 0) */
+export function isDeferredItemOverdue(item: MaintenanceItem): boolean {
+  return isDeferredItemVisible(item, 0);
 }
 
 // ── Queries ───────────────────────────────────────────────────────────────────
@@ -142,17 +154,26 @@ export interface ListMaintenanceItemsArgs {
   severity?: MaintenanceSeverity;
   source?: MaintenanceSource;
   eventId?: string;
+  /**
+   * Milliseconds before a deferred_until deadline that the item resurfaces
+   * on the Active tab. Defaults to 0 (show only overdue defers on Active).
+   * Pass the value from `useMaintenanceUrgencyParams().deferRewarnMs` in
+   * the panel component so the query key includes the configured window.
+   */
+  deferRewarnMs?: number;
 }
 
 export async function listMaintenanceItems(
   args: ListMaintenanceItemsArgs = {},
 ): Promise<MaintenanceItem[]> {
-  // Fetch broadly; tab filtering is done client-side so overdue deferrals
-  // surface on the Active tab without a server-side date comparison.
+  const rewarnMs = args.deferRewarnMs ?? 0;
+
+  // Fetch broadly; tab filtering is done client-side so the rewarn window
+  // and overdue deferrals can be applied without a server-side date expression.
   let q = supabase
     .from("maintenance_items")
     .select(
-      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at",
+      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, last_note_at",
     )
     .order("created_at", { ascending: false });
 
@@ -162,7 +183,7 @@ export async function listMaintenanceItems(
   } else if (args.tab === "all") {
     // no status filter
   } else {
-    // active + deferred — fetch both, sort client-side
+    // active + deferred — fetch both, filter client-side
     q = q.not("status", "in", '("resolved","closed")');
   }
 
@@ -176,18 +197,18 @@ export async function listMaintenanceItems(
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const items = (data ?? []).map((r) => rowToItem(r as Record<string, any>));
 
-  // Client-side tab split
+  // Client-side tab split — rewarn-aware
   if (args.tab === "active") {
     return items.filter(
       (i) =>
         i.status === "open" ||
         i.status === "in_progress" ||
-        isDeferredItemOverdue(i),
+        isDeferredItemVisible(i, rewarnMs),
     );
   }
   if (args.tab === "deferred") {
     return items.filter(
-      (i) => i.status === "deferred" && !isDeferredItemOverdue(i),
+      (i) => i.status === "deferred" && !isDeferredItemVisible(i, rewarnMs),
     );
   }
 
@@ -244,6 +265,15 @@ export async function addMaintenanceNote(
     .select()
     .single();
   if (error) throw error;
+
+  // Touch last_note_at so the list-view urgency staleness timer resets.
+  const nowIso = new Date().toISOString();
+  await supabase
+    .from("maintenance_items")
+    .update({ last_note_at: nowIso })
+    .eq("id", itemId)
+    .then(() => null); // ignore update errors — note already saved
+
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   return rowToNote(data as Record<string, any>);
 }
@@ -295,7 +325,7 @@ export async function deferMaintenanceItem(
   // Also log a note so the timeline shows the defer action
   await addMaintenanceNote(
     id,
-    `Deferred to ${untilDate}. Reason: ${reason}`,
+    `Deferred to ${formatDate(untilDate)}. Reason: ${reason}`,
     author,
   );
 }

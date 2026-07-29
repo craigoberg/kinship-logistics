@@ -1,40 +1,44 @@
 /**
- * TripDaysTab — event_day_sessions: trip leader, open/close location, arrival roll,
- * bus boarding, curfew/morning. (§12.4 / §12.5 GUARDRAILS)
+ * TripDaysTab — office Setup only (BL-089): trip leader, roll-call times, issues.
+ * Field execution (open/close, rolls, boarding) lives in Event Deliver.
  */
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, Bus, CheckCircle2, Clock, Loader2, Moon, Plus, RefreshCw, ShieldCheck, Sunrise, UserCheck, UserCog } from "lucide-react";
+import {
+  AlertTriangle,
+  CalendarDays,
+  CheckCircle2,
+  Clock,
+  Compass,
+  Loader2,
+  Plus,
+  RefreshCw,
+  ShieldCheck,
+  UserCog,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { cn, formatDate } from "@/lib/utils";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
 import {
   listEventDaySessions,
-  listEventVenueStops,
   resetEventDaySessions,
   seedEventDaySessions,
   updateEventDaySession,
+  propagateTripLeaderToUnassignedDays,
+  propagateTripRollTimesToUnsetDays,
   type EventDaySession,
 } from "@/lib/api/event-outing";
-import { BusCheckOnPanel } from "./bus-check-on-panel";
-import { AccountabilityRollPanel } from "./accountability-roll-panel";
 import { EventIssuesCard } from "./event-issues-card";
-import { EventLocationPanel } from "./event-location-panel";
-import { EventArrivalRollPanel } from "./event-arrival-roll-panel";
 import { EventDayVerbalAnomalyFlow } from "./event-day-verbal-anomaly-flow";
-import { isEventLocationOpen } from "@/lib/api/event-location";
+import { isEventLocationClosed, isEventLocationOpen } from "@/lib/api/event-location";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
+import { isValidClockTime } from "@/lib/tour-roll-call";
 import type { EventManifest } from "@/lib/data-store";
 
 interface Props {
@@ -44,8 +48,7 @@ interface Props {
 const daySessionsKey = (eventId: string) => ["event-day-sessions", eventId] as const;
 
 function fmtDate(iso: string): string {
-  const d = new Date(iso + "T00:00:00");
-  return d.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short", year: "numeric" });
+  return formatDate(iso);
 }
 
 const PHASE_LABELS: Record<string, string> = {
@@ -76,6 +79,12 @@ const isMultiDay = (event: EventManifest) =>
 
 /** Radix Select rejects empty string values — use a sentinel for "unassigned". */
 const UNASSIGNED_LEADER = "__unassigned__";
+
+function normalizeRollTime(value: string): string | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  return isValidClockTime(trimmed) ? trimmed : null;
+}
 
 export function DaySessionsTab({ event: ev }: Props) {
   const qc = useQueryClient();
@@ -166,9 +175,9 @@ export function DaySessionsTab({ event: ev }: Props) {
     <div className="space-y-4">
       <div className="flex items-start justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          One <strong>trip day</strong> per calendar date between start and end. Assign a trip leader,
-          then open the location when the event floor starts. Multi-day tours also need curfew and
-          morning times.
+          One <strong>trip day</strong> per calendar date. Assign trip leader and roll-call times here.
+          Run the day in <strong>Event Deliver</strong> (open, rolls, close). Multi-day tours need evening
+          and morning times.
         </p>
         <div className="flex shrink-0 gap-1.5">
           {sessions.length === 0 && (
@@ -233,9 +242,10 @@ export function DaySessionsTab({ event: ev }: Props) {
             <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
           </div>
         ) : (
-          <p className="py-8 text-center text-sm text-muted-foreground">
+          <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center text-sm text-muted-foreground">
+            <CalendarDays className="mx-auto mb-2 h-5 w-5 opacity-50" />
             No trip days yet — use Seed trip days or save dates on Details &amp; Config.
-          </p>
+          </div>
         )
       ) : (
         <div className="divide-y rounded-lg border">
@@ -257,8 +267,6 @@ export function DaySessionsTab({ event: ev }: Props) {
 
 // ─── Single day session row (expandable with inner tabs) ─────────────────────
 
-type InnerTab = "config" | "arrival" | "bus" | "curfew" | "morning";
-
 interface RowProps {
   event: EventManifest;
   session: EventDaySession;
@@ -269,18 +277,18 @@ interface RowProps {
 
 function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps) {
   const [expanded, setExpanded] = useState(false);
-  const [innerTab, setInnerTab] = useState<InnerTab>("config");
   const [anomalyOpen, setAnomalyOpen] = useState(false);
 
   // Config state
   const [managerId, setManagerId] = useState(session.manager_staff_id ?? UNASSIGNED_LEADER);
-  const [curfewTime, setCurfewTime] = useState(session.curfew_time ?? "");
-  const [morningTime, setMorningTime] = useState(session.morning_roll_time ?? "");
+  // PostgreSQL time columns return "HH:mm:ss" — strip seconds so isValidClockTime passes.
+  const [curfewTime, setCurfewTime] = useState((session.curfew_time ?? "").slice(0, 5));
+  const [morningTime, setMorningTime] = useState((session.morning_roll_time ?? "").slice(0, 5));
 
   useEffect(() => {
     setManagerId(session.manager_staff_id ?? UNASSIGNED_LEADER);
-    setCurfewTime(session.curfew_time ?? "");
-    setMorningTime(session.morning_roll_time ?? "");
+    setCurfewTime((session.curfew_time ?? "").slice(0, 5));
+    setMorningTime((session.morning_roll_time ?? "").slice(0, 5));
   }, [session.id, session.manager_staff_id, session.curfew_time, session.morning_roll_time]);
 
   const dirty =
@@ -288,28 +296,68 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
     curfewTime !== (session.curfew_time ?? "") ||
     morningTime !== (session.morning_roll_time ?? "");
 
-  // Day stops (needed by BusCheckOnPanel).
-  const { data: allStops = [] } = useQuery({
-    queryKey: ["event-venue-stops", event.id],
-    queryFn: () => listEventVenueStops(event.id),
-    enabled: expanded && innerTab === "bus",
-    staleTime: 60_000,
-  });
-  const dayStops = allStops.filter((s) => s.session_date === session.session_date);
+  const rollTimesValid =
+    !multiDay ||
+    ((!curfewTime.trim() || isValidClockTime(curfewTime)) &&
+      (!morningTime.trim() || isValidClockTime(morningTime)));
 
   const mut = useMutation({
-    mutationFn: () =>
-      updateEventDaySession({
+    mutationFn: async () => {
+      const leaderId = managerId === UNASSIGNED_LEADER ? null : managerId;
+      const eveningRoll = multiDay ? normalizeRollTime(curfewTime) : null;
+      const morningRoll = multiDay ? normalizeRollTime(morningTime) : null;
+
+      if (multiDay && curfewTime.trim() && !eveningRoll) {
+        throw new Error("Evening roll call must be a valid 24-hour time (HH:mm).");
+      }
+      if (multiDay && morningTime.trim() && !morningRoll) {
+        throw new Error("Morning roll call must be a valid 24-hour time (HH:mm).");
+      }
+
+      const updated = await updateEventDaySession({
         id: session.id,
-        manager_staff_id: managerId === UNASSIGNED_LEADER ? null : managerId,
-        curfew_time: multiDay ? curfewTime || null : null,
-        morning_roll_time: multiDay ? morningTime || null : null,
-      }),
-    onSuccess: () => { toast.success("Trip day saved."); onSaved(); },
+        manager_staff_id: leaderId,
+        curfew_time: eveningRoll,
+        morning_roll_time: morningRoll,
+      });
+      const propagated =
+        multiDay && leaderId
+          ? await propagateTripLeaderToUnassignedDays(event.id, leaderId, session.id)
+          : 0;
+      const rollPropagated = multiDay
+        ? await propagateTripRollTimesToUnsetDays(event.id, session.id, {
+            curfew_time: eveningRoll,
+            morning_roll_time: morningRoll,
+          })
+        : { evening: 0, morning: 0 };
+      return { updated, propagated, rollPropagated };
+    },
+    onSuccess: ({ propagated, rollPropagated }) => {
+      const parts: string[] = ["Trip day saved."];
+      if (propagated > 0) {
+        parts.push(
+          `Leader applied to ${propagated} other unassigned day${propagated === 1 ? "" : "s"}.`,
+        );
+      }
+      const rollParts: string[] = [];
+      if (rollPropagated.evening > 0) {
+        rollParts.push(
+          `evening roll to ${rollPropagated.evening} day${rollPropagated.evening === 1 ? "" : "s"}`,
+        );
+      }
+      if (rollPropagated.morning > 0) {
+        rollParts.push(
+          `morning roll to ${rollPropagated.morning} day${rollPropagated.morning === 1 ? "" : "s"}`,
+        );
+      }
+      if (rollParts.length > 0) {
+        parts.push(`Copied ${rollParts.join(" and ")}.`);
+      }
+      toast.success(parts.join(" "));
+      onSaved();
+    },
     onError: (e: Error) => toast.error(e.message),
   });
-
-  const locationLive = isEventLocationOpen(session.phase);
 
   const leaderName = useMemo(() => {
     if (session.manager_name) return session.manager_name;
@@ -319,15 +367,8 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
     return managers.find((m) => m.id === id)?.fullName ?? null;
   }, [session.manager_name, session.manager_staff_id, managerId, managers]);
 
-  const innerTabs: Array<{ key: InnerTab; label: string; icon: React.ReactNode }> = [
-    { key: "config", label: "Config", icon: <ShieldCheck className="h-3.5 w-3.5" /> },
-    { key: "arrival", label: "Arrival roll", icon: <UserCheck className="h-3.5 w-3.5" /> },
-    { key: "bus", label: "Bus boarding", icon: <Bus className="h-3.5 w-3.5" /> },
-    ...(multiDay ? [
-      { key: "curfew" as InnerTab, label: "Curfew Roll", icon: <Moon className="h-3.5 w-3.5" /> },
-      { key: "morning" as InnerTab, label: "Morning Roll", icon: <Sunrise className="h-3.5 w-3.5" /> },
-    ] : []),
-  ];
+  const floorLive = isEventLocationOpen(session.phase);
+  const floorClosed = isEventLocationClosed(session.phase);
 
   return (
     <div>
@@ -364,7 +405,7 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
             {multiDay && session.curfew_time && (
               <span className="flex items-center gap-1">
                 <Clock className="h-3 w-3" />
-                Curfew {session.curfew_time}
+                Evening {session.curfew_time}
               </span>
             )}
             {multiDay && session.morning_roll_time && (
@@ -378,161 +419,119 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
         <span className="text-[10px] text-muted-foreground">{expanded ? "▲" : "▼"}</span>
       </div>
 
-      {/* Expanded inner tabs */}
+      {/* Expanded — office config only (BL-089) */}
       {expanded && (
-        <div className="border-t bg-muted/10">
-          {/* Inner tab bar — same active treatment as manage-event modal tabs */}
-          <div className="overflow-x-auto border-b border-border bg-background/60 px-3 pt-2">
-            <div className="flex min-w-max items-center gap-2">
-              {innerTabs.map((t) => {
-                const active = innerTab === t.key;
-                return (
-                  <button
-                    key={t.key}
-                    type="button"
-                    onClick={() => setInnerTab(t.key)}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-t-md px-3 py-2 text-xs font-semibold transition-colors",
-                      active
-                        ? "bg-tab-active text-tab-active-foreground"
-                        : "bg-transparent text-muted-foreground hover:text-foreground",
-                    )}
-                    aria-current={active ? "page" : undefined}
-                  >
-                    {t.icon}
-                    {t.label}
-                  </button>
-                );
-              })}
+        <div className="border-t bg-muted/10 px-4 py-4 space-y-4" onClick={(e) => e.stopPropagation()}>
+          <div className="rounded-lg border border-dashed bg-muted/20 px-3 py-2.5 text-xs text-muted-foreground">
+            <p className="font-semibold text-foreground">
+              Floor status:{" "}
+              {floorClosed ? "Closed" : floorLive ? "Open — live in Event Deliver" : "Not open yet"}
+            </p>
+            <p className="mt-1">
+              Open location, rolls, programme, and close day run in{" "}
+              <strong>Event Deliver</strong> — not here.
+            </p>
+            {(event.status === "Open" || event.status === "Confirmed" || floorLive) && (
+              <Button asChild size="sm" variant="outline" className="mt-2 gap-1.5">
+                <Link to="/event-deliver" search={{ eventId: event.id }}>
+                  <Compass className="h-3.5 w-3.5" />
+                  Run this event
+                </Link>
+              </Button>
+            )}
+          </div>
+
+          <div className="space-y-1.5">
+            <Label className="text-xs font-semibold">
+              Trip leader <span className="text-destructive">*</span>
+            </Label>
+            <div className="space-y-1.5">
+              {[
+                { id: UNASSIGNED_LEADER, fullName: "— Unassigned —" },
+                ...managers,
+              ].map((m) => (
+                <MobileFieldButton
+                  key={m.id}
+                  title={m.fullName}
+                  active={managerId === m.id}
+                  onClick={() => setManagerId(m.id)}
+                />
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground">
+              Required before Confirm or Open. Trip leader opens the day in Event Deliver with their PIN.
+              {multiDay && (
+                <> Saving a leader or roll times here also fills days still unassigned.</>
+              )}
+            </p>
+          </div>
+
+          {multiDay && (
+            <div className="grid grid-cols-2 gap-3">
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Evening roll call</Label>
+                <HalfHourTimeField
+                  id={`evening-roll-${session.id}`}
+                  value={curfewTime}
+                  onChange={setCurfewTime}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Bedtime accountability — YELLOW → RED + SMS if unaccounted (§12.5).
+                </p>
+              </div>
+              <div className="space-y-1.5">
+                <Label className="text-xs font-semibold">Morning roll call</Label>
+                <HalfHourTimeField
+                  id={`morning-roll-${session.id}`}
+                  value={morningTime}
+                  onChange={setMorningTime}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Breakfast / morning muster at base hotel.
+                </p>
+              </div>
+            </div>
+          )}
+
+          <div className="flex justify-between gap-2 pt-1">
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-yellow-500/40 text-yellow-700 hover:bg-yellow-500/10 dark:text-yellow-300"
+              onClick={() => setAnomalyOpen(true)}
+            >
+              <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
+              Log Venue Issue
+            </Button>
+            <div className="flex gap-2">
+              <Button size="sm" variant="outline" onClick={() => setExpanded(false)}>
+                Close
+              </Button>
+              <Button
+                size="sm"
+                disabled={!dirty || !rollTimesValid || mut.isPending}
+                onClick={() => mut.mutate()}
+              >
+                {mut.isPending ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />
+                )}
+                Save
+              </Button>
             </div>
           </div>
 
-          <div className="px-4 py-4">
-            {innerTab === "config" && (
-              <>
-              <div className="space-y-4">
-                <EventLocationPanel session={session} onChanged={onSaved} />
+          <EventIssuesCard eventId={event.id} eventDaySessionId={session.id} />
 
-                <div className="space-y-3" onClick={(e) => e.stopPropagation()}>
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">
-                    Trip leader <span className="text-destructive">*</span>
-                  </Label>
-                  <Select value={managerId} onValueChange={setManagerId}>
-                    <SelectTrigger className="h-9">
-                      <SelectValue placeholder="Assign trip leader…" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value={UNASSIGNED_LEADER}>— Unassigned —</SelectItem>
-                      {managers.map((m) => (
-                        <SelectItem key={m.id} value={m.id}>{m.fullName}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  <p className="text-[10px] text-muted-foreground">
-                    Required before Confirm or Open. The trip leader opens the location with Manager PIN on this Config tab.
-                  </p>
-                </div>
-
-                {multiDay && (
-                  <div className="grid grid-cols-2 gap-3">
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">Curfew time</Label>
-                      <Input type="time" value={curfewTime} onChange={(e) => setCurfewTime(e.target.value)} className="h-8 text-sm" />
-                      <p className="text-[10px] text-muted-foreground">YELLOW → RED + SMS if unaccounted (§12.5).</p>
-                    </div>
-                    <div className="space-y-1.5">
-                      <Label className="text-xs font-semibold">Morning roll time</Label>
-                      <Input type="time" value={morningTime} onChange={(e) => setMorningTime(e.target.value)} className="h-8 text-sm" />
-                    </div>
-                  </div>
-                )}
-
-                <div className="flex justify-between gap-2 pt-1">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="text-yellow-700 border-yellow-500/40 hover:bg-yellow-500/10"
-                    onClick={() => setAnomalyOpen(true)}
-                  >
-                    <AlertTriangle className="mr-1.5 h-3.5 w-3.5" />
-                    Log Venue Issue
-                  </Button>
-                  <div className="flex gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setExpanded(false)}>Close</Button>
-                    <Button size="sm" disabled={!dirty || mut.isPending} onClick={() => mut.mutate()}>
-                      {mut.isPending ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-1.5 h-3.5 w-3.5" />}
-                      Save
-                    </Button>
-                  </div>
-                </div>
-
-                {/* Active Issues Register for this day session */}
-                <EventIssuesCard eventId={event.id} eventDaySessionId={session.id} />
-                </div>
-              </div>
-
-              {/* Log Anomaly Modal — event-day context (§12.6) + verbal RED (§3) */}
-              <EventDayVerbalAnomalyFlow
-                eventId={event.id}
-                eventTitle={event.title}
-                eventDaySessionId={session.id}
-                sessionDate={session.session_date}
-                open={anomalyOpen}
-                onOpenChange={setAnomalyOpen}
-              />
-              </>
-            )}
-
-            {innerTab === "arrival" && (
-              session.phase === "closed_orderly" || session.phase === "closed_incident" ? (
-                <EventArrivalRollPanel sessionId={session.id} editable={false} />
-              ) : locationLive ? (
-                <EventArrivalRollPanel
-                  sessionId={session.id}
-                  editable={
-                    session.phase === "active" ||
-                    session.phase === "in_transit" ||
-                    session.phase === "at_base" ||
-                    session.phase === "pre_departure"
-                  }
-                />
-              ) : (
-                <p className="py-6 text-center text-sm text-muted-foreground">
-                  Open the location on the Config tab to start the arrival roll.
-                </p>
-              )
-            )}
-
-            {innerTab === "bus" && (
-              <BusCheckOnPanel
-                event={event}
-                sessionId={session.id}
-                sessionDate={session.session_date}
-                stops={dayStops}
-              />
-            )}
-
-            {innerTab === "curfew" && multiDay && (
-              <AccountabilityRollPanel
-                event={event}
-                sessionId={session.id}
-                sessionDate={session.session_date}
-                rollTimeClock={curfewTime || session.curfew_time}
-                mode="curfew"
-              />
-            )}
-
-            {innerTab === "morning" && multiDay && (
-              <AccountabilityRollPanel
-                event={event}
-                sessionId={session.id}
-                sessionDate={session.session_date}
-                rollTimeClock={morningTime || session.morning_roll_time}
-                mode="morning"
-              />
-            )}
-          </div>
+          <EventDayVerbalAnomalyFlow
+            eventId={event.id}
+            eventTitle={event.title}
+            eventDaySessionId={session.id}
+            sessionDate={session.session_date}
+            open={anomalyOpen}
+            onOpenChange={setAnomalyOpen}
+          />
         </div>
       )}
     </div>

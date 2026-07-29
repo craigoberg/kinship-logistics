@@ -16,3 +16,7 @@ When the user asks about the **backlog**, **priorities**, **what's left**, or as
 3. Do **not** merge with `GUARDRAIL-DRIFT-REPORT.md` — that file is technical drift audit; backlog is product and planning.
 
 **Not in backlog:** Locked build rules in `docs/architecture/GUARDRAILS.md`.
+
+**RBAC (BL-002):** Deferred until last. Interim builds must comply with GUARDRAILS §2.4 and `.cursor/rules/rbac-forward-compat.mdc` — see BL-002 in `docs/BACKLOG.md`.
+
+**UI style guide:** `docs/architecture/UI-STYLE-GUIDE.md` + `.cursor/rules/ui-style-guide.mdc` — audit tracked as **BL-060**.

@@ -8,6 +8,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { createClient } from "@supabase/supabase-js";
+import { formatTime } from "@/lib/utils";
 
 interface Body {
   attendanceId: string;
@@ -69,7 +70,7 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
         }
         recipients = Array.from(new Set(recipients));
 
-        const expectedLocal = new Date(body.expectedAt).toLocaleTimeString();
+        const expectedLocal = formatTime(body.expectedAt);
         const message = `[RED] ${body.participantName} missing from Day Centre — expected ${expectedLocal}. Please confirm whereabouts.`;
         const reference = `att-red-${body.attendanceId}`;
 

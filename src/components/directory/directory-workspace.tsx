@@ -3,6 +3,7 @@ import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle, Lock 
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Badge } from "@/components/ui/badge";
 import {
   Table,
@@ -184,17 +185,15 @@ export function DirectoryWorkspace() {
                         </TableCell>
                         <TableCell className="text-right">
                           {isManager ? (
-                            <Button
-                              size="icon"
-                              variant="ghost"
+                            <IconActionButton
                               onClick={() => {
                                 setEditStaff(s);
                                 setStaffOpen(true);
                               }}
-                              aria-label={`Edit ${s.fullName}`}
+                              tooltip="Edit staff"
                             >
                               <Pencil className="h-4 w-4" />
-                            </Button>
+                            </IconActionButton>
                           ) : (
                             <Lock className="ml-auto h-4 w-4 text-muted-foreground" aria-label="Manager-only" />
                           )}
@@ -258,17 +257,15 @@ export function DirectoryWorkspace() {
                           )}
                         </TableCell>
                         <TableCell className="text-right">
-                          <Button
-                            size="icon"
-                            variant="ghost"
+                          <IconActionButton
                             onClick={() => {
                               setEditCarer(c);
                               setCarerOpen(true);
                             }}
-                            aria-label={`Edit ${c.fullName}`}
+                            tooltip="Edit carer"
                           >
                             <Pencil className="h-4 w-4" />
-                          </Button>
+                          </IconActionButton>
                         </TableCell>
                       </TableRow>
                     );

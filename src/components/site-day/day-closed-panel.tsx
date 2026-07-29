@@ -78,8 +78,12 @@ export function DayClosedPanel({ session }: Props) {
     onSuccess: (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey?.[0] === "site-day-activities",
+      });
       toast.success("Session reset to Start of Day", {
-        description: "Issues, escalations, attendance and billing are preserved.",
+        description:
+          "Activities delivery rewound. Issues, escalations, attendance and billing are preserved.",
       });
     },
     onError: (e: Error) => {
@@ -172,10 +176,7 @@ export function DayClosedPanel({ session }: Props) {
 
       <Dialog
         open={open}
-        onOpenChange={(o) => {
-          if (reopenMut.isPending) return;
-          setOpen(o);
-        }}
+        onOpenChange={setOpen}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -238,10 +239,9 @@ export function DayClosedPanel({ session }: Props) {
             <Button
               type="button"
               variant="outline"
-              disabled={reopenMut.isPending}
               onClick={() => setOpen(false)}
             >
-              Cancel
+              Close
             </Button>
             <Button
               type="button"

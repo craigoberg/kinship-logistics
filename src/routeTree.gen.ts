@@ -16,6 +16,7 @@ import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as ManifestRouteImport } from './routes/manifest'
 import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as EventsRouteImport } from './routes/events'
+import { Route as EventDeliverRouteImport } from './routes/event-deliver'
 import { Route as DayRouteImport } from './routes/day'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
@@ -57,6 +58,11 @@ const GovernanceRoute = GovernanceRouteImport.update({
 const EventsRoute = EventsRouteImport.update({
   id: '/events',
   path: '/events',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const EventDeliverRoute = EventDeliverRouteImport.update({
+  id: '/event-deliver',
+  path: '/event-deliver',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DayRoute = DayRouteImport.update({
@@ -102,6 +108,7 @@ export interface FileRoutesByFullPath {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/day': typeof DayRoute
+  '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -118,6 +125,7 @@ export interface FileRoutesByTo {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/day': typeof DayRoute
+  '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -135,6 +143,7 @@ export interface FileRoutesById {
   '/admin': typeof AdminRoute
   '/auth': typeof AuthRoute
   '/day': typeof DayRoute
+  '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
   '/manifest': typeof ManifestRoute
@@ -153,6 +162,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/day'
+    | '/event-deliver'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -169,6 +179,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/day'
+    | '/event-deliver'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -185,6 +196,7 @@ export interface FileRouteTypes {
     | '/admin'
     | '/auth'
     | '/day'
+    | '/event-deliver'
     | '/events'
     | '/governance'
     | '/manifest'
@@ -202,6 +214,7 @@ export interface RootRouteChildren {
   AdminRoute: typeof AdminRoute
   AuthRoute: typeof AuthRoute
   DayRoute: typeof DayRoute
+  EventDeliverRoute: typeof EventDeliverRoute
   EventsRoute: typeof EventsRoute
   GovernanceRoute: typeof GovernanceRoute
   ManifestRoute: typeof ManifestRoute
@@ -265,6 +278,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof EventsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/event-deliver': {
+      id: '/event-deliver'
+      path: '/event-deliver'
+      fullPath: '/event-deliver'
+      preLoaderRoute: typeof EventDeliverRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/day': {
       id: '/day'
       path: '/day'
@@ -322,6 +342,7 @@ const rootRouteChildren: RootRouteChildren = {
   AdminRoute: AdminRoute,
   AuthRoute: AuthRoute,
   DayRoute: DayRoute,
+  EventDeliverRoute: EventDeliverRoute,
   EventsRoute: EventsRoute,
   GovernanceRoute: GovernanceRoute,
   ManifestRoute: ManifestRoute,

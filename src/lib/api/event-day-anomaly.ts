@@ -1,10 +1,6 @@
 import type { EventDaySession } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
-
-function todayLocalIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
+import { todayLocalIso } from "@/lib/utils";
 
 const LIVE_PHASES = new Set([
   "active",

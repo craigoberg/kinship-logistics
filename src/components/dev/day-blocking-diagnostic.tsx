@@ -5,13 +5,15 @@ import { supabase } from "@/integrations/supabase/client";
 
 interface IssueRow {
   id: string;
-  session_id: string;
+  session_id: string | null;
   severity: string;
   status: string;
   issue_description: string;
   workaround_plan: string | null;
   resolved_at: string | null;
   created_at: string;
+  event_id: string | null;
+  event_day_session_id: string | null;
 }
 
 interface EscalationRow {
@@ -50,6 +52,15 @@ function diagnose(issue: IssueRow, esc: EscalationRow | null): RowDiagnosis {
       reason: "Issue row has workaround_plan stored",
     };
   }
+  // [VERBAL WORKAROUND] prefix in description = accepted verbal workaround (matches redHasAcceptedWorkaround)
+  if (issue.issue_description?.includes("[VERBAL WORKAROUND]")) {
+    return {
+      issue,
+      escalation: esc,
+      blocking: false,
+      reason: "CARRIED — description contains [VERBAL WORKAROUND] (verbal consultation logged; manager-agreed workaround recorded in text)",
+    };
+  }
   if (esc && esc.status === "resolved_approved" && esc.resolution_notes?.trim()) {
     return {
       issue,
@@ -63,22 +74,32 @@ function diagnose(issue: IssueRow, esc: EscalationRow | null): RowDiagnosis {
     issue,
     escalation: esc,
     blocking: true,
-    reason: `BLOCKING — issue status='${issue.status}', no workaround_plan, linked escalation status='${esc?.status ?? "none"}'`,
+    reason: `BLOCKING — issue status='${issue.status}', no workaround_plan, no [VERBAL WORKAROUND] tag, linked escalation status='${esc?.status ?? "none"}'`,
   };
 }
 
-export function DayBlockingDiagnostic({ sessionId }: { sessionId: string | null }) {
+export function DayBlockingDiagnostic({
+  sessionId,
+  visible = true,
+}: {
+  sessionId: string | null;
+  visible?: boolean;
+}) {
+  if (!visible) return null;
   const q = useQuery({
     queryKey: ["diag-day-blocking", sessionId ?? "none"],
     refetchInterval: 10_000,
     queryFn: async (): Promise<RowDiagnosis[]> => {
+      // Day Centre open gate only — trip/event REDs are out of scope.
       const { data: issues, error: ierr } = await supabase
         .from("site_issues_register")
         .select(
-          "id, session_id, severity, status, issue_description, workaround_plan, resolved_at, created_at",
+          "id, session_id, severity, status, issue_description, workaround_plan, resolved_at, created_at, event_id, event_day_session_id",
         )
         .eq("severity", "red")
         .neq("status", "resolved")
+        .is("event_id", null)
+        .is("event_day_session_id", null)
         .order("created_at", { ascending: false });
       if (ierr) throw ierr;
       const rows = (issues ?? []) as IssueRow[];
@@ -140,7 +161,8 @@ export function DayBlockingDiagnostic({ sessionId }: { sessionId: string | null 
         )}
         {!q.isLoading && rows.length === 0 && (
           <div className="text-emerald-700">
-            No unresolved RED issues found anywhere. Nothing should be blocking
+            No unresolved Day Centre–scoped RED issues. Trip/event REDs are
+            ignored by Open Centre — nothing Day-scoped should be blocking
             Start of Day.
           </div>
         )}
@@ -174,7 +196,11 @@ export function DayBlockingDiagnostic({ sessionId }: { sessionId: string | null 
                 <div>issue.workaround_plan</div>
                 <div>{r.issue.workaround_plan ?? "null"}</div>
                 <div>issue.session_id</div>
-                <div className="truncate">{r.issue.session_id}</div>
+                <div className="truncate">{r.issue.session_id ?? "null"}</div>
+                <div>issue.event_id</div>
+                <div className="truncate">{r.issue.event_id ?? "null"}</div>
+                <div>issue.event_day_session_id</div>
+                <div className="truncate">{r.issue.event_day_session_id ?? "null"}</div>
                 <div>esc.status</div>
                 <div>{r.escalation?.status ?? "—"}</div>
                 <div>esc.resolution_notes</div>

@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
 import {
   listTransportRequests,
   upsertTransportRequest,
@@ -389,8 +390,9 @@ export function useParticipantComplianceLogs(participantId: string | null | unde
 }
 
 export function useTodaysComplianceLogs() {
+  const today = useOperationalTodayIso();
   return useQuery({
-    queryKey: ["compliance_audit_logs", "today"],
+    queryKey: ["compliance_audit_logs", "today", today],
     queryFn: listTodaysComplianceLogs,
     staleTime: 30_000,
   });
@@ -1018,15 +1020,20 @@ export function useUpdateEventBooking() {
 
 // ---------- Driver Manifest hooks ----------
 import {
+  patchTripLegOfflineAware,
+  resolveActiveTripBundle,
+} from "@/lib/manifest-offline";
+import { isAppOnline } from "@/lib/simulated-offline";
+import {
   getActiveTripForDriver,
   startTrip as startTripFn,
   startDayCentreRun as startDayCentreRunFn,
   listTodaysBusRunSummaries,
-  patchTripLeg as patchTripLegFn,
   completeTrip as completeTripFn,
   cancelTrip as cancelTripFn,
   getStaffId,
   getLastEndOdometer,
+  getAssetCurrentOdometer,
   listBusRunRosterForDay,
   reorderTripPickupLegs,
   type StartTripInput,
@@ -1045,19 +1052,33 @@ export function useActiveTrip() {
   const driverId = getStaffId();
   return useQuery({
     queryKey: [...ACTIVE_TRIP_KEY, driverId],
-    queryFn: () => getActiveTripForDriver(driverId),
+    queryFn: () =>
+      resolveActiveTripBundle(driverId, () => getActiveTripForDriver(driverId)),
     staleTime: 5_000,
     refetchInterval: 30_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: true,
+    // Keep showing last known run while a refetch fails mid-route.
+    networkMode: "offlineFirst",
   });
 }
 
+/** @deprecated Prefer useAssetCurrentOdometer(assetId). */
 export function useLastEndOdometer() {
   return useQuery({
     queryKey: ["transport_trips", "last_end_odometer"],
     queryFn: getLastEndOdometer,
     staleTime: 30_000,
+  });
+}
+
+/** Per-vehicle estimated odometer for Manifest init prefill (BL-096). */
+export function useAssetCurrentOdometer(assetId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["transport_assets", "current_odometer", assetId ?? "none"],
+    queryFn: () => getAssetCurrentOdometer(assetId!),
+    enabled: !!assetId,
+    staleTime: 15_000,
   });
 }
 
@@ -1076,8 +1097,68 @@ export function useStartTrip() {
       startTripFn({ ...input, driverStaffId: getStaffId() }),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+      invalidateTransportCaches(qc);
     },
     onError: (err: Error) => showRedToast("Could not start trip", err),
+  });
+}
+
+import {
+  eventTransportRunsKey,
+  listEventTransportRuns,
+  prepareEventHopManifest,
+  startEventVenueHop,
+} from "@/lib/api/event-hop-transport";
+
+export function useEventTransportRuns(
+  eventId: string | null | undefined,
+  sessionId: string | null | undefined,
+  sessionDate: string | null | undefined,
+) {
+  return useQuery({
+    queryKey:
+      eventId && sessionId && sessionDate
+        ? eventTransportRunsKey(eventId, sessionDate, sessionId)
+        : ["event-transport-runs", "idle"],
+    queryFn: () =>
+      listEventTransportRuns({
+        eventId: eventId!,
+        sessionId: sessionId!,
+        sessionDate: sessionDate!,
+      }),
+    enabled: !!eventId && !!sessionId && !!sessionDate,
+    staleTime: 15_000,
+  });
+}
+
+export function usePrepareEventHop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: prepareEventHopManifest,
+    onSuccess: (_id, vars) => {
+      qc.invalidateQueries({
+        queryKey: eventTransportRunsKey(vars.eventId, vars.sessionDate, vars.eventDaySessionId),
+      });
+      invalidateTransportCaches(qc);
+    },
+    onError: (err: Error) => showRedToast("Could not prepare hop", err),
+  });
+}
+
+export function useStartEventVenueHop() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: {
+      tripId: string;
+      startOdometerKm: number;
+      assetId?: string | null;
+      varianceReason?: string | null;
+    }) => startEventVenueHop({ ...input, driverStaffId: getStaffId() }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+      invalidateTransportCaches(qc);
+    },
+    onError: (err: Error) => showRedToast("Could not start hop", err),
   });
 }
 
@@ -1105,12 +1186,25 @@ export function useTodaysBusRunSummaries(dayCode: string, runLabels: Record<stri
 export function usePatchTripLeg() {
   const qc = useQueryClient();
   return useMutation({
-    mutationFn: ({ legId, patch }: { legId: string; patch: LegPatch }) =>
-      patchTripLegFn(legId, patch),
+    mutationFn: ({
+      legId,
+      tripId,
+      patch,
+    }: {
+      legId: string;
+      tripId: string;
+      patch: LegPatch;
+    }) => patchTripLegOfflineAware(tripId, legId, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+      if (!isAppOnline()) {
+        toast.info("Saved offline", {
+          description: "Will sync when you are back online.",
+        });
+      }
     },
     onError: (err: Error) => showRedToast("Database rejected leg update", err),
+    networkMode: "always",
   });
 }
 

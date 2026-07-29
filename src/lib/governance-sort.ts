@@ -1,4 +1,5 @@
 import type { UnifiedIssue } from "@/lib/api/unified-issues";
+import type { SiteIssue } from "@/lib/api/site-issues";
 
 /** Red → Yellow → Green → unknown (null). */
 export function rygeSortRank(sev: string | null | undefined): number {
@@ -6,6 +7,18 @@ export function rygeSortRank(sev: string | null | undefined): number {
   if (sev === "yellow") return 1;
   if (sev === "green") return 2;
   return 3;
+}
+
+/**
+ * Day Centre Issues Register sort: group Red → Yellow → Green,
+ * newest → oldest within each band.
+ */
+export function sortSiteIssuesByRygeNewestFirst(issues: SiteIssue[]): SiteIssue[] {
+  return [...issues].sort((a, b) => {
+    const byRyge = rygeSortRank(a.severity) - rygeSortRank(b.severity);
+    if (byRyge !== 0) return byRyge;
+    return b.createdAt.localeCompare(a.createdAt);
+  });
 }
 
 /**

@@ -78,7 +78,7 @@ export const Route = createFileRoute("/api/internal/transport-pickup-sms")({
 
         const reason = body.reason?.trim() || "Passenger not travelling today.";
         const message =
-          `[PICKUP CANCELLED] Driver skipped ${body.participantName} on today's run. ` +
+          `[RED PICKUP CANCELLED] Driver skipped ${body.participantName} on today's run after manager verbal confirmation. ` +
           `${reason} Follow up in Governance Hub.`;
         const reference = `pickup-cancel-${body.legId}`;
 

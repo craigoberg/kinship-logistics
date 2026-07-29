@@ -1,6 +1,14 @@
-import { useMemo } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import { useAllActiveSchedules, useTodaysComplianceLogs } from "@/hooks/use-supabase-data";
 import type { MedicationSchedule } from "@/lib/data-store";
+import {
+  getOperationalClockSnapshot,
+  subscribeOperationalClock,
+} from "@/lib/operational-clock";
+import {
+  getSydneyTimeTodayIso,
+  resolveOperationalNow,
+} from "@/lib/operational-time";
 
 /**
  * Returns a Map of participant_id → the earliest-due pending medication
@@ -11,11 +19,17 @@ import type { MedicationSchedule } from "@/lib/data-store";
 export function usePendingScheduleMap(): Map<string, MedicationSchedule> {
   const { data: schedules = [] } = useAllActiveSchedules();
   const { data: logs = [] } = useTodaysComplianceLogs();
+  const clockSnapshot = useSyncExternalStore(
+    subscribeOperationalClock,
+    getOperationalClockSnapshot,
+    () => "ssr:live",
+  );
 
   return useMemo(() => {
-    const now = new Date();
-    const todayStart = new Date();
-    todayStart.setHours(0, 0, 0, 0);
+    void clockSnapshot;
+    const now = resolveOperationalNow();
+    const todayStartIso = getSydneyTimeTodayIso(0, 0, now);
+    const todayStartMs = Date.parse(todayStartIso);
 
     // Group today's logs by participant.
     const logsByParticipant = new Map<string, typeof logs>();
@@ -31,15 +45,15 @@ export function usePendingScheduleMap(): Map<string, MedicationSchedule> {
     for (const s of schedules) {
       if (!s.participantId || !s.active) continue;
       const [h, m] = s.expectedTime.split(":").map(Number);
-      const expected = new Date(todayStart);
-      expected.setHours(h || 0, m || 0, 0, 0);
-      if (expected > now) continue; // not due yet
+      const expectedIso = getSydneyTimeTodayIso(h || 0, m || 0, now);
+      const expectedMs = Date.parse(expectedIso);
+      if (expectedMs > now.getTime()) continue; // not due yet
 
       const participantLogs = logsByParticipant.get(s.participantId) ?? [];
       const medName = s.medicationName.trim().toLowerCase();
       const matched = participantLogs.some((log) => {
-        const t = new Date(log.timestamp);
-        if (t < expected) return false;
+        const t = Date.parse(log.timestamp);
+        if (Number.isNaN(t) || t < expectedMs || t < todayStartMs) return false;
         const meta = log.metadata as Record<string, unknown>;
         const name = String(meta.medication_name ?? "").trim().toLowerCase();
         return name === medName;
@@ -55,5 +69,5 @@ export function usePendingScheduleMap(): Map<string, MedicationSchedule> {
     }
 
     return pending;
-  }, [schedules, logs]);
+  }, [schedules, logs, clockSnapshot]);
 }

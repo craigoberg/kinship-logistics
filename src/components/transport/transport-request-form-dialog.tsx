@@ -12,6 +12,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -182,11 +183,10 @@ export function TransportRequestFormDialog({
             </div>
             <div className="grid gap-2">
               <Label htmlFor="req-time">Time (optional)</Label>
-              <Input
+              <HalfHourTimeField
                 id="req-time"
-                type="time"
                 value={scheduledTime}
-                onChange={(e) => setScheduledTime(e.target.value)}
+                onChange={setScheduledTime}
               />
             </div>
           </div>

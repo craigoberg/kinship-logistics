@@ -20,7 +20,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { cn } from "@/lib/utils";
+import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import type { ComplianceAsset } from "@/lib/api/compliance-assets";
 import type { ComplianceResolutionContext } from "@/hooks/use-compliance-resolution-context";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
@@ -838,7 +838,13 @@ function GenericFields({
     <div className="grid gap-3 sm:grid-cols-2">
       <div className="space-y-1">
         <Label>Action date</Label>
-        <Input type="date" value={actionDate} max={todayISO()} onChange={(e) => onActionDate(e.target.value)} />
+        <DatePicker
+          value={parseIsoDateLocal(actionDate)}
+          onChange={(d) => onActionDate(d ? toIsoDateString(d) : "")}
+          disabledDates={(d) => d > new Date()}
+          dateFormat="dd-MMM-yy"
+          className="h-9 text-sm"
+        />
       </div>
       {!hideExpiryFields && (
         <div className="space-y-1 sm:col-span-2">
@@ -963,7 +969,7 @@ function DateField({
         onChange={onChange}
         placeholder="Select a date"
         disabledDates={disabledFn}
-        dateFormat="dd/MM/yyyy"
+        dateFormat="dd-MMM-yy"
         className="h-9 text-sm"
       />
       {helper && <span className="text-[11px] text-muted-foreground">{helper}</span>}

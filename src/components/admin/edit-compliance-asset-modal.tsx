@@ -6,6 +6,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -311,13 +313,12 @@ export function EditComplianceAssetModal({
           </div>
           <div className="space-y-1 sm:col-span-2">
             <Label htmlFor="registry-expiry">Next expiry / renewal date</Label>
-            <Input
-              id="registry-expiry"
-              type="date"
-              value={expiry ?? ""}
-              min={expiryMinIso}
-              onChange={(e) => setExpiry(e.target.value)}
-              className="[color-scheme:dark]"
+            <DatePicker
+              value={parseIsoDateLocal(expiry ?? "")}
+              onChange={(d) => setExpiry(d ? toIsoDateString(d) : "")}
+              disabledDates={(d) => !!(expiryMinIso && d < new Date(expiryMinIso))}
+              dateFormat="dd-MMM-yy"
+              className="h-9 text-sm"
             />
             <p className="text-[11px] text-muted-foreground">
               Edit the date directly. Preset intervals (3 / 6 / 12 months) are available in Manage.
@@ -397,8 +398,8 @@ export function EditComplianceAssetModal({
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
-            Cancel
+          <Button variant="outline" onClick={onClose}>
+            Close
           </Button>
           <Button onClick={handleSaveClick} disabled={!canSubmit}>
             {mut.isPending ? "Saving…" : "Save & log"}

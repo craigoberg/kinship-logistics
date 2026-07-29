@@ -10,7 +10,6 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Input } from "@/components/ui/input";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import {
@@ -21,6 +20,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
+import { NextActionDateTimeField } from "@/components/governance/next-action-datetime-field";
 
 export interface CouncilSeverityOption {
   value: string;
@@ -46,6 +46,7 @@ export interface ManageItemShellProps {
   onDeferOnChange?: (value: boolean) => void;
   deferAt?: string;
   onDeferAtChange?: (value: string) => void;
+  onDeferDatetimeValidChange?: (valid: boolean) => void;
   escalateOn?: boolean;
   onEscalateOnChange?: (value: boolean) => void;
   councilSev?: string;
@@ -82,6 +83,7 @@ export function ManageItemShell({
   onDeferOnChange,
   deferAt = "",
   onDeferAtChange,
+  onDeferDatetimeValidChange,
   escalateOn = false,
   onEscalateOnChange,
   councilSev = "Sev 2",
@@ -99,9 +101,6 @@ export function ManageItemShell({
   resolveButtonClassName = "bg-emerald-600 hover:bg-emerald-700 text-white",
   extraFooterStart,
 }: ManageItemShellProps) {
-  const deferValid =
-    !deferOn || (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
-
   const effectiveNoteLabel = deferOn
     ? "Defer reason / next action"
     : escalateOn
@@ -114,10 +113,7 @@ export function ManageItemShell({
   return (
     <Dialog
       open={open}
-      onOpenChange={(o) => {
-        if (busy) return;
-        onOpenChange(o);
-      }}
+      onOpenChange={onOpenChange}
     >
       <DialogContent className="sm:max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -188,22 +184,13 @@ export function ManageItemShell({
                   Defer / Set next action date
                 </label>
                 {deferOn && (
-                  <div className="space-y-1 pl-6">
-                    <Label htmlFor="manage-defer-at" className="text-xs">
-                      Next action date
-                    </Label>
-                    <Input
+                  <div className="pl-6">
+                    <NextActionDateTimeField
                       id="manage-defer-at"
-                      type="datetime-local"
                       value={deferAt}
-                      onChange={(e) => onDeferAtChange(e.target.value)}
-                      className="[color-scheme:dark]"
+                      onChange={onDeferAtChange}
+                      onValidChange={onDeferDatetimeValidChange}
                     />
-                    {!deferValid && (
-                      <span className="text-xs text-destructive">
-                        A valid next-action date is required.
-                      </span>
-                    )}
                   </div>
                 )}
               </div>
@@ -244,24 +231,33 @@ export function ManageItemShell({
           </div>
         )}
 
-        <DialogFooter className="gap-2 sm:gap-2">
-          {extraFooterStart}
-          {onLogUpdate && (
-            <Button variant="secondary" onClick={onLogUpdate} disabled={!canLog}>
-              {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              {logUpdateLabel}
-            </Button>
-          )}
-          {onResolveClose && (
-            <Button
-              onClick={onResolveClose}
-              disabled={!canResolve}
-              className={resolveButtonClassName}
-            >
-              {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
-              {resolveCloseLabel}
-            </Button>
-          )}
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onOpenChange(false)}
+          >
+            Close
+          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {extraFooterStart}
+            {onLogUpdate && (
+              <Button variant="secondary" onClick={onLogUpdate} disabled={!canLog}>
+                {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                {logUpdateLabel}
+              </Button>
+            )}
+            {onResolveClose && (
+              <Button
+                onClick={onResolveClose}
+                disabled={!canResolve}
+                className={resolveButtonClassName}
+              >
+                {busy && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
+                {resolveCloseLabel}
+              </Button>
+            )}
+          </div>
         </DialogFooter>
       </DialogContent>
     </Dialog>

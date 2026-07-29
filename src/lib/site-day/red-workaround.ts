@@ -76,3 +76,66 @@ export function effectiveWorkaroundText(
   const fromEsc = escalationMap?.get(issue.id)?.trim();
   return fromEsc || null;
 }
+
+/** Day Centre open gate — trip/event REDs must never block centre open. */
+export function isDayCentreScopedIssue(issue: {
+  event_id?: string | null;
+  eventId?: string | null;
+  event_day_session_id?: string | null;
+  eventDaySessionId?: string | null;
+}): boolean {
+  const eventId = issue.event_id ?? issue.eventId ?? null;
+  const eventDaySessionId =
+    issue.event_day_session_id ?? issue.eventDaySessionId ?? null;
+  return eventId == null && eventDaySessionId == null;
+}
+
+export type DayCentreRedIssueRow = {
+  id: string;
+  session_id: string | null;
+  severity: string;
+  status: string | null;
+  issue_description: string | null;
+  workaround_plan: string | null;
+  workaround_accepted_at: string | null;
+  created_at: string;
+  event_id: string | null;
+  event_day_session_id: string | null;
+};
+
+export const DAY_CENTRE_BLOCKING_REDS_QUERY_KEY = [
+  "site-issues",
+  "open-reds-day-centre",
+] as const;
+
+/**
+ * RED issues that can block Day Centre Open Centre.
+ * Scoped to Day Centre only: `event_id` and `event_day_session_id` both null.
+ * Trip morning/evening / event-floor REDs are excluded.
+ */
+export async function fetchDayCentreBlockingReds(): Promise<{
+  /** Day-scoped RED rows (any status except we still return resolved for diagnostics). */
+  rows: DayCentreRedIssueRow[];
+  /** Unresolved Day-scoped REDs with no accepted workaround. */
+  blocking: DayCentreRedIssueRow[];
+  escMap: EscalationWorkaroundMap;
+}> {
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select(
+      "id, session_id, severity, status, issue_description, workaround_plan, workaround_accepted_at, created_at, event_id, event_day_session_id",
+    )
+    .eq("severity", "red")
+    .is("event_id", null)
+    .is("event_day_session_id", null)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+
+  const rows = (data ?? []) as DayCentreRedIssueRow[];
+  const unresolved = rows.filter((r) => r.status !== "resolved");
+  const escMap = await fetchApprovedRedWorkarounds(unresolved.map((r) => r.id));
+  const blocking = unresolved.filter(
+    (r) => !redHasAcceptedWorkaround(r, escMap),
+  );
+  return { rows, blocking, escMap };
+}

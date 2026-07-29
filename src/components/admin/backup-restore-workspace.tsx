@@ -476,7 +476,7 @@ export function BackupRestoreWorkspace() {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={restoreMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button
               variant="destructive"
               disabled={!pendingManifest || restoreMut.isPending}

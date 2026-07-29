@@ -29,7 +29,8 @@ import {
   useInsertAttendanceLog,
   useInsertAttendanceLogsBulk,
 } from "@/hooks/use-supabase-data";
-import { formatDate } from "@/lib/utils";
+import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
 
 interface Props {
   open: boolean;
@@ -141,29 +142,31 @@ export function LogPlannedAbsenceModal({
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Start date
               </Label>
-              <Input
-                type="date"
-                value={startDate}
-                onChange={(e) => {
-                  const v = e.target.value;
+              <DatePicker
+                value={parseIsoDateLocal(startDate)}
+                onChange={(d) => {
+                  const v = d ? toIsoDateString(d) : "";
                   setStartDate(v);
                   if (endDate < v) setEndDate(v);
                   setDirty(true);
                 }}
+                dateFormat="dd-MMM-yy"
+                className="h-9 text-sm"
               />
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 End date
               </Label>
-              <Input
-                type="date"
-                value={endDate}
-                min={startDate}
-                onChange={(e) => {
-                  setEndDate(e.target.value);
+              <DatePicker
+                value={parseIsoDateLocal(endDate)}
+                onChange={(d) => {
+                  setEndDate(d ? toIsoDateString(d) : "");
                   setDirty(true);
                 }}
+                disabledDates={(d) => startDate ? d < new Date(startDate + "T00:00:00") : false}
+                dateFormat="dd-MMM-yy"
+                className="h-9 text-sm"
               />
             </div>
           </div>

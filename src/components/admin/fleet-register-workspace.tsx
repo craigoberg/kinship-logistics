@@ -3,8 +3,14 @@ import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { Pencil, Plus, Search, Accessibility } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import {
   Table,
   TableBody,
@@ -125,6 +131,7 @@ export function FleetRegisterWorkspace() {
               <TableHead>Vehicle</TableHead>
               <TableHead className="w-16 text-center">Seats</TableHead>
               <TableHead className="w-20 text-center">Access</TableHead>
+              <TableHead className="w-28 text-right">Current km</TableHead>
               <TableHead className="w-24">Rego RYGE</TableHead>
               <TableHead className="w-28">Rego expiry</TableHead>
               <TableHead className="w-20">Status</TableHead>
@@ -134,13 +141,13 @@ export function FleetRegisterWorkspace() {
           <TableBody>
             {isLoading ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   Loading fleet…
                 </TableCell>
               </TableRow>
             ) : visible.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={7} className="text-center text-muted-foreground">
+                <TableCell colSpan={8} className="text-center text-muted-foreground">
                   No vehicles match this filter.
                 </TableCell>
               </TableRow>
@@ -157,7 +164,26 @@ export function FleetRegisterWorkspace() {
                   <TableCell className="text-center tabular-nums">{a.passengerCapacity}</TableCell>
                   <TableCell className="text-center">
                     {a.hasWheelchairHoist ? (
-                      <Accessibility className="mx-auto h-4 w-4 text-blue-500" aria-label="Hoist equipped" />
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span
+                            className="inline-flex"
+                            aria-label="Wheelchair hoist equipped"
+                          >
+                            <Accessibility className="mx-auto h-4 w-4 text-blue-500" />
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>Wheelchair hoist equipped</TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <span className="text-muted-foreground">—</span>
+                    )}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums text-sm">
+                    {a.currentOdometerKm != null ? (
+                      <span title="Estimated — updated on run close or Admin correct">
+                        {Math.round(a.currentOdometerKm).toLocaleString()}
+                      </span>
                     ) : (
                       <span className="text-muted-foreground">—</span>
                     )}
@@ -177,9 +203,13 @@ export function FleetRegisterWorkspace() {
                   </TableCell>
                   <TableCell>
                     {canEdit && (
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(a)}>
-                        <Pencil className="h-3 w-3" />
-                      </Button>
+                      <IconActionButton
+                        className="h-8 w-8"
+                        onClick={() => setEditing(a)}
+                        tooltip="Edit vehicle"
+                      >
+                        <Pencil className="h-4 w-4" />
+                      </IconActionButton>
                     )}
                   </TableCell>
                 </TableRow>

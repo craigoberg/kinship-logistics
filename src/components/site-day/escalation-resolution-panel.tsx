@@ -194,7 +194,7 @@ export function EscalationResolutionPanel({ session, redIssue }: Props) {
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       queryClient.invalidateQueries({ queryKey: ["site-escalation"] });
       queryClient.invalidateQueries({ queryKey: ["site-issues"] });
-      queryClient.invalidateQueries({ queryKey: ["site-issues", "open-reds-all"] });
+      queryClient.invalidateQueries({ queryKey: ["site-issues", "open-reds-day-centre"] });
       queryClient.invalidateQueries({ queryKey: ["site-day-red-escalation-workarounds"] });
       queryClient.invalidateQueries({ queryKey: ["diag-day-blocking"] });
       setOpenerPin("");

@@ -10,9 +10,12 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -298,10 +301,11 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                       <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Renewal / Expiry Date
                       </Label>
-                      <Input
-                        type="date"
-                        value={c.expiry ?? ""}
-                        onChange={(e) => updateCert(i, { expiry: e.target.value || null })}
+                      <DatePicker
+                        value={parseIsoDateLocal(c.expiry ?? "")}
+                        onChange={(d) => updateCert(i, { expiry: d ? toIsoDateString(d) : null })}
+                        dateFormat="dd-MMM-yy"
+                        className="h-9 text-sm"
                       />
                       <p className="text-[11px] text-muted-foreground/70">
                         Optional. Leave blank if this certification never expires.
@@ -311,25 +315,24 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                       <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
                         Defer Until (Manager)
                       </Label>
-                      <Input
-                        type="date"
-                        value={c.deferredUntil ?? ""}
-                        onChange={(e) => updateCert(i, { deferredUntil: e.target.value || null })}
+                      <DatePicker
+                        value={parseIsoDateLocal(c.deferredUntil ?? "")}
+                        onChange={(d) => updateCert(i, { deferredUntil: d ? toIsoDateString(d) : null })}
+                        dateFormat="dd-MMM-yy"
+                        className="h-9 text-sm"
                       />
                       <p className="text-[11px] text-muted-foreground/70">
                         Hides this cert from the Red/Critical dashboard list until this date.
                       </p>
                     </div>
-                    <Button
+                    <IconActionButton
                       type="button"
-                      size="icon"
-                      variant="ghost"
                       onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
-                      aria-label="Remove certification"
+                      tooltip="Remove certification"
                       className="self-start"
                     >
                       <Trash2 className="h-4 w-4 text-destructive" />
-                    </Button>
+                    </IconActionButton>
                   </div>
                 ))}
               </div>

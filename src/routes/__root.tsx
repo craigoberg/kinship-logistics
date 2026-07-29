@@ -14,12 +14,19 @@ import { useEffect, type ReactNode } from "react";
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
 import { getActiveUserRole } from "../lib/data-store";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { AppShell } from "../components/app-shell";
 import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 // Multi-device handshake interceptor retired — single-user verbal model now drives all RED handling.
 // (GlobalEscalationInterceptor file preserved on disk as inactive fallback.)
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
+import { Toaster } from "../components/ui/sonner";
+import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
+import {
+  markOperationalClockClientReady,
+} from "@/lib/operational-clock";
+import "@/lib/operational-clock"; // register DEV now-provider early
 
 function NotFoundComponent() {
   return (
@@ -131,14 +138,18 @@ function RootShell({ children }: { children: ReactNode }) {
 function AuthGate() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
+  const { user, isReady } = useAuthReady();
 
   useEffect(() => {
     if (pathname === "/auth") return;
+    // Wait for Supabase session hydrate before deciding.
+    if (!isReady) return;
+    // BL-099: day session (Auth) required, then PIN profile (role).
     const role = getActiveUserRole();
-    if (!role) {
+    if (!user || !role) {
       navigate({ to: "/auth", replace: true });
     }
-  }, [navigate, pathname]);
+  }, [navigate, pathname, user, isReady]);
 
   return null;
 }
@@ -164,6 +175,13 @@ function RootComponent() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAuthRoute = pathname === "/auth";
 
+  // Unlock SIM TIME after paint so lazy routes (e.g. Event Deliver) finish
+  // hydrating against the same "live" date the server rendered.
+  useEffect(() => {
+    const id = window.setTimeout(() => markOperationalClockClientReady(), 0);
+    return () => window.clearTimeout(id);
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       <AuthGate />
@@ -172,6 +190,7 @@ function RootComponent() {
         <Outlet />
       ) : (
         <>
+          <DevOperationalClockBar />
           {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
           <AppShell>
             <Outlet />
@@ -180,6 +199,7 @@ function RootComponent() {
           <RoleAwareGuardians />
         </>
       )}
+      <Toaster />
     </QueryClientProvider>
   );
 }

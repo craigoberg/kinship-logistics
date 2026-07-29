@@ -34,38 +34,23 @@ const toneClasses: Record<
   },
 };
 
-/** Large touch target for driver field actions — distinct from green leg-complete CTA. */
-export function MobileFieldButton({
+function FieldButtonChrome({
   title,
   subtitle,
   icon,
-  tone = "neutral",
-  active = false,
-  disabled,
-  onClick,
-  className,
+  active,
+  badgeWhenIdle,
+  badgeClass,
 }: {
   title: ReactNode;
   subtitle?: ReactNode;
   icon?: ReactNode;
-  tone?: MobileFieldTone;
-  active?: boolean;
-  disabled?: boolean;
-  onClick: () => void;
-  className?: string;
+  active: boolean;
+  badgeWhenIdle?: string;
+  badgeClass: string;
 }) {
-  const palette = toneClasses[tone];
   return (
-    <button
-      type="button"
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex w-full min-h-14 touch-manipulation select-none items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition active:scale-[0.99] disabled:opacity-50",
-        active ? palette.active : palette.idle,
-        className,
-      )}
-    >
+    <>
       {icon && <span className="shrink-0">{icon}</span>}
       <span className="min-w-0 flex-1">
         <span className="block text-base font-semibold leading-tight">{title}</span>
@@ -84,12 +69,95 @@ export function MobileFieldButton({
         <span
           className={cn(
             "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide",
-            palette.badge,
+            badgeClass,
           )}
         >
           Selected
         </span>
       )}
+      {!active && badgeWhenIdle && (
+        <span className="shrink-0 text-[10px] font-medium text-muted-foreground">
+          {badgeWhenIdle}
+        </span>
+      )}
+    </>
+  );
+}
+
+/** Large touch target for driver field actions — distinct from green leg-complete CTA. */
+export function MobileFieldButton({
+  title,
+  subtitle,
+  icon,
+  tone = "neutral",
+  active = false,
+  disabled,
+  onClick,
+  className,
+  badgeWhenIdle,
+  trailing,
+}: {
+  title: ReactNode;
+  subtitle?: ReactNode;
+  icon?: ReactNode;
+  tone?: MobileFieldTone;
+  active?: boolean;
+  disabled?: boolean;
+  onClick: () => void;
+  className?: string;
+  /** Small label shown on the right when the button is NOT active (e.g. "Default"). */
+  badgeWhenIdle?: string;
+  /**
+   * Nested control drawn inside the row chrome (e.g. Not attending `UserX`).
+   * When set, outer shell is a `div` so the trailing control can be a real `<button>`
+   * (valid HTML — no nested buttons). Trailing clicks must not fire `onClick`.
+   */
+  trailing?: ReactNode;
+}) {
+  const palette = toneClasses[tone];
+  const shellClass = cn(
+    "flex w-full min-h-14 touch-manipulation select-none items-center gap-3 rounded-xl border-2 px-4 py-3 text-left transition",
+    active ? palette.active : palette.idle,
+    disabled && "opacity-50",
+    className,
+  );
+
+  const chrome = (
+    <FieldButtonChrome
+      title={title}
+      subtitle={subtitle}
+      icon={icon}
+      active={active}
+      badgeWhenIdle={badgeWhenIdle}
+      badgeClass={palette.badge}
+    />
+  );
+
+  // Trailing nested action → shell is a div; primary tap area is its own button.
+  if (trailing) {
+    return (
+      <div className={cn(shellClass, "pr-2")}>
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={onClick}
+          className="flex min-h-11 min-w-0 flex-1 items-center gap-3 text-left active:scale-[0.99] disabled:pointer-events-none"
+        >
+          {chrome}
+        </button>
+        <div className="shrink-0 self-center">{trailing}</div>
+      </div>
+    );
+  }
+
+  return (
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(shellClass, "active:scale-[0.99] disabled:opacity-50")}
+    >
+      {chrome}
     </button>
   );
 }

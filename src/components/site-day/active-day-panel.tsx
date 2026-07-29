@@ -1,9 +1,20 @@
 import { useRef, useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ClipboardCheck, Loader2, PlusCircle, RotateCcw } from "lucide-react";
+import {
+  AlertTriangle,
+  ClipboardCheck,
+  Loader2,
+  LogIn,
+  LogOut,
+  PlusCircle,
+  RotateCcw,
+  ShieldAlert,
+  UtensilsCrossed,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -31,8 +42,12 @@ import { activeSiteIssuesKey, siteIssuesKey } from "@/hooks/use-site-issues";
 import { isAuthError } from "@/lib/api/auth-errors";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
+import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
 import { AttendanceRollPanel } from "./attendance-roll-panel";
+import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
+import { InfectiousExclusionSheet } from "./infectious-exclusion-sheet";
 
 
 
@@ -43,11 +58,14 @@ interface Props {
 export function ActiveDayPanel({ session }: Props) {
   const queryClient = useQueryClient();
   const { user } = useAuthReady();
+  const isSignedIn = !!user || !!getActiveUserProfile();
   const issuesQ = useActiveSiteIssues(session.id);
   const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [exclusionOpen, setExclusionOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
+  const isManager = isActiveUserManager();
   const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
   // Pending RED draft awaiting verbal-consultation log.
   const [verbalPending, setVerbalPending] = useState<{
@@ -61,8 +79,12 @@ export function ActiveDayPanel({ session }: Props) {
     onSuccess: (next) => {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
+      queryClient.invalidateQueries({
+        predicate: (q) => q.queryKey?.[0] === "site-day-activities",
+      });
       toast.success("Session reset to Start of Day", {
-        description: "Issues, escalations, attendance and billing are preserved.",
+        description:
+          "Activities delivery rewound. Issues, escalations, attendance and billing are preserved.",
       });
     },
     onError: (e: Error) => {
@@ -109,7 +131,9 @@ export function ActiveDayPanel({ session }: Props) {
   });
 
   const issues = issuesQ.data ?? [];
-  const openIssues = issues.filter((i) => i.status !== "resolved");
+  const openIssues = sortSiteIssuesByRygeNewestFirst(
+    issues.filter((i) => i.status !== "resolved"),
+  );
 
   return (
     <section className="space-y-5">
@@ -124,7 +148,7 @@ export function ActiveDayPanel({ session }: Props) {
             </p>
           )}
         </div>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap justify-end gap-2">
           <Button
             variant="outline"
             size="sm"
@@ -133,6 +157,16 @@ export function ActiveDayPanel({ session }: Props) {
           >
             <PlusCircle className="h-4 w-4" /> Log anomaly
           </Button>
+          {isManager && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setExclusionOpen(true)}
+              className="gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
+            >
+              <ShieldAlert className="h-4 w-4" /> Infectious exclusion
+            </Button>
+          )}
           <Button
             onClick={() => setCloseOpen(true)}
             size="sm"
@@ -201,8 +235,37 @@ export function ActiveDayPanel({ session }: Props) {
         </Card>
       )}
 
-      <AttendanceRollPanel sessionId={session.id} />
+      <Tabs defaultValue="check_in" className="w-full">
+        <TabsList className="grid h-auto w-full grid-cols-4 gap-1 p-1">
+          <TabsTrigger value="check_in" className="min-h-11 gap-1.5 text-xs sm:text-sm">
+            <LogIn className="h-3.5 w-3.5 shrink-0" />
+            Check-In
+          </TabsTrigger>
+          <TabsTrigger value="activities" className="min-h-11 gap-1.5 text-xs sm:text-sm">
+            <UtensilsCrossed className="h-3.5 w-3.5 shrink-0" />
+            Activities
+          </TabsTrigger>
+          <TabsTrigger value="check_out" className="min-h-11 gap-1.5 text-xs sm:text-sm">
+            <LogOut className="h-3.5 w-3.5 shrink-0" />
+            Check-Out
+          </TabsTrigger>
+          <TabsTrigger value="issues" className="min-h-11 gap-1.5 text-xs sm:text-sm">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+            Issues
+            {openIssues.length > 0 ? ` (${openIssues.length})` : ""}
+          </TabsTrigger>
+        </TabsList>
 
+        <TabsContent value="check_in" className="mt-3 space-y-3">
+          <AttendanceRollPanel sessionId={session.id} mode="check_in" />
+        </TabsContent>
+        <TabsContent value="activities" className="mt-3 space-y-3">
+          <DayCentreActivitiesPanel sessionId={session.id} />
+        </TabsContent>
+        <TabsContent value="check_out" className="mt-3 space-y-3">
+          <AttendanceRollPanel sessionId={session.id} mode="check_out" />
+        </TabsContent>
+        <TabsContent value="issues" className="mt-3 space-y-3">
       <div className="space-y-3">
 
         <div className="flex items-center justify-between">
@@ -213,6 +276,10 @@ export function ActiveDayPanel({ session }: Props) {
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Sorted Red → Yellow → Green, newest first within each. Trip/event
+          issues stay in the Hub only.
+        </p>
 
         {issuesQ.isError && (
           <Card className="border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
@@ -230,20 +297,23 @@ export function ActiveDayPanel({ session }: Props) {
           </Card>
         )}
 
-        {!issuesQ.isError && issues.length === 0 && (
+        {!issuesQ.isError && openIssues.length === 0 && (
           <Card className="border-dashed bg-muted/30 p-4 text-sm text-muted-foreground">
-            No active issues. Use <span className="font-semibold">Log anomaly</span>{" "}
-            above when something needs flagging. This list also surfaces any
-            unresolved issues carried over from prior days.
+            No active Day Centre issues. Use{" "}
+            <span className="font-semibold">Log anomaly</span> above when
+            something needs flagging. Prior-day Day Centre issues may carry
+            over here — trip/event issues stay in the Hub only.
           </Card>
         )}
 
         <div className="space-y-2">
-          {issues.map((i) => (
+          {openIssues.map((i) => (
             <IssuesRegisterCard key={i.id} issue={i} />
           ))}
         </div>
       </div>
+        </TabsContent>
+      </Tabs>
 
       <DayCentreClosureModal
         open={closeOpen}
@@ -252,7 +322,7 @@ export function ActiveDayPanel({ session }: Props) {
       />
 
 
-      {user && (
+      {isSignedIn && (
         <LogAnomalyModal
           open={anomalyOpen}
           onOpenChange={setAnomalyOpen}
@@ -314,6 +384,13 @@ export function ActiveDayPanel({ session }: Props) {
           setReauthOpen(false);
           closeMut.mutate();
         }}
+      />
+
+      <InfectiousExclusionSheet
+        open={exclusionOpen}
+        onOpenChange={setExclusionOpen}
+        surface="centre"
+        siteDaySessionId={session.id}
       />
     </section>
   );

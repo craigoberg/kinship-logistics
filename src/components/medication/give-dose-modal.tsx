@@ -1,7 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
-import { Syringe, ShieldCheck, AlertCircle } from "lucide-react";
+/**
+ * BL-077 — Give Dose with dual staff PIN or sole-carer PIN + justification.
+ */
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { Syringe, AlertCircle } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import {
+  getOperationalClockSnapshot,
+  subscribeOperationalClock,
+} from "@/lib/operational-clock";
+import { operationalNowMinutes } from "@/lib/medication/todays-medication-round";
 
 import {
   Dialog,
@@ -13,20 +21,19 @@ import {
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
 
-import { useGiveDose, useStaffRegistry } from "@/hooks/use-supabase-data";
-import type {
-  AdministrationStatus,
-  ComplianceLog,
-  MedicationSchedule,
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import {
+  insertDualWitnessAdministrationLog,
+  insertSoleCarerAdministrationLog,
+  type AdministrationStatus,
+  type ComplianceLog,
+  type MedicationSchedule,
 } from "@/lib/data-store";
 
 const STATUS_OPTIONS: AdministrationStatus[] = [
@@ -39,12 +46,9 @@ const GIVE_DOSE_ACTIONS = new Set([
   "MEDICATION_ADMIN",
   "MEDICATION_ADMIN_QUICK",
   "MEDICATION_ADMIN_DUAL",
+  "MEDICATION_ADMIN_SOLE",
 ]);
 
-/**
- * Find today's administration log entry for a given schedule.
- * Match by participant_id + case-insensitive medication name.
- */
 export function findTodaysAdministrationLog(
   schedule: MedicationSchedule,
   todaysLogs: ComplianceLog[],
@@ -61,11 +65,18 @@ export function findTodaysAdministrationLog(
   });
 }
 
+type SignMode = "dual" | "sole";
+
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   schedule: MedicationSchedule | null;
   participantName: string;
+  /** Default dual; trips often need sole available. */
+  allowSoleCarer?: boolean;
+  source?: string;
+  eventId?: string | null;
+  eventDaySessionId?: string | null;
 }
 
 export function GiveDoseModal({
@@ -73,28 +84,37 @@ export function GiveDoseModal({
   onOpenChange,
   schedule,
   participantName,
+  allowSoleCarer = true,
+  source = "care_profile_give_dose",
+  eventId = null,
+  eventDaySessionId = null,
 }: Props) {
   const { data: staff = [], isLoading: staffLoading } = useStaffRegistry();
-  const giveDose = useGiveDose();
+  const qc = useQueryClient();
 
+  const [mode, setMode] = useState<SignMode>("dual");
   const [administeredById, setAdministeredById] = useState("");
   const [witnessedById, setWitnessedById] = useState("");
+  const [adminPin, setAdminPin] = useState<string | null>(null);
+  const [witnessPin, setWitnessPin] = useState<string | null>(null);
+  const [solePin, setSolePin] = useState<string | null>(null);
+  const [soleNote, setSoleNote] = useState("");
   const [status, setStatus] = useState<AdministrationStatus>("Administered");
   const [notes, setNotes] = useState("");
-  const [errors, setErrors] = useState<{
-    administeredBy?: string;
-    witnessedBy?: string;
-    notes?: string;
-    form?: string;
-  }>({});
+  const [formError, setFormError] = useState<string | null>(null);
 
   useEffect(() => {
     if (open) {
+      setMode("dual");
       setAdministeredById("");
       setWitnessedById("");
+      setAdminPin(null);
+      setWitnessPin(null);
+      setSolePin(null);
+      setSoleNote("");
       setStatus("Administered");
       setNotes("");
-      setErrors({});
+      setFormError(null);
     }
   }, [open]);
 
@@ -103,51 +123,65 @@ export function GiveDoseModal({
     [staff],
   );
 
-  const now = new Date();
-  const nowLabel = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  useSyncExternalStore(
+    subscribeOperationalClock,
+    getOperationalClockSnapshot,
+    () => "ssr:live",
+  );
+  const nowMins = operationalNowMinutes();
+  const nowLabel = `${String(Math.floor(nowMins / 60)).padStart(2, "0")}:${String(nowMins % 60).padStart(2, "0")}`;
 
   const requiresNotes = status === "Refused";
 
-  const submit = async () => {
-    if (!schedule || giveDose.isPending) return;
-
-    // Click-time validation — surfaces visible per-field errors instead of
-    // silently disabling the button.
-    const next: typeof errors = {};
-    if (!administeredById) {
-      next.administeredBy = "Select the administering staff member.";
-    }
-    if (!witnessedById) {
-      next.witnessedBy = "Select a staff witness.";
-    }
-    if (
-      administeredById &&
-      witnessedById &&
-      administeredById === witnessedById
-    ) {
-      next.administeredBy =
-        "Administering staff and witness must be different people.";
-      next.witnessedBy =
-        "Administering staff and witness must be different people.";
-    }
-    if (requiresNotes && notes.trim().length < 10) {
-      next.notes =
-        "Refusal requires at least 10 characters of context for the audit trail.";
-    }
-    if (Object.keys(next).length > 0) {
-      next.form =
-        "Dual sign-off is mandatory. Please select a staff witness to verify medication delivery.";
-      setErrors(next);
-      return;
-    }
-    setErrors({});
-
-    const administeredBy = activeStaff.find((s) => s.id === administeredById);
-    const witnessedBy = activeStaff.find((s) => s.id === witnessedById);
-    if (!administeredBy || !witnessedBy) return;
-
-    try {
-      await giveDose.mutateAsync({
+  const saveMut = useMutation({
+    mutationFn: async () => {
+      if (!schedule) throw new Error("No schedule selected.");
+      if (requiresNotes && notes.trim().length < 10) {
+        throw new Error("Refusal requires at least 10 characters of notes.");
+      }
+      if (mode === "dual") {
+        if (!administeredById || !witnessedById) {
+          throw new Error("Select administering staff and witness.");
+        }
+        if (administeredById === witnessedById) {
+          throw new Error("Administering staff and witness must be different.");
+        }
+        if (!adminPin || !witnessPin) {
+          throw new Error("Both staff must enter their PIN.");
+        }
+        await verifyNamedStaffPin(administeredById, adminPin);
+        await verifyNamedStaffPin(witnessedById, witnessPin);
+        const administeredBy = activeStaff.find((s) => s.id === administeredById);
+        const witnessedBy = activeStaff.find((s) => s.id === witnessedById);
+        if (!administeredBy || !witnessedBy) throw new Error("Staff not found.");
+        await insertDualWitnessAdministrationLog({
+          scheduleId: schedule.id,
+          participantId: schedule.participantId as string,
+          medicationName: schedule.medicationName,
+          dosage: schedule.dosage,
+          scheduledTime: schedule.expectedTime,
+          administeredById: administeredBy.id,
+          administeredByName: administeredBy.fullName,
+          witnessedById: witnessedBy.id,
+          witnessedByName: witnessedBy.fullName,
+          status,
+          notes: notes.trim() || undefined,
+          source,
+          eventId,
+          eventDaySessionId,
+        });
+        return;
+      }
+      if (!administeredById || !solePin) {
+        throw new Error("Select staff and enter PIN for sole-carer sign-off.");
+      }
+      if (soleNote.trim().length < 10) {
+        throw new Error("Sole-carer justification needs at least 10 characters.");
+      }
+      await verifyNamedStaffPin(administeredById, solePin);
+      const administeredBy = activeStaff.find((s) => s.id === administeredById);
+      if (!administeredBy) throw new Error("Staff not found.");
+      await insertSoleCarerAdministrationLog({
         scheduleId: schedule.id,
         participantId: schedule.participantId as string,
         medicationName: schedule.medicationName,
@@ -155,236 +189,274 @@ export function GiveDoseModal({
         scheduledTime: schedule.expectedTime,
         administeredById: administeredBy.id,
         administeredByName: administeredBy.fullName,
-        witnessedById: witnessedBy.id,
-        witnessedByName: witnessedBy.fullName,
+        soleCarerNote: soleNote.trim(),
         status,
         notes: notes.trim() || undefined,
+        source,
+        eventId,
+        eventDaySessionId,
       });
-      toast.success("Medication administration logged successfully.", {
-        description: `${schedule.medicationName} — ${status} for ${participantName}.`,
-        className: "!bg-green-600 !text-white !border-green-700",
+    },
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] });
+      void qc.invalidateQueries({ queryKey: ["compliance_audit_logs", "today"] });
+      void qc.invalidateQueries({ queryKey: ["medication_schedules"] });
+      toast.success("Medication administration logged.", {
+        description: `${schedule?.medicationName} — ${status} for ${participantName}.`,
       });
       onOpenChange(false);
-    } catch (err) {
-      // Keep the form open so the user can adjust and retry.
-      toast.error((err as Error).message || "Database rejected the sign-off.", {
-        description:
-          "Postgres rejected the insert. The form has been kept open so you can adjust and retry.",
-        className: "!bg-red-600 !text-white !border-red-700",
-        duration: 12_000,
-      });
-    }
-  };
+    },
+    onError: (e: Error) => {
+      setFormError(e.message);
+      toast.error(e.message);
+    },
+  });
+
+  const adminName =
+    activeStaff.find((s) => s.id === administeredById)?.fullName ?? "Staff";
+  const witnessName =
+    activeStaff.find((s) => s.id === witnessedById)?.fullName ?? "Witness";
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg border-border bg-card">
+      <DialogContent className="max-h-[90vh] max-w-lg overflow-y-auto border-border bg-card">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Syringe className="h-5 w-5 text-primary" />
-            Medication Administration Verification
+            Medication administration
           </DialogTitle>
           <DialogDescription>
-            Dual-staff sign-off, written to the compliance audit trail.
+            Dual staff PIN when two carers are available; sole-carer PIN +
+            justification when only one. Never a client as witness. Clock{" "}
+            {nowLabel}.
           </DialogDescription>
         </DialogHeader>
 
         {schedule && (
-          <div className="rounded-md border border-primary/30 bg-primary/5 px-3 py-2 text-sm">
-            Administering{" "}
-            <span className="font-semibold text-foreground">
-              {schedule.medicationName}
-            </span>{" "}
-            —{" "}
-            <span className="font-semibold text-foreground">
-              {schedule.dosage}
-            </span>{" "}
-            to{" "}
-            <span className="font-semibold text-foreground">
-              {participantName}
-            </span>{" "}
-            at{" "}
-            <span className="font-semibold text-foreground tabular-nums">
-              {nowLabel}
-            </span>
-            <span className="ml-2 text-xs text-muted-foreground">
-              (scheduled {schedule.expectedTime.slice(0, 5)})
-            </span>
-          </div>
-        )}
-
-        {errors.form && (
-          <div
-            role="alert"
-            className="flex items-start gap-2 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive"
-          >
-            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-            <span>{errors.form}</span>
-          </div>
-        )}
-
-        <div className="grid gap-3 sm:grid-cols-2">
-          <div className="grid gap-1.5">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Administered By
-            </Label>
-            <Select
-              value={administeredById}
-              onValueChange={(v) => {
-                setAdministeredById(v);
-                setErrors((prev) => ({
-                  ...prev,
-                  administeredBy: undefined,
-                  witnessedBy:
-                    prev.witnessedBy && v && v !== witnessedById
-                      ? undefined
-                      : prev.witnessedBy,
-                  form: undefined,
-                }));
-              }}
-              disabled={staffLoading}
-            >
-              <SelectTrigger
-                className={cn(
-                  "h-9",
-                  errors.administeredBy &&
-                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
-                )}
-              >
-                <SelectValue placeholder="Select staff…" />
-              </SelectTrigger>
-              <SelectContent>
-                {activeStaff.map((s) => (
-                  <SelectItem key={s.id} value={s.id}>
-                    {s.fullName}
-                    {s.role ? ` · ${s.role}` : ""}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            {errors.administeredBy && (
-              <p className="text-xs text-muted-foreground">
-                {errors.administeredBy}
-              </p>
-            )}
-          </div>
-
-          <div className="grid gap-1.5">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Witnessed / Verified By
-            </Label>
-            <Select
-              value={witnessedById}
-              onValueChange={(v) => {
-                setWitnessedById(v);
-                setErrors((prev) => ({
-                  ...prev,
-                  witnessedBy: undefined,
-                  administeredBy:
-                    prev.administeredBy && v && v !== administeredById
-                      ? undefined
-                      : prev.administeredBy,
-                  form: undefined,
-                }));
-              }}
-              disabled={staffLoading}
-            >
-              <SelectTrigger
-                className={cn(
-                  "h-9",
-                  errors.witnessedBy &&
-                    "border-destructive ring-1 ring-destructive/40 focus:ring-destructive/40",
-                )}
-              >
-                <SelectValue placeholder="Select witness…" />
-              </SelectTrigger>
-              <SelectContent>
-                {activeStaff
-                  .filter((s) => s.id !== administeredById)
-                  .map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.fullName}
-                      {s.role ? ` · ${s.role}` : ""}
-                    </SelectItem>
-                  ))}
-              </SelectContent>
-            </Select>
-            {errors.witnessedBy && (
-              <p className="text-xs text-muted-foreground">
-                {errors.witnessedBy}
-              </p>
-            )}
-          </div>
-
-          <div className="grid gap-1.5 sm:col-span-2">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Administration Status
-            </Label>
-            <Select
-              value={status}
-              onValueChange={(v) => setStatus(v as AdministrationStatus)}
-            >
-              <SelectTrigger className="h-9">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {STATUS_OPTIONS.map((opt) => (
-                  <SelectItem key={opt} value={opt}>
-                    {opt}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {requiresNotes && (
-            <div className="grid gap-1.5 sm:col-span-2">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Refusal notes (required)
-              </Label>
-              <Textarea
-                value={notes}
-                onChange={(e) => {
-                  setNotes(e.target.value);
-                  if (errors.notes && e.target.value.trim().length >= 10) {
-                    setErrors((prev) => ({
-                      ...prev,
-                      notes: undefined,
-                      form: undefined,
-                    }));
-                  }
-                }}
-                rows={3}
-                placeholder="e.g. Participant refused 8am dose, stated nausea. Escalated to RN on duty."
-                maxLength={1000}
-                className={cn(
-                  errors.notes &&
-                    "border-destructive ring-1 ring-destructive/40 focus-visible:ring-destructive/40",
-                )}
-              />
-              <p className="text-[11px] text-muted-foreground">
-                {errors.notes
-                  ? errors.notes
-                  : `Minimum 10 characters. ${notes.trim().length}/1000`}
-              </p>
+          <div className="space-y-4">
+            <div className="rounded-md border bg-muted/40 px-3 py-2 text-sm">
+              <div className="font-medium">{participantName}</div>
+              <div>
+                {schedule.medicationName} · {schedule.dosage} · due{" "}
+                {schedule.expectedTime.slice(0, 5)}
+              </div>
             </div>
-          )}
-        </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            {allowSoleCarer && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Sign-off mode
+                </p>
+                <MobileFieldButton
+                  title="Dual staff PIN"
+                  subtitle="Administering staff + witness — both PIN"
+                  tone="info"
+                  active={mode === "dual"}
+                  onClick={() => {
+                    setMode("dual");
+                    setSolePin(null);
+                    setFormError(null);
+                  }}
+                />
+                <MobileFieldButton
+                  title="Sole carer PIN"
+                  subtitle="One staff only — PIN + why no second carer"
+                  tone="neutral"
+                  active={mode === "sole"}
+                  onClick={() => {
+                    setMode("sole");
+                    setWitnessedById("");
+                    setAdminPin(null);
+                    setWitnessPin(null);
+                    setFormError(null);
+                  }}
+                />
+              </div>
+            )}
+
+            <div className="space-y-2">
+              <Label className="text-xs">Outcome</Label>
+              <div className="flex flex-wrap gap-2">
+                {STATUS_OPTIONS.map((s) => (
+                  <Button
+                    key={s}
+                    type="button"
+                    size="sm"
+                    variant={status === s ? "default" : "outline"}
+                    className="h-11 min-h-11"
+                    onClick={() => setStatus(s)}
+                  >
+                    {s}
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {(requiresNotes || mode === "sole") && (
+              <CharacterCountedTextarea
+                label={
+                  mode === "sole"
+                    ? "Sole-carer justification"
+                    : "Refusal notes"
+                }
+                value={mode === "sole" ? soleNote : notes}
+                onValueChange={mode === "sole" ? setSoleNote : setNotes}
+                minChars={10}
+                maxChars={240}
+                rows={2}
+                required
+                placeholder={
+                  mode === "sole"
+                    ? "Why no second staff (min 10 characters)"
+                    : "Context for refusal (min 10 characters)"
+                }
+              />
+            )}
+            {mode === "dual" && !requiresNotes && (
+              <CharacterCountedTextarea
+                label="Notes (optional)"
+                value={notes}
+                onValueChange={setNotes}
+                minChars={0}
+                maxChars={200}
+                rows={2}
+                required={false}
+                placeholder="Optional notes"
+              />
+            )}
+
+            <div className="space-y-2">
+              <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                {mode === "sole" ? "Administering staff" : "Administering staff"}
+              </p>
+              {staffLoading ? (
+                <p className="text-sm text-muted-foreground">Loading staff…</p>
+              ) : (
+                <div className="max-h-36 space-y-1.5 overflow-y-auto">
+                  {activeStaff.map((s) => (
+                    <MobileFieldButton
+                      key={s.id}
+                      title={s.fullName}
+                      subtitle={s.role ?? "Staff"}
+                      tone="info"
+                      active={administeredById === s.id}
+                      onClick={() => {
+                        setAdministeredById(s.id);
+                        setAdminPin(null);
+                        setSolePin(null);
+                        setFormError(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {mode === "dual" && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Witness
+                </p>
+                <div className="max-h-36 space-y-1.5 overflow-y-auto">
+                  {activeStaff
+                    .filter((s) => s.id !== administeredById)
+                    .map((s) => (
+                      <MobileFieldButton
+                        key={s.id}
+                        title={s.fullName}
+                        subtitle={s.role ?? "Staff"}
+                        tone="info"
+                        active={witnessedById === s.id}
+                        onClick={() => {
+                          setWitnessedById(s.id);
+                          setWitnessPin(null);
+                          setFormError(null);
+                        }}
+                      />
+                    ))}
+                </div>
+              </div>
+            )}
+
+            {mode === "dual" && administeredById && (
+              <PinEntryTrigger
+                className="w-full"
+                label={
+                  adminPin
+                    ? `${adminName} PIN verified`
+                    : `${adminName} — enter PIN`
+                }
+                verified={!!adminPin}
+                verifiedLabel={`${adminName} PIN verified`}
+                length={4}
+                title="Administering staff PIN"
+                description={`${adminName}: confirm you administered this dose.`}
+                onVerify={async (pin) => {
+                  await verifyNamedStaffPin(administeredById, pin);
+                }}
+                onSuccess={(pin) => setAdminPin(pin)}
+              />
+            )}
+            {mode === "dual" && witnessedById && (
+              <PinEntryTrigger
+                className="w-full"
+                label={
+                  witnessPin
+                    ? `${witnessName} PIN verified`
+                    : `${witnessName} — enter PIN`
+                }
+                verified={!!witnessPin}
+                verifiedLabel={`${witnessName} PIN verified`}
+                length={4}
+                title="Witness PIN"
+                description={`${witnessName}: confirm you witnessed this dose.`}
+                onVerify={async (pin) => {
+                  await verifyNamedStaffPin(witnessedById, pin);
+                }}
+                onSuccess={(pin) => setWitnessPin(pin)}
+              />
+            )}
+            {mode === "sole" && administeredById && (
+              <PinEntryTrigger
+                className="w-full"
+                label={
+                  solePin
+                    ? `${adminName} PIN verified`
+                    : `${adminName} — sole-carer PIN`
+                }
+                verified={!!solePin}
+                verifiedLabel={`${adminName} PIN verified`}
+                length={4}
+                title="Sole-carer PIN"
+                description={`${adminName}: you are the only staff attesting this dose.`}
+                onVerify={async (pin) => {
+                  await verifyNamedStaffPin(administeredById, pin);
+                }}
+                onSuccess={(pin) => setSolePin(pin)}
+              />
+            )}
+
+            {formError && (
+              <p className={cn("flex items-start gap-2 text-sm text-destructive")}>
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                {formError}
+              </p>
+            )}
+          </div>
+        )}
+
+        <DialogFooter className="gap-2 sm:gap-0">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button
-            onClick={submit}
-            disabled={giveDose.isPending}
-            className="gap-1.5"
+            type="button"
+            disabled={saveMut.isPending || !schedule}
+            onClick={() => saveMut.mutate()}
           >
-            <ShieldCheck className="h-4 w-4" />
-            {giveDose.isPending ? "Saving…" : "Confirm & Sign Off"}
+            {saveMut.isPending ? "Saving…" : "Log administration"}
           </Button>
         </DialogFooter>
-
       </DialogContent>
     </Dialog>
   );

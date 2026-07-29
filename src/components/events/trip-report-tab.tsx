@@ -10,14 +10,16 @@
  *
  * Intended to be printable via window.print() — all sections are visible.
  */
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   AlertTriangle,
   Bus,
   CalendarDays,
   CheckCircle2,
   Clock,
+  Download,
   FileText,
   Info,
   Loader2,
@@ -34,8 +36,13 @@ import {
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Switch } from "@/components/ui/switch";
+import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { buildTripReport, type TripReport, type TripReportDaySession, type TripReportIssue } from "@/lib/api/event-lifecycle";
-import { cn } from "@/lib/utils";
+import { downloadNdisAuditPack } from "@/lib/audit-pack/build-pack";
+import { getActiveUserProfile } from "@/lib/data-store";
+import { cn, formatDate, formatDateTime } from "@/lib/utils";
 import type { EventManifest } from "@/lib/data-store";
 import { EventTransportBadge } from "./event-transport-badge";
 
@@ -51,9 +58,7 @@ function fmtMoney(n: number): string {
 }
 
 function fmtDate(iso: string): string {
-  return new Date(iso + "T00:00:00").toLocaleDateString("en-AU", {
-    weekday: "short", day: "numeric", month: "short", year: "numeric",
-  });
+  return formatDate(iso);
 }
 
 function phaseBadge(phase: string): React.ReactNode {
@@ -65,12 +70,40 @@ function phaseBadge(phase: string): React.ReactNode {
 
 export function TripReportTab({ event }: Props) {
   const [refreshKey, setRefreshKey] = useState(0);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [exportBusy, setExportBusy] = useState(false);
+  const [deidentified, setDeidentified] = useState(false);
+  const profile = useMemo(() => getActiveUserProfile(), []);
 
   const { data: report, isLoading, error, refetch } = useQuery({
     queryKey: [...reportKey(event.id), refreshKey],
     queryFn: () => buildTripReport(event.id),
     staleTime: 60_000,
   });
+
+  async function runTripEvidenceExport() {
+    setExportBusy(true);
+    try {
+      const start = event.startDate ?? report?.startDate ?? "";
+      const end = event.endDate ?? report?.endDate ?? start;
+      const result = await downloadNdisAuditPack({
+        range: { from: start, to: end || start },
+        singleEventId: event.id,
+        identityMode: deidentified ? "deid" : "named",
+      });
+      toast.success(`Downloaded ${result.filename}`, {
+        description: deidentified
+          ? "De-identified auditor copy"
+          : "Named (authoritative)",
+      });
+    } catch (err) {
+      toast.error("Trip evidence export failed", {
+        description: err instanceof Error ? err.message : String(err),
+      });
+    } finally {
+      setExportBusy(false);
+    }
+  }
 
   if (isLoading) {
     return (
@@ -110,18 +143,57 @@ export function TripReportTab({ event }: Props) {
       {/* Actions (hidden on print) */}
       <div className="flex items-center justify-between print:hidden" data-trip-report-actions>
         <p className="text-xs text-muted-foreground">
-          Generated {new Date(report.generatedAt).toLocaleString("en-AU")}.
+          Generated {formatDateTime(report.generatedAt)}.
           Outbound and return reflect event-floor operations when recorded.
         </p>
-        <div className="flex gap-2">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="flex items-center gap-2 text-xs text-muted-foreground">
+            <Switch
+              checked={deidentified}
+              onCheckedChange={setDeidentified}
+              disabled={exportBusy}
+              aria-label="De-identified trip evidence"
+            />
+            {deidentified ? "De-id ZIP" : "Named ZIP"}
+          </label>
           <Button size="sm" variant="outline" onClick={() => { setRefreshKey((p) => p + 1); }}>
             <RefreshCw className="mr-1.5 h-3.5 w-3.5" /> Refresh
           </Button>
           <Button size="sm" variant="outline" onClick={() => window.print()}>
             <Printer className="mr-1.5 h-3.5 w-3.5" /> Print
           </Button>
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={exportBusy}
+            onClick={() => setPinOpen(true)}
+          >
+            {exportBusy ? (
+              <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Download className="mr-1.5 h-3.5 w-3.5" />
+            )}
+            Trip evidence ZIP
+          </Button>
         </div>
       </div>
+
+      <PinEntryDialog
+        open={pinOpen}
+        onOpenChange={setPinOpen}
+        title="Authorise trip evidence export"
+        description="Manager / coordinator PIN required to download the deep evidence pack for this trip."
+        length={4}
+        onVerify={async (pin) => {
+          const staffId = profile?.staffId;
+          if (!staffId) throw new Error("Active staff profile required.");
+          await verifyManagerPin(staffId, pin);
+        }}
+        onSuccess={() => {
+          setPinOpen(false);
+          void runTripEvidenceExport();
+        }}
+      />
 
       {/* ── Event header ── */}
       <Section icon={<FileText className="h-4 w-4" />} title="Event summary">
@@ -321,7 +393,7 @@ function DaySessionBlock({ day }: { day: TripReportDaySession }) {
           {hasCurfew && (
             <span className="flex items-center gap-1">
               <Moon className="h-3 w-3" />
-              Curfew {day.curfewTime ?? ""}: {day.curfewAccounted}/{day.curfewTotal} accounted
+              Evening roll {day.curfewTime ?? ""}: {day.curfewAccounted}/{day.curfewTotal} accounted
               {day.curfewRed > 0 && <span className="font-bold text-destructive ml-1">· {day.curfewRed} RED</span>}
               {day.curfewYellow > 0 && <span className="font-semibold text-yellow-700 ml-1">· {day.curfewYellow} YELLOW</span>}
             </span>
@@ -391,14 +463,14 @@ function ReportIssueRow({ issue }: { issue: TripReportIssue }) {
             <p className="mt-0.5 text-muted-foreground">Workaround: {issue.workaroundPlan}</p>
           )}
           <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-            <span>{new Date(issue.createdAt).toLocaleString("en-AU")}</span>
+            <span>{formatDateTime(issue.createdAt)}</span>
             <span className="font-semibold uppercase">{sevLabel}</span>
             {issue.isVerbalWorkaround && (
               <span className="font-semibold text-amber-700">Verbal workaround — Hub close-out by manager</span>
             )}
             {isResolved && (
               <span className="font-semibold text-emerald-600">
-                Resolved {issue.resolvedAt ? new Date(issue.resolvedAt).toLocaleString("en-AU") : ""}
+                Resolved {issue.resolvedAt ? formatDateTime(issue.resolvedAt) : ""}
               </span>
             )}
           </div>

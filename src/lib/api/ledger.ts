@@ -31,15 +31,59 @@ export interface LedgerEntry {
 export type LedgerInsert = Omit<LedgerEntry, "id" | "created_at">;
 
 /**
+ * Legacy camelCase shape still used by some floor APIs (e.g. activity open/close).
+ * Always normalised to snake_case columns before insert.
+ */
+export type LedgerWriteInput =
+  | LedgerInsert
+  | {
+      actionType: string;
+      severity: LedgerSeverity;
+      category: LedgerCategory;
+      description?: string;
+      metadata?: Record<string, unknown> | null;
+      staff_id?: string;
+      gps_lat?: number | null;
+      gps_lng?: number | null;
+    };
+
+async function toLedgerInsert(payload: LedgerWriteInput): Promise<LedgerInsert> {
+  const legacy = "actionType" in payload;
+  const action_type = legacy
+    ? payload.actionType
+    : payload.action_type;
+  const staff_id =
+    ("staff_id" in payload && payload.staff_id
+      ? payload.staff_id
+      : null) || (await resolveStaffIdWithFallback());
+
+  const metadata: Record<string, unknown> = {
+    ...((payload.metadata as Record<string, unknown> | null | undefined) ?? {}),
+  };
+  if (legacy && payload.description && metadata.description == null) {
+    metadata.description = payload.description;
+  }
+
+  return {
+    staff_id,
+    category: payload.category,
+    severity: payload.severity,
+    action_type,
+    gps_lat: payload.gps_lat ?? null,
+    gps_lng: payload.gps_lng ?? null,
+    metadata: Object.keys(metadata).length > 0 ? metadata : null,
+  };
+}
+
+/**
  * Append a row to the operational_ledger. Best-effort: failures are logged
  * but never thrown, so compliance logging cannot break the calling flow.
  * Use for GREEN / YELLOW / INFO entries only.
  */
-export async function writeToLedger(payload: LedgerInsert): Promise<void> {
+export async function writeToLedger(payload: LedgerWriteInput): Promise<void> {
   try {
-    const { error } = await supabase
-      .from("operational_ledger")
-      .insert(payload);
+    const row = await toLedgerInsert(payload);
+    const { error } = await supabase.from("operational_ledger").insert(row);
     if (error) {
       console.error("[ledger] write failed", error);
     }
@@ -58,10 +102,9 @@ export async function writeToLedger(payload: LedgerInsert): Promise<void> {
  * The calling flow must be inside a try/catch that surfaces the error to
  * the operator — a failed ledger write must never silently complete.
  */
-export async function writeToLedgerOrThrow(payload: LedgerInsert): Promise<void> {
-  const { error } = await supabase
-    .from("operational_ledger")
-    .insert(payload);
+export async function writeToLedgerOrThrow(payload: LedgerWriteInput): Promise<void> {
+  const row = await toLedgerInsert(payload);
+  const { error } = await supabase.from("operational_ledger").insert(row);
   if (error) {
     throw new Error(`[ledger] RED write failed — operation aborted: ${error.message}`);
   }
@@ -500,3 +543,29 @@ export async function resolveVehicleMaintenance(
 
   return { assetId, flagKind, ledgerWritten, assetMirrored };
 }
+
+/**
+ * Date-bounded ledger read for NDIS Audit Pack (BL-061).
+ * Inclusive calendar range on `created_at` (UTC day bounds).
+ */
+export async function listOperationalLedgerInRange(
+  fromIsoDate: string,
+  toIsoDate: string,
+  actionTypes?: string[],
+): Promise<LedgerEntry[]> {
+  const fromTs = `${fromIsoDate}T00:00:00.000Z`;
+  const toTs = `${toIsoDate}T23:59:59.999Z`;
+  let q = supabase
+    .from("operational_ledger")
+    .select("id, created_at, staff_id, category, severity, action_type, gps_lat, gps_lng, metadata")
+    .gte("created_at", fromTs)
+    .lte("created_at", toTs)
+    .order("created_at", { ascending: true });
+  if (actionTypes?.length) {
+    q = q.in("action_type", actionTypes);
+  }
+  const { data, error } = await q;
+  if (error) throw error;
+  return (data ?? []) as LedgerEntry[];
+}
+

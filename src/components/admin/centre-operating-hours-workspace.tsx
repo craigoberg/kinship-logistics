@@ -4,9 +4,9 @@ import { toast } from "sonner";
 import { Loader2, Save } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { ClientTime } from "@/components/ui/client-time";
+import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import {
   Table, TableBody, TableCell, TableHead, TableHeader, TableRow,
 } from "@/components/ui/table";
@@ -19,6 +19,7 @@ import {
 } from "@/lib/api/centre-hours";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 
 const QKEY = ["centre-operating-hours"] as const;
 
@@ -112,7 +113,7 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
   const canSave =
     canEdit &&
     dirty &&
-    just.trim().length >= 10 &&
+    just.trim().length >= MIN_TIMELINE_NOTE &&
     /^\d{2}:\d{2}$/.test(openTime) &&
     /^\d{2}:\d{2}$/.test(closeTime) &&
     openTime < closeTime &&
@@ -122,21 +123,19 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
     <TableRow>
       <TableCell className="font-medium">{DAY_CODE_LABEL[row.dayOfWeek]}</TableCell>
       <TableCell>
-        <input
-          type="time"
+        <HalfHourTimeField
           value={openTime}
+          onChange={setOpenTime}
           disabled={!canEdit}
-          onChange={(e) => setOpenTime(e.target.value)}
-          className="h-9 rounded border border-input bg-background px-2 text-sm"
+          className="h-9"
         />
       </TableCell>
       <TableCell>
-        <input
-          type="time"
+        <HalfHourTimeField
           value={closeTime}
+          onChange={setCloseTime}
           disabled={!canEdit}
-          onChange={(e) => setCloseTime(e.target.value)}
-          className="h-9 rounded border border-input bg-background px-2 text-sm"
+          className="h-9"
         />
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
@@ -145,14 +144,15 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
       <TableCell>
         {canEdit && dirty ? (
           <div className="space-y-1">
-            <Label htmlFor={`just-${row.dayOfWeek}`} className="text-[11px] text-muted-foreground">
-              Justification (min 10 chars, ledger receipt)
-            </Label>
-            <Textarea
+            <CharacterCountedTextarea
               id={`just-${row.dayOfWeek}`}
+              label="Justification"
               rows={2}
+              minChars={MIN_TIMELINE_NOTE}
+              maxChars={500}
+              counterMode="minimum"
               value={just}
-              onChange={(e) => setJust(e.target.value)}
+              onValueChange={setJust}
               placeholder="Why is this changing?"
               className="text-xs"
             />

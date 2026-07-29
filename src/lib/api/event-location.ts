@@ -8,11 +8,16 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback, verifyCoordinatorPin } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
+import { seedAttendanceWithOvernightContinuity } from "@/lib/api/event-day-continuity";
 import {
-  listStillCheckedIn,
-  seedEventAttendanceRoll,
-} from "@/lib/api/event-attendance";
-import type { EventDaySession } from "@/lib/api/event-outing";
+  assertDaySessionCloseable,
+  assertPriorDayClosedBeforeOpen,
+} from "@/lib/api/event-lifecycle-gates";
+import {
+  assertOvernightDaysEndAtHotel,
+  type EventDaySession,
+} from "@/lib/api/event-outing";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 const OPEN_FROM_PHASES = new Set(["planning", "pre_departure"]);
 const LOCATION_LIVE_PHASES = new Set(["active", "pre_departure", "in_transit", "at_base"]);
@@ -42,11 +47,13 @@ async function assertTripLeaderPin(tripLeaderStaffId: string, pin: string): Prom
   if (!ok) throw new Error("Invalid manager PIN.");
 }
 
-/** Hard open — event floor starts (§12.4.1). */
+/** Hard open — event floor starts (§12.4.1 / BL-070). */
 export async function openEventLocation(input: {
   sessionId: string;
   managerPin: string;
   notes?: string;
+  /** Labels ticked on Open location walkthrough (empty = high-trust / none configured). */
+  venueOpenChecksCompleted?: string[];
 }): Promise<EventDaySession> {
   const session = await getSession(input.sessionId);
 
@@ -64,8 +71,24 @@ export async function openEventLocation(input: {
     throw new Error("Open RED issue on this trip day — resolve before opening the location.");
   }
 
+  await assertPriorDayClosedBeforeOpen({
+    eventId: session.event_id,
+    sessionId: input.sessionId,
+  });
+
+  // BL-T3 / BL-072 — overnight itinerary must end at hotel (final day exempt).
+  await assertOvernightDaysEndAtHotel(session.event_id);
+
+  // BL-098 — guest bookings must be complete before floor open.
+  const { listIncompleteGuestBookings, formatGuestIncompleteMessage } =
+    await import("@/lib/api/event-guest");
+  const incompleteGuests = await listIncompleteGuestBookings(session.event_id);
+  if (incompleteGuests.length > 0) {
+    throw new Error(formatGuestIncompleteMessage(incompleteGuests));
+  }
+
   const actorStaffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({
@@ -79,11 +102,13 @@ export async function openEventLocation(input: {
     .single();
   if (error) throw error;
 
-  await seedEventAttendanceRoll(
-    input.sessionId,
-    session.event_id,
-    session.session_date,
-  );
+  await seedAttendanceWithOvernightContinuity({
+    sessionId: input.sessionId,
+    eventId: session.event_id,
+    sessionDate: session.session_date,
+    actorStaffId: tripLeaderId,
+    source: "location_open",
+  });
 
   const gps = await tryGetGps();
   await writeToLedger({
@@ -98,6 +123,7 @@ export async function openEventLocation(input: {
       event_id: session.event_id,
       session_date: session.session_date,
       notes: input.notes ?? null,
+      venue_open_checks: input.venueOpenChecksCompleted ?? [],
     },
   });
 
@@ -120,12 +146,11 @@ export async function closeEventLocation(input: {
     throw new Error("Location is not open yet.");
   }
 
-  const stillIn = await listStillCheckedIn(input.sessionId);
-  if (stillIn.length > 0) {
-    throw new Error(
-      `Departure handover incomplete — still checked in: ${stillIn.join(", ")}. Check out each participant first.`,
-    );
-  }
+  await assertDaySessionCloseable({
+    eventId: session.event_id,
+    sessionId: input.sessionId,
+    sessionDate: session.session_date,
+  });
 
   const tripLeaderId = session.manager_staff_id;
   if (!tripLeaderId) {
@@ -135,7 +160,7 @@ export async function closeEventLocation(input: {
   await assertTripLeaderPin(tripLeaderId, input.managerPin);
 
   const actorStaffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({

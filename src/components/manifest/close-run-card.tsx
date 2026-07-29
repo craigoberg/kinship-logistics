@@ -1,7 +1,8 @@
 /**
- * CloseRunCard — end-of-manifest reconciliation + operator PIN (§11).
+ * CloseRunCard — end-of-manifest reconciliation + operator PIN (§11 / BL-096).
+ * Prefills ending odo = start + Σ logged leg km; soft-warn if driver changes far off.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -18,7 +19,17 @@ import {
   countIssuesLoggedDuringRun,
   listOpenTransportRedBlocks,
 } from "@/lib/api/transport-run-close";
-import { invalidateTransportCaches } from "@/lib/query/invalidation";
+import { invalidateTransportCaches, invalidateFleetCaches } from "@/lib/query/invalidation";
+import { useOdoCloseSuggestWarnKm } from "@/hooks/use-system-parameters";
+import { absDiffExceeds, suggestedEndOdometer } from "@/lib/manifest-odometer";
+import {
+  CAUTION_CALLOUT_BODY_CLASS,
+  CAUTION_CALLOUT_CLASS,
+  CAUTION_CALLOUT_ICON_CLASS,
+} from "@/lib/ui/caution-callout";
+import { FieldActionButton } from "@/components/ui/field-action-button";
+import { useManifestOffline } from "@/hooks/use-manifest-offline";
+import { clearSnapshotForTrip } from "@/lib/manifest-offline";
 
 interface Props {
   trip: TransportTrip;
@@ -28,11 +39,30 @@ interface Props {
 
 export function CloseRunCard({ trip, legs, eventTitle }: Props) {
   const qc = useQueryClient();
-  const [odo, setOdo] = useState("");
+  const {
+    online,
+    hasPending,
+    pendingCount,
+    flushing,
+    flush,
+  } = useManifestOffline(trip.id);
+  const closeSuggestWarnKm = useOdoCloseSuggestWarnKm();
+  const summary = useMemo(() => buildRunCloseSummary(trip, legs), [trip, legs]);
+  const suggested = useMemo(
+    () => suggestedEndOdometer(trip.startOdometerKm, summary.totalKm),
+    [trip.startOdometerKm, summary.totalKm],
+  );
+
+  const [odo, setOdo] = useState(() => String(suggested));
+  const [suggestWarnAck, setSuggestWarnAck] = useState(false);
   const [cancellationsAck, setCancellationsAck] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
 
-  const summary = useMemo(() => buildRunCloseSummary(trip, legs), [trip, legs]);
+  // Keep suggestion in sync if legs complete after mount.
+  useEffect(() => {
+    setOdo(String(suggested));
+    setSuggestWarnAck(false);
+  }, [suggested]);
 
   const redQ = useQuery({
     queryKey: ["transport-run-red-blocks", trip.id],
@@ -49,12 +79,18 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
   const redBlocks = redQ.data ?? [];
   const issuesLogged = issuesQ.data ?? 0;
   const hasCancellations = summary.cancelledPickups.length > 0;
-  const validOdo = odo.length > 0 && Number(odo) >= trip.startOdometerKm;
+  const odoNum = odo === "" ? NaN : Number(odo);
+  const validOdo = Number.isFinite(odoNum) && odoNum >= trip.startOdometerKm;
+  const suggestMismatch =
+    validOdo && absDiffExceeds(odoNum, suggested, closeSuggestWarnKm);
+  const outboxBlocksClose = !online || hasPending || flushing;
   const canClose =
     validOdo &&
     redBlocks.length === 0 &&
     (!hasCancellations || cancellationsAck) &&
-    !redQ.isLoading;
+    !(suggestMismatch && !suggestWarnAck) &&
+    !redQ.isLoading &&
+    !outboxBlocksClose;
 
   const closeMut = useMutation({
     mutationFn: (operatorPin: string) =>
@@ -64,13 +100,15 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         operatorPin,
         cancellationsAcknowledged: hasCancellations ? cancellationsAck : true,
       }),
-    onSuccess: () => {
+    onSuccess: async () => {
+      await clearSnapshotForTrip(trip.id);
       invalidateTransportCaches(qc);
+      invalidateFleetCaches(qc);
       toast.success("Run closed", {
         description: "Manifest reconciled and locked to the ledger.",
       });
-      setOdo("");
       setCancellationsAck(false);
+      setSuggestWarnAck(false);
     },
     onError: (e: Error) => {
       toast.error("Could not close run", { description: e.message });
@@ -157,15 +195,90 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         id="endodo"
         label="Ending odometer"
         value={odo}
-        onChange={setOdo}
-        placeholder={`Tap to enter — min ${trip.startOdometerKm} km`}
+        onChange={(v) => {
+          setOdo(v);
+          setSuggestWarnAck(false);
+        }}
+        placeholder={`Suggested ${suggested} km`}
         title="Ending odometer"
-        description={`Must be at least ${trip.startOdometerKm} km (starting reading for this run).`}
+        description={`Suggested ${suggested} km (start ${trip.startOdometerKm} + ${summary.totalKm.toFixed(1)} km legs). Must be at least ${trip.startOdometerKm} km.`}
         step={1}
         allowDecimal={false}
         min={trip.startOdometerKm}
         unit="km"
       />
+      <p className="text-[11px] text-muted-foreground">
+        Suggested:{" "}
+        <span className="tabular-nums font-medium">{suggested} km</span>
+        {" "}(start + Σ logged legs)
+        {validOdo && odoNum === suggested && " · matches"}
+      </p>
+
+      {suggestMismatch && (
+        <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
+          <div className="flex items-start gap-2">
+            <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
+            <p className={CAUTION_CALLOUT_BODY_CLASS}>
+              Ending {odoNum} km differs from suggested {suggested} km by{" "}
+              {Math.abs(odoNum - suggested)} km (warn at {closeSuggestWarnKm} km). Re-enter or
+              accept — no Hub issue. Admin can correct on Fleet later.
+            </p>
+          </div>
+          <div className="grid gap-2">
+            <FieldActionButton
+              variant="primary"
+              size="sm"
+              onClick={() => {
+                setOdo(String(suggested));
+                setSuggestWarnAck(false);
+              }}
+            >
+              Use suggested ({suggested} km)
+            </FieldActionButton>
+            <FieldActionButton
+              variant={suggestWarnAck ? "success" : "caution"}
+              size="sm"
+              onClick={() => setSuggestWarnAck(true)}
+            >
+              {suggestWarnAck ? "Accepted — close with PIN below" : "Accept this ending reading"}
+            </FieldActionButton>
+          </div>
+        </div>
+      )}
+
+      {outboxBlocksClose && (
+        <div className="space-y-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-2 text-xs">
+          <div className="flex items-center gap-1.5 font-semibold text-amber-800 dark:text-amber-200">
+            <AlertTriangle className="h-3.5 w-3.5" />
+            {!online
+              ? "Close Run needs a connection"
+              : flushing
+                ? "Syncing mid-run actions…"
+                : `${pendingCount} offline action${pendingCount === 1 ? "" : "s"} must sync first`}
+          </div>
+          <p className="text-amber-900/90 dark:text-amber-100/90">
+            Mid-run Depart / Arrive / boarding changes are held on this device until they reach the
+            server. Close Run stays locked until the queue is empty.
+          </p>
+          {online && hasPending && (
+            <FieldActionButton
+              variant="secondary"
+              size="sm"
+              disabled={flushing}
+              onClick={() => void flush()}
+            >
+              {flushing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Syncing…
+                </>
+              ) : (
+                "Retry sync now"
+              )}
+            </FieldActionButton>
+          )}
+        </div>
+      )}
 
       <button
         type="button"
@@ -178,17 +291,24 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
             : "bg-red-700 hover:bg-red-800",
         )}
       >
-        {closeMut.isPending ? "Closing run…" : "Close run & sign with PIN"}
+        {closeMut.isPending
+          ? "Closing…"
+          : outboxBlocksClose
+            ? "Close run — sync first"
+            : "Close run — enter PIN"}
       </button>
 
       <PinEntryDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        title="Close run — operator PIN"
-        description="Sign to confirm this manifest is reconciled and all passengers are accounted for."
-        busy={closeMut.isPending}
+        title="Close transport run"
+        description="Operator PIN confirms the ending odometer and locks this manifest."
+        length={4}
         onVerify={verifyOperatorPin}
-        onSuccess={(pin) => closeMut.mutate(pin)}
+        onSuccess={(pin) => {
+          setPinOpen(false);
+          closeMut.mutate(pin);
+        }}
       />
     </div>
   );

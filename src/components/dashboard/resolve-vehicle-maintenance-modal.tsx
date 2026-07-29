@@ -343,7 +343,7 @@ export function ResolveVehicleMaintenanceModal({
                     onChange={setNewExpiry}
                     helper={
                       currentExpiry
-                        ? `Pre-filled to current expiry + 1 year. Must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}). Editable for 3- or 6-month registrations.`
+                        ? `Pre-filled to current expiry + 1 year. Must be after the current expiry (${format(currentExpiry, "dd-MMM-yy")}). Editable for 3- or 6-month registrations.`
                         : "Pre-filled to today + 1 year. Must be after today. Editable for 3- or 6-month registrations."
                     }
                   />
@@ -351,7 +351,7 @@ export function ResolveVehicleMaintenanceModal({
                     newExpiry.getTime() <= renewedLowerBound.getTime() && (
                       <span className="text-[11px] font-medium text-destructive">
                         {currentExpiry
-                          ? `New expiry must be after the current expiry (${format(currentExpiry, "dd/MM/yyyy")}).`
+                          ? `New expiry must be after the current expiry (${format(currentExpiry, "dd-MMM-yy")}).`
                           : "Expiry must be after today — renewals with an already-expired date cannot resolve the flag."}
                       </span>
                     )}
@@ -481,7 +481,7 @@ function DateField({
         onChange={onChange}
         placeholder="Select a date"
         disabledDates={disabledFn}
-        dateFormat="dd/MM/yyyy"
+        dateFormat="dd-MMM-yy"
         className="h-9 text-sm"
       />
       <span className="text-[11px] text-muted-foreground">{helper}</span>

@@ -1,8 +1,8 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -19,15 +19,22 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { HubListCard } from "@/components/governance/hub-list-card";
+import { HubListCardBody } from "@/components/governance/hub-list-card-body";
+import { HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
+import { unifiedIssueBodyLines } from "@/lib/governance/hub-unified-issue-body";
+import { hubIssueContextMeta } from "@/lib/governance/hub-issue-context";
+import {
+  computeHubUrgency,
+  deriveIssueWorkflowStatus,
+  HUB_WORKFLOW_STATUS_BADGE,
+  HUB_WORKFLOW_STATUS_LABEL,
+  issueDeferredUntil,
+  type HubWorkflowStatus,
+} from "@/lib/governance/hub-workflow-status";
+import { useIssueUrgencyParams } from "@/hooks/use-system-parameters";
+import { fetchHubReviewStartedKeySet } from "@/lib/api/unified-issues";
 import { useUnifiedIssues, unifiedIssuesKey } from "@/hooks/use-unified-issues";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import type {
@@ -64,60 +71,46 @@ function issueUpdatedAt(issue: UnifiedIssue): string {
   return String(raw.updated_at ?? raw.created_at ?? issue.createdAt);
 }
 
-function issueLocationReporter(issue: UnifiedIssue): {
-  location: string | null;
-  reporter: string | null;
-} {
-  const raw = (issue.raw ?? {}) as Record<string, unknown>;
-  const reporterRaw = String(raw.reported_by ?? "").trim();
-  const reporter =
-    reporterRaw && !/^[0-9a-f-]{36}$/i.test(reporterRaw) ? reporterRaw : null;
-
-  if (issue.source === "incident") {
-    const desc = String(raw.description ?? issue.description ?? "");
-    const eventMatch = desc.match(/\[Event:\s*([^·\]]+)/);
-    const filedMatch = desc.match(/Filed from:\s*([^\]]+)/);
-    const eventName = eventMatch?.[1]?.trim() ?? null;
-    const filedFrom = filedMatch?.[1]?.trim() ?? null;
-    return {
-      location: eventName ? `Event: ${eventName}` : filedFrom,
-      reporter,
-    };
-  }
-
-  if (issue.source === "escalation") {
-    return {
-      location: String(raw.vehicle_info ?? issue.subCategory ?? "").trim() || null,
-      reporter: String(raw.driver_name ?? "").trim() || null,
-    };
-  }
-
-  return {
-    location: issue.source === "event" ? "Trip Day" : "Day Centre",
-    reporter,
-  };
-}
-
 function severityBadge(sev: UnifiedSeverity) {
   if (sev === "red")
-    return <Badge className="bg-destructive text-destructive-foreground">RED</Badge>;
+    return <Badge className="bg-red-600 text-white">RED</Badge>;
   if (sev === "yellow")
-    return <Badge className="bg-yellow-500 text-black">YELLOW</Badge>;
+    return <Badge className="bg-yellow-400 text-black">YELLOW</Badge>;
   if (sev === "green")
-    return <Badge className="bg-emerald-600 text-white">GREEN</Badge>;
-  return <span className="text-xs text-muted-foreground">—</span>;
+    return <Badge className="bg-green-600 text-white">GREEN</Badge>;
+  return null;
 }
 
-function IssuesTable({
+function openIssue(
+  issue: UnifiedIssue,
+  onManage: (i: UnifiedIssue, workflow: HubWorkflowStatus) => void,
+  reviewStartedKeys: ReadonlySet<string>,
+  onManageRenewal?: (assetId: string) => void,
+) {
+  if (issue.source === "renewal") {
+    onManageRenewal?.(issue.sourceRowId);
+    return;
+  }
+  onManage(issue, deriveIssueWorkflowStatus(issue, reviewStartedKeys));
+}
+
+function IssuesList({
   tab,
   onManage,
   onManageRenewal,
 }: {
   tab: UnifiedIssueTab;
-  onManage: (i: UnifiedIssue) => void;
+  onManage: (i: UnifiedIssue, workflow: HubWorkflowStatus) => void;
   onManageRenewal?: (assetId: string) => void;
 }) {
   const q = useUnifiedIssues(tab);
+  const urgencyParams = useIssueUrgencyParams();
+  const reviewKeysQ = useQuery({
+    queryKey: ["hub-review-started-keys"],
+    queryFn: fetchHubReviewStartedKeySet,
+    staleTime: 30_000,
+  });
+  const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
   const [categoryFilter, setCategoryFilter] = useState<UnifiedIssueSource | "all">(
     "all",
   );
@@ -145,16 +138,23 @@ function IssuesTable({
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-2">
         <p className="text-sm text-muted-foreground">
-          {tab === "active"
-            ? "Open issues needing attention now. Deferred issues are hidden until their deadline is close — no news is good news."
-            : "Issues currently parked: deferred for a future action or awaiting a Council response. Items return to the Active tab automatically when their deadline is near."}
+          {
+            {
+              active:
+                "Open issues and accepted workarounds still in play. Tap a card to manage. Deferred items stay hidden until their deadline is close.",
+              deferred:
+                "Items parked until a future date, or awaiting Council. They return to Active automatically when the deadline is near.",
+              resolved: "Resolved issue history. Tap a card to review the timeline.",
+            }[tab]
+          }
         </p>
         <div className="flex items-center gap-2">
           {q.isFetching && (
             <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" />
           )}
           <Badge variant="secondary">
-            {all.length} {tab === "active" ? "open" : "awaiting"}
+            {visible.length}{" "}
+            {tab === "active" ? "open" : tab === "deferred" ? "deferred" : "resolved"}
           </Badge>
         </div>
       </div>
@@ -197,7 +197,7 @@ function IssuesTable({
             </SelectContent>
           </Select>
         </div>
-        <div className="space-y-1 flex-1 min-w-[12rem]">
+        <div className="min-w-[12rem] flex-1 space-y-1">
           <Label className="text-xs text-muted-foreground">Search</Label>
           <Input
             className="h-8"
@@ -220,109 +220,92 @@ function IssuesTable({
         </Card>
       )}
 
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-20">Severity</TableHead>
-              <TableHead className="w-32">Category</TableHead>
-              <TableHead>Issue</TableHead>
-              <TableHead className="w-[160px] whitespace-nowrap">Logged</TableHead>
-              <TableHead className="hidden md:table-cell">Location / Reporter</TableHead>
-              <TableHead className="hidden lg:table-cell w-[160px] whitespace-nowrap">Updated</TableHead>
-              <TableHead className="w-28">Status</TableHead>
-              <TableHead className="w-24 text-right" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {q.isLoading ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-3">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            ) : visible.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={8} className="text-center text-muted-foreground py-3">
-                  {tab === "active"
-                    ? "No open issues need attention right now. Check the Awaiting tab for deferred items."
-                    : "Nothing deferred or awaiting Council."}
-                </TableCell>
-              </TableRow>
-            ) : (
-              visible.map((i) => {
-                const { location, reporter } = issueLocationReporter(i);
-                return (
-                <TableRow key={i.key}>
-                  <TableCell className="py-3">{severityBadge(i.severity)}</TableCell>
-                  <TableCell className="py-3">
-                    <Badge className={CATEGORY_BADGE[i.source]}>{i.sourceLabel}</Badge>
-                  </TableCell>
-                  <TableCell className="max-w-[28rem] py-3">
-                    <div className="font-medium truncate">{i.title}</div>
-                    {i.source === "escalation" && (() => {
-                      const r = i.raw as {
-                        id?: string;
-                        claimed_by?: string | null;
-                        operator_acknowledged_at?: string | null;
-                      };
-                      return (
-                        <div className="mt-1 font-mono text-[10px] text-amber-700 dark:text-amber-300">
-                          ESC {String(r.id ?? "").slice(0, 8)} · {i.status}
-                          {r.claimed_by ? ` · claimed ${String(r.claimed_by).slice(0, 8)}` : " · unclaimed"}
-                          {r.operator_acknowledged_at ? " · op-ack ✓" : ""}
-                        </div>
-                      );
-                    })()}
-                    {i.description && i.description !== i.title && (
-                      <div className="text-xs text-muted-foreground line-clamp-2">
-                        {i.description}
-                      </div>
-                    )}
-                  </TableCell>
-                  <TableCell className="w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
-                    <FormattedDateTime value={i.createdAt} />
-                  </TableCell>
-                  <TableCell className="hidden md:table-cell text-xs text-muted-foreground py-3">
-                    {location && <div>{location}</div>}
-                    {reporter && <div className="text-muted-foreground/70">{reporter}</div>}
-                    {!location && !reporter && "—"}
-                  </TableCell>
-                  <TableCell className="hidden lg:table-cell w-[160px] whitespace-nowrap text-xs text-muted-foreground tabular-nums py-3">
-                    <FormattedDateTime value={issueUpdatedAt(i)} />
-                  </TableCell>
-                  <TableCell className="py-3">
-                    <span className="text-xs capitalize">{i.status.replace(/_/g, " ")}</span>
-                  </TableCell>
-                  <TableCell className="text-right py-3">
-                    {i.source === "renewal" ? (
-                      <Button size="sm" onClick={() => onManageRenewal?.(i.sourceRowId)}>
-                        Manage
-                      </Button>
-                    ) : (
-                      <Button size="sm" onClick={() => onManage(i)}>
-                        Manage
-                      </Button>
-                    )}
-                  </TableCell>
-                </TableRow>
-                );
-              })
-            )}
-          </TableBody>
-        </Table>
-      </div>
+      {q.isLoading ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">Loading…</div>
+      ) : visible.length === 0 ? (
+        <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+          {
+            {
+              active:
+                "No open issues need attention right now. Check the Deferred tab for parked items.",
+              deferred: "Nothing deferred right now.",
+              resolved: "No resolved issues in history yet.",
+            }[tab]
+          }
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((i) => {
+            const { location, reporter } = hubIssueContextMeta(i);
+            const updatedAt = issueUpdatedAt(i);
+            const workflow = deriveIssueWorkflowStatus(i, reviewStartedKeys);
+            const deferredUntil = issueDeferredUntil(i);
+            const bodyLines = unifiedIssueBodyLines(i);
+            const nowMs = Date.now();
+            const urgency = tab === "resolved" ? "none" : computeHubUrgency({
+              nowMs,
+              createdAtMs: new Date(i.createdAt).getTime(),
+              lastActivityMs: i.lastActivityAt ? new Date(i.lastActivityAt).getTime() : null,
+              deferredUntilMs: i.deferredUntil ? new Date(i.deferredUntil).getTime() : null,
+              params: urgencyParams,
+            });
+
+            return (
+              <HubListCard
+                key={i.key}
+                ariaLabel={`Manage ${bodyLines.issue}`}
+                summary={bodyLines.issue}
+                body={
+                  <HubListCardBody lines={bodyLines} severity={i.severity} />
+                }
+                onClick={() => openIssue(i, onManage, reviewStartedKeys, onManageRenewal)}
+                badges={
+                  <>
+                    {severityBadge(i.severity)}
+                    <Badge className={CATEGORY_BADGE[i.source]}>
+                      {i.sourceLabel}
+                    </Badge>
+                  </>
+                }
+                status={
+                  <Badge className={HUB_WORKFLOW_STATUS_BADGE[workflow]}>
+                    {HUB_WORKFLOW_STATUS_LABEL[workflow]}
+                  </Badge>
+                }
+                urgency={urgency}
+                meta={
+                  <HubListMetaRows
+                    rows={[
+                      ...(deferredUntil && workflow === "deferred"
+                        ? [{ label: "Deferred to", value: deferredUntil }]
+                        : []),
+                      { label: "Location", value: location },
+                      { label: "Reported by", value: reporter ?? "Unknown staff" },
+                      {
+                        label: "Logged",
+                        value: <FormattedDateTime value={i.createdAt} />,
+                      },
+                      {
+                        label: "Updated",
+                        value: <FormattedDateTime value={updatedAt} />,
+                      },
+                    ]}
+                  />
+                }
+              />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
 
 export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   const [managing, setManaging] = useState<UnifiedIssue | null>(null);
+  const [managingWorkflow, setManagingWorkflow] = useState<HubWorkflowStatus>("open");
   const [tab, setTab] = useState<UnifiedIssueTab>("active");
 
-  // BMS-style live updates: silently invalidate the unified-issues feed when
-  // any of the underlying Hub tables change. The 60s polling on the query
-  // itself remains as a fallback if the socket drops.
   useRealtimeInvalidate({
     table: "site_issues_register",
     queryKeys: [unifiedIssuesKey],
@@ -345,19 +328,36 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
       <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
         <TabsList>
           <TabsTrigger value="active">Active</TabsTrigger>
-          <TabsTrigger value="awaiting">Awaiting / Deferred</TabsTrigger>
+          <TabsTrigger value="deferred">Deferred</TabsTrigger>
+          <TabsTrigger value="resolved">Resolved</TabsTrigger>
         </TabsList>
         <TabsContent value="active" className="mt-4">
-          <IssuesTable
+          <IssuesList
             tab="active"
-            onManage={setManaging}
+            onManage={(issue, workflow) => {
+              setManaging(issue);
+              setManagingWorkflow(workflow);
+            }}
             onManageRenewal={onManageRenewal}
           />
         </TabsContent>
-        <TabsContent value="awaiting" className="mt-4">
-          <IssuesTable
-            tab="awaiting"
-            onManage={setManaging}
+        <TabsContent value="deferred" className="mt-4">
+          <IssuesList
+            tab="deferred"
+            onManage={(issue, workflow) => {
+              setManaging(issue);
+              setManagingWorkflow(workflow);
+            }}
+            onManageRenewal={onManageRenewal}
+          />
+        </TabsContent>
+        <TabsContent value="resolved" className="mt-4">
+          <IssuesList
+            tab="resolved"
+            onManage={(issue, workflow) => {
+              setManaging(issue);
+              setManagingWorkflow(workflow);
+            }}
             onManageRenewal={onManageRenewal}
           />
         </TabsContent>
@@ -365,10 +365,9 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
 
       {managing && (
         <ManageIssueDialog
-          // Stable key — guarantees React never recycles the dialog (and its
-          // textarea state) across different issues mid-typing.
           key={managing.key}
           issue={managing}
+          autoStartReview={managingWorkflow === "open"}
           open
           onOpenChange={(o) => {
             if (!o) setManaging(null);

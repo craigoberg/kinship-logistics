@@ -1,0 +1,51 @@
+---
+description: UI style guide — use canonical patterns; ask before inventing new controls
+alwaysApply: true
+---
+
+# UI style guide — ask before inventing
+
+**Guide:** `docs/architecture/UI-STYLE-GUIDE.md`  
+**Normative rules:** `docs/architecture/GUARDRAILS.md` §4 (components), §5.3 (dates/times)
+
+## Before shipping UI
+
+1. Check **Pattern registry** in `UI-STYLE-GUIDE.md`.
+2. **Defined** → use the canonical component/path exactly; extend the canonical component if needed — do not fork a one-off.
+3. **TBD** or unlisted (Submit placement, dropdown vs tap list, toggle vs row card, table vs cards, toast copy, empty/loading states, etc.) → **stop and ask the user**:
+
+   > *"This pattern isn't in the UI Style Guide yet. I'm planning to use [describe control + layout]. Is this what you want?"*
+
+   Offer 1–2 concrete options when helpful (e.g. `MobileFieldButton` list vs shadcn `Select`). Do **not** silently pick the "clever" option.
+
+4. After user agrees → update `UI-STYLE-GUIDE.md` (registry row + changelog). If global primitive, also add to GUARDRAILS §4.1 table.
+
+## Do not over-engineer UI
+
+- No extra fields, dropdowns, or steps the user did not ask for.
+- No second control when one canonical control exists (`HalfHourTimeField` not dropdown + exact time).
+- No new button/footer conventions when §4.2 or the registry already covers the case.
+- Field routes: prefer high-contrast tap lists (§4.5) over small native selects.
+
+## Always use without asking
+
+Patterns marked **Defined** in the registry — including `DatePicker`, `HalfHourTimeField`, `CharacterCountedTextarea`/`Input`, `PinEntryDialog`, `MobileFieldButton`, `BottomSheet`, `NumericEntryTrigger`, dialog footers per §4.2, 24h time via `formatTime`/`ClientTime`.
+
+## Mandatory on every new form / dialog / sheet (no exceptions)
+
+Before shipping **any** new operator form (Dialog, Sheet, BottomSheet, page panel with Save/Submit):
+
+1. **Identify required fields** — every field that must be filled before the primary action.
+2. **Wire §4.3 visuals immediately** (not “polish later”):
+   - Multi-line required text → `CharacterCountedTextarea` (never bare `<Textarea>` + silent disable).
+   - Short required text → `CharacterCountedInput`.
+   - Dates / selects / tap groups / plain `Input` → `requiredFieldOutline(invalid)` from `src/lib/ui/required-field.ts` while empty/invalid.
+3. **Primary action** (`Save` / `Add` / `Confirm` / `Add guest`, etc.) → `disabled` until **all** required fields pass. Prefer a short **missing-fields list** above the footer when invalid (red/destructive callout) so operators know why the button is off.
+4. **Do not** ship silent disable-only validation (button off with no red borders / no checklist).
+5. **Do not** wait for first submit to show errors — invalid styling is live while empty (§4.3 anti-pattern).
+
+If a form ships without this, treat it as incomplete — fix before handoff.
+
+## Style guide catch-up
+
+Tracked as **BL-060** in `docs/BACKLOG.md`. When user asks to update the guide, run one audit phase (manifest, day, events, governance, or admin) and present TBD rows for review.

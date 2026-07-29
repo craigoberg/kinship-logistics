@@ -30,12 +30,13 @@ import type { EventManifest } from "@/lib/data-store";
 import { listVenues } from "@/lib/api/venues";
 import { ensureEventItineraryStops, inferEventKind, seedEventDaySessions } from "@/lib/api/event-outing";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
-import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { formatDate, parseIsoDateLocal, toIsoDateString, compareIsoDates, normalizeEventEndDate, shiftEndDateWithStart, startOfTodayLocal, todayLocalIso } from "@/lib/utils";
 import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 
 interface Props {
   event: EventManifest;
-  onSuccess?: () => void;
+  /** Called after a successful save — typically closes the parent modal. */
+  onSaved?: () => void;
   onClose?: () => void;
 }
 
@@ -45,7 +46,7 @@ const SCOPE_LABELS: Record<string, string> = {
   multi_day_tour: "Multi-day tour — one trip day per date in range",
 };
 
-export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
+export function EventDetailsTab({ event, onSaved, onClose }: Props) {
   const qc = useQueryClient();
   const [title, setTitle] = useState(event.title);
   const [eventTypeCode, setEventTypeCode] = useState(event.eventTypeCode);
@@ -65,9 +66,41 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
   });
 
   const resolvedEnd = endDate && endDate.length === 10 ? endDate : startDate;
+  const todayIso = todayLocalIso();
+  const endMinIso =
+    compareIsoDates(startDate, todayIso) >= 0 ? startDate : todayIso;
+  const endMinDate = parseIsoDateLocal(endMinIso);
+
+  const datesChanged =
+    startDate !== event.startDate || (endDate || null) !== (event.endDate ?? null);
+
+  const datesOrdered = compareIsoDates(resolvedEnd, startDate) >= 0;
+  const startNotPast =
+    !datesChanged || compareIsoDates(startDate, todayIso) >= 0;
+  const endNotPast =
+    !datesChanged || compareIsoDates(resolvedEnd, todayIso) >= 0;
+  const datesValid =
+    startDate.length === 10 && datesOrdered && startNotPast && endNotPast;
+
+  const dateErrorMessage = !datesValid
+    ? !datesOrdered
+      ? "End date must be on or after the start date."
+      : !startNotPast
+        ? `Start date cannot be before today (${formatDate(todayIso)}).`
+        : !endNotPast
+          ? `End date cannot be before today (${formatDate(todayIso)}).`
+          : "Check start and end dates."
+    : null;
 
   const eventTypeDisplayName =
     eventTypes.find((t) => t.code === eventTypeCode)?.displayName ?? "";
+
+  /** Single Day Excursion etc. — do not preserve a multi-day span when start moves. */
+  const isSingleDayEventType = useMemo(() => {
+    const hay = `${eventTypeCode} ${eventTypeDisplayName}`.toLowerCase();
+    if (/multi/.test(hay)) return false;
+    return /single/.test(hay);
+  }, [eventTypeCode, eventTypeDisplayName]);
 
   const scopeKind = useMemo(
     () =>
@@ -111,7 +144,7 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
     title.trim().length > 0 &&
     eventTypeCode.trim().length > 0 &&
     venue.trim().length > 0 &&
-    startDate.length === 10 &&
+    datesValid &&
     Number.isFinite(priceNumber) &&
     priceNumber >= 0;
 
@@ -133,6 +166,8 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
 
   const submit = async () => {
     if (!canSubmit) return;
+    const previousStartDate = event.startDate;
+    const previousEndDate = event.endDate ?? event.startDate;
     try {
       await mutation.mutateAsync({
         id: event.id,
@@ -146,17 +181,39 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
         eventKind: scopeKind,
         primaryVenueId,
       });
-      if (isOuting) {
-        await seedEventDaySessions(event.id, startDate, resolvedEnd);
+    } catch {
+      return;
+    }
+
+    // Event manifest is saved — close the modal even if trip-day sync fails.
+    const finish = () => {
+      onSaved?.();
+      onClose?.();
+    };
+
+    if (isOuting) {
+      try {
+        await seedEventDaySessions(event.id, startDate, resolvedEnd, {
+          previousStartDate,
+          previousEndDate,
+        });
         await ensureEventItineraryStops(event.id);
         invalidateEventDayCaches(qc, { eventId: event.id });
         qc.invalidateQueries({ queryKey: ["trip-report", event.id] });
+        toast.success("Event logistics updated", { description: title.trim() });
+      } catch (err) {
+        console.error("[EventDetailsTab] post-save trip day sync failed", err);
+        toast.warning("Event dates saved", {
+          description:
+            (err as Error).message ||
+            "Trip days may need a refresh on the Trip Days tab.",
+        });
       }
+    } else {
       toast.success("Event logistics updated", { description: title.trim() });
-      onSuccess?.();
-    } catch {
-      /* surfaced via mutation.onError */
     }
+
+    finish();
   };
 
   return (
@@ -277,8 +334,24 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
             </Label>
             <DatePicker
               value={parseIsoDateLocal(startDate)}
-              onChange={(d) => d && setStartDate(toIsoDateString(d))}
+              onChange={(d) => {
+                if (!d) return;
+                const newStart = toIsoDateString(d);
+                setEndDate((prevEnd) => {
+                  // Single-day types stay single-day. Multi-day tours keep length.
+                  const nextEnd = isSingleDayEventType
+                    ? newStart
+                    : shiftEndDateWithStart(
+                        startDate,
+                        newStart,
+                        prevEnd || startDate,
+                      );
+                  return normalizeEventEndDate(newStart, nextEnd);
+                });
+                setStartDate(newStart);
+              }}
               placeholder="Pick start date"
+              disabledDates={(date) => date < startOfTodayLocal()}
             />
           </div>
           <div className="space-y-2">
@@ -287,9 +360,19 @@ export function EventDetailsTab({ event, onSuccess, onClose }: Props) {
             </Label>
             <DatePicker
               value={parseIsoDateLocal(endDate || undefined)}
-              onChange={(d) => setEndDate(d ? toIsoDateString(d) : "")}
+              onChange={(d) => {
+                if (!d) {
+                  setEndDate("");
+                  return;
+                }
+                setEndDate(normalizeEventEndDate(startDate, toIsoDateString(d)));
+              }}
               placeholder={formatDate(startDate)}
+              disabledDates={(date) => (endMinDate ? date < endMinDate : false)}
             />
+            {dateErrorMessage && (
+              <p className="text-xs text-destructive">{dateErrorMessage}</p>
+            )}
           </div>
         </div>
 

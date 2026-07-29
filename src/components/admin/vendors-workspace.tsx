@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Archive, Pencil, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -29,6 +30,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import {
@@ -78,6 +88,7 @@ export function VendorsWorkspace() {
   const [statusFilter, setStatusFilter] = useState<"active" | "all">("active");
   const [editor, setEditor] = useState<"new" | Vendor | null>(null);
   const [draftName, setDraftName] = useState("");
+  const [archiveTarget, setArchiveTarget] = useState<Vendor | null>(null);
 
   const visible = useMemo(() => {
     let rows = vendors;
@@ -92,7 +103,7 @@ export function VendorsWorkspace() {
       const name = normalizeVendorName(draftName);
       if (name.length < 2) throw new Error("Vendor name must be at least 2 characters.");
       if (editor === "new") return createVendor(name);
-      if (editor && editor !== "new") return updateVendor(editor.id, { name });
+      if (editor) return updateVendor(editor.id, { name });
       throw new Error("Nothing to save.");
     },
     onSuccess: async (vendor) => {
@@ -117,6 +128,7 @@ export function VendorsWorkspace() {
         (old ?? []).filter((v) => v.id !== vendor.id),
       );
       await qc.invalidateQueries({ queryKey: ["vendors"] });
+      setArchiveTarget(null);
       toast.success("Vendor archived");
     },
     onError: (e: Error) => toast.error("Could not archive vendor", { description: e.message }),
@@ -222,27 +234,21 @@ export function VendorsWorkspace() {
                   <TableCell>
                     {canEdit && (
                       <div className="flex justify-end gap-1">
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
+                        <IconActionButton
                           className="h-8 w-8"
                           onClick={() => openEdit(v)}
-                          aria-label={`Edit ${v.name}`}
+                          tooltip="Edit vendor"
                         >
                           <Pencil className="h-4 w-4" />
-                        </Button>
+                        </IconActionButton>
                         {v.status === "active" ? (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
+                          <IconActionButton
                             className="h-8 w-8"
-                            onClick={() => archiveMut.mutate(v)}
-                            aria-label={`Archive ${v.name}`}
+                            onClick={() => setArchiveTarget(v)}
+                            tooltip="Archive vendor"
                           >
                             <Archive className="h-4 w-4" />
-                          </Button>
+                          </IconActionButton>
                         ) : (
                           <Button
                             type="button"
@@ -283,7 +289,7 @@ export function VendorsWorkspace() {
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setEditor(null)}>
-              Cancel
+              Close
             </Button>
             <Button
               onClick={() => saveMut.mutate()}
@@ -294,6 +300,31 @@ export function VendorsWorkspace() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <AlertDialog
+        open={!!archiveTarget}
+        onOpenChange={(open) => !open && setArchiveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive "{archiveTarget?.name}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              The vendor will be hidden from expense pickers. Existing ledger rows keep the
+              name. You can restore it later from the All filter.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={archiveMut.isPending}
+              onClick={() => archiveTarget && archiveMut.mutate(archiveTarget)}
+            >
+              {archiveMut.isPending ? "Archiving…" : "Archive vendor"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

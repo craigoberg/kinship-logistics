@@ -5,7 +5,7 @@
  * For legacy events only the Planning→Confirmed→Open→Closed ladder is shown.
  * For outings the "Close day session" action is surfaced too.
  */
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -23,13 +23,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -43,12 +37,14 @@ import {
   checkPromoteGuards,
   closeEventDaySession,
   promoteEventStatus,
+  repairEventStatusIfDaysStillOpen,
   type EventStatus,
   type StatusGuardResult,
 } from "@/lib/api/event-lifecycle";
 import { inferEventKind, listEventDaySessions } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
 import { refetchEventManifest } from "@/lib/query/invalidation";
+import { formatDate } from "@/lib/utils";
 
 interface Props {
   event: EventManifest;
@@ -98,7 +94,7 @@ const PROMOTE_CONFIRM: Record<string, string> = {
   Confirmed:
     "This authorises transport and coordinator workflows for today. The event floor does not start until the trip leader opens the location (Trip days → Config → Manager PIN).",
   Open:
-    "This will close the event and lock billing. All day sessions must be closed first. This cannot be undone.",
+    "This will close the event and lock billing. All day sessions must be closed first, and the return home manifest must be completed if bus passengers are going home. This cannot be undone.",
 };
 
 const sessionsKey = (eventId: string) => ["event-day-sessions", eventId] as const;
@@ -112,9 +108,6 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
       eventTypeCode: event.eventTypeCode,
       primaryVenueId: event.primaryVenueId,
     }) !== "legacy";
-  const isClosed = event.status === "Closed";
-  const currentIdx = statusIdx(event.status);
-  const canPromote = !isClosed && currentIdx < STATUS_ORDER.length - 1;
 
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [guards, setGuards] = useState<StatusGuardResult | null>(null);
@@ -133,13 +126,45 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
   const openSessions = sessions.filter(
     (s) => s.phase !== "closed_orderly" && s.phase !== "closed_incident",
   );
-
+  // BL-088: never show Closed while trip days remain open (integrity).
+  const statusInconsistent =
+    event.status === "Closed" && isOuting && openSessions.length > 0;
+  const displayStatus: EventStatus = statusInconsistent
+    ? "Open"
+    : (event.status as EventStatus);
+  const isClosed = displayStatus === "Closed";
+  const currentIdx = statusIdx(displayStatus);
+  const canPromote = !isClosed && currentIdx < STATUS_ORDER.length - 1;
   const nextStatus = STATUS_ORDER[currentIdx + 1] ?? null;
+  const canCloseDays =
+    isOuting && openSessions.length > 0 && (displayStatus === "Open" || statusInconsistent);
+
+  // Heal Closed+open-days so promote/close paths use a real Open status.
+  useEffect(() => {
+    if (!statusInconsistent) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const repaired = await repairEventStatusIfDaysStillOpen(event.id);
+        if (cancelled || !repaired) return;
+        toast.message("Event reopened — trip days were still open.", {
+          description: "Close each day, then Close event when ready.",
+        });
+        await refetchEventManifest(qc);
+        onStatusChanged();
+      } catch (e) {
+        if (!cancelled) toast.error((e as Error).message);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [statusInconsistent, event.id, qc, onStatusChanged]);
 
   // Promote mutation
   const promoteMut = useMutation({
     mutationFn: () =>
-      promoteEventStatus(event.id, event.startDate, event.status as EventStatus),
+      promoteEventStatus(event.id, event.startDate, displayStatus),
     onMutate: async () => {
       if (!nextStatus) return {};
       await qc.cancelQueries({ queryKey: ["event_manifest"] });
@@ -157,10 +182,35 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
       );
       return { prev };
     },
-    onSuccess: async ({ newStatus }) => {
+    onSuccess: async ({
+      newStatus,
+      guestsArchived,
+      guestsSkipped,
+      guestArchiveError,
+    }) => {
+      const closedBits: string[] = [];
+      if (newStatus === "Closed") {
+        closedBits.push("Billing locked.");
+        if ((guestsArchived ?? 0) > 0) {
+          closedBits.push(
+            `${guestsArchived} guest${guestsArchived === 1 ? "" : "s"} archived — reuse from Add guest.`,
+          );
+        }
+        if ((guestsSkipped ?? 0) > 0) {
+          closedBits.push(
+            `${guestsSkipped} guest${guestsSkipped === 1 ? "" : "s"} still on another Open/Confirmed trip — left active.`,
+          );
+        }
+      }
       toast.success(`Event → ${newStatus}`, {
-        description: newStatus === "Closed" ? "Billing locked." : undefined,
+        description: closedBits.length > 0 ? closedBits.join(" ") : undefined,
       });
+      if (guestArchiveError) {
+        toast.warning("Guests were not archived", {
+          description: guestArchiveError,
+          duration: 10_000,
+        });
+      }
       await refetchEventManifest(qc);
       onStatusChanged();
       setConfirmOpen(false);
@@ -192,7 +242,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
       const result = await checkPromoteGuards(
         event.id,
         event.startDate,
-        event.status as EventStatus,
+        displayStatus,
       );
       setGuards(result);
       setConfirmOpen(true);
@@ -208,10 +258,10 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
         <div className="flex flex-wrap items-center gap-2">
           {/* Current status chip */}
           <span
-            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white ${statusColor(event.status)}`}
+            className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wide text-white ${statusColor(displayStatus)}`}
           >
-            {statusIcon(event.status)}
-            {event.status}
+            {statusIcon(displayStatus)}
+            {displayStatus}
           </span>
 
           {canPromote && nextStatus && (
@@ -229,13 +279,13 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
               ) : (
                 <ShieldCheck className="mr-1 h-3 w-3" />
               )}
-              {PROMOTE_LABELS[event.status] ?? `→ ${nextStatus}`}
+              {PROMOTE_LABELS[displayStatus] ?? `→ ${nextStatus}`}
             </Button>
           )}
 
-          {isOuting && event.status === "Open" && openSessions.length > 0 && (
+          {canCloseDays && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-[11px] text-muted-foreground">Close day:</span>
+              <span className="text-[11px] text-muted-foreground">Office close:</span>
               {openSessions.map((s) => (
                 <Button
                   key={s.id}
@@ -244,7 +294,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
                   className="h-7 text-xs"
                   onClick={() => { setCloseSessionId(s.id); setCloseOutcome("closed_orderly"); setCloseNotes(""); }}
                 >
-                  {s.session_date}
+                  {formatDate(s.session_date)}
                 </Button>
               ))}
             </div>
@@ -256,10 +306,10 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
           <AlertDialogContent>
             <AlertDialogHeader>
               <AlertDialogTitle>
-                {PROMOTE_LABELS[event.status] ?? `Promote to ${nextStatus}`}?
+                {PROMOTE_LABELS[displayStatus] ?? `Promote to ${nextStatus}`}?
               </AlertDialogTitle>
               <AlertDialogDescription>
-                {PROMOTE_CONFIRM[event.status]}
+                {PROMOTE_CONFIRM[displayStatus]}
               </AlertDialogDescription>
             </AlertDialogHeader>
             {guards && !guards.ok && (
@@ -273,7 +323,20 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
                 </ul>
               </div>
             )}
-            {guards?.ok && (
+            {guards?.ok && (guards.warnings?.length ?? 0) > 0 && (
+              <div className="space-y-2 rounded-lg border-2 border-amber-500/50 bg-amber-50 p-3">
+                <div className="flex items-center gap-1.5 text-sm font-bold text-amber-900">
+                  <AlertTriangle className="h-4 w-4" />
+                  Warning — you can Confirm, but Open location will be blocked until fixed:
+                </div>
+                <ul className="ml-5 list-disc space-y-0.5 text-sm text-amber-950">
+                  {guards.warnings!.map((w, i) => (
+                    <li key={i}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {guards?.ok && !(guards.warnings?.length) && (
               <div className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-700">
                 <CheckCircle2 className="h-4 w-4" />
                 All conditions met — ready to promote.
@@ -287,7 +350,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
                 onClick={() => promoteMut.mutate()}
               >
                 {promoteMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                {PROMOTE_LABELS[event.status] ?? "Promote"}
+                {PROMOTE_LABELS[displayStatus] ?? "Promote"}
               </Button>
             </AlertDialogFooter>
           </AlertDialogContent>
@@ -296,7 +359,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
         <AlertDialog open={!!closeSessionId} onOpenChange={(o) => !o && setCloseSessionId(null)}>
           <AlertDialogContent>
             <AlertDialogHeader>
-              <AlertDialogTitle>Close day session — {closeSessionId && sessions.find((s) => s.id === closeSessionId)?.session_date}</AlertDialogTitle>
+              <AlertDialogTitle>Close day session — {closeSessionId && formatDate(sessions.find((s) => s.id === closeSessionId)?.session_date ?? "")}</AlertDialogTitle>
               <AlertDialogDescription>
                 Select the outcome and provide close notes before locking the session.
               </AlertDialogDescription>
@@ -304,13 +367,19 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
             <div className="space-y-3">
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Outcome</Label>
-                <Select value={closeOutcome} onValueChange={(v) => setCloseOutcome(v as typeof closeOutcome)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="closed_orderly">Closed — orderly</SelectItem>
-                    <SelectItem value="closed_incident">Closed — incident</SelectItem>
-                  </SelectContent>
-                </Select>
+                <div className="space-y-1.5">
+                  {([
+                    { value: "closed_orderly", label: "Closed — orderly" },
+                    { value: "closed_incident", label: "Closed — incident" },
+                  ] as const).map((opt) => (
+                    <MobileFieldButton
+                      key={opt.value}
+                      title={opt.label}
+                      selected={closeOutcome === opt.value}
+                      onClick={() => setCloseOutcome(opt.value)}
+                    />
+                  ))}
+                </div>
               </div>
               <div className="space-y-1.5">
                 <Label className="text-xs font-semibold">Close notes (optional)</Label>
@@ -344,6 +413,16 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
   return (
     <>
       <div className="space-y-3">
+        {statusInconsistent && (
+          <div className="flex items-start gap-1.5 rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-900">
+            <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+            <span>
+              Event was marked Closed while trip days are still open. Status is being
+              reopened — close each day, then Close event.
+            </span>
+          </div>
+        )}
+
         {/* Ladder */}
         <div className="flex flex-wrap items-center gap-1.5">
           {STATUS_ORDER.map((s, idx) => {
@@ -397,14 +476,14 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
               ) : (
                 <ShieldCheck className="mr-1.5 h-3.5 w-3.5" />
               )}
-              {PROMOTE_LABELS[event.status] ?? `Promote to ${nextStatus}`}
+              {PROMOTE_LABELS[displayStatus] ?? `Promote to ${nextStatus}`}
             </Button>
           )}
 
           {/* Close day session quick actions (Open events, outings) */}
-          {isOuting && event.status === "Open" && openSessions.length > 0 && (
+          {canCloseDays && (
             <div className="flex flex-wrap items-center gap-1.5">
-              <span className="text-xs text-muted-foreground">Close day:</span>
+              <span className="text-xs text-muted-foreground">Office close day:</span>
               {openSessions.map((s) => (
                 <Button
                   key={s.id}
@@ -413,7 +492,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
                   className="h-7 text-xs"
                   onClick={() => { setCloseSessionId(s.id); setCloseOutcome("closed_orderly"); setCloseNotes(""); }}
                 >
-                  {s.session_date}
+                  {formatDate(s.session_date)}
                 </Button>
               ))}
             </div>
@@ -426,11 +505,11 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
-              {PROMOTE_LABELS[event.status] ?? `Promote to ${nextStatus}`}?
-            </AlertDialogTitle>
-            <AlertDialogDescription>
-              {PROMOTE_CONFIRM[event.status]}
-            </AlertDialogDescription>
+              {PROMOTE_LABELS[displayStatus] ?? `Promote to ${nextStatus}`}?
+              </AlertDialogTitle>
+              <AlertDialogDescription>
+                {PROMOTE_CONFIRM[displayStatus]}
+              </AlertDialogDescription>
           </AlertDialogHeader>
 
           {/* Guard results */}
@@ -446,7 +525,21 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
             </div>
           )}
 
-          {guards && guards.ok && (
+          {guards?.ok && (guards.warnings?.length ?? 0) > 0 && (
+            <div className="space-y-2 rounded-lg border-2 border-amber-500/50 bg-amber-50 p-3">
+              <div className="flex items-center gap-1.5 text-sm font-bold text-amber-900">
+                <AlertTriangle className="h-4 w-4" />
+                Warning — you can Confirm, but Open location will be blocked until fixed:
+              </div>
+              <ul className="ml-5 list-disc space-y-0.5 text-sm text-amber-950">
+                {guards.warnings!.map((w, i) => (
+                  <li key={i}>{w}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {guards?.ok && !(guards.warnings?.length) && (
             <div className="flex items-center gap-1.5 rounded-lg bg-emerald-500/10 px-3 py-2 text-sm font-semibold text-emerald-700">
               <CheckCircle2 className="h-4 w-4" />
               All conditions met — ready to promote.
@@ -461,7 +554,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
               onClick={() => promoteMut.mutate()}
             >
               {promoteMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              {PROMOTE_LABELS[event.status] ?? "Promote"}
+              {PROMOTE_LABELS[displayStatus] ?? "Promote"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -471,7 +564,7 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
       <AlertDialog open={!!closeSessionId} onOpenChange={(o) => !o && setCloseSessionId(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Close day session — {closeSessionId && sessions.find((s) => s.id === closeSessionId)?.session_date}</AlertDialogTitle>
+            <AlertDialogTitle>Close day session — {closeSessionId && formatDate(sessions.find((s) => s.id === closeSessionId)?.session_date ?? "")}</AlertDialogTitle>
             <AlertDialogDescription>
               Select the outcome and provide close notes before locking the session.
             </AlertDialogDescription>
@@ -480,18 +573,19 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Outcome</Label>
-              <Select
-                value={closeOutcome}
-                onValueChange={(v) => setCloseOutcome(v as typeof closeOutcome)}
-              >
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="closed_orderly">Closed — orderly</SelectItem>
-                  <SelectItem value="closed_incident">Closed — incident</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-1.5">
+                {([
+                  { value: "closed_orderly", label: "Closed — orderly" },
+                  { value: "closed_incident", label: "Closed — incident" },
+                ] as const).map((opt) => (
+                  <MobileFieldButton
+                    key={opt.value}
+                    title={opt.label}
+                    selected={closeOutcome === opt.value}
+                    onClick={() => setCloseOutcome(opt.value)}
+                  />
+                ))}
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs font-semibold">Close notes (optional)</Label>

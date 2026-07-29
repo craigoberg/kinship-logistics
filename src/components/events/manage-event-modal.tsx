@@ -1,10 +1,12 @@
 import React, { useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
   CalendarDays,
   ChevronDown,
   ChevronUp,
+  Compass,
   FileText,
   Map,
   Users,
@@ -44,16 +46,23 @@ import { DaySessionsTab } from "./day-sessions-tab";
 import { EventStatusPanel } from "./event-status-panel";
 import { TripReportTab } from "./trip-report-tab";
 
+type TabKey = "roster" | "finance" | "details" | "itinerary" | "days" | "report";
+
 interface Props {
   event: EventManifest | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** Deep-link tab (e.g. Trip Report after Close Trip). */
+  initialTab?: TabKey;
 }
 
-type TabKey = "roster" | "finance" | "details" | "itinerary" | "days" | "report";
-
-export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: Props) {
-  const [tab, setTab] = useState<TabKey>("roster");
+export function ManageEventModal({
+  event: eventSnapshot,
+  open,
+  onOpenChange,
+  initialTab,
+}: Props) {
+  const [tab, setTab] = useState<TabKey>(initialTab ?? "roster");
   const [incidentOpen, setIncidentOpen] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
   const { data: events = [] } = useEvents();
@@ -122,6 +131,10 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
     }
   }, [open]);
 
+  useEffect(() => {
+    if (open && initialTab) setTab(initialTab);
+  }, [open, initialTab, eventSnapshot?.id]);
+
   const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = useMemo(() => [
     { key: "roster", label: "Roster", icon: Users },
     ...(isOuting ? [
@@ -142,6 +155,18 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
       : formatDate(event.startDate);
 
   // ── Shared sub-renders ──────────────────────────────────────────────────
+
+  const runDeliverButton =
+    isOuting &&
+    event &&
+    (event.status === "Open" || event.status === "Confirmed") ? (
+      <Button asChild size="sm" className="shrink-0 gap-1.5">
+        <Link to="/event-deliver" search={{ eventId: event.id }}>
+          <Compass className="h-4 w-4" />
+          Run this event
+        </Link>
+      </Button>
+    ) : null;
 
   const incidentButton = isOuting ? (
     <Button
@@ -175,6 +200,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
           onStatusChanged={() => {}}
         />
         <div className="flex shrink-0 items-center gap-2">
+          {runDeliverButton}
           {incidentButton}
         <button
           type="button"
@@ -247,7 +273,10 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
 
       <div className="mt-3 flex items-start justify-between gap-3">
         <EventStatusPanel event={event} onStatusChanged={() => {}} />
-        {incidentButton}
+        <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+          {runDeliverButton}
+          {incidentButton}
+        </div>
       </div>
 
       {/* Horizontally scrollable tabs */}
@@ -326,7 +355,7 @@ export function ManageEventModal({ event: eventSnapshot, open, onOpenChange }: P
       ) : (
         <EventDetailsTab
           event={event}
-          onSuccess={() => setTab("days")}
+          onSaved={() => onOpenChange(false)}
           onClose={() => onOpenChange(false)}
         />
       )}

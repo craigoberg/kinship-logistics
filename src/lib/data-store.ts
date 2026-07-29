@@ -11,6 +11,12 @@
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { assessEventReturnTransport, resolveReturnHomeBusEligibleIds } from "@/lib/api/event-transport";
+import { matchesEventBusRun } from "@/lib/event-bus-runs";
+import {
+  getSydneyTimeTodayIso,
+  resolveOperationalNow,
+} from "@/lib/operational-time";
 import { todayLocalIso, eventSpansDate } from "@/lib/utils";
 
 export interface Participant {
@@ -24,6 +30,8 @@ export interface Participant {
    * unless a per-event override is set on the booking. */
   regularPickupAddress: string | null;
   iddsi: { liquids: number; foods: number };
+  /** BL-076 — free-text allergies / alerts (guests + clients). */
+  allergiesNotes: string | null;
   dualWitnessPinHash: string | null;
   createdAt: string;
   updatedAt: string;
@@ -166,6 +174,7 @@ interface ParticipantRow {
   regular_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
+  allergies_notes?: string | null;
   dual_witness_pin_hash: string | null;
   created_at: string;
   updated_at: string;
@@ -184,6 +193,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
       liquids: r.iddsi_level_liquids ?? 0,
       foods: r.iddsi_level_solids ?? 7,
     },
+    allergiesNotes: r.allergies_notes ?? null,
     dualWitnessPinHash: r.dual_witness_pin_hash,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -220,7 +230,10 @@ export async function listParticipants(): Promise<Participant[]> {
     .select("*")
     .order("last_name", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map(rowToParticipant);
+  // BL-098: archived guests stay out of normal pickers (reuse via guest list).
+  return (data ?? [])
+    .filter((r) => !(r as { archived_at?: string | null }).archived_at)
+    .map((r) => rowToParticipant(r as ParticipantRow));
 }
 
 export interface ParticipantPatch {
@@ -390,6 +403,26 @@ export interface DualWitnessAdministration {
   witnessedByName: string;
   status: AdministrationStatus;
   notes?: string;
+  /** Optional context stamp (centre | trip). */
+  source?: string;
+  eventId?: string | null;
+  eventDaySessionId?: string | null;
+}
+
+export interface SoleCarerAdministration {
+  scheduleId: string;
+  participantId: string;
+  medicationName: string;
+  dosage: string;
+  scheduledTime: string;
+  administeredById: string;
+  administeredByName: string;
+  soleCarerNote: string;
+  status: AdministrationStatus;
+  notes?: string;
+  source?: string;
+  eventId?: string | null;
+  eventDaySessionId?: string | null;
 }
 
 /**
@@ -406,7 +439,8 @@ export async function insertDualWitnessAdministrationLog(
     action_performed: "MEDICATION_ADMIN_DUAL",
     witness_1_identity: input.administeredByName,
     witness_2_identity: input.witnessedByName,
-    timestamp: new Date().toISOString(),
+    // SIM / operational clock — not browser wall time (DEV Day Centre tests).
+    timestamp: resolveOperationalNow().toISOString(),
     metadata: {
       schedule_id: input.scheduleId,
       medication_name: input.medicationName,
@@ -416,7 +450,43 @@ export async function insertDualWitnessAdministrationLog(
       witnessed_by_id: input.witnessedById,
       status: input.status,
       notes: input.notes ?? null,
-      source: "care_profile_give_dose",
+      sign_off: "dual_pin",
+      source: input.source ?? "care_profile_give_dose",
+      event_id: input.eventId ?? null,
+      event_day_session_id: input.eventDaySessionId ?? null,
+      device_uuid: getDeviceUuid(),
+    },
+  });
+  if (error) throw error;
+}
+
+/** Sole-carer Give Dose when only one staff is available (trips) — PIN attested. */
+export async function insertSoleCarerAdministrationLog(
+  input: SoleCarerAdministration,
+): Promise<void> {
+  const soleNote = input.soleCarerNote.trim();
+  if (soleNote.length < 10) {
+    throw new Error("Sole-carer justification needs at least 10 characters.");
+  }
+  const { error } = await supabase.from("compliance_audit_logs").insert({
+    participant_id: input.participantId,
+    action_performed: "MEDICATION_ADMIN_SOLE",
+    witness_1_identity: input.administeredByName,
+    witness_2_identity: `SOLE_CARER: ${soleNote}`,
+    timestamp: resolveOperationalNow().toISOString(),
+    metadata: {
+      schedule_id: input.scheduleId,
+      medication_name: input.medicationName,
+      dosage: input.dosage,
+      scheduled_time: input.scheduledTime,
+      administered_by_id: input.administeredById,
+      status: input.status,
+      notes: input.notes ?? null,
+      sole_carer_note: soleNote,
+      sign_off: "sole_pin",
+      source: input.source ?? "trip_give_dose",
+      event_id: input.eventId ?? null,
+      event_day_session_id: input.eventDaySessionId ?? null,
       device_uuid: getDeviceUuid(),
     },
   });
@@ -1102,12 +1172,12 @@ export async function listComplianceLogsForParticipant(
 }
 
 export async function listTodaysComplianceLogs(): Promise<ComplianceLog[]> {
-  const since = new Date();
-  since.setHours(0, 0, 0, 0);
+  // Operational Sydney midnight (honours DEV SIM clock date).
+  const sinceIso = getSydneyTimeTodayIso(0, 0);
   const { data, error } = await supabase
     .from("compliance_audit_logs")
     .select("*")
-    .gte("timestamp", since.toISOString())
+    .gte("timestamp", sinceIso)
     .limit(1000);
   if (error) throw error;
   return (data ?? []).map(rowToComplianceLog);
@@ -2155,9 +2225,37 @@ export async function listManifestPickerEvents(
 
   const events = [...byId.values()].sort((a, b) => b.startDate.localeCompare(a.startDate));
 
+  // Closed events still needing return transport (§12.4.4 — driver recovery path).
+  const { data: closedRows, error: closedErr } = await supabase
+    .from("event_manifest")
+    .select("*")
+    .eq("status", "Closed")
+    .order("start_date", { ascending: false });
+  if (closedErr) throw closedErr;
+
+  const closedCandidates = (closedRows ?? []).filter((r) => {
+    const ev = rowToEvent(r as EventManifestRow);
+    return eventSpansDate(ev.startDate, ev.endDate, today) || todaySessionEventIds.includes(ev.id);
+  });
+
+  if (closedCandidates.length > 0) {
+    const pendingReturn = await Promise.all(
+      closedCandidates.map(async (r) => {
+        const ev = rowToEvent(r as EventManifestRow);
+        const assessment = await assessEventReturnTransport(ev.id);
+        return assessment.needsReturnRun ? ev : null;
+      }),
+    );
+    for (const ev of pendingReturn) {
+      if (ev) byId.set(ev.id, ev);
+    }
+  }
+
+  const mergedEvents = [...byId.values()].sort((a, b) => b.startDate.localeCompare(a.startDate));
+
   // Surface today's outings first when date range or trip-day session matches.
   const todayIds = new Set(todaySessionEventIds);
-  const todaysFirst = [...events].sort((a, b) => {
+  const todaysFirst = [...mergedEvents].sort((a, b) => {
     const aToday = eventSpansDate(a.startDate, a.endDate, today) || todayIds.has(a.id);
     const bToday = eventSpansDate(b.startDate, b.endDate, today) || todayIds.has(b.id);
     if (aToday !== bToday) return aToday ? -1 : 1;
@@ -2358,6 +2456,10 @@ export interface EventRosterBooking {
   outboundTransportMode: string;
   /** §12.3.2 — 'bus' | 'self'. Self only on last-day outbound (enforced in API). */
   returnTransportMode: string;
+  /** BL-069 — Admin bus_runs.code when outbound is bus; null = legacy shared bus. */
+  outboundBusRunCode: string | null;
+  /** BL-069 — Admin bus_runs.code when return is bus; null = legacy shared bus. */
+  returnBusRunCode: string | null;
   /**
    * Outing only — coordinator decision: does a labelled med supply travel on the bus?
    * Driver manifest prompts handover only when `yes`. Day Centre uses schedules instead.
@@ -2382,6 +2484,12 @@ export interface EventRosterBooking {
   billingStatus: string;
   /** Timestamp when a finance officer verified this claim. */
   financeVerifiedAt: string | null;
+  /** BL-098 — planned guest booking (non-NDIS headcount). */
+  isGuestBooking: boolean;
+  /** BL-098 — host client this guest accompanies (not brings_carer). */
+  hostParticipantId: string | null;
+  /** BL-098 — ticket / room / capacity note. */
+  guestOpsNote: string | null;
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: string;
   updatedAt: string;
@@ -2405,9 +2513,14 @@ interface BookingRow {
   dynamic_medical_notes_snapshot: string | null;
   outbound_transport_mode?: string | null;
   return_transport_mode?: string | null;
+  outbound_bus_run_code?: string | null;
+  return_bus_run_code?: string | null;
   transport_med_bag_required?: string | null;
   transport_med_notes?: string | null;
   pickup_order?: number | null;
+  is_guest_booking?: boolean | null;
+  host_participant_id?: string | null;
+  guest_ops_note?: string | null;
   // NDIS billing pipeline
   funding_claim_type: string | null;
   charge_code_id: string | null;
@@ -2452,6 +2565,8 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     participantStreetAddress: r.participants?.street_address ?? null,
     outboundTransportMode: r.outbound_transport_mode ?? "bus",
     returnTransportMode: r.return_transport_mode ?? "bus",
+    outboundBusRunCode: r.outbound_bus_run_code ?? null,
+    returnBusRunCode: r.return_bus_run_code ?? null,
     transportMedBagRequired: (r.transport_med_bag_required ?? "not_set") as
       | "yes"
       | "no"
@@ -2465,14 +2580,18 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     totalAmountBilled: r.total_amount_billed == null ? null : Number(r.total_amount_billed),
     billingStatus: r.billing_status ?? "Unbilled",
     financeVerifiedAt: r.finance_verified_at ?? null,
+    isGuestBooking: r.is_guest_booking === true,
+    hostParticipantId: r.host_participant_id ?? null,
+    guestOpsNote: r.guest_ops_note ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
 
+// Disambiguate: host_participant_id also FKs participants (BL-098).
 const BOOKING_PARTICIPANT_SELECT =
-  "*, participants!inner(first_name, last_name, regular_pickup_address, street_address)";
+  "*, participants!event_roster_bookings_participant_id_fkey!inner(first_name, last_name, regular_pickup_address, street_address)";
 
 export function manifestPickupForBooking(b: EventRosterBooking): string | null {
   const override = (b.tripPickupAddressOverride ?? "").trim();
@@ -2518,7 +2637,7 @@ export async function listEventBookingsForParticipant(
   const { data, error } = await supabase
     .from("event_roster_bookings")
     .select(
-      "*, participants!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price, status)",
+      "*, participants!event_roster_bookings_participant_id_fkey!inner(first_name, last_name, regular_pickup_address, street_address), event_manifest!inner(title, start_date, end_date, ticket_price, status)",
     )
     .eq("participant_id", participantId)
     .order("created_at", { ascending: false });
@@ -2558,12 +2677,25 @@ export interface NewEventBooking {
   carerId?: string | null;
   carerTransportRequired?: boolean;
   participantTransportRequired?: boolean;
+  outboundTransportMode?: "bus" | "self";
+  returnTransportMode?: "bus" | "self";
+  outboundBusRunCode?: string | null;
+  returnBusRunCode?: string | null;
   tripPickupAddressOverride?: string | null;
+  transportMedBagRequired?: "yes" | "no" | "not_set";
+  transportMedNotes?: string | null;
   /** Optional pre-built snapshot. Omit to auto-build from compliance + meds. */
   dynamicMedicalNotesSnapshot?: string | null;
+  /** BL-098 */
+  isGuestBooking?: boolean;
+  hostParticipantId?: string | null;
+  guestOpsNote?: string | null;
+  fundingClaimType?: string | null;
 }
 
-export async function insertEventBooking(input: NewEventBooking): Promise<void> {
+export async function insertEventBooking(
+  input: NewEventBooking,
+): Promise<EventRosterBooking> {
   const amount = input.amountPaid ?? 0;
   const trimmedNotes = (input.notes ?? "").trim();
   const bringsCarer = !!input.bringsCarer;
@@ -2586,14 +2718,72 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
     brings_carer: bringsCarer,
     carer_id: bringsCarer ? input.carerId ?? null : null,
     carer_transport_required: bringsCarer ? !!input.carerTransportRequired : false,
-    participant_transport_required: !!input.participantTransportRequired,
+    participant_transport_required: input.participantTransportRequired ?? true,
+    outbound_transport_mode: input.outboundTransportMode ?? "bus",
+    return_transport_mode: input.returnTransportMode ?? "bus",
     trip_pickup_address_override: trimmedOverride.length > 0 ? trimmedOverride : null,
     dynamic_medical_notes_snapshot:
       snapshot && snapshot.trim().length > 0 ? snapshot : null,
   };
+  if (input.outboundBusRunCode !== undefined) {
+    insertPayload.outbound_bus_run_code =
+      input.outboundTransportMode === "self"
+        ? null
+        : input.outboundBusRunCode?.trim() || null;
+  }
+  if (input.returnBusRunCode !== undefined) {
+    insertPayload.return_bus_run_code =
+      input.returnTransportMode === "self"
+        ? null
+        : input.returnBusRunCode?.trim() || null;
+  }
+  if (input.transportMedBagRequired !== undefined) {
+    insertPayload.transport_med_bag_required = input.transportMedBagRequired;
+  }
+  if (input.transportMedNotes !== undefined) {
+    insertPayload.transport_med_notes = input.transportMedNotes?.trim() || null;
+  }
+  if (input.isGuestBooking) {
+    insertPayload.is_guest_booking = true;
+    insertPayload.host_participant_id = input.hostParticipantId?.trim() || null;
+    insertPayload.guest_ops_note = input.guestOpsNote?.trim() || null;
+    insertPayload.funding_claim_type =
+      input.fundingClaimType?.trim() || "Private";
+  } else if (input.fundingClaimType) {
+    insertPayload.funding_claim_type = input.fundingClaimType;
+  }
   // pickup_order is set via coordinator drag (reorderEventRosterPickupOrder) after migration.
 
-  const { error } = await supabase.from("event_roster_bookings").insert(insertPayload);
+  let { data, error } = await supabase
+    .from("event_roster_bookings")
+    .insert(insertPayload)
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .single();
+
+  // Legacy DBs without BL-098 / multi-bus columns — strip and retry once.
+  if (error && isSchemaMismatchError(error)) {
+    const legacy = { ...insertPayload };
+    delete legacy.is_guest_booking;
+    delete legacy.host_participant_id;
+    delete legacy.guest_ops_note;
+    delete legacy.outbound_bus_run_code;
+    delete legacy.return_bus_run_code;
+    delete legacy.transport_med_bag_required;
+    delete legacy.transport_med_notes;
+    const retry = await supabase
+      .from("event_roster_bookings")
+      .insert(legacy)
+      .select(BOOKING_PARTICIPANT_SELECT)
+      .single();
+    data = retry.data;
+    error = retry.error;
+    if (!error && input.isGuestBooking) {
+      console.warn(
+        "[insertEventBooking] Guest booking inserted without BL-098 columns — run 2026-07-26_event_guest_participants.sql",
+      );
+    }
+  }
+
   if (error) {
     console.error("[insertEventBooking] failed", error);
     throw error;
@@ -2608,6 +2798,7 @@ export async function insertEventBooking(input: NewEventBooking): Promise<void> 
       isReconciled: true,
     });
   }
+  return rowToBooking(data as BookingRow);
 }
 
 // ---------- Compliance snapshot + event cloning ----------
@@ -3178,7 +3369,8 @@ export type LegKind =
   | "depot_to_client"
   | "client_to_client"
   | "client_to_venue"
-  | "venue_to_depot";
+  | "venue_to_depot"
+  | "venue_to_venue";
 
 /** Where the bus departs from for a given trip. */
 export type TripOrigin = "depot" | "day_centre";
@@ -3214,6 +3406,14 @@ export interface TransportTrip {
    * 'day_centre' (fixed location needs no stored address).
    */
   originAddress: string | null;
+  /** Fleet vehicle for this run (BL-096) — updates current_odometer_km on close. */
+  assetId: string | null;
+  /** §12 — event_venue_hop | event | day_centre | transport_request */
+  tripKind?: string | null;
+  eventDaySessionId?: string | null;
+  hopIndex?: number | null;
+  venueStopFromId?: string | null;
+  venueStopToId?: string | null;
 }
 
 interface TripRow {
@@ -3230,6 +3430,12 @@ interface TripRow {
   trip_origin?: string | null;
   trip_return?: string | null;
   origin_address?: string | null;
+  asset_id?: string | null;
+  trip_kind?: string | null;
+  event_day_session_id?: string | null;
+  hop_index?: number | null;
+  venue_stop_from_id?: string | null;
+  venue_stop_to_id?: string | null;
 }
 
 function rowToTrip(r: TripRow): TransportTrip {
@@ -3249,6 +3455,12 @@ function rowToTrip(r: TripRow): TransportTrip {
     tripOrigin: origin,
     tripReturn: ret,
     originAddress: r.origin_address ?? null,
+    assetId: r.asset_id ?? null,
+    tripKind: r.trip_kind ?? null,
+    eventDaySessionId: r.event_day_session_id ?? null,
+    hopIndex: r.hop_index ?? null,
+    venueStopFromId: r.venue_stop_from_id ?? null,
+    venueStopToId: r.venue_stop_to_id ?? null,
   };
 }
 
@@ -3407,12 +3619,33 @@ export async function getActiveTripForDriver(
   if (tripErr) throwPg("[getActiveTripForDriver]", tripErr);
   if (!tripRow) return null;
   const trip = rowToTrip(tripRow as TripRow);
-  const { data: legRows, error: legErr } = await supabase
+
+  let { data: legRows, error: legErr } = await supabase
     .from("trip_legs")
     .select("*")
     .eq("trip_id", trip.id)
     .order("leg_index", { ascending: true });
   if (legErr) throwPg("[getActiveTripForDriver:legs]", legErr);
+
+  // Heal venue hops stuck active with 0 legs (failed medication_handover_status insert).
+  if (trip.tripKind === "event_venue_hop" && !(legRows ?? []).length) {
+    try {
+      const { healActiveVenueHopLegs } = await import("@/lib/api/event-hop-transport");
+      const healed = await healActiveVenueHopLegs(trip.id);
+      if (healed) {
+        const reload = await supabase
+          .from("trip_legs")
+          .select("*")
+          .eq("trip_id", trip.id)
+          .order("leg_index", { ascending: true });
+        if (reload.error) throwPg("[getActiveTripForDriver:heal-legs]", reload.error);
+        legRows = reload.data;
+      }
+    } catch (e) {
+      console.error("[getActiveTripForDriver] hop leg heal failed", e);
+    }
+  }
+
   const eventTitle = await fetchEventTitle(trip.eventId);
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
@@ -3552,6 +3785,8 @@ export interface StartTripInput {
   driverStaffId: string;
   eventId: string;
   startOdometerKm: number;
+  /** Fleet vehicle — stored on trip for Close Run → current_odometer_km (BL-096). */
+  assetId?: string | null;
   varianceReason?: string | null;
   /**
    * Run direction for outing events (§12):
@@ -3589,10 +3824,67 @@ export interface StartTripInput {
   returnDepartAddress?: string | null;
   /** Calendar date (YYYY-MM-DD) for resolving last itinerary stop. */
   returnSessionDate?: string | null;
+  /**
+   * BL-069 — Admin bus_runs.code for this Manifest trip.
+   * null / omit = legacy single shared bus (only passengers with null run codes).
+   */
+  busRunCode?: string | null;
 }
 
-/** Returns the most recent closing odometer (end_odometer_km) recorded across
- * all completed trips. Used for the variance check on the Initialize Run screen. */
+/**
+ * Canonical estimated odometer for a fleet vehicle (BL-096).
+ * Prefers transport_assets.current_odometer_km, then latest completed trip end
+ * for that asset, then max clearance start_odometer.
+ */
+export async function getAssetCurrentOdometer(
+  assetId: string,
+): Promise<number | null> {
+  if (!assetId) return null;
+
+  const { data: asset, error: assetErr } = await supabase
+    .from("transport_assets")
+    .select("current_odometer_km")
+    .eq("id", assetId)
+    .maybeSingle();
+  if (!assetErr && asset) {
+    const v = (asset as { current_odometer_km?: number | string | null })
+      .current_odometer_km;
+    if (v != null && v !== "" && Number.isFinite(Number(v))) return Number(v);
+  }
+
+  const { data: trip, error: tripErr } = await supabase
+    .from("transport_trips")
+    .select("end_odometer, end_odometer_km, completed_at, updated_at")
+    .eq("asset_id", assetId)
+    .eq("status", "completed")
+    .order("completed_at", { ascending: false, nullsFirst: false })
+    .limit(1)
+    .maybeSingle();
+  if (!tripErr && trip) {
+    const row = trip as {
+      end_odometer?: number | null;
+      end_odometer_km?: number | null;
+    };
+    const raw = row.end_odometer_km ?? row.end_odometer ?? null;
+    if (raw != null && Number.isFinite(Number(raw))) return Number(raw);
+  }
+
+  const { data: clearance, error: clrErr } = await supabase
+    .from("asset_daily_clearance")
+    .select("start_odometer")
+    .eq("asset_id", assetId)
+    .order("start_odometer", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (!clrErr && clearance) {
+    const v = (clearance as { start_odometer: number | string }).start_odometer;
+    if (v != null && Number.isFinite(Number(v))) return Number(v);
+  }
+
+  return null;
+}
+
+/** @deprecated Prefer getAssetCurrentOdometer(assetId). Global last end (any vehicle). */
 export async function getLastEndOdometer(): Promise<number | null> {
   const { data, error } = await supabase
     .from("transport_trips")
@@ -3616,6 +3908,26 @@ export async function getLastEndOdometer(): Promise<number | null> {
     row.start_odometer_km ??
     null;
   return raw == null ? null : Number(raw);
+}
+
+/** Persist fleet current estimated KM after Close Run or Admin correction. */
+export async function setAssetCurrentOdometerKm(
+  assetId: string,
+  km: number,
+): Promise<void> {
+  if (!assetId || !Number.isFinite(km)) return;
+  const { error } = await supabase
+    .from("transport_assets")
+    .update({
+      current_odometer_km: km,
+      current_odometer_updated_at: new Date().toISOString(),
+      updated_at: new Date().toISOString(),
+    })
+    .eq("id", assetId);
+  if (error) {
+    console.error("[setAssetCurrentOdometerKm]", error);
+    throw error;
+  }
 }
 
 /** Last itinerary stop for a trip day — return-run departure anchor (§12.4.3a). */
@@ -3660,19 +3972,38 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     .maybeSingle();
   if (existingErr) throwPg("[startTrip:existingLookup]", existingErr);
   if (existingTrip) {
-    const existing = rowToTrip(existingTrip as TripRow);
-    const { data: legRows, error: legErr } = await supabase
-      .from("trip_legs")
-      .select("*")
-      .eq("trip_id", existing.id)
-      .order("leg_index", { ascending: true });
-    if (legErr) throwPg("[startTrip:existingLegs]", legErr);
-    const eventTitle = await fetchEventTitle(existing.eventId);
-    return {
-      trip: existing,
-      legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-      eventTitle,
-    };
+    const existingKind = (existingTrip as { trip_kind?: string | null }).trip_kind;
+    // Venue hops use startEventVenueHop — never reuse via startTrip.
+    if (existingKind !== "event_venue_hop") {
+      const existing = rowToTrip(existingTrip as TripRow);
+      const wantRun = (input.busRunCode ?? "").trim() || null;
+      const haveRun = (existing.busRunCode ?? "").trim() || null;
+      // Different multi-bus run → do not reuse this driver's other active trip.
+      if (wantRun !== haveRun && (wantRun != null || haveRun != null)) {
+        // fall through to create
+      } else {
+      // Heal stale return rosters (e.g. Left-trip still on booking bus mode).
+      if (existing.tripReturn !== "none") {
+        try {
+          await pruneIneligibleReturnTripPassengers(existing);
+        } catch (err) {
+          console.warn("[startTrip:pruneReturn]", err);
+        }
+      }
+      const { data: legRows, error: legErr } = await supabase
+        .from("trip_legs")
+        .select("*")
+        .eq("trip_id", existing.id)
+        .order("leg_index", { ascending: true });
+      if (legErr) throwPg("[startTrip:existingLegs]", legErr);
+      const eventTitle = await fetchEventTitle(existing.eventId);
+      return {
+        trip: existing,
+        legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+        eventTitle,
+      };
+      }
+    }
   }
 
   const { data: statusRow, error: statusErr } = await supabase
@@ -3688,18 +4019,26 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     );
   }
   if (eventStatus === "Closed") {
-    throw new Error("This event is closed. Cannot start a new transport run.");
+    if (input.tripDirection !== "return") {
+      throw new Error(
+        "This event is closed. Only a return home manifest can be started.",
+      );
+    }
+    const transport = await assessEventReturnTransport(input.eventId);
+    if (!transport.needsReturnRun) {
+      throw new Error("This event is closed and no return transport run is required.");
+    }
   }
 
   // 1. Build roster (ordered participants for this event) and pull every
   //    address signal needed for the 3-tier target_address fallback.
   //    Filter by transport mode when a run direction is given (§12).
   const participantJoin =
-    "participants!inner(first_name, last_name, regular_pickup_address, street_address)";
+    "participants!event_roster_bookings_participant_id_fkey!inner(first_name, last_name, regular_pickup_address, street_address)";
   const rosterSelectBase =
     `participant_id, trip_pickup_address_override, created_at, ${participantJoin}`;
   const rosterSelectWithModes =
-    `participant_id, trip_pickup_address_override, created_at, outbound_transport_mode, return_transport_mode, pickup_order, ${participantJoin}`;
+    `participant_id, trip_pickup_address_override, created_at, outbound_transport_mode, return_transport_mode, outbound_bus_run_code, return_bus_run_code, pickup_order, ${participantJoin}`;
 
   type StartTripBookingRow = {
     participant_id: string;
@@ -3708,6 +4047,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     pickup_order?: number | null;
     outbound_transport_mode?: string | null;
     return_transport_mode?: string | null;
+    outbound_bus_run_code?: string | null;
+    return_bus_run_code?: string | null;
     participants:
       | {
           first_name: string;
@@ -3752,15 +4093,39 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   if (bookingErr) throwPg("[startTrip:bookings]", bookingErr);
 
   let resolvedBookingRows = [...(bookingRows ?? [])];
+  const tripBusRunCode = (input.busRunCode ?? "").trim() || null;
 
   if (input.tripDirection === "outbound") {
     resolvedBookingRows = resolvedBookingRows.filter(
       (r) => (r.outbound_transport_mode ?? "bus") === "bus",
     );
+    resolvedBookingRows = resolvedBookingRows.filter((r) =>
+      matchesEventBusRun(r.outbound_bus_run_code, tripBusRunCode),
+    );
   } else if (input.tripDirection === "return") {
     resolvedBookingRows = resolvedBookingRows.filter(
       (r) => (r.return_transport_mode ?? "bus") === "bus",
     );
+    // Floor wins over roster: Left-trip / absent must not seed return drop-offs.
+    const sessionDate =
+      input.returnSessionDate?.slice(0, 10) ?? todayLocalIso();
+    const eligible = await resolveReturnHomeBusEligibleIds({
+      eventId: input.eventId,
+      sessionDate,
+    });
+    if (eligible) {
+      resolvedBookingRows = resolvedBookingRows.filter((r) =>
+        eligible.ids.has(r.participant_id),
+      );
+    }
+    // Prefer floor return_bus_run_code when present (eligible map values).
+    const floorRunByPid = eligible?.runs ?? null;
+    resolvedBookingRows = resolvedBookingRows.filter((r) => {
+      const floorRun = floorRunByPid?.get(r.participant_id);
+      const personRun =
+        floorRun !== undefined ? floorRun : r.return_bus_run_code;
+      return matchesEventBusRun(personRun, tripBusRunCode);
+    });
   }
 
   resolvedBookingRows.sort((a, b) => {
@@ -3911,26 +4276,58 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const isReturn = input.tripDirection === "return";
 
   // 5. Insert trip row.
-  const { data: tripRow, error: tripErr } = await supabase
+  const sessionDateForTrip =
+    input.returnSessionDate?.slice(0, 10) ??
+    (input.tripDirection === "return"
+      ? eventMeta.start_date?.slice(0, 10) ?? todayLocalIso()
+      : todayLocalIso());
+  let sessionIdForTrip: string | null = null;
+  {
+    const { data: sessRow } = await supabase
+      .from("event_day_sessions")
+      .select("id")
+      .eq("event_id", input.eventId)
+      .eq("session_date", sessionDateForTrip)
+      .maybeSingle();
+    sessionIdForTrip = (sessRow as { id?: string } | null)?.id ?? null;
+  }
+
+  const startTripRow = {
+    driver_staff_id: input.driverStaffId,
+    event_id: input.eventId,
+    status: "active" as const,
+    start_odometer: input.startOdometerKm,
+    start_odometer_km: input.startOdometerKm,
+    start_odometer_variance_reason:
+      input.varianceReason && input.varianceReason.trim().length > 0
+        ? input.varianceReason.trim()
+        : null,
+    trip_origin: tripOrigin,
+    trip_return: tripReturn,
+    // Return run: origin_address = where the bus is parked at run start (last stop).
+    // Outbound / legacy: origin_address = depot or day-centre anchor.
+    origin_address: isReturn ? returnDepartAddress ?? null : originAddress,
+    asset_id: input.assetId?.trim() || null,
+    bus_run_code: tripBusRunCode,
+    trip_date: sessionDateForTrip,
+    event_day_session_id: sessionIdForTrip,
+  };
+  let { data: tripRow, error: tripErr } = await supabase
     .from("transport_trips")
-    .insert({
-      driver_staff_id: input.driverStaffId,
-      event_id: input.eventId,
-      status: "active",
-      start_odometer: input.startOdometerKm,
-      start_odometer_km: input.startOdometerKm,
-      start_odometer_variance_reason:
-        input.varianceReason && input.varianceReason.trim().length > 0
-          ? input.varianceReason.trim()
-          : null,
-      trip_origin: tripOrigin,
-      trip_return: tripReturn,
-      // Return run: origin_address = where the bus is parked at run start (last stop).
-      // Outbound / legacy: origin_address = depot or day-centre anchor.
-      origin_address: isReturn ? returnDepartAddress ?? null : originAddress,
-    })
+    .insert(startTripRow)
     .select("*")
     .single();
+  // Pre-BL-096: retry without asset_id until migration is applied.
+  if (tripErr && isSchemaMismatchError(tripErr)) {
+    const { asset_id: _omit, ...withoutAsset } = startTripRow;
+    const retry = await supabase
+      .from("transport_trips")
+      .insert(withoutAsset)
+      .select("*")
+      .single();
+    tripRow = retry.data;
+    tripErr = retry.error;
+  }
   if (tripErr) throwPg("[startTrip:insert]", tripErr);
   const trip = rowToTrip(tripRow as TripRow);
 
@@ -4137,6 +4534,8 @@ export interface StartDayCentreRunInput {
   busRunLabel: string;
   driverStaffId: string;
   startOdometerKm: number;
+  /** Fleet vehicle — stored on trip for Close Run → current_odometer_km (BL-096). */
+  assetId?: string | null;
   dayCode: string; // e.g. "DAY-TUE"
   /** "morning" = depot → clients → centre (default). "afternoon" = centre → clients → depot. */
   direction?: "morning" | "afternoon";
@@ -4203,19 +4602,44 @@ export function isPassengerPickupLeg(leg: TripLeg): boolean {
   );
 }
 
-/** Pickup legs that have started or finished — their from/to must not change on reorder. */
+/** Completed pickup where the passenger was skipped — bus never visited. */
+export function isCancelledPickupLeg(leg: TripLeg): boolean {
+  return (
+    isPassengerPickupLeg(leg) &&
+    leg.status === "completed" &&
+    leg.passengerPresent === false
+  );
+}
+
+/**
+ * Pickup legs that have started or finished with the bus actually there —
+ * their from/to must not change on reorder. Cancelled / no-show pickups are
+ * excluded: skipping a stop must not teleport the chain (GUARDRAILS §11).
+ */
 function lockedPassengerPickupLegs(legs: TripLeg[]): TripLeg[] {
   return legs
-    .filter((l) => isPassengerPickupLeg(l) && l.status !== "pending")
+    .filter(
+      (l) =>
+        isPassengerPickupLeg(l) &&
+        l.status !== "pending" &&
+        !isCancelledPickupLeg(l),
+    )
     .sort((a, b) => a.legIndex - b.legIndex);
 }
 
 /** Trip anchor label for the first pickup when the bus has not left yet. */
 function tripStartLabelForPickups(trip: TransportTrip, legs: TripLeg[]): string {
-  const firstPickup = legs
+  const pickups = legs
     .filter(isPassengerPickupLeg)
-    .sort((a, b) => a.legIndex - b.legIndex)[0];
-  if (firstPickup?.legKind === "depot_to_client") return firstPickup.fromLabel;
+    .sort((a, b) => a.legIndex - b.legIndex);
+  // Prefer a real (non-cancelled) depot_to_client origin label.
+  const originAnchor = pickups.find(
+    (l) => l.legKind === "depot_to_client" && !isCancelledPickupLeg(l),
+  );
+  if (originAnchor) return originAnchor.fromLabel;
+  // All early depot legs cancelled — still use that fromLabel (Depot / Day Centre).
+  const anyDepot = pickups.find((l) => l.legKind === "depot_to_client");
+  if (anyDepot) return anyDepot.fromLabel;
   if (trip.tripOrigin === "day_centre") return "Day Centre";
   return "Depot";
 }
@@ -4295,8 +4719,108 @@ function rebuildPendingPickupChain(
 }
 
 /**
+ * After a pickup is skipped (or before drag-reorder persist), rewrite pending
+ * pickup from→to labels so the bus never teleports. Cancelled stops are not
+ * chain anchors. Terminal centre/venue legs re-anchor to the last real stop.
+ */
+export async function rebuildTripPickupChain(tripId: string): Promise<TripLeg[]> {
+  const [{ data: tripRow, error: tripErr }, { data: rows, error: fetchErr }] =
+    await Promise.all([
+      supabase.from("transport_trips").select("*").eq("id", tripId).single(),
+      supabase
+        .from("trip_legs")
+        .select("*")
+        .eq("trip_id", tripId)
+        .order("leg_index", { ascending: true }),
+    ]);
+  if (tripErr) throwPg("[rebuildTripPickupChain:trip]", tripErr);
+  if (fetchErr) throwPg("[rebuildTripPickupChain:fetch]", fetchErr);
+
+  const trip = rowToTrip(tripRow as TripRow);
+  const legs = (rows ?? []).map((r) => rowToLeg(r as LegRow));
+  if (legs.length === 0) return [];
+
+  const pendingPickups = legs
+    .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+    .sort((a, b) => a.legIndex - b.legIndex);
+  const endpoints = computePickupChainEndpoints(
+    trip,
+    legs,
+    pendingPickups.map((l) => l.id),
+  );
+
+  for (const leg of pendingPickups) {
+    const ep = endpoints.get(leg.id);
+    if (!ep) continue;
+    const { error } = await supabase
+      .from("trip_legs")
+      .update({
+        leg_kind: ep.legKind,
+        from_label: ep.fromLabel,
+        to_label: ep.toLabel,
+        from_participant_id: ep.fromParticipantId,
+        to_participant_id: ep.toParticipantId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", leg.id);
+    if (error) throwPg("[rebuildTripPickupChain:pending]", error);
+  }
+
+  const locked = lockedPassengerPickupLegs(legs);
+  const lastPending = pendingPickups[pendingPickups.length - 1] ?? null;
+  const lastPendingEp = lastPending ? endpoints.get(lastPending.id) : null;
+  const chainEnd = lastPendingEp
+    ? {
+        toLabel: lastPendingEp.toLabel,
+        toParticipantId: lastPendingEp.toParticipantId,
+      }
+    : locked.length > 0
+      ? {
+          toLabel: locked[locked.length - 1]!.toLabel,
+          toParticipantId: locked[locked.length - 1]!.toParticipantId,
+        }
+      : {
+          toLabel: tripStartLabelForPickups(trip, legs),
+          toParticipantId: null as string | null,
+        };
+
+  for (const leg of legs) {
+    if (leg.legKind === "client_to_venue") {
+      const { error } = await supabase
+        .from("trip_legs")
+        .update({
+          from_label: chainEnd.toLabel,
+          from_participant_id: chainEnd.toParticipantId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", leg.id);
+      if (error) throwPg("[rebuildTripPickupChain:terminal]", error);
+    } else if (leg.legKind === "venue_to_depot" && leg.fromParticipantId) {
+      const { error } = await supabase
+        .from("trip_legs")
+        .update({
+          from_label: chainEnd.toLabel,
+          from_participant_id: chainEnd.toParticipantId,
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", leg.id);
+      if (error) throwPg("[rebuildTripPickupChain:return]", error);
+    }
+  }
+
+  const { data: out, error: outErr } = await supabase
+    .from("trip_legs")
+    .select("*")
+    .eq("trip_id", tripId)
+    .order("leg_index", { ascending: true });
+  if (outErr) throwPg("[rebuildTripPickupChain:read]", outErr);
+  return (out ?? []).map((r) => rowToLeg(r as LegRow));
+}
+
+/**
  * Re-order pending passenger pickup legs on an active trip. Completed pickups
  * and terminal legs (centre / depot) are fixed; only pending pickups move.
+ * Cancelled (skipped) pickups stay in place and do not anchor the chain.
  */
 export async function reorderTripPickupLegs(
   tripId: string,
@@ -4314,6 +4838,9 @@ export async function reorderTripPickupLegs(
   if (legs.length === 0) return [];
 
   const lockedPickups = lockedPassengerPickupLegs(legs);
+  const skippedPickups = legs
+    .filter(isCancelledPickupLeg)
+    .sort((a, b) => a.legIndex - b.legIndex);
   const pendingPickups = legs.filter((l) => isPassengerPickupLeg(l) && l.status === "pending");
   const otherLegs = legs.filter((l) => !isPassengerPickupLeg(l));
 
@@ -4328,23 +4855,45 @@ export async function reorderTripPickupLegs(
   const pendingMap = new Map(pendingPickups.map((l) => [l.id, l]));
   const reorderedPending = orderedPendingPickupLegIds.map((id) => pendingMap.get(id)!);
   const rebuiltPending = rebuildPendingPickupChain(trip, legs, reorderedPending);
-  const orderedPickups = [...lockedPickups, ...rebuiltPending];
 
-  const lastPickup = orderedPickups[orderedPickups.length - 1] ?? null;
+  // Preserve boarded + cancelled pickups in original index order, then pending.
+  const historicalPickups = [...lockedPickups, ...skippedPickups].sort(
+    (a, b) => a.legIndex - b.legIndex,
+  );
+  const orderedPickups = [...historicalPickups, ...rebuiltPending];
+
+  const lastChain =
+    rebuiltPending[rebuiltPending.length - 1] ??
+    lockedPickups[lockedPickups.length - 1] ??
+    null;
+  const originLabel = tripStartLabelForPickups(trip, legs);
   const updatedOtherLegs = otherLegs.map((leg) => {
-    if (!lastPickup) return leg;
     if (leg.legKind === "client_to_venue") {
+      if (lastChain) {
+        return {
+          ...leg,
+          fromLabel: lastChain.toLabel,
+          fromParticipantId: lastChain.toParticipantId,
+        };
+      }
       return {
         ...leg,
-        fromLabel: lastPickup.toLabel,
-        fromParticipantId: lastPickup.toParticipantId,
+        fromLabel: originLabel,
+        fromParticipantId: null,
       };
     }
     if (leg.legKind === "venue_to_depot" && leg.fromParticipantId) {
+      if (lastChain) {
+        return {
+          ...leg,
+          fromLabel: lastChain.toLabel,
+          fromParticipantId: lastChain.toParticipantId,
+        };
+      }
       return {
         ...leg,
-        fromLabel: lastPickup.toLabel,
-        fromParticipantId: lastPickup.toParticipantId,
+        fromLabel: originLabel,
+        fromParticipantId: null,
       };
     }
     return leg;
@@ -4375,7 +4924,7 @@ export async function reorderTripPickupLegs(
       patch.to_participant_id = leg.toParticipantId;
     } else if (
       leg.legKind === "client_to_venue" ||
-      (leg.legKind === "venue_to_depot" && leg.fromParticipantId)
+      (leg.legKind === "venue_to_depot" && leg.fromParticipantId != null)
     ) {
       patch.from_label = leg.fromLabel;
       patch.from_participant_id = leg.fromParticipantId;
@@ -4497,22 +5046,35 @@ export async function startDayCentreRun(
     resolveStartPointAddress(input.startPoint, direction, depotAddr, centreAddr, alternateAddr) ??
     (direction === "morning" ? depotAddr : centreAddr);
 
-  const { data: tripRow, error: tripErr } = await supabase
+  const dayCentreTripRow = {
+    driver_staff_id: input.driverStaffId,
+    event_id: null as string | null,
+    bus_run_code: input.busRunCode,
+    status: "active" as const,
+    trip_date: today,
+    start_odometer: input.startOdometerKm,
+    start_odometer_km: input.startOdometerKm,
+    trip_origin: tripOrigin,
+    trip_return: tripReturn,
+    origin_address: originAddress,
+    asset_id: input.assetId?.trim() || null,
+  };
+  let { data: tripRow, error: tripErr } = await supabase
     .from("transport_trips")
-    .insert({
-      driver_staff_id: input.driverStaffId,
-      event_id: null,
-      bus_run_code: input.busRunCode,
-      status: "active",
-      trip_date: today,
-      start_odometer: input.startOdometerKm,
-      start_odometer_km: input.startOdometerKm,
-      trip_origin: tripOrigin,
-      trip_return: tripReturn,
-      origin_address: originAddress,
-    })
+    .insert(dayCentreTripRow)
     .select("*")
     .single();
+  // Pre-BL-096: retry without asset_id until migration is applied.
+  if (tripErr && isSchemaMismatchError(tripErr)) {
+    const { asset_id: _omit, ...withoutAsset } = dayCentreTripRow;
+    const retry = await supabase
+      .from("transport_trips")
+      .insert(withoutAsset)
+      .select("*")
+      .single();
+    tripRow = retry.data;
+    tripErr = retry.error;
+  }
   if (tripErr) throwPg("[startDayCentreRun:insert]", tripErr);
   const trip = rowToTrip(tripRow as TripRow);
 
@@ -4698,6 +5260,64 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
   return rowToTrip(data as TripRow);
 }
 
+/**
+ * Quietly drop return-home legs for people no longer on the floor bus
+ * (Left trip / absent / self checkout). No Hub ticket — roster was stale.
+ * Returns how many passenger legs were pruned.
+ */
+export async function pruneIneligibleReturnTripPassengers(
+  trip: TransportTrip,
+): Promise<number> {
+  if (!trip.eventId) return 0;
+  if (trip.tripKind === "event_venue_hop") return 0;
+  if (trip.tripReturn === "none") return 0;
+
+  const sessionDate = trip.tripDate?.slice(0, 10);
+  if (!sessionDate) return 0;
+
+  const eligible = await resolveReturnHomeBusEligibleIds({
+    eventId: trip.eventId,
+    sessionDate,
+    sessionId: trip.eventDaySessionId ?? null,
+  });
+  if (!eligible) return 0;
+
+  const { data: legRows, error: legErr } = await supabase
+    .from("trip_legs")
+    .select("*")
+    .eq("trip_id", trip.id)
+    .order("leg_index", { ascending: true });
+  if (legErr) throwPg("[pruneIneligibleReturnTripPassengers:legs]", legErr);
+
+  const legs = (legRows ?? []).map((r) => rowToLeg(r as LegRow));
+  const tripRun = (trip.busRunCode ?? "").trim() || null;
+  const toPrune = legs.filter((l) => {
+    if (!isPassengerPickupLeg(l) || l.status !== "pending" || !l.toParticipantId) {
+      return false;
+    }
+    if (!eligible.ids.has(l.toParticipantId)) return true;
+    const floorRun = eligible.runs.get(l.toParticipantId);
+    // checked_in (no floor run yet) — keep unless we know they're wrong run via roster only;
+    // floor map omit means use roster; we only prune known floor mismatches + absents.
+    if (floorRun === undefined) return false;
+    return !matchesEventBusRun(floorRun, tripRun);
+  });
+  if (toPrune.length === 0) return 0;
+
+  const nowIso = new Date().toISOString();
+  for (const leg of toPrune) {
+    await patchTripLeg(leg.id, {
+      status: "completed",
+      passengerPresent: false,
+      medicationHandoverStatus: "not_required",
+      medicationHandoverConfirmed: false,
+      completedAt: nowIso,
+    });
+  }
+  await rebuildTripPickupChain(trip.id);
+  return toPrune.length;
+}
+
 export async function cancelTrip(tripId: string): Promise<TransportTrip> {
   // Clear medication exception flags first so ghost alerts don't leak onto
   // the coordinator's Operations Exception Hub after cancellation. If the trip
@@ -4753,6 +5373,9 @@ export interface TransportAsset {
   lastServiceDate: string | null; // ISO yyyy-mm-dd
   deferredUntil: string | null; // ISO yyyy-mm-dd
   hasWheelchairHoist: boolean;
+  /** Canonical estimated odometer (BL-096) — updated on run close / Admin correct. */
+  currentOdometerKm: number | null;
+  currentOdometerUpdatedAt: string | null;
 }
 
 interface TransportAssetRow {
@@ -4770,6 +5393,8 @@ interface TransportAssetRow {
   last_service_date: string | null;
   deferred_until: string | null;
   has_wheelchair_hoist?: boolean | null;
+  current_odometer_km?: number | string | null;
+  current_odometer_updated_at?: string | null;
 }
 
 function rowToAsset(r: TransportAssetRow): TransportAsset {
@@ -4789,6 +5414,11 @@ function rowToAsset(r: TransportAssetRow): TransportAsset {
     lastServiceDate: r.last_service_date ?? null,
     deferredUntil: r.deferred_until ?? null,
     hasWheelchairHoist: r.has_wheelchair_hoist ?? false,
+    currentOdometerKm:
+      r.current_odometer_km == null || r.current_odometer_km === ""
+        ? null
+        : Number(r.current_odometer_km),
+    currentOdometerUpdatedAt: r.current_odometer_updated_at ?? null,
   };
 }
 
@@ -4859,11 +5489,27 @@ export async function listTransportAssets(): Promise<TransportAsset[]> {
   const { data, error } = await supabase
     .from("transport_assets")
     .select(
-      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until, has_wheelchair_hoist",
+      "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until, has_wheelchair_hoist, current_odometer_km, current_odometer_updated_at",
     )
     .order("is_active", { ascending: false })
     .order("name", { ascending: true });
   if (error) {
+    // Legacy DBs before BL-096 columns — retry without current odo fields.
+    const msg = `${error.message ?? ""} ${error.code ?? ""}`.toLowerCase();
+    if (msg.includes("current_odometer")) {
+      const retry = await supabase
+        .from("transport_assets")
+        .select(
+          "id, name, make_model, rego_plate, passenger_capacity, is_active, vehicle_category, vin, registration_expiry, service_interval_km, last_service_odo, last_service_date, deferred_until, has_wheelchair_hoist",
+        )
+        .order("is_active", { ascending: false })
+        .order("name", { ascending: true });
+      if (retry.error) {
+        console.error("[listTransportAssets] failed", retry.error);
+        return [];
+      }
+      return ((retry.data ?? []) as TransportAssetRow[]).map(rowToAsset);
+    }
     console.error("[listTransportAssets] failed", error);
     return [];
   }

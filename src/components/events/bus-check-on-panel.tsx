@@ -37,6 +37,7 @@ import type { EventVenueStop } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 
 interface Props {
   event: EventManifest;
@@ -364,35 +365,25 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
           )}
         </div>
         <div className="mt-2 flex items-center gap-2">
-          <button
-            type="button"
-            disabled={markOnBusMut.isPending || isNt}
-            onClick={() => markOnBusMut.mutate()}
-          className={cn(
-            "flex h-12 min-w-[7rem] shrink-0 touch-manipulation items-center justify-center gap-1.5 rounded-xl border-2 px-3 text-sm font-semibold transition active:scale-[0.99] disabled:opacity-50",
-            isOnBus
-              ? "border-emerald-500 bg-emerald-600/20 text-emerald-800"
-              : "border-primary bg-primary/10 text-primary",
-          )}
-        >
-          {markOnBusMut.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <CheckCircle2 className="h-4 w-4" />
-          )}
-          {isOnBus ? "On bus" : "Mark on bus"}
-        </button>
+          <div className="flex-1">
+            <MobileFieldButton
+              title={isOnBus ? "On bus ✓" : "Mark on bus"}
+              selected={isOnBus}
+              disabled={markOnBusMut.isPending || isNt}
+              onClick={() => markOnBusMut.mutate()}
+            />
+          </div>
 
-        {!isNt && !isOnBus && (
-          <button
-            type="button"
-            onClick={() => setNtOpen(true)}
-            title="Not travelling"
-            className="flex h-12 w-12 shrink-0 touch-manipulation items-center justify-center rounded-xl border-2 border-destructive/40 text-destructive transition active:scale-[0.99] hover:bg-destructive/10"
-          >
-            <UserX className="h-5 w-5" />
-          </button>
-        )}
+          {!isNt && !isOnBus && (
+            <button
+              type="button"
+              onClick={() => setNtOpen(true)}
+              title="Not travelling"
+              className="flex h-14 w-14 shrink-0 touch-manipulation items-center justify-center rounded-xl border-2 border-destructive/40 text-destructive transition active:scale-[0.99] hover:bg-destructive/10"
+            >
+              <UserX className="h-5 w-5" />
+            </button>
+          )}
         </div>
       </div>
 

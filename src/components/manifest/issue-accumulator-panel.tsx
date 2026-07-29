@@ -5,10 +5,13 @@ import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
-import { verifyOperatorPin } from "@/components/auth/pin-verify";
+import {
+  resolveOperatorStaffIdFromPin,
+  verifyOperatorPin,
+} from "@/components/auth/pin-verify";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
 import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
@@ -25,8 +28,7 @@ import type {
   TransportAsset,
 } from "@/lib/data-store";
 import {
-  DEFAULT_STAFF_UUID,
-  getStaffId,
+  getClearanceForAssetOnDate,
   insertAssetClearanceWithItems,
   resolveStaffIdWithFallback,
   resolveStaffDisplayName,
@@ -82,19 +84,13 @@ function incidentSevToClearance(
 }
 
 
-function severityChip(s: DraftIssueSeverity): {
-  label: string;
-  tone: string;
-  emoji: string;
-} {
-  if (s === "red")
-    return { label: "RED", tone: "bg-red-600 text-white", emoji: "🛑" };
-  if (s === "red-verbal-cleared")
-    return { label: "RED · Verbal Cleared", tone: "bg-amber-500 text-white", emoji: "✅" };
-  if (s === "yellow")
-    return { label: "YELLOW", tone: "bg-yellow-400 text-black", emoji: "🟡" };
-  return { label: "GREEN", tone: "bg-green-600 text-white", emoji: "🟢" };
-}
+/** Canonical severity display — visual chip classes match RYGE_SEVERITY_CHIPS active state. */
+const SEVERITY_DISPLAY: Record<DraftIssueSeverity, { label: string; cls: string; emoji: string }> = {
+  red:               { label: "RED",               cls: "bg-red-600 text-white",   emoji: "🛑" },
+  "red-verbal-cleared": { label: "RED · Verbal Cleared", cls: "bg-amber-500 text-white", emoji: "✅" },
+  yellow:            { label: "YELLOW",             cls: "bg-yellow-400 text-black", emoji: "🟡" },
+  green:             { label: "GREEN",              cls: "bg-green-600 text-white",  emoji: "🟢" },
+};
 
 interface Props {
   asset: TransportAsset;
@@ -207,28 +203,32 @@ export function IssueAccumulatorPanel({
   const buildAccumulatedBlob = (list: DraftIssue[]): string =>
     list
       .map((i, idx) => {
-        const c = severityChip(i.severity);
-        return `${idx + 1}. ${c.emoji} ${c.label} — ${i.text}`;
+        const d = SEVERITY_DISPLAY[i.severity];
+        return `${idx + 1}. ${d.emoji} ${d.label} — ${i.text}`;
       })
       .join("\n");
 
   const submit = async () => {
     if (submitting) return;
-    const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
 
     if (!comfortDeclared) {
       toast.error("Please tick the comfort declaration to continue.");
       return;
     }
-    if (!driverPinVerified) {
+    if (!driverPinVerified || !verifiedDriverPinRef.current) {
       setPinError("Driver PIN required.");
       toast.error("Driver PIN required.");
       return;
     }
 
+    const pin = verifiedDriverPinRef.current;
     setSubmitting(true);
     setPinError(null);
+    let insertedClearanceId: string | null = null;
     try {
+      // PIN holder is the driver of record — must match submitDriverAuthorization.
+      const driverStaffId = await resolveOperatorStaffIdFromPin(pin);
+
       const items: NewClearanceItemInput[] = issues.map((i) => ({
         checkpointId: null,
         checkpointLabel: i.text.slice(0, 80),
@@ -239,43 +239,70 @@ export function IssueAccumulatorPanel({
         workaroundText: i.text,
       }));
 
-      const bundle = await insertAssetClearanceWithItems({
-        assetId: asset.id,
-        clearanceDate: dateStr,
-        driverStaffId,
-        startOdometer: Math.round(startOdometer),
-        items,
-        accumulatedIssues: buildAccumulatedBlob(issues),
-        driverComfortDeclared: comfortDeclared,
-      });
+      let clearanceId: string;
+      const existing = await getClearanceForAssetOnDate(asset.id, dateStr);
+      const reusedExisting = !!existing;
+      if (existing) {
+        // Orphan from a prior failed PIN lock-in, or Fast-Pass path skipped — finish auth.
+        if (existing.status === "failed") {
+          throw new Error(
+            `Clearance failed for this vehicle on ${dateStr}. Office must clear it before dispatch.`,
+          );
+        }
+        clearanceId = existing.id;
+      } else {
+        const bundle = await insertAssetClearanceWithItems({
+          assetId: asset.id,
+          clearanceDate: dateStr,
+          driverStaffId,
+          startOdometer: Math.round(startOdometer),
+          items,
+          accumulatedIssues: buildAccumulatedBlob(issues),
+          driverComfortDeclared: comfortDeclared,
+        });
+        clearanceId = bundle.clearance.id;
+        insertedClearanceId = clearanceId;
 
-      issues.forEach((i) => {
-        if (i.severity === "green") return;
-        const cpHint = checkpoints.find((c) =>
-          i.text.toLowerCase().includes(c.label.toLowerCase().slice(0, 12)),
-        );
-        triggerInspectionAlert(
-          asset.name,
-          driverName,
-          i.text,
-          cpHint ? toSeverity(cpHint.impactLevel) : "conditional_warning",
-          i.text,
-        );
-      });
+        issues.forEach((i) => {
+          if (i.severity === "green") return;
+          const cpHint = checkpoints.find((c) =>
+            i.text.toLowerCase().includes(c.label.toLowerCase().slice(0, 12)),
+          );
+          triggerInspectionAlert(
+            asset.name,
+            driverName,
+            i.text,
+            cpHint ? toSeverity(cpHint.impactLevel) : "conditional_warning",
+            i.text,
+          );
+        });
+      }
 
-      await submitDriverAuthorization(bundle.clearance.id, driverStaffId, verifiedDriverPinRef.current);
+      try {
+        await submitDriverAuthorization(clearanceId, driverStaffId, pin);
+      } catch (authErr) {
+        // Don't leave a UNIQUE(asset, date) row that blocks the next attempt.
+        if (insertedClearanceId) {
+          await supabase
+            .from("asset_daily_clearance")
+            .delete()
+            .eq("id", insertedClearanceId);
+        }
+        throw authErr;
+      }
+
       toast.success("Declaration locked in", {
         description: `${asset.name} cleared for service.`,
       });
 
       // ALL bus/vehicle pre-trip issues land in Maintenance & Repairs (§14.2).
       // GREEN = low-priority note (dented panel, dirty windows); still needs follow-up.
-      if (issues.length > 0) {
+      if (issues.length > 0 && !reusedExisting) {
         (async () => {
           try {
-            const staffId = getStaffId() || (await resolveStaffIdWithFallback());
+            const staffId = driverStaffId || (await resolveStaffIdWithFallback());
             const reporterName = resolveStaffDisplayName(staffId);
-            const locationLabel = `${asset.name} (${asset.regoPlate}) — Pre-trip ${dateStr}`;
+            const locationLabel = `${asset.name} (${asset.regoPlate}) — Pre-trip ${formatDate(dateStr)}`;
             for (const issue of issues) {
               const sev =
                 issue.severity === "red-verbal-cleared"
@@ -297,6 +324,9 @@ export function IssueAccumulatorPanel({
         })();
       }
 
+      void queryClient.invalidateQueries({
+        queryKey: ["asset-clearance", asset.id, dateStr],
+      });
       onCleared();
     } catch (err) {
       const msg = (err as Error).message;
@@ -339,7 +369,7 @@ export function IssueAccumulatorPanel({
             </div>
           )}
           {issues.map((i, idx) => {
-            const c = severityChip(i.severity);
+            const d = SEVERITY_DISPLAY[i.severity];
             return (
               <div
                 key={i.id}
@@ -347,16 +377,18 @@ export function IssueAccumulatorPanel({
                   "flex items-start gap-3 rounded-lg border p-3",
                   i.severity === "yellow"
                     ? "border-yellow-500/70 bg-yellow-400/10"
+                    : i.severity === "red" || i.severity === "red-verbal-cleared"
+                    ? "border-red-600/40 bg-red-600/5"
                     : "border-green-600/40 bg-green-600/5",
                 )}
               >
                 <span
                   className={cn(
                     "shrink-0 rounded-md px-2 py-1 text-[10px] font-extrabold tracking-wide",
-                    c.tone,
+                    d.cls,
                   )}
                 >
-                  #{idx + 1} · {c.label}
+                  #{idx + 1} · {d.label}
                 </span>
                 <div className="min-w-0 flex-1 text-sm">{i.text}</div>
                 <button

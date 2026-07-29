@@ -13,6 +13,8 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { DatePicker } from "@/components/ui/date-picker";
+import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -115,13 +117,14 @@ export function LogLedgerEntryModal({
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Transaction date
               </Label>
-              <Input
-                type="date"
-                value={transactionDate}
-                onChange={(e) => {
-                  setTransactionDate(e.target.value);
+              <DatePicker
+                value={parseIsoDateLocal(transactionDate)}
+                onChange={(d) => {
+                  setTransactionDate(d ? toIsoDateString(d) : "");
                   setDirty(true);
                 }}
+                dateFormat="dd-MMM-yy"
+                className="h-9 text-sm"
               />
             </div>
             <div className="space-y-2">

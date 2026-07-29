@@ -5,16 +5,40 @@ import { useMandatedChecks } from "@/hooks/use-system-parameters";
 interface Props {
   ticked?: Set<number>;
   onTickedChange?: (next: Set<number>) => void;
+  /** Override checklist labels (e.g. close checks). Default = Open mandated list. */
+  items?: string[];
+  /** Section heading above the tick list. */
+  heading?: string;
+  /** Parameter key shown in empty-state Admin hint. */
+  paramKey?: string;
+  /** Verb in empty-state copy: "open" | "close". */
+  emptyTrustVerb?: "open" | "close";
+  /**
+   * Subtext under each Confirm row.
+   * Default = Open Centre fabric wording (Manager-approved workaround).
+   */
+  itemHint?: string;
 }
 
 /**
- * Visual checklist of mandated compliance items pulled from
- * `system_parameters.site_management.mandated_compliance_checks`.
+ * Visual checklist of mandated compliance items.
  * Each item is a big tappable button that toggles between grey (unchecked)
  * and bright green (confirmed) — styled like an oversized status pill.
+ *
+ * Default source: `site_management.mandated_compliance_checks` (Open).
+ * Pass `items` for Close (`site_management.mandated_close_checks`).
  */
-export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
-  const items = useMandatedChecks();
+export function MandatedChecksList({
+  ticked,
+  onTickedChange,
+  items: itemsOverride,
+  heading = "Confirm site is ready to open",
+  paramKey = "site_management.mandated_compliance_checks",
+  emptyTrustVerb = "open",
+  itemHint = "Checked and OK, or a Manager-approved workaround is in place.",
+}: Props = {}) {
+  const openItems = useMandatedChecks();
+  const items = itemsOverride ?? openItems;
   const [internal, setInternal] = useState<Set<number>>(new Set());
   const controlled = !!ticked && !!onTickedChange;
   const value = controlled ? ticked! : internal;
@@ -24,10 +48,10 @@ export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
       <div className="flex items-start gap-2 rounded-md border border-dashed border-border bg-muted/30 p-3 text-sm text-muted-foreground">
         <Info className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
-          No mandated compliance checks configured — high-trust 1-tap open is
-          enabled. A Manager can add items in
+          No mandated compliance checks configured — high-trust 1-tap{" "}
+          {emptyTrustVerb} is enabled. A Manager can add items in
           <code className="mx-1 rounded bg-muted px-1 py-0.5 text-[11px]">
-            site_management.mandated_compliance_checks
+            {paramKey}
           </code>
           via Admin → System Parameters.
         </div>
@@ -47,7 +71,7 @@ export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
     <div className="space-y-3">
       <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
         <ClipboardCheck className="h-3.5 w-3.5" />
-        Confirm site is ready to open
+        {heading}
       </div>
       <ul className="space-y-3">
         {items.map((label, i) => {
@@ -77,8 +101,7 @@ export function MandatedChecksList({ ticked, onTickedChange }: Props = {}) {
                       on ? "text-white/80" : "text-muted-foreground"
                     }`}
                   >
-                    Checked and OK, or a Manager-approved workaround is in
-                    place.
+                    {itemHint}
                   </div>
                 </div>
               </button>

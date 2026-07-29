@@ -6,6 +6,15 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
   Tabs,
   TabsContent,
   TabsList,
@@ -81,6 +90,7 @@ function CategoryPanel({
   const [code, setCode] = useState("");
   const [displayName, setDisplayName] = useState("");
   const [newColor, setNewColor] = useState("#3b82f6");
+  const [removeTarget, setRemoveTarget] = useState<LookupParameter | null>(null);
 
   const invalidate = () => {
     clearLookupCacheCategory(category);
@@ -115,6 +125,7 @@ function CategoryPanel({
     mutationFn: (id: string) => deleteLookupParameter(id),
     onSuccess: () => {
       invalidate();
+      setRemoveTarget(null);
       toast.success("Entry removed");
     },
     onError: (e: Error) =>
@@ -270,8 +281,7 @@ function CategoryPanel({
                       <Button
                         variant="ghost"
                         size="sm"
-                        onClick={() => remove.mutate(row.id)}
-                        disabled={remove.isPending}
+                        onClick={() => setRemoveTarget(row)}
                         className="gap-1.5 text-destructive hover:text-destructive"
                       >
                         <Trash2 className="h-3.5 w-3.5" />
@@ -285,6 +295,32 @@ function CategoryPanel({
           </tbody>
         </table>
       </div>
+
+      <AlertDialog
+        open={!!removeTarget}
+        onOpenChange={(open) => !open && setRemoveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Remove "{removeTarget?.displayName}"?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This lookup entry will be deleted from {label}. Code{" "}
+              <span className="font-mono">{removeTarget?.code}</span> will no longer appear in
+              pickers that use this list.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={remove.isPending}
+              onClick={() => removeTarget && remove.mutate(removeTarget.id)}
+            >
+              {remove.isPending ? "Removing…" : "Remove entry"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

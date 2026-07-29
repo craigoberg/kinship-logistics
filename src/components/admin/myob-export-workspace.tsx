@@ -14,6 +14,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ClientTime } from "@/components/ui/client-time";
+import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   buildCsv,
   downloadCsv,
@@ -107,25 +109,21 @@ export function MyobExportWorkspace() {
 
       <div className="grid gap-3 sm:grid-cols-2">
         <div className="space-y-1">
-          <Label htmlFor="rg-start" className="text-xs">
-            From
-          </Label>
-          <Input
-            id="rg-start"
-            type="date"
-            value={rangeStart}
-            onChange={(e) => setRangeStart(e.target.value)}
+          <Label className="text-xs">From</Label>
+          <DatePicker
+            value={parseIsoDateLocal(rangeStart)}
+            onChange={(d) => setRangeStart(d ? toIsoDateString(d) : "")}
+            dateFormat="dd-MMM-yy"
+            className="h-9 text-sm"
           />
         </div>
         <div className="space-y-1">
-          <Label htmlFor="rg-end" className="text-xs">
-            To
-          </Label>
-          <Input
-            id="rg-end"
-            type="date"
-            value={rangeEnd}
-            onChange={(e) => setRangeEnd(e.target.value)}
+          <Label className="text-xs">To</Label>
+          <DatePicker
+            value={parseIsoDateLocal(rangeEnd)}
+            onChange={(d) => setRangeEnd(d ? toIsoDateString(d) : "")}
+            dateFormat="dd-MMM-yy"
+            className="h-9 text-sm"
           />
         </div>
       </div>
@@ -181,7 +179,7 @@ export function MyobExportWorkspace() {
               rows.map((r) => (
                 <TableRow key={r.logId}>
                   <TableCell className="font-mono text-xs">
-                    {r.rosterDate}
+                    {formatDate(r.rosterDate)}
                   </TableCell>
                   <TableCell>{r.participantName}</TableCell>
                   <TableCell className="text-xs">{r.serviceCode}</TableCell>

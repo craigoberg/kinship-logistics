@@ -1,6 +1,6 @@
 import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import {
   listCentreHours,
   dayCodeFromSydneyIndex,
@@ -41,23 +41,19 @@ function mondayOf(date: Date): Date {
   return d;
 }
 
+
 const SHORT_MONTH = [
   "Jan", "Feb", "Mar", "Apr", "May", "Jun",
   "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
-];
+] as const;
 
 function fmtRange(d: Date): string {
-  return `${d.getDate()} ${SHORT_MONTH[d.getMonth()]}`;
+  return formatDate(d.toISOString().slice(0, 10));
 }
 
 function fmtTime(t: string): string {
-  // "HH:MM" → "9am" / "3pm"
-  const [hStr, mStr] = t.split(":");
-  const h = parseInt(hStr, 10);
-  const m = parseInt(mStr, 10);
-  const ampm = h >= 12 ? "pm" : "am";
-  const h12 = h % 12 === 0 ? 12 : h % 12;
-  return m === 0 ? `${h12}${ampm}` : `${h12}:${mStr}${ampm}`;
+  // "HH:MM" stored clock string → display as-is (already 24h)
+  return t.slice(0, 5);
 }
 
 // ---------------------------------------------------------------------------
@@ -84,21 +80,22 @@ type CalRow = CalCell[];
 
 const ROW_LABELS = ["Last", "This", "", "", ""];
 
-// Status-based button colour for event chips
-const EVENT_STATUS_CLS: Record<string, string> = {
-  Planning:
-    "bg-amber-400/20 text-amber-800 dark:text-amber-300 border border-amber-400/40 hover:bg-amber-400/30",
-  Confirmed:
-    "bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-400/40 hover:bg-blue-500/30",
-  Open:
-    "bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30",
-};
+// ---------------------------------------------------------------------------
+// Solid-fill chip colour tokens  (Style A — Google Calendar convention)
+// White text on fully-opaque coloured bar; past days handled via cell opacity.
+// ---------------------------------------------------------------------------
 
-// Centre button — green when open, blue when closed (weekdays only)
-const CENTRE_OPEN_CLS =
-  "bg-emerald-500/20 text-emerald-800 dark:text-emerald-300 border border-emerald-400/40 hover:bg-emerald-500/30";
-const CENTRE_CLOSED_CLS =
-  "bg-blue-500/20 text-blue-800 dark:text-blue-300 border border-blue-400/40 hover:bg-blue-500/30";
+// Centre chip variants
+const CENTRE_LIVE_CLS   = "bg-emerald-500 text-white hover:bg-emerald-600";
+const CENTRE_FUTURE_CLS = "bg-indigo-500  text-white hover:bg-indigo-600";
+const CENTRE_PAST_CLS   = "bg-slate-500   text-white/80";
+
+// Event chip variants — distinct hue family from Centre
+const EVENT_STATUS_CLS: Record<string, string> = {
+  Planning:  "bg-amber-500  text-white hover:bg-amber-600",
+  Confirmed: "bg-sky-500    text-white hover:bg-sky-600",
+  Open:      "bg-teal-500   text-white hover:bg-teal-600",
+};
 
 // ---------------------------------------------------------------------------
 // Grid builder — 5-week rolling window anchored to today
@@ -156,19 +153,36 @@ interface DayCellProps {
   onEventClick: (e: EventManifest) => void;
 }
 
-// Shared pill button style
-const PILL = "truncate rounded px-1 text-[8px] leading-[13px] font-semibold text-left transition-colors cursor-pointer";
+// Shared pill style — solid fill, white text, rounded bar
+const PILL     = "block w-full truncate rounded px-1.5 text-[8px] leading-[15px] font-semibold text-left transition-colors";
+const PILL_BTN = PILL + " cursor-pointer";
+
+function centreCls(cell: CalCell): string {
+  if (cell.isLiveOpen) return CENTRE_LIVE_CLS;
+  if (!cell.isPast)    return CENTRE_FUTURE_CLS;
+  return CENTRE_PAST_CLS;
+}
+
+function centreLabel(cell: CalCell): string {
+  if (cell.isLiveOpen) return "● Live";
+  if (!cell.isPast)    return "Centre";
+  return "Centre ✓";
+}
 
 function DayCell({ cell, onEventClick }: DayCellProps) {
+  const hours = cell.centreHours
+    ? `${fmtTime(cell.centreHours.openTime)}–${fmtTime(cell.centreHours.closeTime)}`
+    : null;
+
   return (
-    // height: date row (18px) + up to 2 event rows (13px each) + gaps + padding = ~58px
+    // date row (18px) + up to 2 chip rows (15px each) + gaps + padding ≈ 64px
     <div
       className={cn(
-        "relative h-[58px] overflow-hidden border-r border-b border-border/30 p-1",
-        cell.isPast && !cell.isToday && "opacity-55",
+        "relative h-[64px] overflow-hidden border-r border-b border-border/30 p-1",
+        cell.isPast && !cell.isToday && "opacity-50",
       )}
     >
-      {/* Row 1: date number + Centre button side-by-side */}
+      {/* Row 1: date number + Centre chip */}
       <div className="flex items-center gap-1">
         <span
           className={cn(
@@ -185,29 +199,27 @@ function DayCell({ cell, onEventClick }: DayCellProps) {
             : cell.date.getDate()}
         </span>
 
-        {cell.isWeekday && (
+        {cell.isCentreScheduled && (
           <button
             type="button"
-            className={cn(PILL, "min-w-0 flex-1", cell.isLiveOpen ? CENTRE_OPEN_CLS : CENTRE_CLOSED_CLS)}
+            className={cn(PILL_BTN, "min-w-0 flex-1", centreCls(cell))}
             title={
               cell.isLiveOpen
-                ? `Centre is open${cell.centreHours ? ` · ${fmtTime(cell.centreHours.openTime)}–${fmtTime(cell.centreHours.closeTime)}` : ""}`
-                : cell.isCentreScheduled
-                ? "Centre scheduled — not yet opened"
-                : "Centre closed"
+                ? `Centre is open${hours ? ` · ${hours}` : ""}`
+                : !cell.isPast
+                ? `Centre scheduled${hours ? ` · ${hours}` : ""} — not yet open`
+                : "Centre closed for the day"
             }
           >
-            Centre
-            {cell.isLiveOpen && cell.centreHours && (
-              <span className="ml-0.5 opacity-70">
-                {fmtTime(cell.centreHours.openTime)}–{fmtTime(cell.centreHours.closeTime)}
-              </span>
+            {centreLabel(cell)}
+            {cell.isLiveOpen && hours && (
+              <span className="ml-1 opacity-80 font-normal">{hours}</span>
             )}
           </button>
         )}
       </div>
 
-      {/* Rows 2–3: event buttons */}
+      {/* Rows 2–3: event chips */}
       <div className="mt-0.5 space-y-px">
         {cell.events.slice(0, 2).map((e) => (
           <button
@@ -215,18 +227,18 @@ function DayCell({ cell, onEventClick }: DayCellProps) {
             type="button"
             onClick={() => onEventClick(e)}
             className={cn(
-              PILL, "w-full",
+              PILL_BTN,
               EVENT_STATUS_CLS[e.status] ??
-                "bg-muted text-foreground border border-border hover:bg-accent",
+                "bg-slate-500 text-white hover:bg-slate-600",
             )}
-            title={`${e.title} (${e.status})`}
+            title={`${e.title} · ${e.status}`}
           >
             {e.title}
           </button>
         ))}
         {cell.events.length > 2 && (
-          <span className="block pl-0.5 text-[8px] leading-[13px] text-muted-foreground">
-            +{cell.events.length - 2}
+          <span className="block pl-1 text-[8px] leading-[14px] text-muted-foreground">
+            +{cell.events.length - 2} more
           </span>
         )}
       </div>
@@ -296,19 +308,14 @@ export function WallCalendar() {
         {/* Header */}
         <div className="flex items-center justify-between border-b border-border bg-muted/30 px-3 py-1.5">
           <span className="text-xs font-semibold">
-            {fmtRange(rangeStart)} – {fmtRange(rangeEnd)}{" "}
-            {rangeEnd.getFullYear()}
+            {fmtRange(rangeStart)} – {fmtRange(rangeEnd)}
           </span>
-          <span className="flex items-center gap-2 text-[10px] text-muted-foreground">
-            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", CENTRE_OPEN_CLS)}>
-              Centre live
-            </span>
-            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", CENTRE_CLOSED_CLS)}>
-              Centre closed
-            </span>
-            <span className="rounded border border-amber-400/40 bg-amber-400/20 px-1.5 py-0.5 text-[9px] font-semibold text-amber-800 dark:text-amber-300">
-              Event
-            </span>
+          <span className="flex items-center gap-1.5">
+            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", CENTRE_LIVE_CLS)}>● Live</span>
+            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", CENTRE_FUTURE_CLS)}>Centre</span>
+            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", EVENT_STATUS_CLS.Open)}>Event open</span>
+            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", EVENT_STATUS_CLS.Confirmed)}>Confirmed</span>
+            <span className={cn("rounded px-1.5 py-0.5 text-[9px] font-semibold", EVENT_STATUS_CLS.Planning)}>Planning</span>
           </span>
         </div>
 

@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { operationToasts } from "@/lib/ui/operation-toasts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -12,16 +12,44 @@ import {
   listIssueNotes,
   renderNoteLine,
   resolveUnifiedIssue,
+  startUnifiedIssueReview,
   type CouncilSeverity,
   type UnifiedIssue,
 } from "@/lib/api/unified-issues";
+import {
+  dispatchCouncilEmail,
+  openCouncilMailto,
+  type CouncilSlaCategory,
+} from "@/lib/api/site-issues";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { HubContextMetaGrid } from "@/components/governance/hub-context-meta-grid";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
+import { hubIssueContextMeta } from "@/lib/governance/hub-issue-context";
+import {
+  findHubReviewStartedNote,
+  formatHubWaitDuration,
+  isHubReviewStarted,
+} from "@/lib/governance/hub-review-started";
 import { isManagerProfile } from "@/lib/governance/is-manager";
+import {
+  deriveIssueWorkflowStatus,
+  HUB_WORKFLOW_STATUS_BADGE,
+  HUB_WORKFLOW_STATUS_LABEL,
+} from "@/lib/governance/hub-workflow-status";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
+import { getExclusionByHubIssueId, type InfectiousExclusion } from "@/lib/api/infectious-exclusion";
+import { InfectiousClearanceSheet } from "@/components/site-day/infectious-clearance-sheet";
+import { isActiveUserManager } from "@/lib/data-store";
+import {
+  useCouncilEmailTemplate,
+  useCouncilEmailTo,
+  useCouncilSlaHours,
+} from "@/hooks/use-system-parameters";
+import { formatDate, formatDateTime } from "@/lib/utils";
+import { toast } from "sonner";
 
 // ── Helpers for clean display ──────────────────────────────────────────────
 
@@ -32,6 +60,8 @@ function stripPrefixes(text: string): string {
     .replace(/^\[INCIDENT\]\s*/i, "")
     .replace(/^\[AUTOMATED_RED\]\s*/i, "")
     .replace(/^\[ATTENDANCE\]\s*/i, "")
+    .replace(/^\[HEALTH & SAFETY\]\s*/i, "")
+    .replace(/^\[INFECTIOUS EXCLUSION\]\s*/i, "")
     .trim();
 }
 
@@ -75,17 +105,32 @@ interface Props {
   issue: UnifiedIssue;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When true, opening the dialog starts office review (Open → In Progress). */
+  autoStartReview?: boolean;
 }
 
-export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
+function substituteCouncilTokens(
+  template: string,
+  tokens: Record<string, string>,
+): string {
+  return template.replace(/\{(\w+)\}/g, (_m, k: string) => tokens[k] ?? `{${k}}`);
+}
+
+export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview = false }: Props) {
   const qc = useQueryClient();
+  const councilEmailTo = useCouncilEmailTo();
+  const councilTemplate = useCouncilEmailTemplate();
+  const councilSlaHours = useCouncilSlaHours();
   const [note, setNote] = useState("");
   const [deferOn, setDeferOn] = useState(false);
   const [escalateOn, setEscalateOn] = useState(false);
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
+  const [deferDatetimeValid, setDeferDatetimeValid] = useState(true);
   const [councilSev, setCouncilSev] = useState<CouncilSeverity>("Sev 2");
   const [pinOpen, setPinOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<"log" | "resolve" | "forceAck">("log");
+  const [pendingAction, setPendingAction] = useState<"resolve" | "forceAck">("resolve");
+  const [clearanceOpen, setClearanceOpen] = useState(false);
+  const [activeExclusion, setActiveExclusion] = useState<InfectiousExclusion | null>(null);
 
   useEffect(() => {
     if (open) {
@@ -93,11 +138,32 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       setDeferOn(false);
       setEscalateOn(false);
       setDeferAt(defaultDeferIso());
+      setDeferDatetimeValid(true);
       setCouncilSev("Sev 2");
       setPinOpen(false);
-      setPendingAction("log");
+      setClearanceOpen(false);
+      setActiveExclusion(null);
     }
   }, [open]);
+
+  const exclusionQuery = useQuery({
+    queryKey: ["infectious-exclusion-by-hub", issue.sourceRowId],
+    enabled:
+      open &&
+      (issue.source === "day_centre" || issue.source === "event") &&
+      (issue.subCategory === "Health & Safety" ||
+        issue.description.includes("[INFECTIOUS EXCLUSION]")),
+    queryFn: () => getExclusionByHubIssueId(issue.sourceRowId),
+    staleTime: 15_000,
+  });
+
+  useEffect(() => {
+    if (exclusionQuery.data?.status === "active") {
+      setActiveExclusion(exclusionQuery.data);
+    } else {
+      setActiveExclusion(null);
+    }
+  }, [exclusionQuery.data]);
 
   const timelineQuery = useQuery({
     queryKey: ["hub-issue-timeline", issue.source, issue.sourceRowId],
@@ -110,8 +176,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const trimmed = note.trim().length;
   const noteOk = trimmed >= MIN_TIMELINE_NOTE;
-  const deferValid =
-    !deferOn || (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
+  const deferValid = !deferOn || deferDatetimeValid;
 
   const invalidateAll = () => {
     invalidateIssueCaches(qc, {
@@ -132,6 +197,41 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
           councilSeverity: councilSev,
           note,
         });
+        // BL-062 — mailto handoff (production stance). Hub notes + stale RYG after.
+        if (
+          (issue.source === "day_centre" || issue.source === "event") &&
+          councilEmailTo.trim().includes("@")
+        ) {
+          const slaCategory: CouncilSlaCategory =
+            councilSev === "Sev 4" ? "Sev 3" : (councilSev as CouncilSlaCategory);
+          const hoursKey =
+            slaCategory === "Sev 1"
+              ? "Sev_1"
+              : slaCategory === "Sev 2"
+                ? "Sev_2"
+                : "Sev_3";
+          const hours = councilSlaHours[hoursKey] ?? 24;
+          const deadlineIso = new Date(
+            Date.now() + hours * 3600 * 1000,
+          ).toISOString();
+          const tokens = {
+            severity: councilSev,
+            deadline: formatDateTime(deadlineIso),
+            description: issue.description || issue.title,
+            workaround: note.trim(),
+            date: formatDate(new Date().toISOString().slice(0, 10)),
+          };
+          const res = await dispatchCouncilEmail({
+            issueId: issue.sourceRowId,
+            to: councilEmailTo.trim(),
+            subject: substituteCouncilTokens(councilTemplate.subject, tokens),
+            body: substituteCouncilTokens(councilTemplate.body, tokens),
+            category: slaCategory,
+            deadlineIso,
+          });
+          openCouncilMailto(res.mailto);
+          return "escalate_mailto" as const;
+        }
         return "escalate" as const;
       }
       await appendUpdateNote(issue, note);
@@ -140,16 +240,29 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onSuccess: (kind) => {
       invalidateAll();
       setNote("");
+      setDeferOn(false);
+      setEscalateOn(false);
       if (kind === "append") {
-        toast.success("Update appended to the timeline.");
+        operationToasts.noteLogged();
       } else if (kind === "defer") {
-        toast.success("Issue deferred. Moved to the Awaiting tab.");
+        operationToasts.issueDeferred();
+      } else if (kind === "escalate_mailto") {
+        operationToasts.councilEscalatedMailto();
       } else {
-        toast.success("Escalated to Council. Moved to the Awaiting tab.");
+        operationToasts.councilEscalated();
+        if (
+          (issue.source === "day_centre" || issue.source === "event") &&
+          !councilEmailTo.trim().includes("@")
+        ) {
+          toast.message("Council escalated in Hub", {
+            description:
+              "Set site_management.council_email_to in Admin to open a pre-filled mail next time.",
+          });
+        }
       }
-      onOpenChange(false);
+      // Dialog stays open — user can add more notes or close manually.
     },
-    onError: (e: Error) => toast.error("Action failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
   const resolveMut = useMutation({
@@ -159,12 +272,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onSuccess: () => {
       invalidateAll();
       setNote("");
-      toast.success("Issue resolved", {
-        description: "Receipt appended to the operational ledger (NDIS).",
-      });
+      operationToasts.issueResolved();
       onOpenChange(false);
     },
-    onError: (e: Error) => toast.error("Resolution failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.resolutionFailed(e.message),
   });
 
   const forceAckMut = useMutation({
@@ -174,15 +285,39 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
     onSuccess: () => {
       invalidateAll();
       setNote("");
-      toast.success("Escalation force-acknowledged", {
-        description: "Removed from the awaiting list. Receipt logged.",
-      });
+      operationToasts.escalationAcknowledged();
       onOpenChange(false);
     },
-    onError: (e: Error) =>
-      toast.error("Force-ack failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
+  const startMut = useMutation({
+    mutationFn: () => startUnifiedIssueReview(issue),
+    onSuccess: () => {
+      invalidateAll();
+      qc.invalidateQueries({ queryKey: ["hub-review-started-keys"] });
+      const waitLabel = formatHubWaitDuration(issue.createdAt, new Date().toISOString());
+      operationToasts.reviewStarted(waitLabel);
+    },
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
+  });
+
+  const autoStartRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      autoStartRef.current = null;
+      return;
+    }
+    if (!autoStartReview) return;
+    const sessionKey = `${issue.source}:${issue.sourceRowId}`;
+    if (autoStartRef.current === sessionKey) return;
+    autoStartRef.current = sessionKey;
+    startMut.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per open session
+  }, [open, autoStartReview, issue.source, issue.sourceRowId]);
+
+  // startMut runs in the background (Open → In Progress transition) — exclude from busy
+  // so it doesn't lock the UI while the status change completes.
   const busy = logMut.isPending || resolveMut.isPending || forceAckMut.isPending;
   const canLog = noteOk && deferValid && !busy;
   const canResolve = noteOk && !busy && !deferOn && !escalateOn;
@@ -200,8 +335,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const handleLogClick = () => {
     if (!canLog) return;
-    setPendingAction("log");
-    setPinOpen(true);
+    logMut.mutate();
   };
 
   const handleResolveClick = () => {
@@ -212,20 +346,15 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
 
   const handlePinAuthenticated = () => {
     if (!isManagerProfile()) {
-      toast.error("Manager PIN required", {
-        description:
-          "Only manager-level operators can save issue changes. Action blocked.",
-      });
+      operationToasts.managerPinRequired();
       setPinOpen(false);
       return;
     }
     setPinOpen(false);
-    if (pendingAction === "resolve") {
-      resolveMut.mutate();
-    } else if (pendingAction === "forceAck") {
+    if (pendingAction === "forceAck") {
       forceAckMut.mutate();
     } else {
-      logMut.mutate();
+      resolveMut.mutate();
     }
   };
 
@@ -236,7 +365,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   };
 
   // Parse event context suffix embedded by IncidentIntakeDialog
-  const { cleanText, eventName, filedFrom } = parseContextSuffix(issue.description ?? "");
+  const { cleanText } = parseContextSuffix(issue.description ?? "");
   const cleanTitle = stripPrefixes(cleanText || issue.title);
 
   // Only show the extended description when it's meaningfully longer (truncation occurred)
@@ -246,11 +375,24 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
   // Detect prefix tags for display badge
   const hasVerbalWorkaround = /^\[VERBAL WORKAROUND\]/i.test(issue.description ?? "");
   const hasIncidentTag = /^\[INCIDENT\]/i.test(issue.description ?? "");
+  const isHealthSafety =
+    issue.subCategory === "Health & Safety" ||
+    /\[HEALTH & SAFETY\]/i.test(issue.description ?? "");
+  const showClearance =
+    !!activeExclusion &&
+    activeExclusion.status === "active" &&
+    isActiveUserManager();
 
-  // Reporter name — stored as a string on operational_incidents, may be UUID on site issues
-  const reportedBy = (raw.reported_by as string | null) ?? null;
-  const reportedByDisplay =
-    reportedBy && !reportedBy.match(/^[0-9a-f-]{36}$/i) ? reportedBy : null;
+  const { location, reporter } = hubIssueContextMeta(issue);
+  const notes = timelineQuery.data ?? [];
+  const reviewStartedNote = findHubReviewStartedNote(notes);
+  const reviewStarted = isHubReviewStarted(notes);
+  const workflow = reviewStarted
+    ? ("in_progress" as const)
+    : deriveIssueWorkflowStatus(issue, new Set());
+  const waitLabel = reviewStartedNote
+    ? formatHubWaitDuration(issue.createdAt, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(issue.createdAt, new Date().toISOString());
 
   const contextCard = (
     <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
@@ -261,13 +403,21 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
           </Badge>
         )}
         <Badge variant="secondary">
-          {SOURCE_LABEL_CLEAN[issue.source] ?? issue.sourceLabel}
+          {isHealthSafety
+            ? "Health & Safety"
+            : (SOURCE_LABEL_CLEAN[issue.source] ?? issue.sourceLabel)}
+        </Badge>
+        <Badge className={HUB_WORKFLOW_STATUS_BADGE[workflow]}>
+          {HUB_WORKFLOW_STATUS_LABEL[workflow]}
         </Badge>
         {hasVerbalWorkaround && (
           <Badge className="bg-amber-500 text-white text-[10px]">Verbal Workaround</Badge>
         )}
         {hasIncidentTag && (
           <Badge className="bg-orange-600 text-white text-[10px]">Incident</Badge>
+        )}
+        {activeExclusion?.status === "active" && (
+          <Badge className="bg-amber-600 text-white text-[10px]">Infectious exclusion</Badge>
         )}
         <span className="text-xs text-muted-foreground capitalize">
           {issue.category?.replace(/_/g, " ")}
@@ -280,30 +430,24 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
         <p className="text-xs text-muted-foreground whitespace-pre-wrap">{extendedDesc}</p>
       )}
 
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {eventName && (
-          <>
-            <span className="font-medium text-foreground/70">Event</span>
-            <span>{eventName}</span>
-          </>
-        )}
-        {filedFrom && (
-          <>
-            <span className="font-medium text-foreground/70">Filed from</span>
-            <span>{filedFrom}</span>
-          </>
-        )}
-        {reportedByDisplay && (
-          <>
-            <span className="font-medium text-foreground/70">Reported by</span>
-            <span>{reportedByDisplay}</span>
-          </>
-        )}
-        <span className="font-medium text-foreground/70">Status</span>
-        <span className="capitalize">{String(raw.status ?? issue.status ?? "open")}</span>
-        <span className="font-medium text-foreground/70">Logged</span>
-        <span><FormattedDateTime value={issue.createdAt} /></span>
-      </div>
+      <HubContextMetaGrid
+        rows={[
+          { label: "Location", value: location },
+          { label: "Reported by", value: reporter ?? "Unknown staff" },
+          { label: "Logged", value: <FormattedDateTime value={issue.createdAt} /> },
+          reviewStarted
+            ? {
+                label: "Review started",
+                value: (
+                  <>
+                    <FormattedDateTime value={reviewStartedNote!.stampedAt} />
+                    {waitLabel ? ` (${waitLabel} after logged)` : ""}
+                  </>
+                ),
+              }
+            : { label: "Waiting", value: `${waitLabel} since logged` },
+        ]}
+      />
     </div>
   );
 
@@ -312,7 +456,6 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
       <ManageItemShell
         open={open}
         onOpenChange={(o) => {
-          if (busy) return;
           if (!o) setNote("");
           onOpenChange(o);
         }}
@@ -328,14 +471,23 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
         onDeferOnChange={setDeferOn}
         deferAt={deferAt}
         onDeferAtChange={setDeferAt}
+        onDeferDatetimeValidChange={setDeferDatetimeValid}
         escalateOn={escalateOn}
         onEscalateOnChange={setEscalateOn}
         councilSev={councilSev}
         onCouncilSevChange={(v) => setCouncilSev(v as CouncilSeverity)}
         councilOptions={COUNCIL_SEVERITY_OPTIONS}
-        showEscalate={issue.source === "day_centre"}
+        showEscalate={issue.source === "day_centre" && !isHealthSafety}
         extraFooterStart={
-          isAwaitingOperatorAck ? (
+          showClearance ? (
+            <Button
+              size="sm"
+              className="bg-emerald-600 hover:bg-emerald-700"
+              onClick={() => setClearanceOpen(true)}
+            >
+              Clear to return
+            </Button>
+          ) : isAwaitingOperatorAck ? (
             <Button
               variant="destructive"
               size="sm"
@@ -351,7 +503,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
         canLog={canLog}
         onResolveClose={handleResolveClick}
         resolveCloseLabel="Resolve"
-        canResolve={canResolve}
+        canResolve={canResolve && !showClearance}
       />
 
       <PinReauthDialog
@@ -359,6 +511,18 @@ export function ManageIssueDialog({ issue, open, onOpenChange }: Props) {
         onOpenChange={setPinOpen}
         reason="Manager PIN required to save issue changes."
         onAuthenticated={handlePinAuthenticated}
+      />
+
+      <InfectiousClearanceSheet
+        open={clearanceOpen}
+        onOpenChange={setClearanceOpen}
+        exclusion={activeExclusion}
+        onCleared={() => {
+          void qc.invalidateQueries({
+            queryKey: ["infectious-exclusion-by-hub", issue.sourceRowId],
+          });
+          onOpenChange(false);
+        }}
       />
     </>
   );

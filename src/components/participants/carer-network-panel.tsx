@@ -16,6 +16,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Switch } from "@/components/ui/switch";
 import {
   Popover,
@@ -272,25 +273,21 @@ export function CarerNetworkPanel({ participantId, participantName }: Props) {
                                 Primary
                               </span>
                             </div>
-                            <Button
-                              size="icon"
-                              variant="ghost"
+                            <IconActionButton
                               onClick={() => {
                                 setEditingCarer(c);
                                 setSheetOpen(true);
                               }}
-                              aria-label="Edit carer"
+                              tooltip="Edit carer"
                             >
                               <Pencil className="h-4 w-4" />
-                            </Button>
-                            <Button
-                              size="icon"
-                              variant="ghost"
+                            </IconActionButton>
+                            <IconActionButton
                               onClick={() => setUnlinkTarget(c)}
-                              aria-label="Unlink carer"
+                              tooltip="Unlink carer"
                             >
                               <Link2Off className="h-4 w-4" />
-                            </Button>
+                            </IconActionButton>
                           </div>
                         </td>
                       </tr>

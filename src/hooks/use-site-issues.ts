@@ -37,9 +37,9 @@ export function useSiteIssues(sessionId: string | null | undefined) {
 }
 
 /**
- * Unified active-issues hook for the post-declaration ActiveDayPanel.
- * Returns today's issues for `sessionId` PLUS any still-open issues
- * carried over from prior sessions.
+ * Day Centre active-issues feed for Start of Day walkthrough and Active Day.
+ * Today's non-resolved Day Centre rows PLUS prior open / workaround_accepted /
+ * deferred Day Centre carry-over (never trip/event issues).
  */
 export function useActiveSiteIssues(sessionId: string | null | undefined) {
   const queryClient = useQueryClient();

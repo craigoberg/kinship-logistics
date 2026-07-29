@@ -323,7 +323,7 @@ function DateField({
         onChange={onChange}
         placeholder="Select a date"
         disabledDates={disabledFn}
-        dateFormat="dd/MM/yyyy"
+        dateFormat="dd-MMM-yy"
         className="h-9 text-sm"
       />
       <span className="text-[11px] text-muted-foreground">{helper}</span>

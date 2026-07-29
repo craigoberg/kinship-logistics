@@ -10,6 +10,7 @@ import {
   DialogFooter,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -30,8 +31,12 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
-import { useInsertEvent, usePriorEventsForClone } from "@/hooks/use-supabase-data";
+import { cn, formatDate, parseIsoDateLocal, toIsoDateString, compareIsoDates, normalizeEventEndDate, shiftEndDateWithStart, startOfTodayLocal, todayLocalIso } from "@/lib/utils";
+import {
+  useInsertEvent,
+  useLookupParameters,
+  usePriorEventsForClone,
+} from "@/hooks/use-supabase-data";
 import { useQuery } from "@tanstack/react-query";
 import { listVenues } from "@/lib/api/venues";
 import { inferEventKind } from "@/lib/api/event-outing";
@@ -53,8 +58,7 @@ interface Props {
 }
 
 function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  return todayLocalIso();
 }
 
 export function CreateEventModal({ open, onOpenChange }: Props) {
@@ -77,6 +81,14 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
     queryFn: () => listVenues("active"),
     staleTime: 60_000,
   });
+  const { data: eventTypes = [] } = useLookupParameters("event_types");
+  const eventTypeDisplayName =
+    eventTypes.find((t) => t.code === eventTypeCode)?.displayName ?? "";
+  const isSingleDayEventType = useMemo(() => {
+    const hay = `${eventTypeCode} ${eventTypeDisplayName}`.toLowerCase();
+    if (/multi/.test(hay)) return false;
+    return /single/.test(hay);
+  }, [eventTypeCode, eventTypeDisplayName]);
 
   useEffect(() => {
     if (open) {
@@ -99,6 +111,15 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
   );
 
   const resolvedEndDate = endDate && endDate.length === 10 ? endDate : startDate;
+  const endMinIso =
+    compareIsoDates(startDate, todayLocalIso()) >= 0 ? startDate : todayLocalIso();
+  const endMinDate = parseIsoDateLocal(endMinIso);
+
+  const datesValid =
+    startDate.length === 10 &&
+    compareIsoDates(resolvedEndDate, startDate) >= 0 &&
+    compareIsoDates(startDate, todayLocalIso()) >= 0 &&
+    compareIsoDates(resolvedEndDate, todayLocalIso()) >= 0;
 
   const scopeKind = useMemo(
     () =>
@@ -120,9 +141,10 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
       eventTypeCode.trim().length > 0 &&
       venue.trim().length > 0 &&
       startDate.length === 10 &&
+      datesValid &&
       Number.isFinite(priceNumber) &&
       priceNumber >= 0,
-    [title, eventTypeCode, venue, startDate, priceNumber],
+    [title, eventTypeCode, venue, startDate, priceNumber, datesValid],
   );
   const canSubmit = dirty && valid && !mutation.isPending;
 
@@ -233,7 +255,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                     >
                       <span className={cn("truncate", !selectedSource && "text-muted-foreground")}>
                         {selectedSource
-                          ? `${selectedSource.title} · ${selectedSource.startDate}`
+                          ? `${selectedSource.title} · ${formatDate(selectedSource.startDate)}`
                           : priorLoading
                             ? "Loading events…"
                             : "Pick a past event to clone its roster…"}
@@ -266,7 +288,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                               <div className="flex min-w-0 flex-1 items-center justify-between gap-2">
                                 <span className="truncate font-medium">{ev.title}</span>
                                 <span className="shrink-0 text-[11px] text-muted-foreground">
-                                  {ev.startDate}
+                                  {formatDate(ev.startDate)}
                                 </span>
                               </div>
                             </CommandItem>
@@ -278,26 +300,24 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                 </Popover>
 
                 {selectedSource && (
-                  <Button
+                  <IconActionButton
                     type="button"
-                    variant="ghost"
-                    size="icon"
                     className="h-9 w-9 shrink-0"
                     onClick={() => {
                       setSourceEventId(null);
                       setDirty(true);
                     }}
-                    aria-label="Clear cloned source"
+                    tooltip="Clear cloned source"
                   >
                     <X className="h-4 w-4" />
-                  </Button>
+                  </IconActionButton>
                 )}
               </div>
 
               {selectedSource ? (
                 <div className="rounded bg-background/60 px-2 py-1.5 text-[11px]">
                   <span className="font-semibold">Source:</span> {selectedSource.title}{" "}
-                  <span className="text-muted-foreground">· {selectedSource.startDate}</span>
+                  <span className="text-muted-foreground">· {formatDate(selectedSource.startDate)}</span>
                   <div className="mt-0.5 text-muted-foreground">
                     Roster will be copied · financials reset · medical snapshots refreshed · status forced to{" "}
                     <strong>Planning</strong>.
@@ -394,8 +414,21 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                 </Label>
                 <DatePicker
                   value={parseIsoDateLocal(startDate)}
-                  onChange={(d) => d && mark(setStartDate)(toIsoDateString(d))}
+                  onChange={(d) => {
+                    if (!d) return;
+                    const newStart = toIsoDateString(d);
+                    const nextEnd = isSingleDayEventType
+                      ? newStart
+                      : shiftEndDateWithStart(
+                          startDate,
+                          newStart,
+                          endDate || startDate,
+                        );
+                    mark(setEndDate)(normalizeEventEndDate(newStart, nextEnd));
+                    mark(setStartDate)(newStart);
+                  }}
                   placeholder="Pick start date"
+                  disabledDates={(date) => date < startOfTodayLocal()}
                 />
               </div>
               <div className="space-y-2">
@@ -404,8 +437,17 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
                 </Label>
                 <DatePicker
                   value={parseIsoDateLocal(endDate || undefined)}
-                  onChange={(d) => mark(setEndDate)(d ? toIsoDateString(d) : "")}
+                  onChange={(d) => {
+                    if (!d) {
+                      mark(setEndDate)("");
+                      return;
+                    }
+                    mark(setEndDate)(
+                      normalizeEventEndDate(startDate, toIsoDateString(d)),
+                    );
+                  }}
                   placeholder={formatDate(startDate)}
+                  disabledDates={(date) => (endMinDate ? date < endMinDate : false)}
                 />
               </div>
             </div>
@@ -426,7 +468,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
 
         <DialogFooter className="shrink-0 border-t border-border pt-3">
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <Plus className="h-4 w-4" />

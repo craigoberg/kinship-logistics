@@ -29,6 +29,7 @@ import {
 import { useUpdateAttendanceLog } from "@/hooks/use-supabase-data";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { enqueue } from "@/lib/sync-queue";
+import { formatDate } from "@/lib/utils";
 
 interface Props {
   open: boolean;
@@ -97,7 +98,7 @@ export function EditAttendanceLogModal({ open, onOpenChange, log }: Props) {
         },
       });
       toast.success("Attendance updated", {
-        description: `${log.rosterDate} · ${status}.`,
+        description: `${formatDate(log.rosterDate)} · ${status}.`,
       });
       onOpenChange(false);
     } catch (err) {
@@ -119,7 +120,7 @@ export function EditAttendanceLogModal({ open, onOpenChange, log }: Props) {
         <DialogHeader>
           <DialogTitle>Update attendance</DialogTitle>
           <DialogDescription>
-            {log.rosterDate} · {log.expectedService}
+            {formatDate(log.rosterDate)} · {log.expectedService}
           </DialogDescription>
         </DialogHeader>
 

@@ -1,5 +1,5 @@
-import { useMemo, useState, type ReactNode } from "react";
-import { Pill, CheckCircle2, Clock, AlertOctagon } from "lucide-react";
+import { useState, type ReactNode } from "react";
+import { Pill, CheckCircle2, Clock, AlertOctagon, Loader2 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
@@ -14,103 +14,70 @@ import {
 
 import { GiveDoseModal } from "@/components/medication/give-dose-modal";
 import { ClientTime, useClientFormattedDate } from "@/components/ui/client-time";
+import { useMedicationRound } from "@/hooks/use-medication-round";
+import type { MedicationRoundRow } from "@/lib/medication/todays-medication-round";
+import { isPrnSchedule } from "@/lib/medication/todays-medication-round";
+import { cn } from "@/lib/utils";
 
-import {
-  useAllActiveSchedules,
-  useParticipants,
-  useTodaysComplianceLogs,
-} from "@/hooks/use-supabase-data";
-import {
-  type ComplianceLog,
-  type MedicationSchedule,
-  type Participant,
-} from "@/lib/data-store";
+type Props = {
+  /** Trip: pass presence set. Centre: omit (uses Day Centre checked-in). */
+  presenceIds?: Set<string> | null;
+  presenceLabel?: string;
+  allowSoleCarer?: boolean;
+  source?: string;
+  eventId?: string | null;
+  eventDaySessionId?: string | null;
+  /** Compact embed inside Activities / Programme card. */
+  embedded?: boolean;
+};
 
-type Status = "administered" | "amber" | "red" | "future";
+export function TodaysMedicationCard({
+  presenceIds,
+  presenceLabel = "checked in",
+  allowSoleCarer = true,
+  source = "care_profile_give_dose",
+  eventId = null,
+  eventDaySessionId = null,
+  embedded = false,
+}: Props) {
+  const { rows, isLoading, presenceCount } = useMedicationRound(presenceIds);
+  const [verifying, setVerifying] = useState<MedicationRoundRow | null>(null);
+  const [historyFor, setHistoryFor] = useState<MedicationRoundRow | null>(null);
 
-interface Row {
-  schedule: MedicationSchedule;
-  participant: Participant | undefined;
-  scheduledMinutes: number;
-  status: Status;
-  administeredLog?: ComplianceLog;
-}
-
-function timeToMinutes(hhmm: string): number {
-  const [h, m] = hhmm.split(":").map((n) => parseInt(n, 10));
-  return (h || 0) * 60 + (m || 0);
-}
-
-function findAdministrationLog(
-  schedule: MedicationSchedule,
-  logs: ComplianceLog[],
-): ComplianceLog | undefined {
-  const target = schedule.medicationName.trim().toLowerCase();
-  return logs.find((l) => {
-    if (!l.participantId || l.participantId !== schedule.participantId) return false;
-    const meta = l.metadata as Record<string, unknown>;
-    const name = String(meta.medication_name ?? "").trim().toLowerCase();
-    return name === target;
-  });
-}
-
-export function TodaysMedicationCard() {
-  const { data: schedules = [], isLoading: schedLoading } = useAllActiveSchedules();
-  const { data: participants = [] } = useParticipants();
-  const { data: logs = [] } = useTodaysComplianceLogs();
-  const [verifying, setVerifying] = useState<Row | null>(null);
-  const [historyFor, setHistoryFor] = useState<Row | null>(null);
-
-  const nowMinutes =
-    new Date().getHours() * 60 + new Date().getMinutes();
-
-  const participantById = useMemo(
-    () => new Map(participants.map((p) => [p.id, p])),
-    [participants],
-  );
-
-  const rows: Row[] = useMemo(() => {
-    return schedules
-      .filter((s): s is MedicationSchedule & { participantId: string } => !!s.participantId)
-      .map<Row>((s) => {
-        const participant = participantById.get(s.participantId);
-        const log = findAdministrationLog(s, logs);
-        const scheduledMinutes = timeToMinutes(s.expectedTime.slice(0, 5));
-        let status: Status;
-        if (log) status = "administered";
-        else if (nowMinutes > scheduledMinutes + 15) status = "red";
-        else if (nowMinutes >= scheduledMinutes - 60) status = "amber";
-        else status = "future";
-        return {
-          schedule: s,
-          participant,
-          scheduledMinutes,
-          status,
-          administeredLog: log,
-        };
-      })
-      .sort((a, b) => {
-        const order = { red: 0, amber: 1, future: 2, administered: 3 } as const;
-        if (order[a.status] !== order[b.status]) return order[a.status] - order[b.status];
-        return a.scheduledMinutes - b.scheduledMinutes;
-      });
-  }, [schedules, logs, participantById, nowMinutes]);
-
-  return (
-    <Card className="space-y-3 p-5">
+  const body = (
+    <>
       <div className="flex items-center gap-2">
         <Pill className="h-4 w-4 text-primary" />
-        <h3 className="text-base font-semibold">Today&apos;s Care &amp; Medication Schedule</h3>
+        <h3 className="text-base font-semibold">
+          {embedded ? "Medication board" : "Today's Care & Medication Schedule"}
+        </h3>
         <span className="ml-auto text-xs text-muted-foreground tabular-nums">
-          {rows.length} routine{rows.length === 1 ? "" : "s"}
+          {isLoading ? (
+            <span className="inline-flex items-center gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" /> Loading…
+            </span>
+          ) : (
+            <>
+              {rows.length} routine{rows.length === 1 ? "" : "s"} ·{" "}
+              {presenceCount} {presenceLabel}
+            </>
+          )}
         </span>
       </div>
 
-      {schedLoading ? (
-        <p className="py-6 text-center text-sm text-muted-foreground">Loading schedules…</p>
+      {isLoading ? (
+        <p className="flex items-center justify-center gap-2 py-6 text-sm text-muted-foreground">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          Loading medication requirements…
+        </p>
+      ) : presenceCount === 0 ? (
+        <p className="rounded-md border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+          No people on the medication board yet — check-in first (or clear
+          alternate plans).
+        </p>
       ) : rows.length === 0 ? (
         <p className="rounded-md border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
-          No active medication routines on file.
+          No active medication routines for people on this board.
         </p>
       ) : (
         <div className="overflow-hidden rounded-lg border border-border">
@@ -131,10 +98,15 @@ export function TodaysMedicationCard() {
                   </td>
                   <td className="px-3 py-2">
                     <div className="font-medium">{r.schedule.medicationName}</div>
-                    <div className="text-xs text-muted-foreground">{r.schedule.dosage}</div>
+                    <div className="text-xs text-muted-foreground">
+                      {r.schedule.dosage}
+                      {isPrnSchedule(r.schedule.frequency) ? " · PRN" : ""}
+                    </div>
                   </td>
                   <td className="px-3 py-2 tabular-nums">
-                    {r.schedule.expectedTime.slice(0, 5)}
+                    {isPrnSchedule(r.schedule.frequency)
+                      ? "As needed"
+                      : r.schedule.expectedTime.slice(0, 5)}
                   </td>
                   <td className="px-3 py-2 text-right">
                     <StatusButton
@@ -155,6 +127,10 @@ export function TodaysMedicationCard() {
         onOpenChange={(o) => !o && setVerifying(null)}
         schedule={verifying?.schedule ?? null}
         participantName={verifying?.participant?.fullName ?? ""}
+        allowSoleCarer={allowSoleCarer}
+        source={source}
+        eventId={eventId}
+        eventDaySessionId={eventDaySessionId}
       />
 
       <Dialog open={!!historyFor} onOpenChange={(o) => !o && setHistoryFor(null)}>
@@ -180,8 +156,13 @@ export function TodaysMedicationCard() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </Card>
+    </>
   );
+
+  if (embedded) {
+    return <div className={cn("space-y-3")}>{body}</div>;
+  }
+  return <Card className="space-y-3 p-5">{body}</Card>;
 }
 
 function StatusButton({
@@ -189,7 +170,7 @@ function StatusButton({
   onAdminister,
   onHistory,
 }: {
-  row: Row;
+  row: MedicationRoundRow;
   onAdminister: () => void;
   onHistory: () => void;
 }) {
@@ -227,7 +208,7 @@ function StatusButton({
       <Button
         size="sm"
         onClick={onAdminister}
-        className="gap-1.5 bg-amber-500 text-white hover:bg-amber-600 focus-visible:ring-amber-500"
+        className="gap-1.5 animate-pulse bg-amber-500 text-white hover:bg-amber-600 focus-visible:ring-amber-500"
       >
         <Clock className="h-3.5 w-3.5" />
         Due Soon / Administer
@@ -252,4 +233,3 @@ function LogRow({ label, value }: { label: string; value: ReactNode }) {
     </div>
   );
 }
-

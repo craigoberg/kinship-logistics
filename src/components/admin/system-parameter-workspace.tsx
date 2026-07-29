@@ -7,6 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { Badge } from "@/components/ui/badge";
 import {
   Dialog,
@@ -16,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import {
   Table,
   TableBody,
@@ -34,7 +36,14 @@ import {
 import { getActiveUserProfile } from "@/lib/data-store";
 import { ClientTime } from "@/components/ui/client-time";
 import { MyobExportWorkspace } from "./myob-export-workspace";
+import { AuditPackWorkspace } from "./audit-pack-workspace";
+import {
+  MandatedChecksAdminPanel,
+  MANDATED_CHECK_PARAM_KEYS,
+} from "./mandated-checks-admin-panel";
+import { TourRollCallDefaultsPanel } from "./tour-roll-call-defaults-panel";
 
+const HIDDEN_FROM_JSON_TABLE = new Set<string>(MANDATED_CHECK_PARAM_KEYS);
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
@@ -74,14 +83,18 @@ export function SystemParameterWorkspace() {
     );
   }
 
-  const rows = q.data ?? [];
+  const rows = (q.data ?? []).filter((r) => !HIDDEN_FROM_JSON_TABLE.has(r.key));
 
   return (
     <div className="space-y-4">
+      <TourRollCallDefaultsPanel />
+
+      <MandatedChecksAdminPanel />
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Tunable operational thresholds. Every change is appended to the operational ledger with
-          the Managers justification.
+          the Managers justification. Walkthrough checklists are edited above (not as JSON).
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
@@ -131,6 +144,8 @@ export function SystemParameterWorkspace() {
       {editing && <EditParameterModal row={editing} onClose={() => setEditing(null)} />}
 
       <MyobExportWorkspace />
+
+      <AuditPackWorkspace />
     </div>
   );
 }
@@ -193,7 +208,8 @@ function EditParameterModal({ row, onClose }: { row: SystemParameterRow; onClose
         (typeof row.value === "object"
           ? JSON.stringify(row.value, null, 2)
           : String(row.value ?? ""));
-  const canSubmit = changed && justification.trim().length >= 10 && !mutation.isPending;
+  const canSubmit =
+    changed && justification.trim().length >= MIN_TIMELINE_NOTE && !mutation.isPending;
 
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
@@ -236,23 +252,22 @@ function EditParameterModal({ row, onClose }: { row: SystemParameterRow; onClose
             )}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="justification">
-              Justification <span className="text-destructive">*</span>
-            </Label>
-            <Textarea
-              id="justification"
-              rows={3}
-              placeholder="Why is this changing? (min 10 chars, recorded in the ledger)"
-              value={justification}
-              onChange={(e) => setJustification(e.target.value)}
-            />
-          </div>
+          <CharacterCountedTextarea
+            id="justification"
+            label="Justification"
+            rows={3}
+            minChars={MIN_TIMELINE_NOTE}
+            maxChars={500}
+            counterMode="minimum"
+            placeholder="Why is this changing? (recorded in the ledger)"
+            value={justification}
+            onValueChange={setJustification}
+          />
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>
-            Cancel
+          <Button variant="outline" onClick={onClose}>
+            Close
           </Button>
           <Button onClick={() => mutation.mutate()} disabled={!canSubmit}>
             {mutation.isPending ? "Saving…" : "Save & log"}

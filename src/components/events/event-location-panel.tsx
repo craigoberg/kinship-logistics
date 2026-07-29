@@ -12,20 +12,17 @@ import {
   ShieldCheck,
   Unlock,
 } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Label } from "@/components/ui/label";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
+import { MandatedChecksList } from "@/components/site-day/mandated-checks-list";
+import { FieldActionButton } from "@/components/ui/field-action-button";
 import { getActiveUserProfile } from "@/lib/data-store";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import {
   Dialog,
   DialogContent,
@@ -42,14 +39,40 @@ import {
   openEventLocation,
 } from "@/lib/api/event-location";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
+import { countTodayVenueStops } from "@/lib/api/event-activity-roll";
+import {
+  formatGuestIncompleteMessage,
+  listIncompleteGuestBookings,
+} from "@/lib/api/event-guest";
 import type { EventDaySession } from "@/lib/api/event-outing";
+import { getEventDayPhaseDisplay } from "@/lib/event-day-phase-display";
+import { useVenueOpenChecks } from "@/hooks/use-system-parameters";
 
 interface Props {
   session: EventDaySession;
   onChanged: () => void;
+  /** When true, hides the "Close location" button (Event Deliver owns close via Check-Out tab). */
+  hideCloseAction?: boolean;
+  /** Office event status — disambiguates day phase from whole-event Open. */
+  eventStatus?: string | null;
+  /** First calendar day of the trip — tweaks open-location copy. */
+  isFirstDay?: boolean;
+  /**
+   * Opens trip-day Log Venue Issue (EventDayVerbalAnomalyFlow).
+   * Required for Day Centre parity before open — RED from walkthrough blocks open;
+   * Big Red Button INCIDENT does not.
+   */
+  onLogVenueIssue?: () => void;
 }
 
-export function EventLocationPanel({ session, onChanged }: Props) {
+export function EventLocationPanel({
+  session,
+  onChanged,
+  hideCloseAction = false,
+  eventStatus,
+  isFirstDay = true,
+  onLogVenueIssue,
+}: Props) {
   const qc = useQueryClient();
   const [openDialog, setOpenDialog] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
@@ -57,10 +80,19 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   const [managerPinVerified, setManagerPinVerified] = useState(false);
   const [verifiedManagerPin, setVerifiedManagerPin] = useState("");
   const [closeOutcome, setCloseOutcome] = useState<"closed_orderly" | "closed_incident">("closed_orderly");
+  const [venueChecksTicked, setVenueChecksTicked] = useState<Set<number>>(new Set());
+  const venueOpenChecks = useVenueOpenChecks();
+  const venueWalkthroughReady =
+    venueOpenChecks.length === 0 || venueChecksTicked.size >= venueOpenChecks.length;
 
   const resetPinState = () => {
     setManagerPinVerified(false);
     setVerifiedManagerPin("");
+  };
+
+  const resetOpenDialogState = () => {
+    resetPinState();
+    setVenueChecksTicked(new Set());
   };
 
   const managerStaffId = session.manager_staff_id ?? getActiveUserProfile()?.staffId ?? "";
@@ -71,21 +103,43 @@ export function EventLocationPanel({ session, onChanged }: Props) {
     staleTime: 15_000,
   });
 
+  const { data: incompleteGuests = [] } = useQuery({
+    queryKey: ["event-incomplete-guests", session.event_id],
+    queryFn: () => listIncompleteGuestBookings(session.event_id),
+    staleTime: 15_000,
+  });
+  const guestBlock =
+    incompleteGuests.length > 0
+      ? formatGuestIncompleteMessage(incompleteGuests)
+      : null;
+
+  const { data: stopCount = 0 } = useQuery({
+    queryKey: ["event-stop-count", session.event_id, session.session_date],
+    queryFn: () => countTodayVenueStops(session.event_id, session.session_date),
+    staleTime: 30_000,
+  });
+  const hasStops = stopCount > 0;
+
+  // PIN success opens immediately — pass pin into mutate (do not gate on
+  // managerPinVerified state; setState is async and would see a stale false).
   const openMut = useMutation({
-    mutationFn: () => {
-      if (!managerPinVerified || !verifiedManagerPin) {
-        throw new Error("Manager PIN required.");
+    mutationFn: (managerPin: string) => {
+      if (!managerPin) throw new Error("Manager PIN required.");
+      if (!venueWalkthroughReady) {
+        throw new Error("Complete the venue walkthrough checks before opening.");
       }
+      const completed = venueOpenChecks.filter((_, i) => venueChecksTicked.has(i));
       return openEventLocation({
         sessionId: session.id,
-        managerPin: verifiedManagerPin,
+        managerPin,
         notes,
+        venueOpenChecksCompleted: completed,
       });
     },
     onSuccess: () => {
       toast.success("Location opened — event floor is live.");
       setOpenDialog(false);
-      resetPinState();
+      resetOpenDialogState();
       setNotes("");
       onChanged();
       qc.invalidateQueries({ queryKey: ["event-attendance-log", session.id] });
@@ -121,129 +175,250 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   const canClose = isOpen && !isClosed;
 
   return (
-    <div className="rounded-lg border bg-card p-4 space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <ShieldCheck className="h-4 w-4 text-primary" />
-        <span className="text-sm font-semibold">Event location</span>
-        <PhaseBadge phase={session.phase} />
-      </div>
-
-      <p className="text-xs text-muted-foreground">
-        Opening the location <strong>starts the event</strong> (temporary centre). Transport may run
-        before open. Close after everyone has been handed to their return transport.
-      </p>
-
-      {session.open_declared_at && (
-        <p className="text-[11px] text-muted-foreground">
-          Opened <FormattedDateTime value={session.open_declared_at} />
-          {session.open_leader_notes && ` — ${session.open_leader_notes}`}
-        </p>
-      )}
-      {session.close_declared_at && (
-        <p className="text-[11px] text-muted-foreground">
-          Closed <FormattedDateTime value={session.close_declared_at} />
-          {session.close_leader_notes && ` — ${session.close_leader_notes}`}
-        </p>
-      )}
-
-      {hasRed && canOpen && (
-        <div className="flex items-start gap-2 rounded-lg border-2 border-destructive/50 bg-destructive/10 p-2.5 text-xs text-destructive">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          Open RED issue — resolve before opening the location.
-        </div>
-      )}
-
-      {!session.manager_staff_id && canOpen && (
-        <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-2.5 text-xs text-amber-800">
-          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          Assign a trip leader in Config before opening.
-        </div>
-      )}
-
-      <div className="flex flex-wrap gap-2">
-        {canOpen && (
-          <Button
-            size="sm"
-            disabled={!session.manager_staff_id || hasRed}
-            onClick={() => {
+    <div className={cn(
+      "rounded-lg border bg-card",
+      isOpen || isClosed ? "px-3 py-2" : "p-4 space-y-3",
+    )}>
+      {/* ── Compact status bar when location is live or closed ── */}
+      {(isOpen || isClosed) ? (
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+          <div className="flex items-center gap-1.5">
+            <ShieldCheck className="h-3.5 w-3.5 text-primary shrink-0" />
+            <span className="text-xs font-semibold">Event location</span>
+            <PhaseBadge phase={session.phase} eventStatus={eventStatus} />
+          </div>
+          {session.open_declared_at && (
+            <span className="text-[11px] text-muted-foreground">
+              Opened <FormattedDateTime value={session.open_declared_at} />
+              {session.open_leader_notes && ` · ${session.open_leader_notes}`}
+            </span>
+          )}
+          {session.close_declared_at && (
+            <span className="text-[11px] text-muted-foreground">
+              · Closed <FormattedDateTime value={session.close_declared_at} />
+              {session.close_leader_notes && ` · ${session.close_leader_notes}`}
+            </span>
+          )}
+          {canClose && !hideCloseAction && (
+            <Button size="sm" variant="destructive" className="ml-auto h-7 text-xs" onClick={() => {
               resetPinState();
               setNotes("");
-              setOpenDialog(true);
-            }}
-          >
-            <Unlock className="mr-1.5 h-3.5 w-3.5" />
-            Open location
-          </Button>
-        )}
-        {canClose && (
-          <Button size="sm" variant="destructive" onClick={() => {
-            resetPinState();
-            setNotes("");
-            setCloseDialog(true);
-          }}>
-            <Lock className="mr-1.5 h-3.5 w-3.5" />
-            Close location
-          </Button>
-        )}
-        {isClosed && (
-          <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
-            <CheckCircle2 className="h-3.5 w-3.5 text-emerald-600" />
-            Location closed for this trip day
-          </span>
-        )}
-      </div>
+              setCloseDialog(true);
+            }}>
+              <Lock className="mr-1 h-3 w-3" />
+              Close
+            </Button>
+          )}
+          {isClosed && (
+            <span className="ml-auto inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+              <CheckCircle2 className="h-3 w-3 text-emerald-600" />
+              Closed
+            </span>
+          )}
+        </div>
+      ) : (
+        /* ── Full panel when location is not yet open (planning / pre-departure) ── */
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <ShieldCheck className="h-4 w-4 text-primary" />
+            <span className="text-sm font-semibold">Event location</span>
+            <PhaseBadge phase={session.phase} eventStatus={eventStatus} />
+          </div>
 
-      {/* Open dialog — Dialog (not AlertDialog) so nested PinEntry sheet does not block submit */}
+          <p className="text-xs text-muted-foreground">
+            {isFirstDay ? (
+              <>
+                Opening the location <strong>starts the event floor</strong> (temporary centre).
+                Complete venue walkthrough and confirm area is safe before opening.
+              </>
+            ) : (
+              <>
+                The event is <strong>Open</strong> in the office — open the location to{" "}
+                <strong>start today&apos;s floor</strong>. Complete venue walkthrough and confirm
+                the area is safe before opening.
+              </>
+            )}
+          </p>
+
+          {guestBlock && canOpen && (
+            <div className="flex items-start gap-2 rounded-md border-2 border-amber-500 bg-amber-50 p-3 text-sm text-amber-950">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-600" />
+              <span>{guestBlock}</span>
+            </div>
+          )}
+          {hasRed && (
+            <div className="flex items-start gap-2 rounded-lg border-2 border-destructive/50 bg-destructive/10 p-2.5 text-xs text-destructive">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div className="space-y-1">
+                <p className="font-semibold">Open RED issue — cannot open the location.</p>
+                <p className="text-destructive/90">
+                  Clear via Hub / accepted workaround, or do not open (turn buses around). Use{" "}
+                  <span className="font-semibold">Log Venue Issue</span> for new walkthrough finds —
+                  not the Big Red Button (that does not block open).
+                </p>
+              </div>
+            </div>
+          )}
+
+          {!session.manager_staff_id && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-2.5 text-xs text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              Assign a trip leader in Config before opening.
+            </div>
+          )}
+
+          {canOpen && !hasStops && (
+            <div className="flex items-start gap-2 rounded-lg bg-amber-500/10 p-2.5 text-xs text-amber-800">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              No activities scheduled for this day — add at least a departure point in the Itinerary before opening.
+            </div>
+          )}
+
+          <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+            {canOpen && (
+              <Button
+                size="sm"
+                disabled={
+                  !session.manager_staff_id ||
+                  hasRed ||
+                  !hasStops ||
+                  !!guestBlock
+                }
+                onClick={() => {
+                  resetPinState();
+                  setNotes("");
+                  setOpenDialog(true);
+                }}
+              >
+                <Unlock className="mr-1.5 h-3.5 w-3.5" />
+                Open location
+              </Button>
+            )}
+            {canClose && !hideCloseAction && (
+              <Button size="sm" variant="destructive" onClick={() => {
+                resetPinState();
+                setNotes("");
+                setCloseDialog(true);
+              }}>
+                <Lock className="mr-1.5 h-3.5 w-3.5" />
+                Close location
+              </Button>
+            )}
+          </div>
+
+          {canOpen && onLogVenueIssue && (
+            <FieldActionButton
+              variant="caution"
+              size="sm"
+              onClick={onLogVenueIssue}
+            >
+              <span className="flex items-center justify-center gap-2">
+                <AlertTriangle className="h-5 w-5 shrink-0" />
+                Log Venue Issue
+                <span className="text-xs font-normal opacity-70">
+                  (if a check is not OK — blocks open on RED)
+                </span>
+              </span>
+            </FieldActionButton>
+          )}
+        </>
+      )}
+
+      {/* Open dialog — PIN = open (same as Day Centre); warnings stay on the panel before this */}
       <Dialog
         open={openDialog}
         onOpenChange={(o) => {
           setOpenDialog(o);
-          if (!o) resetPinState();
+          if (!o) resetOpenDialogState();
         }}
       >
-        <DialogContent className="max-w-md">
+        <DialogContent className="max-w-md max-h-[92dvh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Open location?</DialogTitle>
             <DialogDescription>
-              This starts the event floor. Arrival check-in becomes active. Manager PIN required.
+              Complete the venue walkthrough, then enter trip leader PIN. That sign-off opens the
+              event floor and starts arrival check-in.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
+            <MandatedChecksList
+              items={venueOpenChecks}
+              ticked={venueChecksTicked}
+              onTickedChange={setVenueChecksTicked}
+              heading="Confirm venue walkthrough"
+              paramKey="event_deliver.venue_open_checks"
+              emptyTrustVerb="open"
+            />
+            {venueOpenChecks.length > 0 && !venueWalkthroughReady && (
+              <div className="flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3 text-sm text-yellow-800 dark:text-yellow-200">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-yellow-600" />
+                <p>
+                  Tick each confirmation above. If any item is{" "}
+                  <span className="font-semibold">not</span> OK, use{" "}
+                  <span className="font-semibold">Log Venue Issue</span> (Yellow
+                  workaround or Red — blocks open). Do not use the Big Red Button
+                  for walkthrough fails.
+                </p>
+              </div>
+            )}
+            {onLogVenueIssue && (
+              <FieldActionButton
+                variant="caution"
+                size="sm"
+                onClick={() => {
+                  // Keep tick progress; anomaly modal stacks above.
+                  onLogVenueIssue();
+                }}
+                disabled={openMut.isPending}
+              >
+                <span className="flex items-center justify-center gap-2">
+                  <AlertTriangle className="h-5 w-5 shrink-0" />
+                  Log Venue Issue
+                  <span className="text-xs font-normal opacity-70">
+                    (Green · Yellow · Red)
+                  </span>
+                </span>
+              </FieldActionButton>
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">Open notes (optional)</Label>
-              <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
+              <Textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={2}
+                disabled={openMut.isPending}
+              />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Manager PIN</Label>
+              <Label className="text-xs">Trip leader PIN</Label>
               <PinEntryTrigger
-                label="Tap to enter manager PIN"
-                verified={managerPinVerified}
-                verifiedLabel="Manager PIN verified"
+                label={
+                  venueWalkthroughReady
+                    ? "Tap to enter PIN and open"
+                    : "Complete walkthrough checks first"
+                }
+                verified={managerPinVerified || openMut.isPending}
+                verifiedLabel={openMut.isPending ? "Opening…" : "Trip leader PIN verified"}
                 length={4}
                 title="Open event location"
-                description="Trip leader PIN required to start the event floor."
-                disabled={!managerStaffId}
+                description="PIN confirms and opens the event floor."
+                disabled={
+                  !managerStaffId || openMut.isPending || !venueWalkthroughReady || hasRed
+                }
                 onVerify={async (pin) => {
                   await verifyManagerPin(managerStaffId, pin);
                 }}
                 onSuccess={(pin) => {
                   setVerifiedManagerPin(pin);
                   setManagerPinVerified(true);
+                  openMut.mutate(pin);
                 }}
               />
             </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setOpenDialog(false)}>
-              Cancel
-            </Button>
-            <Button
-              type="button"
-              disabled={!managerPinVerified || !verifiedManagerPin || openMut.isPending}
-              onClick={() => openMut.mutate()}
-            >
-              {openMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Open location
+              Close
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -268,16 +443,19 @@ export function EventLocationPanel({ session, onChanged }: Props) {
           <div className="space-y-3">
             <div className="space-y-1.5">
               <Label className="text-xs">Outcome</Label>
-              <Select
-                value={closeOutcome}
-                onValueChange={(v) => setCloseOutcome(v as typeof closeOutcome)}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="closed_orderly">Closed — orderly</SelectItem>
-                  <SelectItem value="closed_incident">Closed — incident</SelectItem>
-                </SelectContent>
-              </Select>
+              <div className="space-y-1.5">
+                {([
+                  { value: "closed_orderly", label: "Closed — orderly" },
+                  { value: "closed_incident", label: "Closed — incident" },
+                ] as const).map((opt) => (
+                  <MobileFieldButton
+                    key={opt.value}
+                    title={opt.label}
+                    selected={closeOutcome === opt.value}
+                    onClick={() => setCloseOutcome(opt.value)}
+                  />
+                ))}
+              </div>
             </div>
             <div className="space-y-1.5">
               <Label className="text-xs">Close notes (optional)</Label>
@@ -305,7 +483,7 @@ export function EventLocationPanel({ session, onChanged }: Props) {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setCloseDialog(false)}>
-              Cancel
+              Close
             </Button>
             <Button
               type="button"
@@ -323,14 +501,11 @@ export function EventLocationPanel({ session, onChanged }: Props) {
   );
 }
 
-function PhaseBadge({ phase }: { phase: string }) {
-  if (phase === "active")
-    return <Badge className="bg-emerald-600 text-white text-[10px]">Open — live</Badge>;
-  if (phase === "closed_orderly")
-    return <Badge className="bg-zinc-600 text-white text-[10px]">Closed</Badge>;
-  if (phase === "closed_incident")
-    return <Badge className="bg-destructive text-[10px]">Closed — incident</Badge>;
-  if (phase === "planning")
-    return <Badge variant="secondary" className="text-[10px]">Not yet open</Badge>;
-  return <Badge variant="outline" className="text-[10px]">{phase}</Badge>;
+function PhaseBadge({ phase, eventStatus }: { phase: string; eventStatus?: string | null }) {
+  const { label, classes } = getEventDayPhaseDisplay(phase, eventStatus);
+  return (
+    <Badge className={cn("text-[10px] font-bold uppercase tracking-wide", classes)}>
+      {label}
+    </Badge>
+  );
 }

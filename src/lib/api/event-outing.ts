@@ -11,7 +11,15 @@ import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
-import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { parseIsoDateLocal, toIsoDateString, formatDate } from "@/lib/utils";
+import {
+  DEFAULT_EVENING_ROLL_CALL,
+  DEFAULT_MORNING_ROLL_CALL,
+  EVENING_ROLL_CALL_PARAM,
+  MORNING_ROLL_CALL_PARAM,
+  isValidClockTime,
+  normalizeClockTime,
+} from "@/lib/tour-roll-call";
 
 // ============================================================================
 // Event kind inference (§12.3.1 — derived from dates + outing event type)
@@ -64,20 +72,66 @@ export function inferEventKind(input: {
 // event_venue_stops — itinerary
 // ============================================================================
 
+export type EventStopActivityKind = "venue" | "meal" | "medication_round";
+export type EventMealSlot = "breakfast" | "morning_tea" | "lunch" | "dinner";
+export type EventMealSource =
+  | "delivered_by_us"
+  | "own_food"
+  | "venue_provided"
+  | "packed"
+  | "purchase";
+
 export interface EventVenueStop {
   id: string;
   event_id: string;
   session_date: string;
-  venue_id: string;
+  venue_id: string | null;
   stop_order: number;
   label_override: string | null;
   notes: string | null;
   created_at: string;
   updated_at: string;
+  /** venue (default) | meal | medication_round — Programme activities. */
+  activity_kind?: EventStopActivityKind | null;
+  meal_slot?: EventMealSlot | null;
+  meal_source?: EventMealSource | null;
+  menu_notes?: string | null;
+  prepared_by_staff_id?: string | null;
+  preparer_cert_status?: string | null;
+  preparer_ack_note?: string | null;
+  /** Completed meal prep walkthrough labels (BL-073). */
+  prep_checks_completed?: string[] | null;
+  prep_attestation_mode?: string | null;
+  prep_attested_by_staff_id?: string | null;
+  guest_preparer_name?: string | null;
+  prep_attestation_note?: string | null;
+  phase?: string | null;
+  movement_method?: string | null;
+  opened_at?: string | null;
+  closed_at?: string | null;
   /** Joined from venues table (not always present). */
   venue_name?: string | null;
   venue_type?: string | null;
   venue_street_address?: string | null;
+}
+
+export function isMealStop(
+  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+): boolean {
+  return (stop?.activity_kind ?? "venue") === "meal";
+}
+
+export function isMedicationStop(
+  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+): boolean {
+  return (stop?.activity_kind ?? "venue") === "medication_round";
+}
+
+/** Venue stops that participate in bus hops / overnight hotel chain. */
+export function isVenueTransportStop(
+  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+): boolean {
+  return (stop?.activity_kind ?? "venue") === "venue";
 }
 
 export async function listEventVenueStops(eventId: string): Promise<EventVenueStop[]> {
@@ -97,6 +151,132 @@ export async function listEventVenueStops(eventId: string): Promise<EventVenueSt
   })) as EventVenueStop[];
 }
 
+/** Admin venue type `hotel` = Hotel / accommodation (BL-072 / BL-T3). */
+export function isAccommodationVenueType(venueType: string | null | undefined): boolean {
+  const t = (venueType ?? "").toLowerCase().trim();
+  return t === "hotel" || t === "accommodation";
+}
+
+export interface OvernightHotelItineraryAssessment {
+  ok: boolean;
+  /** Non-final calendar days whose last stop is missing or not accommodation. */
+  failingDates: string[];
+  blockers: string[];
+}
+
+/**
+ * Pure check — multi-day non-final nights must end at Hotel / accommodation.
+ * Final day is exempt (Check-Out → Transport HOME).
+ */
+export function assessOvernightHotelStops(opts: {
+  eventKind: string | null | undefined;
+  /** Sorted ascending YYYY-MM-DD session dates for the tour. */
+  sessionDates: string[];
+  stops: Array<{
+    session_date: string;
+    stop_order: number;
+    venue_type?: string | null;
+    activity_kind?: string | null;
+  }>;
+}): OvernightHotelItineraryAssessment {
+  if (opts.eventKind !== "multi_day_tour") {
+    return { ok: true, failingDates: [], blockers: [] };
+  }
+  const dates = [...opts.sessionDates].sort((a, b) => a.localeCompare(b));
+  if (dates.length <= 1) {
+    return { ok: true, failingDates: [], blockers: [] };
+  }
+
+  const overnightDates = dates.slice(0, -1);
+  const failingDates: string[] = [];
+
+  for (const date of overnightDates) {
+    // Meal Programme stops do not count as overnight venue (BL-073).
+    const dayStops = opts.stops
+      .filter((s) => s.session_date === date)
+      .filter((s) => (s.activity_kind ?? "venue") === "venue")
+      .sort((a, b) => a.stop_order - b.stop_order);
+    const last = dayStops[dayStops.length - 1];
+    if (!last || !isAccommodationVenueType(last.venue_type)) {
+      failingDates.push(date);
+    }
+  }
+
+  if (failingDates.length === 0) {
+    return { ok: true, failingDates: [], blockers: [] };
+  }
+
+  const labels = failingDates.map((d) => formatDate(d)).join(", ");
+  return {
+    ok: false,
+    failingDates,
+    blockers: [
+      `Overnight days must end at Hotel / accommodation — fix Itinerary for: ${labels}. (Admin → Venues: set venue type to Hotel / accommodation, then make that stop last on the day.)`,
+    ],
+  };
+}
+
+/** Live DB assessment for Confirm / Open / Open location (BL-072 / BL-T3). */
+export async function assessOvernightHotelItinerary(
+  eventId: string,
+): Promise<OvernightHotelItineraryAssessment> {
+  const { data: ev, error } = await supabase
+    .from("event_manifest")
+    .select("event_kind, start_date, end_date, event_type, primary_venue_id")
+    .eq("id", eventId)
+    .single();
+  if (error || !ev) {
+    return {
+      ok: false,
+      failingDates: [],
+      blockers: [`Could not check overnight hotel itinerary: ${error?.message ?? "event not found"}`],
+    };
+  }
+
+  const row = ev as {
+    event_kind: string | null;
+    start_date: string;
+    end_date: string | null;
+    event_type: string | null;
+    primary_venue_id: string | null;
+  };
+  const kind = inferEventKind({
+    startDate: row.start_date,
+    endDate: row.end_date,
+    eventTypeCode: row.event_type,
+    primaryVenueId: row.primary_venue_id,
+    storedEventKind: row.event_kind,
+  });
+
+  const sessions = await listEventDaySessions(eventId);
+  const sessionDates =
+    sessions.length > 0
+      ? sessions.map((s) => s.session_date)
+      : (() => {
+          const start = row.start_date.slice(0, 10);
+          const end = (row.end_date ?? row.start_date).slice(0, 10);
+          const out: string[] = [];
+          let cur = parseIsoDateLocal(start);
+          const last = parseIsoDateLocal(end);
+          while (cur <= last) {
+            out.push(toIsoDateString(cur));
+            cur = new Date(cur);
+            cur.setDate(cur.getDate() + 1);
+          }
+          return out;
+        })();
+
+  const stops = await listEventVenueStops(eventId);
+  return assessOvernightHotelStops({ eventKind: kind, sessionDates, stops });
+}
+
+export async function assertOvernightDaysEndAtHotel(eventId: string): Promise<void> {
+  const result = await assessOvernightHotelItinerary(eventId);
+  if (!result.ok) {
+    throw new Error(result.blockers[0] ?? "Overnight itinerary incomplete.");
+  }
+}
+
 export interface ItineraryStopAnchor {
   id: string;
   label: string;
@@ -112,6 +292,7 @@ export async function getLastItineraryStopForDate(
   const stops = await listEventVenueStops(eventId);
   const dayStops = stops
     .filter((s) => s.session_date === sessionDate)
+    .filter((s) => isVenueTransportStop(s))
     .sort((a, b) => a.stop_order - b.stop_order);
   const last = dayStops[dayStops.length - 1];
   if (!last) return null;
@@ -127,10 +308,14 @@ export interface UpsertEventVenueStopInput {
   id?: string | null;
   event_id: string;
   session_date: string;
-  venue_id: string;
+  venue_id?: string | null;
   stop_order: number;
   label_override?: string | null;
   notes?: string | null;
+  activity_kind?: EventStopActivityKind;
+  meal_slot?: EventMealSlot | null;
+  meal_source?: EventMealSource | null;
+  menu_notes?: string | null;
 }
 
 export async function upsertEventVenueStop(
@@ -139,14 +324,32 @@ export async function upsertEventVenueStop(
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can edit the event itinerary.");
 
-  const payload = {
+  const kind = input.activity_kind ?? "venue";
+  if (kind === "venue" && !input.venue_id) {
+    throw new Error("Venue is required for venue itinerary stops.");
+  }
+  if (kind === "meal" && !input.meal_slot) {
+    throw new Error("Meal slot is required (Breakfast / Lunch / …).");
+  }
+
+  const payload: Record<string, unknown> = {
     event_id: input.event_id,
     session_date: input.session_date,
-    venue_id: input.venue_id,
+    venue_id: input.venue_id || null,
     stop_order: input.stop_order,
-    label_override: input.label_override?.trim() || null,
+    label_override:
+      kind === "medication_round"
+        ? input.label_override?.trim() || "Medication round"
+        : input.label_override?.trim() || null,
     notes: input.notes?.trim() || null,
+    activity_kind: kind,
+    meal_slot: kind === "meal" ? input.meal_slot ?? null : null,
+    meal_source: kind === "meal" ? input.meal_source ?? null : null,
+    menu_notes: kind === "meal" ? input.menu_notes?.trim() || null : null,
+    movement_method:
+      kind === "meal" || kind === "medication_round" ? "on_site" : undefined,
   };
+  if (payload.movement_method === undefined) delete payload.movement_method;
 
   if (input.id) {
     const { data, error } = await supabase
@@ -179,7 +382,11 @@ export async function deleteEventVenueStop(id: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Reorder stops for one session date by providing the new ordered list of IDs. */
+/**
+ * Reorder stops for one session date by providing the new ordered list of IDs.
+ * Two-phase write avoids UNIQUE (event_id, session_date, stop_order) 409 conflicts
+ * when swapping orders in parallel (e.g. 0↔1).
+ */
 export async function reorderEventVenueStops(
   eventId: string,
   sessionDate: string,
@@ -187,17 +394,30 @@ export async function reorderEventVenueStops(
 ): Promise<void> {
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can reorder itinerary stops.");
+  if (orderedIds.length === 0) return;
 
-  await Promise.all(
-    orderedIds.map((id, idx) =>
-      supabase
-        .from("event_venue_stops")
-        .update({ stop_order: idx })
-        .eq("id", id)
-        .eq("event_id", eventId)
-        .eq("session_date", sessionDate),
-    ),
-  );
+  const parkBase = 1000;
+
+  const applyOrders = async (offset: number) => {
+    const results = await Promise.all(
+      orderedIds.map(async (id, idx) => {
+        const { error } = await supabase
+          .from("event_venue_stops")
+          .update({ stop_order: offset + idx })
+          .eq("id", id)
+          .eq("event_id", eventId)
+          .eq("session_date", sessionDate);
+        return error;
+      }),
+    );
+    const first = results.find((e) => e != null);
+    if (first) throw new Error(`Reorder failed: ${first.message}`);
+  };
+
+  // Phase 1 — park at 1000+ so final 0..n-1 slots are free
+  await applyOrders(parkBase);
+  // Phase 2 — final order
+  await applyOrders(0);
 }
 
 /** Inclusive calendar dates between start and end (local timezone — §5.3). */
@@ -211,6 +431,134 @@ function calendarDateRange(startDate: string, endDate: string): string[] {
     cur = new Date(cur.getFullYear(), cur.getMonth(), cur.getDate() + 1);
   }
   return dates;
+}
+
+function shiftIsoDate(iso: string, days: number): string {
+  const d = parseIsoDateLocal(iso.slice(0, 10));
+  if (!d) return iso.slice(0, 10);
+  const shifted = new Date(d.getFullYear(), d.getMonth(), d.getDate() + days);
+  return toIsoDateString(shifted);
+}
+
+function remapDateToNewRange(
+  date: string,
+  oldStart: string,
+  oldEnd: string,
+  newStart: string,
+  newEnd: string,
+): string {
+  const oldDates = calendarDateRange(oldStart, oldEnd);
+  const newDates = calendarDateRange(newStart, newEnd);
+  if (newDates.length === 0) return newStart;
+
+  const normalized = date.slice(0, 10);
+  const idx = oldDates.indexOf(normalized);
+  if (idx >= 0) {
+    return newDates[Math.min(idx, newDates.length - 1)];
+  }
+  // Session drifted outside the previous manifest range — anchor to first new day.
+  return newDates[0];
+}
+
+/**
+ * When event dates change, remap trip days by ordinal position in the old/new
+ * ranges so floor activity stays on the correct day (day 1 → day 1, etc.).
+ */
+async function remapTripArtifactsToNewRange(
+  eventId: string,
+  oldStart: string,
+  oldEnd: string,
+  newStart: string,
+  newEnd: string,
+): Promise<void> {
+  const validDates = new Set(calendarDateRange(newStart, newEnd));
+  const sessions = await listEventDaySessions(eventId);
+  const stops = await listEventVenueStops(eventId);
+
+  const sessionMoves = sessions.map((s) => ({
+    id: s.id,
+    from: s.session_date,
+    to: remapDateToNewRange(s.session_date, oldStart, oldEnd, newStart, newEnd),
+    phase: s.phase,
+  }));
+
+  // If multiple sessions land on the same date, keep the one with floor activity.
+  const byTarget = new Map<string, typeof sessionMoves>();
+  for (const m of sessionMoves) {
+    const list = byTarget.get(m.to) ?? [];
+    list.push(m);
+    byTarget.set(m.to, list);
+  }
+
+  const toDelete: string[] = [];
+  for (const [, movers] of byTarget) {
+    if (movers.length <= 1) continue;
+    const sorted = [...movers].sort((a, b) => {
+      const aActive = a.phase !== "planning" ? 0 : 1;
+      const bActive = b.phase !== "planning" ? 0 : 1;
+      return aActive - bActive;
+    });
+    for (const dup of sorted.slice(1)) {
+      if (dup.phase === "planning") toDelete.push(dup.id);
+    }
+  }
+
+  if (toDelete.length > 0) {
+    const { error } = await supabase
+      .from("event_day_sessions")
+      .delete()
+      .in("id", toDelete);
+    if (error) throw error;
+  }
+
+  const activeMoves = sessionMoves.filter((m) => !toDelete.includes(m.id));
+
+  for (const m of activeMoves) {
+    if (!validDates.has(m.to)) {
+      throw new Error(
+        `Trip day ${m.from} could not be remapped into ${newStart} → ${newEnd}.`,
+      );
+    }
+  }
+
+  const STAGING_OFFSET = 5000;
+  for (const m of activeMoves) {
+    const { error } = await supabase
+      .from("event_day_sessions")
+      .update({ session_date: shiftIsoDate(m.from, STAGING_OFFSET) })
+      .eq("id", m.id);
+    if (error) throw error;
+  }
+  for (const m of activeMoves) {
+    const { error } = await supabase
+      .from("event_day_sessions")
+      .update({ session_date: m.to })
+      .eq("id", m.id);
+    if (error) throw error;
+  }
+
+  const stopMoves = stops.map((s) => ({
+    id: s.id,
+    from: s.session_date,
+    to: remapDateToNewRange(s.session_date, oldStart, oldEnd, newStart, newEnd),
+  }));
+
+  for (const m of stopMoves) {
+    if (!validDates.has(m.to)) continue;
+    const { error } = await supabase
+      .from("event_venue_stops")
+      .update({ session_date: shiftIsoDate(m.from, STAGING_OFFSET) })
+      .eq("id", m.id);
+    if (error) throw error;
+  }
+  for (const m of stopMoves) {
+    if (!validDates.has(m.to)) continue;
+    const { error } = await supabase
+      .from("event_venue_stops")
+      .update({ session_date: m.to })
+      .eq("id", m.id);
+    if (error) throw error;
+  }
 }
 
 /**
@@ -295,6 +643,10 @@ export interface EventDaySession {
   phase: EventDayPhase;
   manager_staff_id: string | null;
   curfew_time: string | null;
+  /** Banner-only group Morning Roll defer summary (Option A). */
+  morning_group_defer_note?: string | null;
+  /** Banner-only group Evening Roll defer summary (Option A). */
+  evening_group_defer_note?: string | null;
   morning_roll_time: string | null;
   opened_by_id: string | null;
   open_declared_at: string | null;
@@ -415,6 +767,177 @@ export async function updateEventDaySession(
   return data as EventDaySession;
 }
 
+/**
+ * Multi-day tours — assign the same trip leader to every day still unassigned.
+ * Per-day overrides are preserved; only rows with `manager_staff_id` null are updated.
+ */
+export async function propagateTripLeaderToUnassignedDays(
+  eventId: string,
+  managerStaffId: string,
+  sourceSessionId: string,
+): Promise<number> {
+  const allowed = await canManageSystemParameters();
+  if (!allowed) throw new Error("Only Managers can configure event day sessions.");
+
+  const sessions = await listEventDaySessions(eventId);
+  const targetIds = sessions
+    .filter((s) => s.id !== sourceSessionId && !s.manager_staff_id)
+    .map((s) => s.id);
+  if (targetIds.length === 0) return 0;
+
+  const actor = await resolveStaffIdWithFallback();
+  const { error } = await supabase
+    .from("event_day_sessions")
+    .update({ manager_staff_id: managerStaffId })
+    .in("id", targetIds);
+  if (error) throw error;
+
+  await writeToLedger({
+    staff_id: actor,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "EVENT_DAY_MANAGER_PROPAGATED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      event_id: eventId,
+      source_session_id: sourceSessionId,
+      manager_staff_id: managerStaffId,
+      session_ids: targetIds,
+    },
+  });
+
+  return targetIds.length;
+}
+
+export interface TourRollCallDefaults {
+  evening: string | null;
+  morning: string | null;
+}
+
+/** Admin defaults — used when seeding multi-day trip days. */
+export async function getTourRollCallDefaults(): Promise<TourRollCallDefaults> {
+  const { data, error } = await supabase
+    .from("system_parameters")
+    .select("key, value")
+    .in("key", [EVENING_ROLL_CALL_PARAM, MORNING_ROLL_CALL_PARAM]);
+  if (error) {
+    console.warn("[getTourRollCallDefaults]", error);
+    return {
+      evening: DEFAULT_EVENING_ROLL_CALL,
+      morning: DEFAULT_MORNING_ROLL_CALL,
+    };
+  }
+
+  const byKey = Object.fromEntries(
+    (data ?? []).map((r) => {
+      const row = r as { key: string; value: unknown };
+      const raw = row.value;
+      const str = typeof raw === "string" ? raw : raw == null ? "" : String(raw);
+      return [row.key, normalizeClockTime(str)] as const;
+    }),
+  );
+
+  return {
+    evening:
+      byKey[EVENING_ROLL_CALL_PARAM] ??
+      normalizeClockTime(DEFAULT_EVENING_ROLL_CALL),
+    morning:
+      byKey[MORNING_ROLL_CALL_PARAM] ??
+      normalizeClockTime(DEFAULT_MORNING_ROLL_CALL),
+  };
+}
+
+function isMultiDayRange(startDate: string, endDate: string): boolean {
+  return startDate.slice(0, 10) !== endDate.slice(0, 10);
+}
+
+function tripDaySeedRow(
+  eventId: string,
+  sessionDate: string,
+  defaults: TourRollCallDefaults | null,
+): Record<string, unknown> {
+  const row: Record<string, unknown> = {
+    event_id: eventId,
+    session_date: sessionDate,
+    phase: "planning",
+  };
+  if (defaults?.evening) row.curfew_time = defaults.evening;
+  if (defaults?.morning) row.morning_roll_time = defaults.morning;
+  return row;
+}
+
+/**
+ * Multi-day tours — copy evening/morning roll times to days still unset.
+ * Per-day overrides are preserved.
+ */
+export async function propagateTripRollTimesToUnsetDays(
+  eventId: string,
+  sourceSessionId: string,
+  times: { curfew_time?: string | null; morning_roll_time?: string | null },
+): Promise<{ evening: number; morning: number }> {
+  const allowed = await canManageSystemParameters();
+  if (!allowed) throw new Error("Only Managers can configure event day sessions.");
+
+  const evening = normalizeClockTime(times.curfew_time);
+  const morning = normalizeClockTime(times.morning_roll_time);
+  if (!evening && !morning) return { evening: 0, morning: 0 };
+
+  const sessions = await listEventDaySessions(eventId);
+  const actor = await resolveStaffIdWithFallback();
+  let eveningCount = 0;
+  let morningCount = 0;
+
+  if (evening) {
+    const ids = sessions
+      .filter((s) => s.id !== sourceSessionId && !s.curfew_time)
+      .map((s) => s.id);
+    if (ids.length > 0) {
+      const { error } = await supabase
+        .from("event_day_sessions")
+        .update({ curfew_time: evening })
+        .in("id", ids);
+      if (error) throw error;
+      eveningCount = ids.length;
+    }
+  }
+
+  if (morning) {
+    const ids = sessions
+      .filter((s) => s.id !== sourceSessionId && !s.morning_roll_time)
+      .map((s) => s.id);
+    if (ids.length > 0) {
+      const { error } = await supabase
+        .from("event_day_sessions")
+        .update({ morning_roll_time: morning })
+        .in("id", ids);
+      if (error) throw error;
+      morningCount = ids.length;
+    }
+  }
+
+  if (eveningCount > 0 || morningCount > 0) {
+    await writeToLedger({
+      staff_id: actor,
+      category: "CENTRE",
+      severity: "INFO",
+      action_type: "EVENT_DAY_ROLL_TIMES_PROPAGATED",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: {
+        event_id: eventId,
+        source_session_id: sourceSessionId,
+        curfew_time: evening,
+        morning_roll_time: morning,
+        evening_days: eveningCount,
+        morning_days: morningCount,
+      },
+    });
+  }
+
+  return { evening: eveningCount, morning: morningCount };
+}
+
 /** Seed one `event_day_sessions` row per calendar day between start_date and end_date. */
 async function pruneTripArtifactsOutsideRange(
   eventId: string,
@@ -509,13 +1032,12 @@ export async function resetEventDaySessions(
 
   // Reseed without the prune step (rows are already gone).
   const dates = calendarDateRange(startDate, endDate);
-  if (dates.length === 0) throw new Error(`No valid dates for ${startDate} → ${endDate}.`);
+  if (dates.length === 0) throw new Error(`No valid dates for ${formatDate(startDate)} → ${formatDate(endDate ?? startDate)}.`);
 
-  const rows = dates.map((d) => ({
-    event_id: eventId,
-    session_date: d,
-    phase: "planning" as EventDayPhase,
-  }));
+  const defaults = isMultiDayRange(startDate, endDate)
+    ? await getTourRollCallDefaults()
+    : null;
+  const rows = dates.map((d) => tripDaySeedRow(eventId, d, defaults));
 
   const { error: seedErr } = await supabase
     .from("event_day_sessions")
@@ -530,21 +1052,33 @@ export async function seedEventDaySessions(
   eventId: string,
   startDate: string,
   endDate: string,
+  options?: { previousStartDate?: string; previousEndDate?: string },
 ): Promise<EventDaySession[]> {
-  await pruneTripArtifactsOutsideRange(eventId, startDate, endDate);
+  const newStart = startDate.slice(0, 10);
+  const newEnd = endDate.slice(0, 10);
+  const prevStart = (options?.previousStartDate ?? newStart).slice(0, 10);
+  const prevEnd = (options?.previousEndDate ?? options?.previousStartDate ?? newEnd).slice(
+    0,
+    10,
+  );
 
-  const dates = calendarDateRange(startDate, endDate);
+  if (prevStart !== newStart || prevEnd !== newEnd) {
+    await remapTripArtifactsToNewRange(eventId, prevStart, prevEnd, newStart, newEnd);
+  }
+
+  await pruneTripArtifactsOutsideRange(eventId, newStart, newEnd);
+
+  const dates = calendarDateRange(newStart, newEnd);
   if (dates.length === 0) {
     throw new Error(
-      `Could not build trip days from dates ${startDate} → ${endDate}. Check start/end on Details & Config.`,
+      `Could not build trip days from dates ${formatDate(startDate)} → ${formatDate(endDate ?? startDate)}. Check start/end on Details & Config.`,
     );
   }
 
-  const rows = dates.map((d) => ({
-    event_id: eventId,
-    session_date: d,
-    phase: "planning" as EventDayPhase,
-  }));
+  const defaults = isMultiDayRange(newStart, newEnd)
+    ? await getTourRollCallDefaults()
+    : null;
+  const rows = dates.map((d) => tripDaySeedRow(eventId, d, defaults));
 
   const { error } = await supabase
     .from("event_day_sessions")
@@ -563,19 +1097,48 @@ export interface UpdateBookingTransportModeInput {
   booking_id: string;
   outbound_transport_mode: "bus" | "self";
   return_transport_mode: "bus" | "self";
+  /** BL-069 — required when outbound is bus and multi-run is used; null clears. */
+  outbound_bus_run_code?: string | null;
+  return_bus_run_code?: string | null;
 }
 
 export async function updateBookingTransportModes(
   input: UpdateBookingTransportModeInput,
 ): Promise<void> {
+  const patch: Record<string, unknown> = {
+    outbound_transport_mode: input.outbound_transport_mode,
+    return_transport_mode: input.return_transport_mode,
+  };
+  if (input.outbound_transport_mode === "self") {
+    patch.outbound_bus_run_code = null;
+  } else if (input.outbound_bus_run_code !== undefined) {
+    patch.outbound_bus_run_code = input.outbound_bus_run_code?.trim() || null;
+  }
+  if (input.return_transport_mode === "self") {
+    patch.return_bus_run_code = null;
+  } else if (input.return_bus_run_code !== undefined) {
+    patch.return_bus_run_code = input.return_bus_run_code?.trim() || null;
+  }
+
   const { error } = await supabase
     .from("event_roster_bookings")
-    .update({
-      outbound_transport_mode: input.outbound_transport_mode,
-      return_transport_mode: input.return_transport_mode,
-    })
+    .update(patch)
     .eq("id", input.booking_id);
-  if (error) throw error;
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      // Pre-BL-069: modes only.
+      const { error: retryErr } = await supabase
+        .from("event_roster_bookings")
+        .update({
+          outbound_transport_mode: input.outbound_transport_mode,
+          return_transport_mode: input.return_transport_mode,
+        })
+        .eq("id", input.booking_id);
+      if (retryErr) throw retryErr;
+      return;
+    }
+    throw error;
+  }
 }
 
 // ============================================================================

@@ -18,6 +18,8 @@ import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
+import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
 import {
   Select,
   SelectContent,
@@ -143,27 +145,29 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
           <DialogDescription>
             <span className="font-medium text-foreground">{asset.name}</span> ·{" "}
             <span className="font-mono text-xs">{asset.category}</span> ·{" "}
-            current expiry {asset.expiry_date ?? "—"}
+            current expiry {asset.expiry_date ? formatDate(asset.expiry_date) : "—"}
           </DialogDescription>
         </DialogHeader>
 
         <div className="grid gap-3 py-2 sm:grid-cols-2">
           <div className="space-y-1">
             <Label>Action date</Label>
-            <Input
-              type="date"
-              value={actionDate}
-              max={todayISO()}
-              onChange={(e) => setActionDate(e.target.value)}
+            <DatePicker
+              value={parseIsoDateLocal(actionDate)}
+              onChange={(d) => setActionDate(d ? toIsoDateString(d) : "")}
+              disabledDates={(d) => d > new Date()}
+              dateFormat="dd-MMM-yy"
+              className="h-9 text-sm"
             />
           </div>
           <div className="space-y-1">
             <Label>New expiry</Label>
-            <Input
-              type="date"
-              value={newExpiry}
-              min={todayISO()}
-              onChange={(e) => setNewExpiry(e.target.value)}
+            <DatePicker
+              value={parseIsoDateLocal(newExpiry)}
+              onChange={(d) => setNewExpiry(d ? toIsoDateString(d) : "")}
+              disabledDates={(d) => d < new Date()}
+              dateFormat="dd-MMM-yy"
+              className="h-9 text-sm"
             />
           </div>
           <div className="space-y-1 sm:col-span-2">

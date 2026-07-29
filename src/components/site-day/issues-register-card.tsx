@@ -6,34 +6,30 @@ import { cn } from "@/lib/utils";
 import { ClientTime } from "@/components/ui/client-time";
 import { ElapsedTimer, formatElapsed } from "@/components/ui/elapsed-timer";
 import { type SiteIssue } from "@/lib/api/site-issues";
+import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
 
 interface Props {
   issue: SiteIssue;
 }
 
-const SEVERITY_CHIP: Record<
-  SiteIssue["severity"],
-  { label: string; classes: string; icon: ReactNode | null }
-> = {
-  green: {
-    label: "NOTE",
-    classes: "bg-green-600 text-white",
-    icon: <Info className="h-3 w-3" />,
-  },
-  yellow: {
-    label: "YELLOW",
-    classes: "bg-yellow-400 text-black",
-    icon: null,
-  },
-  red: {
-    label: "RED",
-    classes: "bg-red-600 text-white",
-    icon: null,
-  },
+const RYGE_MAP = new Map(RYGE_SEVERITY_CHIPS.map((c) => [c.value, c]));
+
+const SEVERITY_LABEL: Record<SiteIssue["severity"], string> = {
+  green: "NOTE",
+  yellow: "YELLOW",
+  red: "RED",
+};
+
+const SEVERITY_ICON: Record<SiteIssue["severity"], ReactNode> = {
+  green: <Info className="h-3 w-3" />,
+  yellow: null,
+  red: null,
 };
 
 export function IssuesRegisterCard({ issue }: Props) {
-  const sev = SEVERITY_CHIP[issue.severity];
+  const sevCls = RYGE_MAP.get(issue.severity)?.activeClass ?? "bg-slate-600 text-white";
+  const sevLabel = SEVERITY_LABEL[issue.severity];
+  const sevIcon = SEVERITY_ICON[issue.severity];
   const isResolved = issue.status === "resolved";
   const isWorkaroundAccepted = issue.status === "workaround_accepted";
 
@@ -50,11 +46,11 @@ export function IssuesRegisterCard({ issue }: Props) {
         <span
           className={cn(
             "flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
-            sev.classes,
+            sevCls,
           )}
         >
-          {sev.icon}
-          {sev.label}
+          {sevIcon}
+          {sevLabel}
         </span>
         <span className="text-xs text-muted-foreground">
           <ClientTime iso={issue.createdAt} />

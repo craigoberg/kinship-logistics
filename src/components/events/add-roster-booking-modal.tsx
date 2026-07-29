@@ -37,13 +37,14 @@ interface Props {
 }
 
 export function AddRosterBookingModal({ open, onOpenChange, event, existingBookings }: Props) {
+  const isOuting = event.eventKind === "single_day_outing" || event.eventKind === "multi_day_tour";
   const [participantId, setParticipantId] = useState("");
   const [amountPaid, setAmountPaid] = useState("0.00");
   const [notes, setNotes] = useState("");
   const [bringsCarer, setBringsCarer] = useState(false);
   const [carerId, setCarerId] = useState<string>("");
   const [carerTransport, setCarerTransport] = useState(false);
-  const [participantTransport, setParticipantTransport] = useState(false);
+  const [participantTransport, setParticipantTransport] = useState(true);
   const [dirty, setDirty] = useState(false);
   const mutation = useInsertEventBooking();
   const { data: participants = [] } = useParticipants();
@@ -57,7 +58,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
       setBringsCarer(false);
       setCarerId("");
       setCarerTransport(false);
-      setParticipantTransport(false);
+      setParticipantTransport(true);
       setDirty(false);
     }
   }, [open]);
@@ -101,7 +102,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         bringsCarer,
         carerId: bringsCarer ? carerId || null : null,
         carerTransportRequired: bringsCarer ? carerTransport : false,
-        participantTransportRequired: participantTransport,
+        participantTransportRequired: isOuting ? true : participantTransport,
       });
       toast.success("Participant added to roster");
       onOpenChange(false);
@@ -172,19 +173,21 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
             </p>
           </div>
 
-          {/* ----- Transport logistics ----- */}
-          <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Client requires bus transport?
-            </Label>
-            <Switch
-              checked={participantTransport}
-              onCheckedChange={(v) => {
-                setParticipantTransport(v);
-                setDirty(true);
-              }}
-            />
-          </div>
+          {/* ----- Transport logistics (legacy non-outing events only) ----- */}
+          {!isOuting && (
+            <div className="flex items-center justify-between gap-2 rounded-lg border border-border bg-muted/30 p-3">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Client requires bus transport?
+              </Label>
+              <Switch
+                checked={participantTransport}
+                onCheckedChange={(v) => {
+                  setParticipantTransport(v);
+                  setDirty(true);
+                }}
+              />
+            </div>
+          )}
 
           {/* ----- Carer companion ----- */}
           <div className="space-y-3 rounded-lg border border-border bg-muted/30 p-3">
@@ -267,7 +270,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <UserPlus className="h-4 w-4" />

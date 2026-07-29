@@ -97,6 +97,7 @@ export function invalidateTransportCaches(qc: QueryClient): void {
   // Confirmed-events picker shown to the driver before trip start.
   qc.invalidateQueries({ queryKey: ["events", "confirmed"] });
   qc.invalidateQueries({ queryKey: ["events", "manifest-picker"] });
+  qc.invalidateQueries({ queryKey: ["event-return-transport"] });
 
   // Participants directory Bus/Self indicator grid (reads participant_attendance_schedules).
   qc.invalidateQueries({ queryKey: ["participant-directory-indicators", "v3-split-transport"] });
@@ -108,6 +109,8 @@ export function invalidateFleetCaches(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ["transport_assets"] });
   qc.invalidateQueries({ queryKey: ["transport-assets"] });
   qc.invalidateQueries({ queryKey: ["compliance-assets"] });
+  // Manifest init start-odo prefill (BL-096)
+  qc.invalidateQueries({ queryKey: ["transport_assets", "current_odometer"] });
 }
 
 /** Ad-hoc transport request queue on /transport. */
@@ -153,6 +156,9 @@ export function invalidateEventDayCaches(
     qc.invalidateQueries({ queryKey: ["event-morning-log", scope.sessionId] });
     qc.invalidateQueries({ queryKey: ["event-attendance-log", scope.sessionId] });
     qc.invalidateQueries({ queryKey: ["event-day-issues", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-day-issues-red-check", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-unreconciled-checkins", scope.sessionId] });
+    qc.invalidateQueries({ queryKey: ["event-arrival-gate", scope.sessionId] });
   } else {
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-curfew-log" });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-morning-log" });
@@ -160,6 +166,13 @@ export function invalidateEventDayCaches(
   }
 
   qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-day-sessions" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-accountability-roll" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-deliver-group-status" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-deliver-roll-alerts" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-activity-rolls" });
+  qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "active-trip" });
+  invalidateTransportCaches(qc);
+  invalidateIssueCaches(qc, { sessionId: scope.sessionId });
 
   if (scope.eventId) {
     qc.invalidateQueries({ queryKey: ["event-actual-transport", scope.eventId] });

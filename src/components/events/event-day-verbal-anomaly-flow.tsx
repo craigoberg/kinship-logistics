@@ -16,6 +16,7 @@ import {
 import { createIssue, type ResponsibilityOwner } from "@/lib/api/site-issues";
 import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
 import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
+import { formatDate } from "@/lib/utils";
 
 interface Props {
   eventId: string;
@@ -40,7 +41,7 @@ export function EventDayVerbalAnomalyFlow({
     owner: ResponsibilityOwner;
   } | null>(null);
 
-  const subjectLabel = `${eventTitle} · ${sessionDate}`;
+  const subjectLabel = `${eventTitle} · ${formatDate(sessionDate)}`;
 
   return (
     <>

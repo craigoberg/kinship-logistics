@@ -5,6 +5,7 @@ import {
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { getSydneyIsoDate, todaysSydneyDayCode } from "@/lib/operational-time";
+import { getOperationalTodayIso, operationalNowIso } from "@/lib/operational-clock";
 
 // ---------------------------------------------------------------------------
 // Empty-Day Opening Shield
@@ -118,7 +119,7 @@ function rowToSession(r: SiteDaySessionRow): SiteDaySession {
 }
 
 function todayIso(): string {
-  return getSydneyIsoDate();
+  return getOperationalTodayIso();
 }
 
 /**
@@ -209,7 +210,7 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
 export async function openSession(notes: string): Promise<SiteDaySession> {
   const openedByUserId = await resolveOpenedByUserId();
   const date = todayIso();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
 
   const existing = await supabase
@@ -248,6 +249,15 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
     { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
     "GREEN",
   );
+  // BL-100 / BL-073 — seed Activities template (meals + med round) if empty.
+  try {
+    const { ensureSiteDayActivitiesSeeded } = await import(
+      "@/lib/api/site-day-activities"
+    );
+    await ensureSiteDayActivitiesSeeded(next.id);
+  } catch (e) {
+    console.warn("[openSession] activity seed", e);
+  }
   return next;
 }
 
@@ -353,8 +363,8 @@ export async function reopenSession(args: {
 /**
  * TEST-ONLY rewind. Flip today's session row back to `open_pending` and
  * clear all open/close/handshake stamps so the Start of Day flow renders
- * fresh. Does NOT touch issues, escalations, attendance, billing or other
- * tables — only this row plus a single YELLOW ledger audit entry.
+ * fresh. Also rewinds Activities delivery (`site_day_activities` → pending).
+ * Does NOT touch issues, escalations, attendance, or billing.
  *
  * UI for this action is gated by `IS_TEST_BUILD` so it never appears on
  * published deployments.
@@ -394,6 +404,11 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
   if (error) throw error;
   const next = rowToSession(data as SiteDaySessionRow);
 
+  const { resetSiteDayActivitiesDelivery } = await import(
+    "@/lib/api/site-day-activities"
+  );
+  const activitiesReset = await resetSiteDayActivitiesDelivery(next.id);
+
   await siteLedger(
     "reset_start_of_day",
     {
@@ -402,6 +417,7 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
       prior_phase: prior.phase,
       prior_open_at: prior.openDeclaredAt,
       prior_close_at: prior.closeDeclaredAt,
+      activities_reset: activitiesReset,
       reason: reason ?? null,
       test_only: true,
     },

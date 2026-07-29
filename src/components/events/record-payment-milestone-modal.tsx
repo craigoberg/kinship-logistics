@@ -14,7 +14,8 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useRecordEventPaymentMilestone } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
-import { todayLocalIso } from "@/lib/utils";
+import { todayLocalIso, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
 
 interface Props {
   open: boolean;
@@ -108,10 +109,11 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Payment date
             </Label>
-            <Input
-              type="date"
-              value={paymentDate}
-              onChange={(e) => setPaymentDate(e.target.value)}
+            <DatePicker
+              value={parseIsoDateLocal(paymentDate)}
+              onChange={(d) => setPaymentDate(d ? toIsoDateString(d) : "")}
+              dateFormat="dd-MMM-yy"
+              className="h-9 text-sm"
             />
           </div>
 
@@ -123,7 +125,7 @@ export function RecordPaymentMilestoneModal({ open, onOpenChange, event, booking
 
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+            Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <CircleDollarSign className="h-4 w-4" />

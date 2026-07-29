@@ -5,14 +5,12 @@
  *   Active / Deferred sub-tabs · Search · Category + Severity filters
  *   Manage dialog (ManageItemShell) with notes timeline + defer + resolve
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
 import { Loader2, Plus, Wrench } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -29,24 +27,38 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
-import {
   Dialog,
   DialogContent,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { HubListCard } from "@/components/governance/hub-list-card";
+import { HubListCardBody } from "@/components/governance/hub-list-card-body";
+import { HubContextMetaGrid, HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
+import { maintenanceItemBodyLines } from "@/lib/governance/hub-maintenance-item-body";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
+import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
+import { operationToasts } from "@/lib/ui/operation-toasts";
+import {
+  findHubReviewStartedNote,
+  formatHubWaitDuration,
+  isHubReviewStarted,
+} from "@/lib/governance/hub-review-started";
+import {
+  computeHubUrgency,
+  HUB_WORKFLOW_STATUS_BADGE,
+  HUB_WORKFLOW_STATUS_LABEL,
+  maintenanceWorkflowStatus,
+} from "@/lib/governance/hub-workflow-status";
+import { useMaintenanceUrgencyParams } from "@/hooks/use-system-parameters";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
+import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { resolveStaffIdWithFallback, getStaffId, resolveStaffDisplayName } from "@/lib/data-store";
 import {
   addMaintenanceNote,
@@ -73,21 +85,8 @@ const SEV_BADGE: Record<MaintenanceSeverity, string> = {
   green: "bg-green-600 text-white",
 };
 
-const STATUS_BADGE: Record<string, string> = {
-  open: "bg-orange-500 text-white",
-  in_progress: "bg-sky-600 text-white",
-  deferred: "bg-amber-500 text-black",
-  resolved: "bg-green-600 text-white",
-  closed: "bg-slate-500 text-white",
-};
-
-const STATUS_LABEL: Record<string, string> = {
-  open: "Open",
-  in_progress: "In Progress",
-  deferred: "Deferred",
-  resolved: "Resolved",
-  closed: "Closed",
-};
+const STATUS_BADGE = HUB_WORKFLOW_STATUS_BADGE;
+const STATUS_LABEL = HUB_WORKFLOW_STATUS_LABEL;
 
 const SOURCE_BADGE: Record<MaintenanceSource, string> = {
   venue_issue:    "bg-violet-600 text-white",
@@ -122,12 +121,16 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   const [note, setNote] = useState("");
   const [deferOn, setDeferOn] = useState(false);
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
+  const [deferDatetimeValid, setDeferDatetimeValid] = useState(true);
+  const [pinOpen, setPinOpen] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"resolve" | "close">("resolve");
 
   useEffect(() => {
     if (open) {
       setNote("");
       setDeferOn(false);
       setDeferAt(defaultDeferIso());
+      setDeferDatetimeValid(true);
     }
   }, [open, item.id]);
 
@@ -141,13 +144,29 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   const timelineLines = useMemo(() => {
     const notes: MaintenanceNote[] = notesQuery.data ?? [];
     const lines = notes.map(renderMaintenanceNote);
-    // Initial log line from item creation
-    const created = new Date(item.createdAt).toLocaleString("en-AU", {
-      day: "numeric", month: "short", hour: "2-digit", minute: "2-digit",
-    });
+    const created = formatDateTime(item.createdAt);
     const createdLine = `[${created}${item.reportedBy ? ` · ${item.reportedBy}` : ""}] Item logged — ${item.description}`;
     return [createdLine, ...lines];
   }, [notesQuery.data, item]);
+
+  const maintenanceNotesForReview = useMemo(
+    () =>
+      (notesQuery.data ?? []).map((n) => ({
+        note: n.noteText,
+        stampedAt: n.createdAt,
+        metadata: null as Record<string, unknown> | null,
+      })),
+    [notesQuery.data],
+  );
+  const reviewStartedNote = useMemo(
+    () => findHubReviewStartedNote(maintenanceNotesForReview),
+    [maintenanceNotesForReview],
+  );
+  const reviewStarted =
+    item.status === "in_progress" || isHubReviewStarted(maintenanceNotesForReview);
+  const waitLabel = reviewStartedNote
+    ? formatHubWaitDuration(item.createdAt, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(item.createdAt, new Date().toISOString());
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
@@ -160,7 +179,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   };
 
   const noteOk = note.trim().length >= MIN_TIMELINE_NOTE;
-  const deferValid = !deferOn || (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
+  const deferValid = !deferOn || deferDatetimeValid;
 
   const logMut = useMutation({
     mutationFn: async () => {
@@ -177,9 +196,13 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       invalidate();
       setNote("");
       setDeferOn(false);
-      toast.success(kind === "defer" ? "Item deferred." : "Note added to timeline.");
+      if (kind === "defer") {
+        operationToasts.maintenanceDeferred();
+      } else {
+        operationToasts.noteLogged();
+      }
     },
-    onError: (e: Error) => toast.error("Action failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
   const startMut = useMutation({
@@ -190,9 +213,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     },
     onSuccess: () => {
       invalidate();
-      toast.success("Marked as In Progress.");
+      const waitLabel = formatHubWaitDuration(item.createdAt, new Date().toISOString());
+      operationToasts.reviewStarted(waitLabel);
     },
-    onError: (e: Error) => toast.error("Update failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
   const resolveMut = useMutation({
@@ -206,10 +230,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     onSuccess: () => {
       invalidate();
       setNote("");
-      toast.success("Item marked as resolved.");
+      operationToasts.maintenanceResolved();
       onOpenChange(false);
     },
-    onError: (e: Error) => toast.error("Resolve failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.resolutionFailed(e.message),
   });
 
   const closeMut = useMutation({
@@ -220,30 +244,73 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     },
     onSuccess: () => {
       invalidate();
-      toast.success("Item closed.");
+      operationToasts.maintenanceClosed();
       onOpenChange(false);
     },
-    onError: (e: Error) => toast.error("Close failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
+  const autoStartRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!open) {
+      autoStartRef.current = null;
+      return;
+    }
+    if (item.status !== "open") return;
+    if (autoStartRef.current === item.id) return;
+    autoStartRef.current = item.id;
+    startMut.mutate();
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fire once per open session
+  }, [open, item.id, item.status]);
+
+  // startMut is a background housekeeping step (auto-transition open→in_progress).
+  // It must NOT contribute to busy — that would lock the form while the silent
+  // background call is in-flight and confuse the user.
   const busy =
     logMut.isPending ||
-    startMut.isPending ||
     resolveMut.isPending ||
     closeMut.isPending;
 
   const canLog = noteOk && deferValid && !busy;
   const canResolve = noteOk && !deferOn && !busy;
 
+  const handleResolveClick = () => {
+    if (!canResolve) return;
+    setPendingAction("resolve");
+    setPinOpen(true);
+  };
+
+  const handleCloseClick = () => {
+    if (busy) return;
+    setPendingAction("close");
+    setPinOpen(true);
+  };
+
+  const handlePinAuthenticated = () => {
+    if (!isManagerProfile()) {
+      operationToasts.managerPinRequired();
+      setPinOpen(false);
+      return;
+    }
+    setPinOpen(false);
+    if (pendingAction === "close") {
+      closeMut.mutate();
+    } else {
+      resolveMut.mutate();
+    }
+  };
+
   const contextCard = (
     <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">
       <div className="flex flex-wrap items-center gap-2">
         <Badge className={SEV_BADGE[item.severity]}>{item.severity.toUpperCase()}</Badge>
         <Badge className={SOURCE_BADGE[item.source]}>{SOURCE_LABELS[item.source]}</Badge>
-        <Badge className={STATUS_BADGE[item.status]}>{STATUS_LABEL[item.status]}</Badge>
+        <Badge className={STATUS_BADGE[maintenanceWorkflowStatus(item.status)]}>
+          {STATUS_LABEL[maintenanceWorkflowStatus(item.status)]}
+        </Badge>
         {item.deferredUntil && item.status === "deferred" && (
           <span className="text-xs text-amber-600 font-medium">
-            ↻ Deferred to {item.deferredUntil}
+            ↻ Deferred to {formatDate(item.deferredUntil)}
             {item.deferCount > 1 && ` (×${item.deferCount})`}
           </span>
         )}
@@ -252,41 +319,48 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       {item.description !== item.title && (
         <p className="text-xs text-muted-foreground whitespace-pre-wrap">{item.description}</p>
       )}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {item.locationLabel && (
-          <>
-            <span className="font-medium text-foreground/70">Location</span>
-            <span>{item.locationLabel}</span>
-          </>
-        )}
-        {item.reportedBy && (
-          <>
-            <span className="font-medium text-foreground/70">Reported by</span>
-            <span>{item.reportedBy}</span>
-          </>
-        )}
-        {item.assignedTo && (
-          <>
-            <span className="font-medium text-foreground/70">Assigned to</span>
-            <span>{item.assignedTo}</span>
-          </>
-        )}
-        <span className="font-medium text-foreground/70">Logged</span>
-        <span><FormattedDateTime value={item.createdAt} /></span>
-        {item.resolvedAt && (
-          <>
-            <span className="font-medium text-foreground/70">Resolved</span>
-            <span><FormattedDateTime value={item.resolvedAt} /></span>
-          </>
-        )}
-      </div>
+      <HubContextMetaGrid
+        rows={[
+          { label: "Location", value: item.locationLabel },
+          { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
+          { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
+          reviewStarted && reviewStartedNote
+            ? {
+                label: "Review started",
+                value: (
+                  <>
+                    <FormattedDateTime value={reviewStartedNote.stampedAt} />
+                    {waitLabel ? ` (${waitLabel} after logged)` : ""}
+                  </>
+                ),
+              }
+            : item.status !== "resolved" && item.status !== "closed"
+              ? { label: "Waiting", value: `${waitLabel} since logged` }
+              : { label: "Waiting", value: null },
+          item.assignedTo
+            ? { label: "Assigned to", value: item.assignedTo }
+            : { label: "Assigned to", value: null },
+          item.resolvedAt
+            ? {
+                label: "Resolved",
+                value: <FormattedDateTime value={item.resolvedAt} />,
+              }
+            : { label: "Resolved", value: null },
+        ]}
+      />
     </div>
   );
 
   return (
+    <>
     <ManageItemShell
       open={open}
-      onOpenChange={(o) => { if (busy) return; if (!o) setNote(""); onOpenChange(o); }}
+      onOpenChange={(o) => {
+        // Never block the close/X path — user must always be able to escape.
+        // In-flight mutations will be abandoned naturally by React Query on unmount.
+        if (!o) setNote("");
+        onOpenChange(o);
+      }}
       busy={busy}
       title="Manage Maintenance Item"
       description="Log progress notes, defer to a future date, or mark as resolved."
@@ -301,44 +375,39 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       onDeferOnChange={setDeferOn}
       deferAt={deferAt}
       onDeferAtChange={setDeferAt}
+      onDeferDatetimeValidChange={setDeferDatetimeValid}
       showEscalate={false}
       onLogUpdate={() => logMut.mutate()}
       logUpdateLabel={deferOn ? "Defer Item" : "Log Note"}
       canLog={canLog}
       onResolveClose={
         item.status !== "resolved" && item.status !== "closed"
-          ? () => resolveMut.mutate()
+          ? handleResolveClick
           : undefined
       }
       resolveCloseLabel="Mark Resolved"
       canResolve={canResolve}
       extraFooterStart={
-        <div className="flex gap-2">
-          {item.status === "open" && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => startMut.mutate()}
-            >
-              {startMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Start Work
-            </Button>
-          )}
-          {item.status === "resolved" && (
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={busy}
-              onClick={() => closeMut.mutate()}
-            >
-              {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-              Close
-            </Button>
-          )}
-        </div>
+        item.status === "resolved" ? (
+          <Button
+            size="sm"
+            variant="outline"
+            disabled={busy}
+            onClick={handleCloseClick}
+          >
+            {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+            Close Item
+          </Button>
+        ) : undefined
       }
     />
+    <PinReauthDialog
+      open={pinOpen}
+      onOpenChange={setPinOpen}
+      reason="Manager PIN required to resolve or close a maintenance item."
+      onAuthenticated={handlePinAuthenticated}
+    />
+    </>
   );
 }
 
@@ -349,14 +418,24 @@ function AddItemDialog({ open, onClose }: { open: boolean; onClose: () => void }
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [severity, setSeverity] = useState<MaintenanceSeverity>("yellow");
+  const [workaround, setWorkaround] = useState("");
+  const [managerName, setManagerName] = useState("");
   const [locationLabel, setLocationLabel] = useState("");
 
   const mutation = useMutation({
     mutationFn: async () => {
       const id = getStaffId() || (await resolveStaffIdWithFallback());
+      // Build description with severity context
+      let fullDescription = description.trim();
+      if (severity === "yellow" && workaround.trim()) {
+        fullDescription = `Workaround: ${workaround.trim()}\n\n${fullDescription}`.trim();
+      }
+      if (severity === "red" && managerName.trim()) {
+        fullDescription = `Manager verbally notified: ${managerName.trim()}\n\n${fullDescription}`.trim();
+      }
       return createMaintenanceItem({
         title: title.trim(),
-        description: description.trim(),
+        description: fullDescription,
         severity,
         source: "manual",
         locationLabel: locationLabel.trim() || null,
@@ -365,14 +444,17 @@ function AddItemDialog({ open, onClose }: { open: boolean; onClose: () => void }
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
-      toast.success("Maintenance item added.");
-      setTitle(""); setDescription(""); setSeverity("yellow"); setLocationLabel("");
+      operationToasts.maintenanceAdded();
+      setTitle(""); setDescription(""); setSeverity("yellow");
+      setWorkaround(""); setManagerName(""); setLocationLabel("");
       onClose();
     },
-    onError: (e: Error) => toast.error("Could not add item", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
-  const canSubmit = title.trim().length >= 5 && description.trim().length >= 10;
+  const workaroundOk = severity !== "yellow" || workaround.trim().length >= 5;
+  const managerOk    = severity !== "red"    || managerName.trim().length >= 2;
+  const canSubmit    = title.trim().length >= 5 && workaroundOk && managerOk && !mutation.isPending;
 
   return (
     <Dialog open={open} onOpenChange={(v) => { if (!v) onClose(); }}>
@@ -385,71 +467,108 @@ function AddItemDialog({ open, onClose }: { open: boolean; onClose: () => void }
         </DialogHeader>
         <div className="space-y-3 py-1">
           <div className="space-y-1">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Title</Label>
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Title *</Label>
             <Input placeholder="e.g. Toilet 2 tap leaking" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
-          <div className="space-y-1">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description</Label>
-            <Textarea rows={3} placeholder="Describe what needs repairing." value={description} onChange={(e) => setDescription(e.target.value)} />
-          </div>
+
+          {/* Severity selector */}
           <div className="space-y-1.5">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Severity</Label>
             <div className="flex flex-wrap gap-2">
-              {(["red", "yellow", "green"] as const).map((s) => (
+              {RYGE_SEVERITY_CHIPS.map((chip) => (
                 <button
-                  key={s}
+                  key={chip.value}
                   type="button"
-                  onClick={() => setSeverity(s)}
-                  data-active={severity === s}
-                  className={
-                    s === "red"
-                      ? "rounded-full border px-3 py-1 text-xs font-semibold transition border-red-600/60 bg-red-600/10 text-red-700 data-[active=true]:bg-red-600 data-[active=true]:text-white"
-                      : s === "yellow"
-                        ? "rounded-full border px-3 py-1 text-xs font-semibold transition border-yellow-500/60 bg-yellow-500/10 text-yellow-700 data-[active=true]:bg-yellow-400 data-[active=true]:text-black"
-                        : "rounded-full border px-3 py-1 text-xs font-semibold transition border-green-600/60 bg-green-600/10 text-green-700 data-[active=true]:bg-green-600 data-[active=true]:text-white"
-                  }
+                  onClick={() => setSeverity(chip.value as MaintenanceSeverity)}
+                  className={cn(
+                    "rounded-full border-2 px-4 py-1.5 text-xs font-bold transition",
+                    severity === chip.value ? chip.activeClass : chip.idleClass,
+                  )}
                 >
-                  {s.charAt(0).toUpperCase() + s.slice(1)}
+                  {chip.label}
                 </button>
               ))}
             </div>
           </div>
+
+          {/* Yellow: workaround required */}
+          {severity === "yellow" && (
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-yellow-500">
+                Workaround in place *
+              </Label>
+              <Textarea
+                rows={2}
+                placeholder="e.g. Toilet 2 out of order — redirect participants to Toilet 1."
+                value={workaround}
+                onChange={(e) => setWorkaround(e.target.value)}
+                className={workaround.trim().length > 0 && workaround.trim().length < 5 ? "border-destructive" : ""}
+              />
+            </div>
+          )}
+
+          {/* Red: manager name required */}
+          {severity === "red" && (
+            <div className="rounded-md border border-red-600/40 bg-red-600/10 p-3 space-y-2">
+              <p className="text-xs font-semibold text-red-400">
+                RED items require verbal notification to a manager before logging.
+              </p>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold uppercase tracking-wide text-red-400">
+                  Manager verbally notified *
+                </Label>
+                <Input
+                  placeholder="Manager's name"
+                  value={managerName}
+                  onChange={(e) => setManagerName(e.target.value)}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-1">
+            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Description (optional)</Label>
+            <Textarea rows={3} placeholder="Describe what needs repairing." value={description} onChange={(e) => setDescription(e.target.value)} />
+          </div>
+
           <div className="space-y-1">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Location (optional)</Label>
             <Input placeholder="e.g. Main hall, Toilet block 3" value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} />
           </div>
         </div>
-        <div className="flex justify-end gap-2 pt-2">
-          <Button variant="outline" onClick={onClose} disabled={mutation.isPending}>Cancel</Button>
-          <Button onClick={() => mutation.mutate()} disabled={!canSubmit || mutation.isPending}>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>Close</Button>
+          <Button onClick={() => mutation.mutate()} disabled={!canSubmit}>
             {mutation.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             Add Item
           </Button>
-        </div>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ── Items table ───────────────────────────────────────────────────────────────
+// ── Items list (card rows) ────────────────────────────────────────────────────
 
-interface ItemsTableProps {
+interface ItemsListProps {
   tab: MaintenanceTabFilter;
   onManage: (item: MaintenanceItem) => void;
 }
 
-function ItemsTable({ tab, onManage }: ItemsTableProps) {
+function ItemsList({ tab, onManage }: ItemsListProps) {
   const [categoryFilter, setCategoryFilter] = useState<MaintenanceSource | "all">("all");
   const [severityFilter, setSeverityFilter] = useState<MaintenanceSeverity | "all">("all");
   const [search, setSearch] = useState("");
+  const urgencyParams = useMaintenanceUrgencyParams();
 
   const { data: items = [], isLoading, isFetching } = useQuery({
-    queryKey: [...MAINTENANCE_ITEMS_KEY, tab, severityFilter, categoryFilter],
+    queryKey: [...MAINTENANCE_ITEMS_KEY, tab, severityFilter, categoryFilter, urgencyParams.deferRewarnMs],
     queryFn: () =>
       listMaintenanceItems({
         tab,
         severity: severityFilter === "all" ? undefined : severityFilter,
         source: categoryFilter === "all" ? undefined : categoryFilter,
+        deferRewarnMs: urgencyParams.deferRewarnMs,
       }),
     staleTime: 30_000,
     refetchInterval: 60_000,
@@ -465,8 +584,8 @@ function ItemsTable({ tab, onManage }: ItemsTableProps) {
   }, [items, search]);
 
   const tabDesc = {
-    active: "Open items and any overdue deferrals needing attention now.",
-    deferred: "Items parked until a future date. They return to Active automatically when their date arrives.",
+    active: "Open items and any deferred items whose deadline is approaching or overdue.",
+    deferred: "Items safely parked with a future deadline. They return to Active automatically when the deadline is near.",
     resolved: "Resolved and closed items — read-only history.",
     all: "All maintenance items regardless of status.",
   }[tab];
@@ -519,87 +638,87 @@ function ItemsTable({ tab, onManage }: ItemsTableProps) {
         </div>
       </div>
 
-      <Card className="overflow-hidden">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-20">Severity</TableHead>
-              <TableHead className="hidden sm:table-cell w-36">Category</TableHead>
-              <TableHead>Issue</TableHead>
-              <TableHead className="hidden lg:table-cell w-40">Logged</TableHead>
-              <TableHead className="hidden md:table-cell">Location / Reporter</TableHead>
-              <TableHead className="hidden lg:table-cell w-40">Updated</TableHead>
-              <TableHead className="w-28">Status</TableHead>
-              <TableHead className="text-right w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {isLoading && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
-                  <Loader2 className="mx-auto h-5 w-5 animate-spin" />
-                </TableCell>
-              </TableRow>
-            )}
-            {!isLoading && visible.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
-                  {tab === "active"
-                    ? "No open items — good news!"
-                    : tab === "deferred"
-                      ? "Nothing deferred."
-                      : "No items match your filter."}
-                </TableCell>
-              </TableRow>
-            )}
-            {visible.map((item) => (
-              <TableRow key={item.id} className="align-top cursor-pointer hover:bg-muted/30" onClick={() => onManage(item)}>
-                <TableCell className="pt-3">
-                  <Badge className={SEV_BADGE[item.severity]}>{item.severity.toUpperCase()}</Badge>
-                </TableCell>
-                <TableCell className="hidden sm:table-cell pt-3">
-                  <Badge className={SOURCE_BADGE[item.source]}>{SOURCE_LABELS[item.source]}</Badge>
-                </TableCell>
-                <TableCell className="max-w-xs">
-                  <p className="font-medium text-sm leading-tight">{item.title}</p>
-                  {item.description !== item.title && (
-                    <p className="mt-0.5 text-xs text-muted-foreground line-clamp-2">{item.description}</p>
-                  )}
-                  {item.deferredUntil && item.status === "deferred" && (
-                    <p className="mt-1 text-xs text-amber-600 font-medium">
-                      ↻ Deferred to {item.deferredUntil}
-                    </p>
-                  )}
-                </TableCell>
-                <TableCell className="hidden lg:table-cell text-xs text-muted-foreground pt-3">
-                  <FormattedDateTime value={item.createdAt} />
-                </TableCell>
-                <TableCell className="hidden md:table-cell text-xs text-muted-foreground pt-3">
-                  {item.locationLabel && <div>{item.locationLabel}</div>}
-                  {item.reportedBy && <div className="text-muted-foreground/70">{item.reportedBy}</div>}
-                  {!item.locationLabel && !item.reportedBy && "—"}
-                </TableCell>
-                <TableCell className="hidden lg:table-cell text-xs text-muted-foreground pt-3">
-                  <FormattedDateTime value={item.updatedAt} />
-                </TableCell>
-                <TableCell className="pt-3">
-                  <Badge className={STATUS_BADGE[item.status]}>{STATUS_LABEL[item.status]}</Badge>
-                </TableCell>
-                <TableCell className="text-right pt-2.5">
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    className="h-7 px-2 text-xs"
-                    onClick={(e) => { e.stopPropagation(); onManage(item); }}
-                  >
-                    Manage
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      </Card>
+      {isLoading ? (
+        <div className="py-8 text-center text-sm text-muted-foreground">
+          <Loader2 className="mx-auto h-5 w-5 animate-spin" />
+        </div>
+      ) : visible.length === 0 ? (
+        <div className="rounded-lg border border-dashed py-8 text-center text-sm text-muted-foreground">
+          {tab === "active"
+            ? "No open items — good news!"
+            : tab === "deferred"
+              ? "Nothing deferred."
+              : "No items match your filter."}
+        </div>
+      ) : (
+        <div className="space-y-2">
+          {visible.map((item) => {
+            const bodyLines = maintenanceItemBodyLines(item);
+            const nowMs = Date.now();
+            const lastActivityMs = item.lastNoteAt
+              ? new Date(item.lastNoteAt).getTime()
+              : null;
+            const deferredUntilMs = item.deferredUntil
+              ? new Date(item.deferredUntil).getTime()
+              : null;
+            const urgency = tab === "resolved" ? "none" : computeHubUrgency({
+              nowMs,
+              createdAtMs: new Date(item.createdAt).getTime(),
+              lastActivityMs,
+              deferredUntilMs,
+              params: urgencyParams,
+            });
+            return (
+            <HubListCard
+              key={item.id}
+              ariaLabel={`Manage ${bodyLines.issue}`}
+              summary={bodyLines.issue}
+              body={
+                <HubListCardBody lines={bodyLines} severity={item.severity} />
+              }
+              onClick={() => onManage(item)}
+              badges={
+                <>
+                  <Badge className={SEV_BADGE[item.severity]}>
+                    {item.severity.toUpperCase()}
+                  </Badge>
+                  <Badge className={SOURCE_BADGE[item.source]}>
+                    {SOURCE_LABELS[item.source]}
+                  </Badge>
+                </>
+              }
+              status={
+                <Badge className={STATUS_BADGE[maintenanceWorkflowStatus(item.status)]}>
+                  {STATUS_LABEL[maintenanceWorkflowStatus(item.status)]}
+                </Badge>
+              }
+              urgency={urgency}
+              meta={
+                <HubListMetaRows
+                  rows={[
+                    ...(item.deferredUntil && item.status === "deferred"
+                      ? [
+                          {
+                            label: "Deferred to",
+                            value: formatDate(item.deferredUntil),
+                          },
+                        ]
+                      : []),
+                    { label: "Location", value: item.locationLabel },
+                    { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
+                    { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
+                    {
+                      label: "Updated",
+                      value: <FormattedDateTime value={item.updatedAt} />,
+                    },
+                  ]}
+                />
+              }
+            />
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
@@ -613,29 +732,27 @@ export function MaintenancePanel() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between gap-2">
-        <div /> {/* spacer */}
-        <Button size="sm" onClick={() => setAddOpen(true)} className="h-8 text-xs">
-          <Plus className="mr-1.5 h-3.5 w-3.5" />
-          Add Item
-        </Button>
-      </div>
-
       <Tabs value={tab} onValueChange={(v) => setTab(v as MaintenanceTabFilter)}>
-        <TabsList>
-          <TabsTrigger value="active">Active</TabsTrigger>
-          <TabsTrigger value="deferred">Deferred</TabsTrigger>
-          <TabsTrigger value="resolved">Resolved</TabsTrigger>
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <TabsList>
+            <TabsTrigger value="active">Active</TabsTrigger>
+            <TabsTrigger value="deferred">Deferred</TabsTrigger>
+            <TabsTrigger value="resolved">Resolved</TabsTrigger>
+          </TabsList>
+          <Button size="sm" onClick={() => setAddOpen(true)} className="h-8 text-xs">
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            Add Item
+          </Button>
+        </div>
 
         <TabsContent value="active" className="mt-4">
-          <ItemsTable tab="active" onManage={setManaging} />
+          <ItemsList tab="active" onManage={setManaging} />
         </TabsContent>
         <TabsContent value="deferred" className="mt-4">
-          <ItemsTable tab="deferred" onManage={setManaging} />
+          <ItemsList tab="deferred" onManage={setManaging} />
         </TabsContent>
         <TabsContent value="resolved" className="mt-4">
-          <ItemsTable tab="resolved" onManage={setManaging} />
+          <ItemsList tab="resolved" onManage={setManaging} />
         </TabsContent>
       </Tabs>
 

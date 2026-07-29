@@ -26,7 +26,8 @@ import {
   type AttendanceStatus,
 } from "@/lib/data-store";
 import { useInsertAttendanceLog } from "@/hooks/use-supabase-data";
-import { formatDate } from "@/lib/utils";
+import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { DatePicker } from "@/components/ui/date-picker";
 
 interface Props {
   open: boolean;
@@ -132,13 +133,14 @@ export function MarkAttendanceExceptionModal({
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Roster date
             </Label>
-            <Input
-              type="date"
-              value={rosterDate}
-              onChange={(e) => {
-                setRosterDate(e.target.value);
+            <DatePicker
+              value={parseIsoDateLocal(rosterDate)}
+              onChange={(d) => {
+                setRosterDate(d ? toIsoDateString(d) : "");
                 setDirty(true);
               }}
+              dateFormat="dd-MMM-yy"
+              className="h-9 text-sm"
             />
           </div>
 

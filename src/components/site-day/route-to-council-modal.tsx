@@ -22,9 +22,11 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ClientTime } from "@/components/ui/client-time";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import { usePersistedForm } from "@/hooks/use-persisted-form";
 import {
   dispatchCouncilEmail,
+  openCouncilMailto,
   routeToCouncilLocal,
   type CouncilSlaCategory,
   type SiteIssue,
@@ -81,10 +83,10 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
   const initialTokens = useMemo(
     () => ({
       severity: suggested.category,
-      deadline: new Date(suggested.deadlineIso).toLocaleString(),
+      deadline: formatDateTime(suggested.deadlineIso),
       description: issue.issueDescription,
       workaround: issue.workaroundPlan ?? "—",
-      date: new Date().toLocaleDateString(),
+      date: formatDate(new Date().toISOString().slice(0, 10)),
     }),
     [suggested.category, suggested.deadlineIso, issue.issueDescription, issue.workaroundPlan],
   );
@@ -137,20 +139,15 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
         queryKey: siteIssuesKey(issue.sessionId),
       });
       form.reset();
-      if (res.mode === "mailto" && res.mailto && typeof window !== "undefined") {
-        toast.message("Opening your mail client…", {
-          description: "Server email route not configured — using mailto fallback.",
-        });
-        window.location.href = res.mailto;
-      } else {
-        toast.success("Council notified.", {
-          description: "Issue flagged as dispatched.",
-        });
-      }
+      toast.success("Opening your mail…", {
+        description:
+          "Edit and send from your mail app. Issue marked as dispatched to Council — follow up with Hub notes.",
+      });
+      openCouncilMailto(res.mailto);
       onOpenChange(false);
     },
     onError: (e: Error) =>
-      toast.error("Could not dispatch email", { description: e.message }),
+      toast.error("Could not open council mail", { description: e.message }),
   });
 
   const canSubmit =
@@ -165,8 +162,9 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
             Route to Council Maintenance
           </DialogTitle>
           <DialogDescription>
-            Pre-filled from your council email template. Review, edit, and send
-            — we'll flag the issue as dispatched and record the SLA deadline.
+            Opens your mail app with a pre-filled message (To, subject, body).
+            Edit and send from there. We log the handoff and SLA deadline; follow
+            up with Hub notes as Council replies.
           </DialogDescription>
         </DialogHeader>
 
@@ -292,7 +290,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
             ) : (
               <Mail className="mr-1.5 h-4 w-4" />
             )}
-            Send to Council
+            Open mail to Council
           </Button>
         </DialogFooter>
       </DialogContent>

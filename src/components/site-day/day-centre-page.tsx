@@ -11,8 +11,7 @@ import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
-import { getActiveUserProfile, getEscalationBySourceIssue } from "@/lib/data-store";
-import { supabase } from "@/integrations/supabase/client";
+import { getActiveUserProfile, getEscalationBySourceIssue, isActiveUserManager } from "@/lib/data-store";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
 import { EscalationLockBanner } from "./escalation-lock-banner";
@@ -20,20 +19,21 @@ import { EscalationResolutionPanel } from "./escalation-resolution-panel";
 import { DayClosedPanel } from "./day-closed-panel";
 import { DayBlockingDiagnostic } from "@/components/dev/day-blocking-diagnostic";
 import {
-  fetchApprovedRedWorkarounds,
-  redHasAcceptedWorkaround,
+  DAY_CENTRE_BLOCKING_REDS_QUERY_KEY,
+  fetchDayCentreBlockingReds,
   effectiveWorkaroundText,
 } from "@/lib/site-day/red-workaround";
 
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
+interface DayCentrePageProps {
+  /** Dev-only: show/hide the RED blocking diagnostic panel. */
+  showDiagnostic?: boolean;
 }
 
-export function DayCentrePage() {
+export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
   const queryClient = useQueryClient();
   const { user, isReady } = useAuthReady();
   const profile = useMemo(() => getActiveUserProfile(), []);
-  const userIsManager = isManagerRole(profile?.staffRole);
+  const userIsManager = isActiveUserManager();
   const isSignedIn = !!user || !!profile;
   const reporterId = user?.id ?? profile?.staffId ?? "";
   const sessionQ = useSiteSession();
@@ -42,35 +42,20 @@ export function DayCentrePage() {
   const redIssue =
     (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
 
-  // Cross-session: a RED only blocks opening if it has no agreed workaround.
+  // Cross-session Day Centre REDs only — trip/event REDs never block Open Centre.
   // Queryable even without today's session row, so we can show guidance
   // BEFORE provisioning.
   const openRedsQ = useQuery({
-    queryKey: ["site-issues", "open-reds-all"],
+    queryKey: DAY_CENTRE_BLOCKING_REDS_QUERY_KEY,
     enabled: isReady,
     staleTime: 5_000,
     // BMS fallback poll only — realtime hook below pushes most updates.
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
-    queryFn: async () => {
-      const { data, error } = await supabase
-        .from("site_issues_register")
-        .select("id, session_id, severity, status, issue_description, workaround_plan, created_at")
-        .eq("severity", "red")
-        .order("created_at", { ascending: false });
-      if (error) throw error;
-      const rows = data ?? [];
-      const escMap = await fetchApprovedRedWorkarounds(
-        rows.filter((r) => r.status !== "resolved").map((r) => r.id),
-      );
-      return { rows, escMap };
-    },
+    queryFn: fetchDayCentreBlockingReds,
   });
-  const allReds = openRedsQ.data?.rows ?? [];
   const escMap = openRedsQ.data?.escMap ?? null;
-  const blockingReds = allReds.filter(
-    (issue) => issue.status !== "resolved" && !redHasAcceptedWorkaround(issue, escMap),
-  );
+  const blockingReds = openRedsQ.data?.blocking ?? [];
   const hasBlockingRed = blockingReds.length > 0;
 
   const redEscalationQ = useQuery({
@@ -84,7 +69,7 @@ export function DayCentrePage() {
   // session opening. Polling above stays as a fallback if the socket drops.
   useRealtimeInvalidate({
     table: "site_issues_register",
-    queryKeys: [["site-issues", "open-reds-all"]],
+    queryKeys: [DAY_CENTRE_BLOCKING_REDS_QUERY_KEY],
   });
 
 
@@ -183,7 +168,7 @@ export function DayCentrePage() {
   if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
       <div className="space-y-4">
-        <DayBlockingDiagnostic sessionId={session?.id ?? null} />
+        <DayBlockingDiagnostic sessionId={session?.id ?? null} visible={showDiagnostic} />
       <Card className="space-y-4 border-destructive/50 bg-destructive/5 p-5 text-sm">
         <div className="flex items-start gap-3">
           <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
@@ -335,7 +320,7 @@ export function DayCentrePage() {
 
   return (
     <div className="space-y-6">
-      <DayBlockingDiagnostic sessionId={session?.id ?? null} />
+      <DayBlockingDiagnostic sessionId={session?.id ?? null} visible={showDiagnostic} />
       {renderPhase()}
     </div>
   );

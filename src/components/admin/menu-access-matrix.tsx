@@ -33,7 +33,7 @@ const MENUS: { key: string; label: string; description: string }[] = [
   { key: "transport", label: "Transport", description: "Ad-hoc run requests and mileage logging" },
   { key: "participants", label: "Participants", description: "Care profiles, IDDSI, medications" },
   { key: "staff", label: "Personnel Directory", description: "Staff, carers, certifications" },
-  { key: "events", label: "Events & Trips", description: "Roster bookings, milestones, finance" },
+  { key: "events", label: "Event Manage", description: "Office setup — roster, milestones, finance, Trip Report" },
   { key: "governance", label: "Governance Hub", description: "Unified issues, incident ledger, NDIS" },
   { key: "admin", label: "Admin Configuration", description: "Lookups, parameters, access matrix" },
   { key: "sync", label: "Sync Queue", description: "Offline reconciliation and replay" },

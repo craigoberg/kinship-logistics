@@ -4,6 +4,7 @@ import {
   type JsonValue,
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
+import type { UrgencyParams } from "@/lib/governance/hub-workflow-status";
 import {
   listCheckpointsForAsset,
   type AssetCheckpoint,
@@ -90,6 +91,54 @@ export function useMandatedChecks(scope?: MandatedCheckScope): string[] {
   return [];
 }
 
+/**
+ * Close Centre mandated visual checks — separate Admin list from Open.
+ * Key: `site_management.mandated_close_checks` (JSON string array).
+ * Empty = high-trust close (no ticks required).
+ */
+export function useMandatedCloseChecks(): string[] {
+  const value = useSystemParameter<JsonValue>(
+    "site_management.mandated_close_checks",
+    [] as unknown as JsonValue,
+  );
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  return [];
+}
+
+/**
+ * Event Deliver Open location venue walkthrough checks (BL-070).
+ * Key: `event_deliver.venue_open_checks` (JSON string array).
+ * Empty = high-trust 1-tap open (no ticks required) until Admin fills the list.
+ */
+export function useVenueOpenChecks(): string[] {
+  const value = useSystemParameter<JsonValue>(
+    "event_deliver.venue_open_checks",
+    [] as unknown as JsonValue,
+  );
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  return [];
+}
+
+/**
+ * Meal prep walkthrough at Open meal (cooked/packed only) — BL-073.
+ * Key: `meal.prep_checks` (JSON string array).
+ * Empty = high-trust open (no ticks) until Admin fills / after Manager clears.
+ */
+export function useMealPrepChecks(): string[] {
+  const value = useSystemParameter<JsonValue>(
+    "meal.prep_checks",
+    [] as unknown as JsonValue,
+  );
+  if (Array.isArray(value)) {
+    return value.filter((v): v is string => typeof v === "string");
+  }
+  return [];
+}
+
 export interface CouncilSlaHoursMap {
   Sev_1: number;
   Sev_2: number;
@@ -148,6 +197,21 @@ export function useComplianceHubVisibilityDays(): number {
   return useSystemParameter<number>("compliance_hub_visibility_days", 60);
 }
 
+/** Manifest soft-warn: |logged − GPS| ≥ km (BL-096). */
+export function useOdoLegGpsWarnKm(): number {
+  return useSystemParameter<number>("manifest.odo_leg_gps_warn_km", 3);
+}
+
+/** Manifest Close Run soft-warn: |end − (start+Σ)| ≥ km (BL-096). */
+export function useOdoCloseSuggestWarnKm(): number {
+  return useSystemParameter<number>("manifest.odo_close_suggest_warn_km", 5);
+}
+
+/** Manifest init soft-warn: |start − vehicle current| ≥ km (BL-096). */
+export function useOdoStartVsLastWarnKm(): number {
+  return useSystemParameter<number>("manifest.odo_start_vs_last_warn_km", 20);
+}
+
 /**
  * Days before a compliance asset deferral deadline expires that the item
  * moves from the Deferred tab back to the Active tab.
@@ -178,6 +242,96 @@ export function useDepotAddress(): string {
 /** Default Day Centre street address (Admin → Day Centre Bus Runs). */
 export function useDayCentreAddress(): string {
   return useSystemParameter<string>("day_centre_address", "");
+}
+
+/** Default evening roll call for multi-day tours (Admin → System Parameters). */
+export function useDefaultEveningRollCallTime(): string {
+  return useSystemParameter<string>(
+    "default_evening_roll_call_time",
+    "21:00",
+  );
+}
+
+/** Default morning roll call for multi-day tours (Admin → System Parameters). */
+export function useDefaultMorningRollCallTime(): string {
+  return useSystemParameter<string>(
+    "default_morning_roll_call_time",
+    "07:00",
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Hub urgency param hooks (BL-021)
+// ---------------------------------------------------------------------------
+
+/**
+ * Hours before a Human Issue defer deadline that it resurfaces on the Active
+ * tab. Default: 1 hour. Replaces the old days-based rewarn for human issues.
+ */
+export function useIssueDeferRewarnMs(): number {
+  const h = useSystemParameter<number>("issue_defer_rewarn_hours", 1);
+  return h * 3_600_000;
+}
+
+/**
+ * Urgency thresholds for the Human Issues tab.
+ * All values are in milliseconds for direct comparison with Date.getTime().
+ */
+export function useIssueUrgencyParams(): UrgencyParams {
+  const yellowH    = useSystemParameter<number>("issue_active_yellow_hours",    24);
+  const redH       = useSystemParameter<number>("issue_active_red_hours",       48);
+  const rewarnH    = useSystemParameter<number>("issue_defer_rewarn_hours",      1);
+  const overdueH   = useSystemParameter<number>("issue_defer_overdue_red_hours", 1);
+  return {
+    activeYellowMs:   yellowH  * 3_600_000,
+    activeRedMs:      redH     * 3_600_000,
+    deferRewarnMs:    rewarnH  * 3_600_000,
+    deferOverdueRedMs: overdueH * 3_600_000,
+  };
+}
+
+/** Urgency thresholds for the Maintenance tab. */
+export function useMaintenanceUrgencyParams(): UrgencyParams {
+  const yellowD  = useSystemParameter<number>("maintenance_active_yellow_days",   7);
+  const redD     = useSystemParameter<number>("maintenance_active_red_days",     14);
+  const rewarnD  = useSystemParameter<number>("maintenance_defer_rewarn_days",    7);
+  const overdueD = useSystemParameter<number>("maintenance_defer_overdue_red_days", 7);
+  return {
+    activeYellowMs:   yellowD  * 86_400_000,
+    activeRedMs:      redD     * 86_400_000,
+    deferRewarnMs:    rewarnD  * 86_400_000,
+    deferOverdueRedMs: overdueD * 86_400_000,
+  };
+}
+
+/**
+ * Hours past expected_arrival_at before the No-Show dashboard tile turns red.
+ * Yellow fires immediately when status = 'overdue'. Default: 2 hours.
+ */
+export function useAttendanceNoShowRedHours(): number {
+  return useSystemParameter<number>("attendance_noshow_red_hours", 2);
+}
+
+/**
+ * Minutes after roll call deadline before the Roll Call Breach tile turns red.
+ * Yellow fires at the deadline. Default: 30 minutes.
+ */
+export function useRollCallGraceMinutes(): number {
+  return useSystemParameter<number>("roll_call_grace_minutes", 30);
+}
+
+/** Urgency thresholds for the Compliance Assets tab. */
+export function useComplianceUrgencyParams(): UrgencyParams {
+  const yellowD  = useSystemParameter<number>("compliance_active_yellow_days",   7);
+  const redD     = useSystemParameter<number>("compliance_active_red_days",     14);
+  const rewarnD  = useSystemParameter<number>("compliance_defer_rewarn_days",    7); // existing key
+  const overdueD = useSystemParameter<number>("compliance_defer_overdue_red_days", 7);
+  return {
+    activeYellowMs:   yellowD  * 86_400_000,
+    activeRedMs:      redD     * 86_400_000,
+    deferRewarnMs:    rewarnD  * 86_400_000,
+    deferOverdueRedMs: overdueD * 86_400_000,
+  };
 }
 
 export function useCouncilEmailTemplate(): { subject: string; body: string } {

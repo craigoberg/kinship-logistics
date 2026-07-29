@@ -9,6 +9,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
+import { formatDate } from "@/lib/utils";
 import { writeToLedgerOrThrow, writeToLedger } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
@@ -582,7 +583,7 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
       return {
         canUse: true,
         reason: "compliance_deferred_grace",
-        message: `Annual safety review for this venue is overdue but deferred until ${asset.next_action_at.slice(0, 10)}. A new baseline sign-off is required before that date.`,
+        message: `Annual safety review for this venue is overdue but deferred until ${formatDate(asset.next_action_at.slice(0, 10))}. A new baseline sign-off is required before that date.`,
         latestSignoff: signoff,
       };
     }
@@ -590,7 +591,7 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
     return {
       canUse: false,
       reason: "compliance_deferred_expired",
-      message: `The annual safety review deferral for this venue has expired (was due ${asset.next_action_at.slice(0, 10)}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
+        message: `The annual safety review deferral for this venue has expired (was due ${formatDate(asset.next_action_at.slice(0, 10))}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
       latestSignoff: signoff,
     };
   }
@@ -598,7 +599,7 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
   return {
     canUse: false,
     reason: "compliance_overdue",
-    message: `The annual safety review for this venue is overdue (expired ${asset.expiry_date}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
+        message: `The annual safety review for this venue is overdue (expired ${formatDate(asset.expiry_date ?? "")}). A new baseline sign-off must be completed in Admin → Venues before this venue can be used.`,
     latestSignoff: signoff,
   };
 }

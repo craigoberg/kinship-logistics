@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Wifi, WifiOff, RefreshCw } from "lucide-react";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
+import { useManifestOffline } from "@/hooks/use-manifest-offline";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -12,10 +13,12 @@ interface Props {
 export function SyncIndicator({ className, compact = false }: Props) {
   const online = useOnlineStatus();
   const queue = useSyncQueue();
+  const manifestOffline = useManifestOffline();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
-  const pending = queue.filter((q) => q.status !== "synced").length;
+  const legacyPending = queue.filter((q) => q.status !== "synced").length;
+  const pending = legacyPending + manifestOffline.pendingCount;
   const stateLabel = !mounted ? "—" : online ? "Online" : "Offline";
 
   return (

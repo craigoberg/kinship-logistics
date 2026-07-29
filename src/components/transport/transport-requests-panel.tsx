@@ -92,7 +92,7 @@ export function TransportRequestsPanel({ participants, onLogRequest }: Props) {
           value={filterDate}
           onChange={(d) => setFilterDate(d)}
           className="w-auto max-w-[200px]"
-          dateFormat="dd MMM yyyy"
+          dateFormat="dd-MMM-yy"
         />
       </div>
 

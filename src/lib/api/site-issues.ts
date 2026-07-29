@@ -11,6 +11,8 @@ export type RygeSeverity = "green" | "yellow" | "red";
 export type ResponsibilityOwner = "internal" | "council";
 export type CouncilSlaCategory = "Sev 1" | "Sev 2" | "Sev 3";
 
+export type SiteIssueArea = "general" | "health_safety";
+
 export interface SiteIssue {
   id: string;
   sessionId: string | null;
@@ -23,6 +25,8 @@ export interface SiteIssue {
   issueDescription: string;
   workaroundPlan: string | null;
   owner: ResponsibilityOwner;
+  /** Hub area — BL-084 Health & Safety when set. */
+  issueArea: SiteIssueArea | null;
   councilSlaCategory: CouncilSlaCategory | null;
   councilSlaDeadline: string | null;
   emailDispatchedToCouncil: boolean;
@@ -43,6 +47,7 @@ interface SiteIssueRow {
   issue_description: string;
   workaround_plan: string | null;
   owner: ResponsibilityOwner | null;
+  issue_area?: string | null;
   council_sla_category: string | null;
   council_sla_deadline: string | null;
   email_dispatched_to_council: boolean | null;
@@ -54,6 +59,7 @@ interface SiteIssueRow {
 }
 
 function rowToIssue(r: SiteIssueRow): SiteIssue {
+  const area = r.issue_area;
   return {
     id: r.id,
     sessionId: r.session_id ?? null,
@@ -64,6 +70,10 @@ function rowToIssue(r: SiteIssueRow): SiteIssue {
     issueDescription: r.issue_description,
     workaroundPlan: r.workaround_plan,
     owner: (r.owner ?? "internal") as ResponsibilityOwner,
+    issueArea:
+      area === "health_safety" || area === "general"
+        ? (area as SiteIssueArea)
+        : null,
     councilSlaCategory: (r.council_sla_category ?? null) as CouncilSlaCategory | null,
     councilSlaDeadline: r.council_sla_deadline,
     emailDispatchedToCouncil: r.email_dispatched_to_council ?? false,
@@ -96,24 +106,40 @@ export async function listIssues(sessionId: string): Promise<SiteIssue[]> {
 
 /**
  * Unified active-issue feed for the post-declaration ActiveDayPanel.
- * Returns, in one round trip:
- *   - every row for today's session (any status), plus
- *   - every still-`open` row from prior sessions.
- * Resolved rows from prior days are excluded.
+ * Returns Day Centre–scoped rows that leaders still need to know about:
+ *   - today's session: not yet `resolved` (open / workaround / deferred / …)
+ *   - prior days: still `open` or `workaround_accepted` (carry-over + active plans)
+ *
+ * Purpose: show existing RYG issues and workarounds so they are not
+ * re-reported, and so the floor knows the operating plan.
+ *
+ * Trip / event-floor issues (`event_id` or `event_day_session_id` set) are
+ * never included — those belong in the Hub / Event Deliver, not this register.
  */
 export async function listActiveIssues(sessionId: string): Promise<SiteIssue[]> {
   console.info("[SiteIssues] listActiveIssues → session_id", sessionId);
   const { data, error } = await supabase
     .from("site_issues_register")
     .select("*")
-    .or(`session_id.eq.${sessionId},status.eq.open`)
+    .or(
+      [
+        `and(session_id.eq.${sessionId},status.neq.resolved)`,
+        "and(status.eq.open,event_id.is.null,event_day_session_id.is.null)",
+        "and(status.eq.workaround_accepted,event_id.is.null,event_day_session_id.is.null)",
+        "and(status.eq.deferred,event_id.is.null,event_day_session_id.is.null)",
+      ].join(","),
+    )
     .order("created_at", { ascending: false });
   if (error) throw error;
-  const rows = (data ?? []).map((r) => rowToIssue(r as SiteIssueRow));
+  // Belt-and-suspenders: never surface trip/event issues on the Day Centre floor.
+  const rows = (data ?? [])
+    .map((r) => rowToIssue(r as SiteIssueRow))
+    .filter((r) => r.eventId == null && r.eventDaySessionId == null)
+    .filter((r) => r.status !== "resolved");
   console.info(
     "[SiteIssues] listActiveIssues ← returned",
     rows.length,
-    "rows (today + carried-over open)",
+    "rows (today + carried Day Centre open/workaround)",
   );
   return rows;
 }
@@ -129,32 +155,52 @@ export interface NewSiteIssue {
   eventId?: string | null;
   /** event_day_sessions.id — set for outing event issues (§12.6). */
   eventDaySessionId?: string | null;
+  /** BL-084 — Hub area tag (e.g. health_safety). */
+  issueArea?: SiteIssueArea | null;
 }
 
 export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
   const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
+  // PIN terminals: prefer staff UUID / name so Hub "Reported by" is not blank.
+  let reportedBy: string | null = userId;
+  if (!reportedBy) {
+    try {
+      const { resolveStaffIdWithFallback, resolveStaffDisplayName } = await import(
+        "@/lib/data-store"
+      );
+      const staffId = await resolveStaffIdWithFallback();
+      reportedBy = staffId || resolveStaffDisplayName(staffId) || null;
+    } catch {
+      reportedBy = null;
+    }
+  }
   console.info("[SiteIssues] createIssue → inserting", {
     session_id: payload.sessionId,
     event_id: payload.eventId,
     event_day_session_id: payload.eventDaySessionId,
     severity: payload.severity,
     owner: payload.owner,
+    reported_by: reportedBy,
   });
   const hasWorkaround = !!(payload.workaroundPlan && payload.workaroundPlan.trim());
+  const insertPayload: Record<string, unknown> = {
+    session_id: payload.sessionId ?? null,
+    reported_by: reportedBy,
+    severity: payload.severity,
+    issue_description: payload.issueDescription,
+    workaround_plan: payload.workaroundPlan,
+    owner: payload.owner,
+    status: "open",
+    workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
+    event_id: payload.eventId ?? null,
+    event_day_session_id: payload.eventDaySessionId ?? null,
+  };
+  if (payload.issueArea) {
+    insertPayload.issue_area = payload.issueArea;
+  }
   const { data, error } = await supabase
     .from("site_issues_register")
-    .insert({
-      session_id: payload.sessionId ?? null,
-      reported_by: userId,
-      severity: payload.severity,
-      issue_description: payload.issueDescription,
-      workaround_plan: payload.workaroundPlan,
-      owner: payload.owner,
-      status: "open",
-      workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
-      event_id: payload.eventId ?? null,
-      event_day_session_id: payload.eventDaySessionId ?? null,
-    })
+    .insert(insertPayload)
     .select("*")
     .single();
   if (error) throw error;
@@ -353,53 +399,37 @@ export interface DispatchCouncilEmailArgs {
 }
 
 /**
- * Send the council maintenance email via the Lovable Emails route if
- * available; on 404 / missing route, fall back to a `mailto:` handoff so
- * the user can dispatch from their mail client. Either path flips the
- * `email_dispatched_to_council` flag on success.
+ * BL-062 (locked) — Council notify is **mailto only** (production stance).
+ * Prefills the operator's mail client; they edit/send. We log the handoff
+ * (`email_dispatched_to_council` + ledger). No server SMTP / Postmark / Lovable send.
  */
+export function buildCouncilMailto(
+  to: string,
+  subject: string,
+  body: string,
+): string {
+  const params = new URLSearchParams({
+    subject: subject.trim(),
+    body: body.trim(),
+  });
+  return `mailto:${encodeURIComponent(to.trim())}?${params.toString()}`;
+}
+
+/** Open the OS/browser mail composer for a council mailto URL. */
+export function openCouncilMailto(mailto: string): void {
+  if (typeof window === "undefined" || !mailto.startsWith("mailto:")) return;
+  window.location.href = mailto;
+}
+
 export async function dispatchCouncilEmail(
   args: DispatchCouncilEmailArgs,
-): Promise<{ ok: true; mode: "sent" | "mailto"; mailto?: string }> {
-  let mode: "sent" | "mailto" = "sent";
-  let mailto: string | undefined;
-
-  try {
-    const session = (await supabase.auth.getSession()).data.session;
-    const token = session?.access_token;
-    const resp = await fetch("/lovable/email/transactional/send", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        ...(token ? { Authorization: `Bearer ${token}` } : {}),
-      },
-      body: JSON.stringify({
-        templateName: "council-maintenance-request",
-        recipientEmail: args.to,
-        idempotencyKey: `council-maint-${args.issueId}`,
-        templateData: {
-          subject: args.subject,
-          body: args.body,
-          severity: args.category,
-          deadline: args.deadlineIso,
-        },
-      }),
-    });
-    if (!resp.ok) {
-      throw new Error(`Email route returned ${resp.status}`);
-    }
-  } catch {
-    // Graceful fallback: mailto handoff. UI surfaces this as a "manual send" toast.
-    mode = "mailto";
-    const params = new URLSearchParams({
-      subject: args.subject,
-      body: args.body,
-    });
-    mailto = `mailto:${encodeURIComponent(args.to)}?${params.toString()}`;
+): Promise<{ ok: true; mode: "mailto"; mailto: string }> {
+  const to = args.to.trim();
+  if (!to.includes("@")) {
+    throw new Error("Set a valid council recipient email address.");
   }
+  const mailto = buildCouncilMailto(to, args.subject, args.body);
 
-  // Flip the issue flag + record SLA fields. If column is missing this throws
-  // and the UI surfaces it.
   const { error } = await supabase
     .from("site_issues_register")
     .update({
@@ -424,15 +454,15 @@ export async function dispatchCouncilEmail(
         issue_id: args.issueId,
         sla_category: args.category,
         deadline: args.deadlineIso,
-        mode,
-        to: args.to,
+        mode: "mailto",
+        to,
       },
     });
   } catch (err) {
     console.error("[dispatchCouncilEmail] ledger failed", err);
   }
 
-  return { ok: true, mode, mailto };
+  return { ok: true, mode: "mailto", mailto };
 }
 
 /** Realtime subscription for issues attached to a single session. */

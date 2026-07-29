@@ -7,6 +7,8 @@ import { BottomNav, NAV_ITEMS } from "./bottom-nav";
 import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
 import { SyncIndicator } from "./sync-indicator";
 import { Button } from "@/components/ui/button";
+import { TooltipProvider } from "@/components/ui/tooltip";
+import { IconActionButton } from "@/components/ui/icon-action-button";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { getActiveUserProfile } from "@/lib/data-store";
@@ -96,19 +98,18 @@ export function AppShell({ children }: { children: ReactNode }) {
   }, []);
 
   return (
+    <TooltipProvider delayDuration={300}>
     <div className="flex min-h-dvh bg-background text-foreground">
       <AppSidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
       <div className="flex min-w-0 flex-1 flex-col">
         <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-2 backdrop-blur md:min-h-16 md:px-6">
           {/* Left: menu toggle (md+) + page title */}
           <div className="flex min-w-0 items-center gap-2">
-            <Button
+            <IconActionButton
               type="button"
-              variant="ghost"
-              size="icon"
               className="hidden h-9 w-9 shrink-0 md:inline-flex"
               onClick={toggleSidebar}
-              aria-label={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
+              tooltip={sidebarCollapsed ? "Expand menu" : "Collapse menu"}
               aria-expanded={!sidebarCollapsed}
             >
               {sidebarCollapsed ? (
@@ -116,7 +117,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               ) : (
                 <PanelLeftClose className="h-4 w-4" />
               )}
-            </Button>
+            </IconActionButton>
             <div className="flex min-w-0 flex-col gap-0">
             <h1 className="truncate text-sm font-semibold tracking-tight md:text-base">
               <span>{title}</span>
@@ -172,5 +173,6 @@ export function AppShell({ children }: { children: ReactNode }) {
       </div>
       <BottomNav />
     </div>
+    </TooltipProvider>
   );
 }

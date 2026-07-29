@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { toast } from "sonner";
+import { Loader2 } from "lucide-react";
+import { operationToasts } from "@/lib/ui/operation-toasts";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -13,13 +14,15 @@ import {
   listComplianceAssetNotes,
   renderComplianceNoteLine,
   saveComplianceAssetRenewal,
+  startComplianceAssetReview,
   type ComplianceAsset,
 } from "@/lib/api/compliance-assets";
 import { executeComplianceResolution } from "@/lib/api/compliance-resolution";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
-import { FormattedDate } from "@/components/ui/formatted-time";
+import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
+import { HubContextMetaGrid } from "@/components/governance/hub-context-meta-grid";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
 import { NextExpiryDateField } from "@/components/governance/next-expiry-date-field";
 import {
@@ -28,9 +31,15 @@ import {
 } from "@/components/governance/compliance-resolution-panel";
 import { useComplianceResolutionContext } from "@/hooks/use-compliance-resolution-context";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
+import { NextActionDateTimeField } from "@/components/governance/next-action-datetime-field";
 import { isManagerProfile } from "@/lib/governance/is-manager";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { MIN_EVIDENCE, MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
+import {
+  findHubReviewStartedNote,
+  formatHubWaitDuration,
+  isHubReviewStarted,
+} from "@/lib/governance/hub-review-started";
 import { parseExpiryBase, startOfDay, toISODate } from "@/lib/governance/next-expiry";
 
 interface Props {
@@ -66,7 +75,7 @@ function needsDomainFields(asset: ComplianceAsset): boolean {
   );
 }
 
-type PendingAction = "log" | "resolve";
+type PendingAction = "resolve";
 
 export function ManageComplianceAssetDialog({
   asset,
@@ -83,8 +92,9 @@ export function ManageComplianceAssetDialog({
   const [nextExpiry, setNextExpiry] = useState<Date | undefined>(undefined);
   const [deferOn, setDeferOn] = useState(false);
   const [deferAt, setDeferAt] = useState(defaultDeferIso());
+  const [deferDatetimeValid, setDeferDatetimeValid] = useState(true);
   const [pinOpen, setPinOpen] = useState(false);
-  const [pendingAction, setPendingAction] = useState<PendingAction>("log");
+  const [pendingAction, setPendingAction] = useState<PendingAction>("resolve");
   const [domainFieldsValid, setDomainFieldsValid] = useState(true);
 
   const showDomainFields = needsDomainFields(asset);
@@ -103,8 +113,9 @@ export function ManageComplianceAssetDialog({
       setNextExpiry(undefined);
       setDeferOn(false);
       setDeferAt(defaultDeferIso());
+      setDeferDatetimeValid(true);
       setPinOpen(false);
-      setPendingAction("log");
+      setPendingAction("resolve");
       setDomainFieldsValid(!needsDomainFields(asset));
     }
   }, [open]);
@@ -118,8 +129,7 @@ export function ManageComplianceAssetDialog({
 
   const trimmed = note.trim().length;
   const noteOk = trimmed >= MIN_TIMELINE_NOTE;
-  const deferValid =
-    !deferOn || (deferAt.length > 0 && !Number.isNaN(Date.parse(deferAt)));
+  const deferValid = !deferOn || deferDatetimeValid;
 
   const nextExpiryIso = nextExpiry ? toISODate(nextExpiry) : "";
   const expiryOk =
@@ -157,14 +167,25 @@ export function ManageComplianceAssetDialog({
       invalidateAll();
       setNote("");
       setEvidenceRef("");
-      toast.success(
-        kind === "defer"
-          ? "Deferred — next action date set"
-          : "Note logged to the timeline",
-      );
-      onOpenChange(false);
+      setDeferOn(false);
+      if (kind === "defer") {
+        operationToasts.complianceDeferred();
+      } else {
+        operationToasts.complianceNoteLogged();
+      }
+      // Dialog stays open — user can add more notes or close manually.
     },
-    onError: (e: Error) => toast.error("Log failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
+  });
+
+  const startMut = useMutation({
+    mutationFn: () => startComplianceAssetReview(asset.id),
+    onSuccess: () => {
+      invalidateAll();
+      const waitLabel = formatHubWaitDuration(asset.created_at, new Date().toISOString());
+      operationToasts.reviewStarted(waitLabel);
+    },
+    onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
 
   const resolveMut = useMutation({
@@ -201,15 +222,14 @@ export function ManageComplianceAssetDialog({
       invalidateAll();
       setNote("");
       setEvidenceRef("");
-      toast.success("Resolved", {
-        description:
-          "Expiry updated, asset archived, and receipt logged to the operational ledger (NDIS).",
-      });
+      operationToasts.complianceResolved();
       onOpenChange(false);
     },
-    onError: (e: Error) => toast.error("Resolve failed", { description: e.message }),
+    onError: (e: Error) => operationToasts.resolutionFailed(e.message),
   });
 
+  // startMut runs in the background (Open → In Progress transition) — exclude from busy
+  // so it doesn't lock the UI while the status change completes.
   const busy = logMut.isPending || resolveMut.isPending;
 
   const canLog = noteOk && deferValid && !busy;
@@ -222,8 +242,12 @@ export function ManageComplianceAssetDialog({
     !busy &&
     !resolutionContext.loading;
 
+  const handleLogClick = () => {
+    if (!canLog) return;
+    logMut.mutate();
+  };
+
   const openPin = (action: PendingAction) => {
-    if (action === "log" && !canLog) return;
     if (action === "resolve" && !canResolve) return;
     setPendingAction(action);
     const panel = domainRef.current;
@@ -240,24 +264,37 @@ export function ManageComplianceAssetDialog({
 
   const handlePinAuthenticated = () => {
     if (!isManagerProfile()) {
-      toast.error("Manager PIN required", {
-        description: "Only manager-level operators can save compliance changes.",
-      });
+      operationToasts.managerPinRequired();
       setPinOpen(false);
       return;
     }
     setPinOpen(false);
-    if (pendingAction === "resolve") {
-      resolveMut.mutate();
-    } else {
-      logMut.mutate();
-    }
+    resolveMut.mutate();
   };
 
   const timelineLines = useMemo(
     () => (timelineQuery.data ?? []).map(renderComplianceNoteLine),
     [timelineQuery.data],
   );
+
+  const complianceNotesForReview = useMemo(
+    () =>
+      (timelineQuery.data ?? []).map((n) => ({
+        note: n.note,
+        stampedAt: n.stampedAt,
+        metadata: n.metadata,
+      })),
+    [timelineQuery.data],
+  );
+  const reviewStartedNote = useMemo(
+    () => findHubReviewStartedNote(complianceNotesForReview),
+    [complianceNotesForReview],
+  );
+  const reviewStarted = isHubReviewStarted(complianceNotesForReview);
+  const hubAppearedAt = asset.created_at;
+  const waitLabel = reviewStartedNote
+    ? formatHubWaitDuration(hubAppearedAt, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(hubAppearedAt, new Date().toISOString());
 
   const renewalSection = (
     <>
@@ -314,16 +351,12 @@ export function ManageComplianceAssetDialog({
         </label>
       </div>
       {deferOn && (
-        <div className="space-y-1 pl-1">
-          <Label htmlFor="compliance-defer-at" className="text-xs">
-            Next action date
-          </Label>
-          <Input
+        <div className="pl-1">
+          <NextActionDateTimeField
             id="compliance-defer-at"
-            type="datetime-local"
             value={deferAt}
-            onChange={(e) => setDeferAt(e.target.value)}
-            className="[color-scheme:dark]"
+            onChange={setDeferAt}
+            onValidChange={setDeferDatetimeValid}
           />
         </div>
       )}
@@ -335,6 +368,9 @@ export function ManageComplianceAssetDialog({
       <div className="flex flex-wrap items-center gap-2">
         {rygeBadge(asset, warningDays)}
         <Badge variant="secondary">{asset.category}</Badge>
+        {reviewStarted && (
+          <Badge className="bg-sky-600 text-white text-[10px]">In Review</Badge>
+        )}
         <span className="font-mono text-xs text-muted-foreground">{asset.type}</span>
       </div>
       <p className="font-medium leading-snug">{asset.name}</p>
@@ -343,26 +379,29 @@ export function ManageComplianceAssetDialog({
           {asset.description}
         </p>
       )}
-      <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-muted-foreground">
-        {asset.expiry_date && (
-          <>
-            <span className="font-medium text-foreground/70">Expires</span>
-            <span><FormattedDate value={asset.expiry_date} /></span>
-          </>
-        )}
-        {(asset as Record<string, unknown>).associated_entity_name && (
-          <>
-            <span className="font-medium text-foreground/70">Entity</span>
-            <span>{String((asset as Record<string, unknown>).associated_entity_name)}</span>
-          </>
-        )}
-        {asset.category && (
-          <>
-            <span className="font-medium text-foreground/70">Category</span>
-            <span>{asset.category}</span>
-          </>
-        )}
-      </div>
+      <HubContextMetaGrid
+        rows={[
+          { label: "Expires", value: asset.expiry_date ? <FormattedDate value={asset.expiry_date} /> : null },
+          {
+            label: "Entity",
+            value: (asset as Record<string, unknown>).associated_entity_name
+              ? String((asset as Record<string, unknown>).associated_entity_name)
+              : null,
+          },
+          { label: "In Hub since", value: <FormattedDateTime value={hubAppearedAt} /> },
+          reviewStarted && reviewStartedNote
+            ? {
+                label: "Review started",
+                value: (
+                  <>
+                    <FormattedDateTime value={reviewStartedNote.stampedAt} />
+                    {waitLabel ? ` (${waitLabel} after in Hub)` : ""}
+                  </>
+                ),
+              }
+            : { label: "Waiting", value: `${waitLabel} since in Hub` },
+        ]}
+      />
     </div>
   );
 
@@ -371,7 +410,6 @@ export function ManageComplianceAssetDialog({
       <ManageItemShell
         open={open}
         onOpenChange={(o) => {
-          if (busy) return;
           if (!o) setNote("");
           onOpenChange(o);
         }}
@@ -385,22 +423,26 @@ export function ManageComplianceAssetDialog({
         onNoteChange={setNote}
         renewalSection={renewalSection}
         showDefer={false}
-        onLogUpdate={() => openPin("log")}
+        onLogUpdate={handleLogClick}
         logUpdateLabel="Log Note"
         canLog={canLog}
         onResolveClose={() => openPin("resolve")}
         resolveCloseLabel="Resolve"
         canResolve={canResolve}
         extraFooterStart={
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
+          !reviewStarted ? (
+            <Button
+              size="sm"
+              variant="outline"
+              disabled={busy}
+              onClick={() => startMut.mutate()}
+            >
+              {startMut.isPending && (
+                <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+              )}
+              Start Review
+            </Button>
+          ) : undefined
         }
       />
 

@@ -1,5 +1,5 @@
 import { useMemo } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 import {
   listActiveMedicationExceptions,
   listAllActiveSchedules,
@@ -14,6 +14,7 @@ import {
   type FailedClearanceReport,
   type TodayManifestSummary,
 } from "@/lib/data-store";
+import { formatDate } from "@/lib/utils";
 import {
   listComplianceAssets,
   computeRyge,
@@ -22,6 +23,10 @@ import {
 } from "@/lib/api/compliance-assets";
 import { supabase } from "@/integrations/supabase/client";
 import { getSydneyIsoDate } from "@/lib/operational-time";
+import {
+  operationalNowMs,
+  useOperationalTodayIso,
+} from "@/lib/operational-clock";
 
 // Presence-gated medication alerts: dashboard must NOT surface a med
 // exception for a participant who isn't physically in our custody. We
@@ -50,6 +55,21 @@ async function fetchTodaysCheckedInParticipants(): Promise<Set<string>> {
     }
   }
   return out;
+}
+
+/**
+ * Returns the set of participant IDs who are currently `checked_in` for
+ * today's Day Centre session. Empty set when the session hasn't opened or
+ * nobody has checked in yet.
+ */
+export function useTodaysCheckedInIds(): UseQueryResult<Set<string>> {
+  const today = useOperationalTodayIso();
+  return useQuery<Set<string>>({
+    queryKey: ["today-checked-in-ids", today],
+    queryFn: fetchTodaysCheckedInParticipants,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
 }
 
 export type Severity = "critical" | "warning" | "info";
@@ -342,7 +362,7 @@ function complianceDetail(asset: ComplianceAsset, daysDelta: number): string {
       : daysDelta === 0
         ? "Expires today"
         : `Expires in ${daysDelta}d`;
-  return `${human} (${asset.expiry_date})`;
+  return `${human} (${formatDate(asset.expiry_date ?? "")})`;
 }
 
 export function useComplianceExceptions() {
@@ -389,6 +409,79 @@ export function useComplianceExceptions() {
   }, [q.data]);
 
   return { data: rows, isLoading: q.isLoading };
+}
+
+// ---------------------------------------------------------------------------
+// MAINTENANCE TILE FEED — open items that have gone stale (no note activity).
+//
+// BL-066: tile turns yellow when last activity ≥ 7 days, red ≥ 14 days.
+// Only stale items surface as exception rows; items within SLA are silent
+// (tile stays green). Thresholds default to system_parameters values but
+// can be overridden via the params argument.
+// ---------------------------------------------------------------------------
+
+export interface MaintenanceTileRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  daysSinceActivity: number;
+}
+
+async function fetchOpenMaintenanceForTile() {
+  const { data, error } = await supabase
+    .from("maintenance_items")
+    .select("id, title, status, created_at, last_note_at, location_label")
+    .in("status", ["open", "in_progress"])
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  return (data ?? []) as Array<{
+    id: string;
+    title: string;
+    status: string;
+    created_at: string;
+    last_note_at: string | null;
+    location_label: string | null;
+  }>;
+}
+
+export function useMaintenanceTileFeed(params?: {
+  /** Days without a note before tile turns yellow (default 7). */
+  slaDays?: number;
+  /** Days without a note before tile turns red (default 14). */
+  redDays?: number;
+}) {
+  const slaDays = params?.slaDays ?? 7;
+  const redDays = params?.redDays ?? 14;
+  const slaMs  = slaDays * 86_400_000;
+  const redMs  = redDays * 86_400_000;
+
+  return useQuery({
+    queryKey: ["maintenance-tile-feed"],
+    queryFn: fetchOpenMaintenanceForTile,
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+    select: (rows) => {
+      const now = operationalNowMs();
+      const out: MaintenanceTileRow[] = [];
+      for (const r of rows) {
+        const activityAt = r.last_note_at ?? r.created_at;
+        const ageMs = now - new Date(activityAt).getTime();
+        if (ageMs < slaMs) continue;
+        const daysSince = Math.floor(ageMs / 86_400_000);
+        const severity: Severity = ageMs >= redMs ? "critical" : "warning";
+        const loc = r.location_label ? ` · ${r.location_label}` : "";
+        out.push({
+          key: r.id,
+          title: r.title,
+          detail: `No update in ${daysSince}d${loc}`,
+          severity,
+          daysSinceActivity: daysSince,
+        });
+      }
+      return out.sort((a, b) => b.daysSinceActivity - a.daysSinceActivity);
+    },
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -466,8 +559,19 @@ export function useComplianceCategories() {
       if (row) map.get(a.category)!.push(row);
     }
 
+    // Defined display order — categories not listed here sort alphabetically after.
+    const CATEGORY_PRIORITY: Record<string, number> = {
+      EQUIPMENT: 0,
+      VEHICLE:   1,
+      STAFF:     2,
+      INSURANCE: 3,
+      FACILITY:  4,
+      VENUE:     5,
+    };
+    const priority = (cat: string) => CATEGORY_PRIORITY[cat] ?? 99;
+
     return Array.from(map.entries())
-      .sort(([a], [b]) => a.localeCompare(b))
+      .sort(([a], [b]) => priority(a) - priority(b) || a.localeCompare(b))
       .map(([category, exceptionRows]) => ({
         category,
         exceptionRows: exceptionRows.sort((x, y) => x.daysDelta - y.daysDelta),
@@ -475,5 +579,356 @@ export function useComplianceCategories() {
   }, [q.data]);
 
   return { data, isLoading: q.isLoading };
+}
+
+// ---------------------------------------------------------------------------
+// NO-SHOW / MISSING — clients who are overdue for today's Day Centre session.
+//
+// The attendance sweep already marks status = 'overdue' when expected_arrival_at
+// passes without check-in. This tile just surfaces that count.
+// Yellow: any overdue. Red: overdue AND expected_arrival_at was > redHours ago.
+// ---------------------------------------------------------------------------
+
+export interface NoShowTileRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+async function fetchTodayOverdueAttendees(): Promise<
+  Array<{ participant_id: string; expected_arrival_at: string; session_id: string }>
+> {
+  const date = getSydneyIsoDate();
+  const sessionRes = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (sessionRes.error || !sessionRes.data) return [];
+  const sessionId = sessionRes.data.id as string;
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, expected_arrival_at, session_id")
+    .eq("session_id", sessionId)
+    .eq("status", "overdue");
+  if (error) throw error;
+  return (data ?? []) as Array<{
+    participant_id: string;
+    expected_arrival_at: string;
+    session_id: string;
+  }>;
+}
+
+export function useNoShowTileFeed(params?: { redHours?: number }) {
+  const redHours = params?.redHours ?? 2;
+  const redMs    = redHours * 3_600_000;
+
+  const overdueQ = useQuery({
+    queryKey: ["no-show-tile-feed", getSydneyIsoDate()],
+    queryFn: fetchTodayOverdueAttendees,
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+  const participantsQ = useQuery({
+    queryKey: ["participants"],
+    queryFn: () => listParticipants(),
+    staleTime: 60_000,
+  });
+
+  const rows = useMemo<NoShowTileRow[]>(() => {
+    const now = operationalNowMs();
+    const byId = new Map((participantsQ.data ?? []).map((p) => [p.id, p]));
+    return (overdueQ.data ?? []).map((r) => {
+      const expectedMs  = new Date(r.expected_arrival_at).getTime();
+      const overdueForMs = now - expectedMs;
+      const overdueMin   = Math.floor(overdueForMs / 60_000);
+      const severity: Severity = overdueForMs >= redMs ? "critical" : "warning";
+      const name = byId.get(r.participant_id)?.fullName ?? "Unknown client";
+      const expectedTime = r.expected_arrival_at.slice(11, 16);
+      return {
+        key: r.participant_id,
+        title: name,
+        detail: `Expected ${expectedTime} · overdue ${overdueMin} min`,
+        severity,
+      };
+    });
+  }, [overdueQ.data, participantsQ.data, redMs]);
+
+  return {
+    data: rows,
+    isLoading: overdueQ.isLoading || participantsQ.isLoading,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// ROLL CALL BREACH — multi-day event evening/morning roll has unaccounted
+// participants past the deadline (+ optional grace window).
+//
+// Yellow: deadline passed, ≥1 person still 'expected' (not accounted/absent).
+// Red: deadline + graceMinutes passed, still unaccounted.
+// Only fires when there is an active multi-day event_day_session today.
+// ---------------------------------------------------------------------------
+
+export interface RollCallBreachRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+async function fetchRollCallBreaches(graceMs: number): Promise<RollCallBreachRow[]> {
+  const date = getSydneyIsoDate();
+  const now = operationalNowMs();
+
+  // Only multi-day sessions (have curfew_time or morning_roll_time set)
+  const { data: sessions, error: sErr } = await supabase
+    .from("event_day_sessions")
+    .select("id, event_id, session_date, curfew_time, morning_roll_time, phase")
+    .eq("session_date", date)
+    .not("phase", "eq", "closed");
+  if (sErr) throw sErr;
+  if (!sessions || sessions.length === 0) return [];
+
+  const out: RollCallBreachRow[] = [];
+
+  for (const s of sessions as Array<{
+    id: string; event_id: string; session_date: string;
+    curfew_time: string | null; morning_roll_time: string | null; phase: string;
+  }>) {
+    // Build deadline timestamps for evening + morning rolls
+    const checks: Array<{ label: string; deadlineMs: number; table: string }> = [];
+    if (s.curfew_time) {
+      const [hh, mm] = s.curfew_time.split(":").map(Number);
+      const deadline = new Date(`${date}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00`);
+      checks.push({ label: "Evening roll call", deadlineMs: deadline.getTime(), table: "event_curfew_log" });
+    }
+    if (s.morning_roll_time) {
+      const [hh, mm] = s.morning_roll_time.split(":").map(Number);
+      const deadline = new Date(`${date}T${String(hh).padStart(2,"0")}:${String(mm).padStart(2,"0")}:00`);
+      checks.push({ label: "Morning roll call", deadlineMs: deadline.getTime(), table: "event_morning_log" });
+    }
+
+    for (const check of checks) {
+      if (now < check.deadlineMs) continue; // deadline not yet reached
+
+      // Count 'expected' (unaccounted) rows for this session
+      const { count, error: cErr } = await supabase
+        .from(check.table as "event_curfew_log" | "event_morning_log")
+        .select("id", { count: "exact", head: true })
+        .eq("event_day_session_id", s.id)
+        .eq("status", "expected");
+      if (cErr) continue;
+      if (!count || count === 0) continue;
+
+      const pastDeadlineMs = now - check.deadlineMs;
+      const severity: Severity = pastDeadlineMs >= graceMs ? "critical" : "warning";
+      const minsLate = Math.floor(pastDeadlineMs / 60_000);
+      out.push({
+        key: `${s.id}:${check.table}`,
+        title: `${check.label} — ${count} unaccounted`,
+        detail: `Deadline passed ${minsLate} min ago · Session ${s.session_date}`,
+        severity,
+      });
+    }
+  }
+
+  return out;
+}
+
+export function useRollCallBreachFeed(params?: { graceMinutes?: number }) {
+  const graceMs = (params?.graceMinutes ?? 30) * 60_000;
+  return useQuery<RollCallBreachRow[]>({
+    queryKey: ["roll-call-breach-feed", graceMs],
+    queryFn: () => fetchRollCallBreaches(graceMs),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// ACTIVE RED INCIDENTS — open RED issues from site_issues_register created
+// today. Yellow: any open red today. Red: no Hub note for ≥ warnHours.
+// ---------------------------------------------------------------------------
+
+export interface ActiveRedIncidentRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+async function fetchTodayOpenRedIssues(warnMs: number): Promise<ActiveRedIncidentRow[]> {
+  const date = getSydneyIsoDate();
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("id, issue_description, status, created_at")
+    .eq("severity", "red")
+    .in("status", ["open", "pending"])
+    .gte("created_at", `${date}T00:00:00.000Z`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  const ids = (data as Array<{ id: string }>).map((r) => r.id);
+
+  // Latest hub note per issue (source = 'site_issue')
+  const { data: notes } = await supabase
+    .from("hub_issue_notes")
+    .select("source_row_id, stamped_at")
+    .eq("source", "site_issue")
+    .in("source_row_id", ids)
+    .order("stamped_at", { ascending: false });
+
+  const latestNote = new Map<string, string>();
+  for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
+    if (!latestNote.has(n.source_row_id)) latestNote.set(n.source_row_id, n.stamped_at);
+  }
+
+  const now = operationalNowMs();
+  return (data as Array<{ id: string; issue_description: string; created_at: string }>).map((r) => {
+    const lastAt   = latestNote.get(r.id) ?? r.created_at;
+    const silentMs = now - new Date(lastAt).getTime();
+    const severity: Severity = silentMs >= warnMs ? "critical" : "warning";
+    const minsAgo  = Math.floor((now - new Date(r.created_at).getTime()) / 60_000);
+    return {
+      key: r.id,
+      title: String(r.issue_description ?? "RED incident").slice(0, 100),
+      detail: `Logged ${minsAgo} min ago${latestNote.has(r.id) ? "" : " · no Hub update yet"}`,
+      severity,
+    };
+  });
+}
+
+export function useActiveRedIncidentsFeed(params?: { warnHours?: number }) {
+  const warnMs = (params?.warnHours ?? 24) * 3_600_000;
+  return useQuery<ActiveRedIncidentRow[]>({
+    queryKey: ["active-red-incidents-feed", getSydneyIsoDate()],
+    queryFn: () => fetchTodayOpenRedIssues(warnMs),
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// HUB HUMAN INCIDENTS (STALE) — open issues across all time that have had
+// no Hub note activity for ≥ warnHours (yellow) or ≥ redHours (red).
+// Excludes today's issues (those surface in Active RED Incidents above).
+// ---------------------------------------------------------------------------
+
+export interface HubHumanIncidentRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  daysSinceActivity: number;
+}
+
+async function fetchStaleHubIssues(
+  warnMs: number,
+  redMs: number,
+): Promise<HubHumanIncidentRow[]> {
+  const date = getSydneyIsoDate();
+
+  // Open issues older than today (today's reds are in Active RED tile)
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("id, issue_description, severity, status, created_at")
+    .in("status", ["open", "pending", "awaiting_external"])
+    .lt("created_at", `${date}T00:00:00.000Z`)
+    .order("created_at", { ascending: false });
+  if (error) throw error;
+  if (!data || data.length === 0) return [];
+
+  const ids = (data as Array<{ id: string }>).map((r) => r.id);
+
+  // Latest hub note per issue
+  const { data: notes } = await supabase
+    .from("hub_issue_notes")
+    .select("source_row_id, stamped_at")
+    .eq("source", "site_issue")
+    .in("source_row_id", ids)
+    .order("stamped_at", { ascending: false });
+
+  const latestNote = new Map<string, string>();
+  for (const n of (notes ?? []) as Array<{ source_row_id: string; stamped_at: string }>) {
+    if (!latestNote.has(n.source_row_id)) latestNote.set(n.source_row_id, n.stamped_at);
+  }
+
+  const now = operationalNowMs();
+  const out: HubHumanIncidentRow[] = [];
+
+  for (const r of data as Array<{
+    id: string; issue_description: string; severity: string; created_at: string;
+  }>) {
+    const lastAt    = latestNote.get(r.id) ?? r.created_at;
+    const silentMs  = now - new Date(lastAt).getTime();
+    if (silentMs < warnMs) continue; // within SLA — silent
+    const daysSince = Math.floor(silentMs / 86_400_000);
+    const severity: Severity = silentMs >= redMs ? "critical" : "warning";
+    out.push({
+      key: r.id,
+      title: String(r.issue_description ?? "Open issue").slice(0, 100),
+      detail: `No Hub update in ${daysSince}d · ${String(r.severity ?? "").toUpperCase()}`,
+      severity,
+      daysSinceActivity: daysSince,
+    });
+  }
+
+  return out.sort((a, b) => b.daysSinceActivity - a.daysSinceActivity);
+}
+
+export function useHubHumanIncidentsFeed(params?: {
+  warnHours?: number;
+  redHours?: number;
+}) {
+  const warnMs = (params?.warnHours ?? 24) * 3_600_000;
+  const redMs  = (params?.redHours  ?? 48) * 3_600_000;
+  return useQuery<HubHumanIncidentRow[]>({
+    queryKey: ["hub-human-incidents-feed", warnMs, redMs],
+    queryFn: () => fetchStaleHubIssues(warnMs, redMs),
+    staleTime: 60_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// BL-084 Phase A — active infectious exclusions (Health & Safety tile)
+// ---------------------------------------------------------------------------
+
+export interface InfectiousExclusionFeedRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  hubIssueId: string | null;
+}
+
+export function useInfectiousExclusionsFeed() {
+  return useQuery<InfectiousExclusionFeedRow[]>({
+    queryKey: ["infectious-exclusions-active"],
+    queryFn: async () => {
+      const { listActiveInfectiousExclusions, INFECTION_CATEGORY_LABELS } =
+        await import("@/lib/api/infectious-exclusion");
+      const rows = await listActiveInfectiousExclusions();
+      return rows.map((r) => {
+        const scope = [
+          r.excludeCentre ? "Centre" : null,
+          r.excludeTrips ? "Trips" : null,
+        ]
+          .filter(Boolean)
+          .join(" + ");
+        return {
+          key: r.id,
+          title: r.participantName ?? "Participant",
+          detail: `${INFECTION_CATEGORY_LABELS[r.category]} · excluded from ${scope} since ${r.excludedFrom}`,
+          severity: "warning" as Severity,
+          hubIssueId: r.hubIssueId,
+        };
+      });
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
 }
 

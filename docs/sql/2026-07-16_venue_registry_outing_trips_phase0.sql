@@ -407,13 +407,13 @@ INSERT INTO public.system_parameters (key, value, description)
 VALUES
   (
     'event_curfew_yellow_mins_before',
-    '15'::jsonb,
-    'Minutes before curfew_time when a YELLOW curfew row is logged for an unaccounted participant.'
+    '0'::jsonb,
+    'Minutes before evening roll for Green approaching banner. 0 = Green at deadline minute only; Yellow from deadline.'
   ),
   (
     'event_curfew_red_mins_after',
     '30'::jsonb,
-    'Minutes after curfew_time when the same site_issues_register row promotes to RED and SMS fires.'
+    'Minutes after evening roll when RED promotes and SMS fires once per unaccounted participant.'
   ),
   (
     'event_curfew_red_sms_recipients',
@@ -422,13 +422,13 @@ VALUES
   ),
   (
     'event_morning_yellow_mins_before',
-    '15'::jsonb,
-    'Minutes before morning_roll_time when YELLOW is logged for an unaccounted participant.'
+    '0'::jsonb,
+    'Minutes before morning roll for Green approaching banner. 0 = Green at deadline minute only; Yellow from deadline.'
   ),
   (
     'event_morning_red_mins_after',
     '30'::jsonb,
-    'Minutes after morning_roll_time when the row promotes to RED and SMS fires.'
+    'Minutes after morning roll when RED promotes and SMS fires once per unaccounted participant.'
   ),
   (
     'event_morning_red_sms_recipients',
