@@ -307,6 +307,8 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
           (s.transport_required as string | null) ??
           null,
       ),
+      // Explicit — TEST OpenAPI bootstrap tables omit DEFAULT 'expected'.
+      status: "expected" as const,
     };
   });
 
