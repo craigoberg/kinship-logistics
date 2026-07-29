@@ -2,9 +2,19 @@ import { createClient } from "@supabase/supabase-js";
 
 // The .env value may include a trailing `/rest/v1/` segment from the REST docs URL.
 // supabase-js expects the project base URL only, so normalise it here.
-const rawUrl = import.meta.env.VITE_SUPABASE_URL as string;
+const rawUrl = import.meta.env.VITE_SUPABASE_URL as string | undefined;
+const SUPABASE_PUBLISHABLE_KEY = import.meta.env
+  .VITE_SUPABASE_PUBLISHABLE_KEY as string | undefined;
+
+if (!rawUrl?.trim() || !SUPABASE_PUBLISHABLE_KEY?.trim()) {
+  throw new Error(
+    "Missing VITE_SUPABASE_URL or VITE_SUPABASE_PUBLISHABLE_KEY. " +
+      "Set them in Lovable Project settings → Secrets / Environment " +
+      "(or local .env). Do not commit real keys.",
+  );
+}
+
 const SUPABASE_URL = rawUrl.replace(/\/rest\/v1\/?$/, "").replace(/\/$/, "");
-const SUPABASE_PUBLISHABLE_KEY = import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY as string;
 
 export const supabaseUrl = SUPABASE_URL;
 
