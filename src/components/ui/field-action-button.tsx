@@ -40,6 +40,8 @@ interface FieldActionButtonProps {
   children: ReactNode;
   className?: string;
   type?: "button" | "submit";
+  /** Default true (field CTAs). False = inline manager-ops toolbar chip. */
+  fullWidth?: boolean;
 }
 
 export function FieldActionButton({
@@ -51,6 +53,7 @@ export function FieldActionButton({
   children,
   className,
   type = "button",
+  fullWidth = true,
 }: FieldActionButtonProps) {
   return (
     <button
@@ -58,10 +61,11 @@ export function FieldActionButton({
       disabled={disabled}
       onClick={onClick}
       className={cn(
-        "w-full rounded-xl transition",
+        "inline-flex items-center justify-center gap-1.5 rounded-xl transition",
         "touch-manipulation select-none",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",
         "disabled:opacity-50 disabled:cursor-not-allowed",
+        fullWidth ? "w-full" : "w-auto shrink-0 px-3",
         SIZE_CLASSES[size],
         VARIANT_CLASSES[variant],
         pulse && "animate-pulse",

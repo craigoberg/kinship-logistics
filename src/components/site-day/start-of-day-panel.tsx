@@ -16,6 +16,7 @@ import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { FieldActionButton } from "@/components/ui/field-action-button";
+import { ManagerOpsChip } from "@/components/ui/manager-ops-chip";
 import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
 import {
   AlertDialog,
@@ -354,16 +355,14 @@ export function StartOfDayPanel({ sessionId }: Props) {
         </FieldActionButton>
 
         {isManager && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-11 w-full gap-2 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
+          <ManagerOpsChip
+            tone="caution"
+            layout="stack"
             onClick={() => setDoNotOpenSheet(true)}
           >
             <DoorClosed className="h-4 w-4" />
             Do not open centre today
-          </Button>
+          </ManagerOpsChip>
         )}
 
         {/* High-trust escape hatch when a Manager is unreachable digitally.

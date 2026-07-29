@@ -1302,27 +1302,34 @@ Phases are **sequential** — do not start B before A ships to production.
 ## 13. INCIDENT / FAULT Recording Model
 
 > **2026-07-11 — Project owner directive (locked).** This section documents the confirmed INCIDENT/FAULT workflow. All code that touches `IncidentIntakeDialog`, `GlobalIncidentIntakeDrawer`, `raiseOperationalIncident`, or any incident-to-Hub write path must comply with this section. Violations are blocking defects.
+>
+> **2026-07-29 — Amended:** Big Red gains a third **Health & Safety** lane (BL-084). That lane does **not** write an INCIDENT row — it opens the manager H&S declare/activate flow. Human and Asset lanes unchanged.
 
 ### 13.1 The Global Button
 
 A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else.
 
-The button is **never context-specific** — available at all times so staff can report anything immediately without navigating first.
+The button is **never context-specific** — available at all times so staff can report anything immediately without navigating first. Label remains **Incident / Fault**; the chooser includes Health & Safety as a third lane.
 
-### 13.2 The Two-Lane Chooser
+### 13.2 The Three-Lane Chooser
 
 The button always opens `IncidentIntakeDialog` at the lane-chooser step:
 
-| Lane | Label | HUB destination | DB `incidentType` |
-| :-- | :-- | :-- | :-- |
-| Human / Operational | Injury, welfare, dispute, near-miss | HUB Human side | `human_operational` |
-| Equipment & Asset Fault | Bus, iPad, trolley, venue equipment — **any non-human asset** | HUB Asset side | `mechanical` |
+| Lane | Label | Outcome |
+| :-- | :-- | :-- |
+| Human / Operational | Injury, welfare, dispute, near-miss | HUB Human side — `incidentType = human_operational` (RYGE form) |
+| Equipment & Asset Fault | Bus, iPad, trolley, venue equipment — **any non-human asset** | HUB Asset side — `mechanical` + `maintenance_items` (RYGE form) |
+| **Health & Safety** | Emergency / drill, lockdown / do-not-open / programme suspend, infectious exclusion | Closes the dialog → opens `GlobalHealthSafetyFlow` (manager PIN sheets). **No** `operational_incidents` INCIDENT write. Drill/Live stay **out of** Human/Asset forms. |
 
 **Bus pre-trip walkaround faults are separate** — logged through the manifest issue accumulator, not this button. This button covers all other failures that occur at any point during operations.
 
-### 13.3 RYGE Severity Step (mandatory, both lanes)
+**Health & Safety entry is global via Big Red only.** Do **not** re-add duplicate Emergency / Health & Safety chips on Day Centre Active, Event Deliver, or Manifest toolbars. Sticky banners and clear-lockdown / clear-suspend recovery controls remain on those surfaces. Start-of-day **Do not open centre today** may remain on the Start of Day panel (open-flow action).
 
-After selecting a lane the operator **always** sees the RYGE severity dialogue. No path skips this.
+Context for H&S actions is harvested from route + today's site session + `localStorage` event keys (`yada.activeEventId`, `yada.activeEventDaySessionId`). When centre/trip context is missing, site hold and infectious may be disabled with an explanation; Emergency / drill may still run with surface `manifest`.
+
+### 13.3 RYGE Severity Step (mandatory, Human & Asset lanes only)
+
+After selecting Human or Asset the operator **always** sees the RYGE severity dialogue. No path skips this. Health & Safety does not use this step.
 
 | Severity | Rule | Workaround |
 | :-- | :-- | :-- |
@@ -1332,7 +1339,7 @@ After selecting a lane the operator **always** sees the RYGE severity dialogue. 
 
 ### 13.4 RED Verbal Consultation (INCIDENT / FAULT path)
 
-RED from either lane opens `VerbalConsultationDialog` (same component as §3). Identical rules:
+RED from Human or Asset opens `VerbalConsultationDialog` (same component as §3). Identical rules:
 
 - Manager selected **by name only** — never by PIN
 - Operator signs with **their own PIN** to attest the contact attempt
@@ -1340,9 +1347,11 @@ RED from either lane opens `VerbalConsultationDialog` (same component as §3). I
 - An Event Leader with Manager RBAC **may self-certify** their own RED
 - Contact failure is still recorded — the attempt itself is the compliance requirement
 
+Health & Safety manager declares use **Manager PIN** on their own sheets (`PinEntryTrigger` / `verifyManagerPin`) — that is step-up auth for activate/declare, not §13.4 verbal consultation.
+
 ### 13.5 Write Destinations
 
-On final submission the app writes to all applicable destinations:
+On final submission of a **Human or Asset** lane the app writes to all applicable destinations:
 
 | Context | Writes to |
 | :-- | :-- |
@@ -1358,6 +1367,8 @@ The `[INCIDENT]` prefix in `issue_description` distinguishes these rows from ven
 
 **CRITICAL:** `[INCIDENT]`-prefixed rows in `site_issues_register` must **never** block location opening. Only venue-walkaround RED rows (no `[INCIDENT]` prefix) activate the RED gate in `hasOpenRedIssueForSession`.
 
+**Health & Safety** writes go through BL-084 APIs (`operational_emergencies`, infectious exclusion, site lockdown/suspend columns, Hub Health & Safety area) — not this INCIDENT path. Stand-down clears floor banners but does **not** auto-resolve the Hub Open issue.
+
 ### 13.6 Context Awareness
 
 At the moment the button is pressed the app captures:
@@ -1365,16 +1376,19 @@ At the moment the button is pressed the app captures:
 | Field | Source |
 | :-- | :-- |
 | Event ID | `localStorage.yada.activeEventId` |
+| Event day session | `localStorage.yada.activeEventDaySessionId` |
 | Event title | `localStorage.yada.activeEventTitle` |
+| Site day session / phase | `useSiteSession()` when on Day Centre (or available) |
 | App section | Derived from current route pathname |
 | Operator | `getStaffId()` / `resolveStaffIdWithFallback()` |
 
-All fields are stored in `operational_incidents` and in the ledger receipt.
+All Human/Asset fields are stored in `operational_incidents` and in the ledger receipt. H&S sheets receive the same harvested context.
 
 ### 13.7 What this flow is NOT
 
-- Not a replacement for the **venue check-in Log Issue** (Trip Day Config tab → `LogAnomalyModal` + `EventDayVerbalAnomalyFlow`). That flow is exclusively for venue walkaround at event-open time.
+- Not a replacement for the **venue check-in Log Issue** (Trip Day → `LogAnomalyModal` + `EventDayVerbalAnomalyFlow`). That flow is exclusively for venue walkaround at event-open time.
 - Not a replacement for the **bus pre-trip walkaround** (manifest issue accumulator).
+- Health & Safety lane is **not** a free-text INCIDENT form and must not open Drill/Live inside Human/Asset RYGE.
 
 ### 13.9 Issue Display Sort Order (§13 + §12 combined rule)
 
@@ -1392,11 +1406,13 @@ Both utilities are exported from `src/lib/api/site-issues.ts`. **Never display a
 | Concern | Canonical path |
 | :-- | :-- |
 | Global FAB | `src/components/global/global-incident-intake-drawer.tsx` |
-| Dialog | `src/components/global/incident-intake-dialog.tsx` |
-| HUB write | `src/lib/incidents.ts` → `raiseOperationalIncident` |
+| Dialog (3-lane chooser) | `src/components/global/incident-intake-dialog.tsx` |
+| Health & Safety flow | `src/components/global/global-health-safety-flow.tsx` |
+| HUB write (Human/Asset) | `src/lib/incidents.ts` → `raiseOperationalIncident` |
 | Event-day mirror | `src/lib/api/site-issues.ts` → `createIssue` |
 | Verbal consultation | `src/components/issue-engine/verbal-consultation-dialog.tsx` |
-| Event context storage | `src/components/events/manage-event-modal.tsx` → `localStorage.yada.activeEventTitle` |
+| Event context storage | Event Deliver / Manage Event / Manifest → `localStorage.yada.activeEvent*` |
+| Emergency / site hold / infectious | `src/components/ops/*`, `src/components/site-day/infectious-*-sheet.tsx`, `src/lib/api/operational-emergency.ts` |
 
 ---
 
@@ -1412,7 +1428,7 @@ The Governance Hub (`/governance`) has three tabs. **RYGE severity applies equal
 | **Maintenance & Repairs** | `maintenance_items` | Physical faults requiring repair: venue defects, broken equipment, asset failures, dented panels, graffiti |
 | **Compliance & Renewals** | `compliance_assets` | Expiry-driven items: insurance, vehicle rego, staff certs, formal audits — populated programmatically |
 
-> **Human Incidents tab** filters `operational_incidents` to `incident_type = 'human_operational'` only. Asset/mechanical incidents from the Equipment & Asset lane are tracked exclusively in Maintenance & Repairs via `maintenance_items`.
+> **Human Incidents tab** filters `operational_incidents` to `incident_type = 'human_operational'` only. Asset/mechanical incidents from the Equipment & Asset lane are tracked exclusively in Maintenance & Repairs via `maintenance_items`. Health & Safety Hub cards (infectious, emergency, site hold) use Hub area `health_safety` — not Big Red Human/Asset writes.
 
 > **Compliance RYGE** is computed from expiry dates (e.g. expiring within 30 days = Yellow, overdue = Red). No human manually enters compliance severity.
 
@@ -1426,6 +1442,7 @@ The table below is the single source of truth for all write paths. **Source dete
 | :-- | :-- | :-- | :-- | :-- | :-- |
 | **Big Red Button → Human lane** | Any | ✓ if event+session open | ✓ `human_operational` ALL RYGE | ✗ | Human Incidents |
 | **Big Red Button → Asset lane** | Any | ✓ if event+session open | ✓ `mechanical` (audit only, not shown in tab) | ✓ ALL RYGE `incident_fault` | Maintenance & Repairs |
+| **Big Red Button → Health & Safety** | Any (context-aware) | ✓ via BL-084 declare/activate APIs | ✗ INCIDENT path | ✗ | Health & Safety area / Emergency & Site Hold tile |
 | **Venue Walk-around** (Log Venue Issue) | Event Trip Day | ✓ ALL RYGE | ✗ | ✓ ALL RYGE `venue_issue` | Maintenance & Repairs |
 | **Day Centre Walk-around** (site-day LogAnomalyModal) | Day Centre session | ✓ ALL RYGE + Human Incidents via `session_id` | ✗ | ✓ ALL RYGE `centre_issue` | Maintenance & Repairs |
 | **Bus / Vehicle Pre-trip Walk-around** | Pre-trip clearance | ✓ via `asset_clearance_items` | ✗ | ✓ ALL RYGE `vehicle_issue` | Maintenance & Repairs |
@@ -1434,8 +1451,8 @@ The table below is the single source of truth for all write paths. **Source dete
 **Key rules:**
 - **GREEN issues are NOT informational-only.** A Green issue is a low-priority note (graffiti, dented panel) that still needs staff follow-up. Green issues appear in the appropriate tab based on source.
 - Walk-arounds (Venue, Day Centre, Bus) always write to **Maintenance & Repairs**.
-- The Big Red Button gate (Human vs Asset) determines the tab — consistent UX across all form contexts.
-- `operational_incidents` always receives a record for audit purposes, but only `human_operational` rows display in the Human Incidents tab.
+- The Big Red Button gate (Human vs Asset vs Health & Safety) determines the path — H&S never opens the free-text INCIDENT RYGE form.
+- `operational_incidents` always receives a record for Human/Asset audit purposes, but only `human_operational` rows display in the Human Incidents tab.
 
 ---
 
@@ -1447,9 +1464,13 @@ The table below is the single source of truth for all write paths. **Source dete
                   → [Equipment & Asset Fault] → RYGE → operational_incidents (mechanical, audit)
                                                       → maintenance_items (incident_fault)
                                                       → site_issues_register (if event context)
+                  → [Health & Safety] → GlobalHealthSafetyFlow → Emergency / site hold / infectious
+                                         (manager PIN; no INCIDENT write)
 ```
 
-Implementation anchor: `src/components/global/incident-intake-dialog.tsx` → `commitWrite()`
+Implementation anchors:
+- `src/components/global/incident-intake-dialog.tsx` → `commitWrite()` (Human/Asset)
+- `src/components/global/global-health-safety-flow.tsx` (Health & Safety)
 
 ---
 

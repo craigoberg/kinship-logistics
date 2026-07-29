@@ -72,12 +72,33 @@ export function unifiedIssueSortDate(issue: UnifiedIssue): string {
 }
 
 export function sortUnifiedIssuesByRygeThenExpiry(issues: UnifiedIssue[]): UnifiedIssue[] {
-  return [...issues].sort((a, b) =>
-    compareRygeThenExpiry(
+  return [...issues].sort((a, b) => {
+    const byEmergency =
+      emergencyHubPriorityRank(a) - emergencyHubPriorityRank(b);
+    if (byEmergency !== 0) return byEmergency;
+    return compareRygeThenExpiry(
       a.severity,
       unifiedIssueSortDate(a),
       b.severity,
       unifiedIssueSortDate(b),
-    ),
-  );
+    );
+  });
+}
+
+/** Pin active Drill/Live / site-hold Health & Safety tickets above other Hub rows. */
+export function emergencyHubPriorityRank(issue: UnifiedIssue): number {
+  const desc = `${issue.title} ${issue.description}`.toUpperCase();
+  if (desc.includes("[LIVE EMERGENCY]")) return 0;
+  if (desc.includes("[DRILL EMERGENCY]")) return 1;
+  if (
+    desc.includes("[SITE LOCKDOWN") ||
+    desc.includes("[SITE DO-NOT-OPEN]") ||
+    desc.includes("[PROGRAMME SUSPENDED]")
+  ) {
+    return 2;
+  }
+  if (issue.subCategory === "Health & Safety" || issue.sourceLabel === "Health & Safety") {
+    return 3;
+  }
+  return 9;
 }

@@ -118,7 +118,9 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Programme Absent (mode toggle)** | **Defined** | `ProgrammeAbsentDialog` | Programme activity UserX | Large tap mode: **Still on the trip** (default) vs **Left the trip**. Hydrates skip vs left-trip reason lists. Field / touch-first. |
 | **Toast feedback** | **Defined** | `operationToasts` in `operation-toasts.ts` | After save/defer/resolve in Hub manage flows | Standard copy; `sonner` toast |
 | **Empty states** | Defined | Dashed border card | No rows in a list | `rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground` — no shared component needed |
-| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold` — variants: `primary` (blue), `success` (green), `caution` (amber, use `pulse`), `destructive` (red), `secondary` (muted). See `src/components/ui/field-action-button.tsx` |
+| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold` — variants: `primary` (blue), `success` (green), `caution` (amber, use `pulse`), `destructive` (red), `secondary` (muted). `fullWidth={false}` for toolbar chips. See `src/components/ui/field-action-button.tsx` |
+| **Manager ops toolbar** | **Defined** | `ManagerOpsChip` → `FieldActionButton` solid fills | Emergency / lockdown / infectious / do-not-open / suspend chips **inside** H&S sheet or Start-of-Day | **Never** thin outline on dark UI. Tones: `emergency`=solid red, `caution`=solid amber+black, `neutral`=muted. `layout="chip"` or `stack`. |
+| **Big Red → Health & Safety** | **Defined** | `IncidentIntakeDialog` lane 3 → `GlobalHealthSafetyFlow` | Every screen via Big Red | Third lane opens H&S BottomSheet (Emergency · site hold · Infectious). **No** INCIDENT write. **No** duplicate H&S/Emergency chips on Day Centre Active, Event Deliver, or Manifest. Log anomaly / Close / Log Venue Issue stay on primary bars. Start-of-Day **Do not open** may remain on that panel. |
 | **Field multi-option picker** | Defined | `MobileFieldButton` with `badgeWhenIdle` | Start point, return depart point, 3-option layouts | Use `tone="success"` for location pickers; `badgeWhenIdle="Default"` or `"Recommended"` for the pre-selected option. No hand-rolled `optionClass`. |
 | **Field select (many items)** | Defined (exception) | shadcn `Select` | Bus run picker, event picker when list > ~6 items | Acceptable exception to tap-list rule when the option set is too long for cards. Field routes with ≤6 options must use `MobileFieldButton`. |
 | **Walkaround severity display** | Defined | `SEVERITY_DISPLAY` constant | Walkaround issue chips in `IssueAccumulatorPanel` | Colours match `RYGE_SEVERITY_CHIPS` active state. Also used for ledger text (emoji + label). Do not hand-roll a local `severityChip()`. |
@@ -309,13 +311,13 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Boolean confirm in modal** | Defined | shadcn `Checkbox` | Med bag required, unexpected med flag — yes/no toggles in context | Not a selector; does not need `MobileOptionButton` |
 | **Check-out departure vector** | Defined | `BottomSheet` + `MobileFieldButton` rows | 2–4 departure options at bottom of screen | `tone="neutral"`, no active state — immediate action on tap |
 | **Open Centre Check Leader PIN** | Defined | `PinEntryTrigger` + `verifyOperatorPin` in confirm dialog | Declare Site Safe & Open — successful PIN **opens immediately** (no second Confirm tap) |
-| **Infectious exclusion / clear to return** | Defined | `InfectiousExclusionSheet` / `InfectiousClearanceSheet` | BL-084 A/A.1 manager declare + Hub clearance | Dual entry Day Centre + Event Deliver; if in care → home-safe outcome taps + handover + Manager PIN; Hub Clear to return later; Band 2 tile |
+| **Infectious exclusion / clear to return** | Defined | `InfectiousExclusionSheet` / `InfectiousClearanceSheet` | BL-084 A/A.1 manager declare + Hub clearance | Entry via Big Red → Health & Safety (centre/trip context); if in care → home-safe + Manager PIN; Hub Clear to return; Band 2 tile |
 | **Infectious home-safe disposition** | Defined | `MobileFieldButton` outcome classes (`HOME_SAFE_DISPOSITIONS`) | Leaving care when infectious exclude | Family/carer · Staff escorted · Transport/taxi · Other — **not** a logistics plan; optional note |
-| **Emergency activate (Drill\|Live)** | Defined | `EmergencyActivateSheet` | BL-084 C manager activate | Drill\|Live `MobileFieldButton` + Yellow\|Red RYGE chips + `CharacterCountedTextarea` situation + Manager `PinEntryTrigger` — Day Centre, Event Deliver, Manifest |
-| **Emergency sticky banner** | Defined | `EmergencyOpsBanner` | Active Drill/Live | Sticky top strip (amber Drill / red Live); Muster + Stand down (manager) |
+| **Emergency activate (Drill\|Live)** | Defined | `EmergencyActivateSheet` | BL-084 C manager activate | Entry via Big Red → Health & Safety. Drill\|Live `MobileFieldButton` + Yellow\|Red + `CharacterCountedTextarea` + Manager PIN |
+| **Emergency sticky banner** | Defined | `EmergencyOpsBanner` | Active Drill/Live only | Sticky strip on Day Centre, Event Deliver, Manifest, Governance Hub while `status=active`. **Clears on stand-down.** Hub Open issue CTA while active. Post-stand-down review = open Health & Safety card on Active (no banner) |
 | **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Expected / Accounted / Missing via `MobileFieldButton` — not a park-evac sim |
-| **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub resolve + clear banner |
-| **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Free-text reason + Yellow\|Red + Manager PIN; kinds: do_not_open · lockdown · programme_suspend |
+| **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
+| **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
 
 ### Component inventory (Defined in Day Centre flow)
 
@@ -340,12 +342,13 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Day Centre close | `PinReauthDialog` | Existing |
 | RED anomaly | `LogAnomalyModal` → `VerbalConsultationDialog` | Existing |
 | Dialog dismiss | Always allows Close — no `isPending` guard | Per G5 |
-| Infectious exclusion (BL-084 A/A.1) | `InfectiousExclusionSheet` on Day Centre + Event Deliver | Manager-only; home-safe block when `checked_in` |
+| Infectious exclusion (BL-084 A/A.1) | `InfectiousExclusionSheet` via Big Red H&S | Manager-only; home-safe block when `checked_in` |
+| Manager ops toolbar (BL-084) | `ManagerOpsChip` solid fills | Chips inside `GlobalHealthSafetyFlow` / Start-of-Day — not outline ghosts |
 | Infectious home safe | Outcome `MobileFieldButton` + `CharacterCountedInput` handover + optional note + Manager PIN | Attests left care; floor checkout / trip absent; no second Hub LEFT TRIP ticket |
 | Clear to return (BL-084 A) | `InfectiousClearanceSheet` — attestation vs medical cert `MobileFieldButton` + Manager PIN | Hub Manage issue footer when exclusion active |
-| Emergency activate (BL-084 C) | `EmergencyActivateSheet` | Manager-only Drill\|Live; free-text why; Yellow\|Red |
-| Emergency banner / muster / stand-down | `EmergencyOpsBanner` | Sticky on Centre / Event Deliver / Manifest |
-| Site do-not-open / lockdown / suspend | `SiteOpsDeclareSheet` | Start of Day · Active Day · Event Deliver |
+| Emergency activate (BL-084 C) | `EmergencyActivateSheet` via Big Red H&S | Manager-only Drill\|Live; free-text why; Yellow\|Red |
+| Emergency banner / muster / stand-down | `EmergencyOpsBanner` | Sticky on Centre / Event Deliver / Manifest / Hub |
+| Site do-not-open / lockdown / suspend | `SiteOpsDeclareSheet` | Big Red H&S · Start of Day do-not-open chip |
 
 ---
 
@@ -481,6 +484,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-07-29 | Big Red → Health & Safety | Third lane → `GlobalHealthSafetyFlow`; removed Day/Event/Manifest H&S entry chips — GUARDRAILS §13.2 |
+| 2026-07-29 | Manager Health & Safety menu | *(superseded)* Was amber chip → sheet; entry now Big Red only |
+| 2026-07-29 | Manager ops toolbar | Solid `ManagerOpsChip` (emergency red / caution amber / neutral) — never thin outline for Emergency, lockdown, infectious, do-not-open; TEST stays dashed |
 | 2026-07-29 | Emergency B+C MVP | `EmergencyActivateSheet` + sticky banner + light muster + stand-down; `SiteOpsDeclareSheet` do-not-open/lockdown/suspend — BL-084 |
 | 2026-07-28 | Day session login | Email + password then PIN on `/auth` — BL-099 thin gate (not full RBAC) |
 | 2026-07-27 | Infectious home-safe (A.1) | Centre + Trip entry; in-care → disposition taps + handover + Manager PIN (outcome not route); not-in-care → exclude only — BL-084 |

@@ -1,17 +1,17 @@
 /**
  * IncidentIntakeDialog — GUARDRAILS §13
  *
- * Flow (both lanes):
- *   1. Lane chooser  — Human/Operational OR Equipment & Asset Fault
- *   2. RYGE severity — description (+ workaround for YELLOW)
- *   3. RED only      — VerbalConsultationDialog (manager by name, operator PIN)
- *   4. Submit        — writes to operational_incidents (HUB always) +
- *                      site_issues_register (when event + day session in context)
+ * Flow:
+ *   1. Lane chooser — Human / Asset / Health & Safety
+ *      Health & Safety closes this dialog and opens GlobalHealthSafetyFlow (no INCIDENT write).
+ *   2. Human/Asset only — RYGE severity + description (+ workaround for YELLOW)
+ *   3. RED only — VerbalConsultationDialog (manager by name, operator PIN)
+ *   4. Submit — operational_incidents (+ site_issues_register when event day in context)
  */
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { HeartPulse, Wrench } from "lucide-react";
+import { HeartPulse, ShieldAlert, Wrench } from "lucide-react";
 
 import {
   Dialog,
@@ -52,6 +52,8 @@ export interface IncidentIntakeContext {
   eventTitle?: string;
   /** When set, incident is also mirrored to site_issues_register for this day session. */
   eventDaySessionId?: string;
+  siteDaySessionId?: string;
+  siteDayPhase?: string;
 }
 
 interface Props {
@@ -60,11 +62,22 @@ interface Props {
   context: IncidentIntakeContext;
   /** Called after a successful submission — use for cache invalidation. */
   onFiled?: () => void;
+  /**
+   * Third lane — opens Health & Safety manager flow (emergency / site hold / infectious).
+   * Must not write an INCIDENT row.
+   */
+  onHealthSafety?: () => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
 
-export function IncidentIntakeDialog({ open, onOpenChange, context, onFiled }: Props) {
+export function IncidentIntakeDialog({
+  open,
+  onOpenChange,
+  context,
+  onFiled,
+  onHealthSafety,
+}: Props) {
   const qc = useQueryClient();
   const [lane, setLane] = useState<Lane>("choose");
   const [severity, setSeverity] = useState<RygeSev | null>(null);
@@ -242,9 +255,9 @@ export function IncidentIntakeDialog({ open, onOpenChange, context, onFiled }: P
             <DialogDescription>Context: {contextLine}</DialogDescription>
           </DialogHeader>
 
-          {/* ── Step 1: Lane chooser ── */}
+          {/* ── Step 1: Lane chooser (3 lanes — GUARDRAILS §13.2) ── */}
           {lane === "choose" && (
-            <div className="grid gap-3 sm:grid-cols-2">
+            <div className="grid gap-3 sm:grid-cols-3">
               <button
                 type="button"
                 onClick={() => setLane("human")}
@@ -252,7 +265,7 @@ export function IncidentIntakeDialog({ open, onOpenChange, context, onFiled }: P
               >
                 <HeartPulse className="h-7 w-7 text-rose-300" />
                 <div className="text-base font-semibold text-rose-100">
-                  🚑 Human / Operational
+                  Human / Operational
                 </div>
                 <p className="text-xs text-rose-200/80">
                   Injury, welfare concern, dispute, near-miss — involves a person.
@@ -266,10 +279,24 @@ export function IncidentIntakeDialog({ open, onOpenChange, context, onFiled }: P
               >
                 <Wrench className="h-7 w-7 text-amber-300" />
                 <div className="text-base font-semibold text-amber-100">
-                  🔧 Equipment &amp; Asset Fault
+                  Equipment &amp; Asset Fault
                 </div>
                 <p className="text-xs text-amber-200/80">
                   Bus, iPad, trolley, venue equipment — any non-human asset failure.
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => onHealthSafety?.()}
+                className="flex flex-col items-start gap-2 rounded-xl border-2 border-red-600/70 bg-red-600/15 p-5 text-left transition hover:bg-red-600/25"
+              >
+                <ShieldAlert className="h-7 w-7 text-red-300" />
+                <div className="text-base font-semibold text-red-100">
+                  Health &amp; Safety
+                </div>
+                <p className="text-xs text-red-200/80">
+                  Emergency / drill, lockdown or suspend, infectious exclusion — manager declare. Not an INCIDENT log.
                 </p>
               </button>
             </div>
@@ -287,7 +314,7 @@ export function IncidentIntakeDialog({ open, onOpenChange, context, onFiled }: P
                       : "bg-amber-500/20 text-amber-200",
                   )}
                 >
-                  {lane === "human" ? "🚑 Human / Operational" : "🔧 Equipment & Asset"}
+                  {lane === "human" ? "Human / Operational" : "Equipment & Asset"}
                 </span>
                 <button
                   type="button"

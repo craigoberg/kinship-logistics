@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -45,6 +46,7 @@ import type {
 } from "@/lib/api/unified-issues";
 import { ManageIssueDialog } from "./resolve-issue-dialog";
 import { sortUnifiedIssuesByRygeThenExpiry } from "@/lib/governance-sort";
+import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
@@ -305,6 +307,13 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   const [managing, setManaging] = useState<UnifiedIssue | null>(null);
   const [managingWorkflow, setManagingWorkflow] = useState<HubWorkflowStatus>("open");
   const [tab, setTab] = useState<UnifiedIssueTab>("active");
+  const reviewKeysQ = useQuery({
+    queryKey: ["hub-review-started-keys"],
+    queryFn: fetchHubReviewStartedKeySet,
+    staleTime: 30_000,
+  });
+  const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
+  const activeIssuesQ = useUnifiedIssues("active");
 
   useRealtimeInvalidate({
     table: "site_issues_register",
@@ -323,8 +332,29 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
     queryKeys: [unifiedIssuesKey],
   });
 
+  const openHubIssueById = (hubIssueId: string) => {
+    const match = (activeIssuesQ.data ?? []).find(
+      (i) =>
+        (i.source === "day_centre" || i.source === "event") &&
+        i.sourceRowId === hubIssueId,
+    );
+    if (!match) {
+      toast.message("Issue not in Active list", {
+        description: "Hard refresh or check Deferred. It may still be loading.",
+      });
+      return;
+    }
+    setTab("active");
+    setManaging(match);
+    setManagingWorkflow(deriveIssueWorkflowStatus(match, reviewStartedKeys));
+  };
+
   return (
     <div className="space-y-4">
+      <EmergencyOpsBanner
+        variant="hub"
+        onOpenHubIssue={openHubIssueById}
+      />
       <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
         <TabsList>
           <TabsTrigger value="active">Active</TabsTrigger>

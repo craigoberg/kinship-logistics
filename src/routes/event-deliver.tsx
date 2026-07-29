@@ -25,10 +25,7 @@ import {
   LogOut,
   Loader2,
   Moon,
-  Lock,
-  ShieldAlert,
   ShieldCheck,
-  Siren,
   Sunrise,
   UserCheck,
   AlertTriangle,
@@ -37,9 +34,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FieldActionButton } from "@/components/ui/field-action-button";
-import { EmergencyActivateSheet } from "@/components/ops/emergency-activate-sheet";
 import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
-import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
 import {
   clearProgrammeSuspend,
   getProgrammeSuspend,
@@ -71,7 +66,6 @@ import {
 import { reconcileOvernightAttendanceContinuity } from "@/lib/api/event-day-continuity";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { listManifestPickerEvents, type EventManifest, type StaffMember } from "@/lib/data-store";
-import { InfectiousExclusionSheet } from "@/components/site-day/infectious-exclusion-sheet";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import { OperationalTodayLabel } from "@/components/dev/operational-today-label";
 import {
@@ -434,9 +428,6 @@ function TripDayView({
   const qc = useQueryClient();
   const navigate = useNavigate();
   const [anomalyOpen, setAnomalyOpen] = useState(false);
-  const [exclusionOpen, setExclusionOpen] = useState(false);
-  const [emergencyOpen, setEmergencyOpen] = useState(false);
-  const [suspendOpen, setSuspendOpen] = useState(false);
   const isManager = isActiveUserManager();
 
   // Keep all session data fresh after location open/close
@@ -794,39 +785,8 @@ function TripDayView({
         />
       )}
 
-      {/* Manager Health & Safety + venue issue (pre-open Log Venue is on EventLocationPanel). */}
+      {/* Venue issue (pre-open Log Venue is on EventLocationPanel). H&S via Big Red §13.2. */}
       <div className="flex flex-col gap-2">
-        {isManager && (
-          <>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setEmergencyOpen(true)}
-              className="h-11 w-full gap-1.5 border-red-600/50 text-red-700 hover:bg-red-600/10"
-            >
-              <Siren className="h-4 w-4" />
-              Emergency / drill
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setSuspendOpen(true)}
-              className="h-11 w-full gap-1.5 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
-            >
-              <Lock className="h-4 w-4" />
-              Suspend programme
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setExclusionOpen(true)}
-              className="h-11 w-full gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
-            >
-              <ShieldAlert className="h-4 w-4" />
-              Infectious exclusion
-            </Button>
-          </>
-        )}
         {isLocationOpen && (
           <FieldActionButton
             variant="caution"
@@ -994,28 +954,6 @@ function TripDayView({
         sessionDate={session.session_date}
         open={anomalyOpen}
         onOpenChange={setAnomalyOpen}
-      />
-
-      <InfectiousExclusionSheet
-        open={exclusionOpen}
-        onOpenChange={setExclusionOpen}
-        surface="trip"
-        eventId={event.id}
-        eventDaySessionId={session.id}
-      />
-      <EmergencyActivateSheet
-        open={emergencyOpen}
-        onOpenChange={setEmergencyOpen}
-        surface="trip"
-        eventId={event.id}
-        eventDaySessionId={session.id}
-      />
-      <SiteOpsDeclareSheet
-        open={suspendOpen}
-        onOpenChange={setSuspendOpen}
-        kind="programme_suspend"
-        eventId={event.id}
-        eventDaySessionId={session.id}
       />
     </div>
   );

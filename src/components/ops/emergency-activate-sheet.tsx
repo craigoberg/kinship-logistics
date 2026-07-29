@@ -109,22 +109,20 @@ export function EmergencyActivateSheet(props: EmergencyActivateSheetProps) {
         <div className="space-y-2">
           <Label>Mode</Label>
           <div className="grid grid-cols-2 gap-2">
-            {(
-              [
-                { value: "drill", label: "Drill", sub: "Practice — recorded" },
-                { value: "live", label: "Live", sub: "Real incident" },
-              ] as const
-            ).map((opt) => (
-              <MobileFieldButton
-                key={opt.value}
-                selected={mode === opt.value}
-                onClick={() => setMode(opt.value)}
-                className="h-auto min-h-14 flex-col items-start py-2"
-              >
-                <span className="font-bold">{opt.label}</span>
-                <span className="text-[11px] font-normal opacity-80">{opt.sub}</span>
-              </MobileFieldButton>
-            ))}
+            <MobileFieldButton
+              title="Drill"
+              subtitle="Practice — recorded"
+              tone="warning"
+              active={mode === "drill"}
+              onClick={() => setMode("drill")}
+            />
+            <MobileFieldButton
+              title="LIVE"
+              subtitle="Real incident"
+              tone="danger"
+              active={mode === "live"}
+              onClick={() => setMode("live")}
+            />
           </div>
         </div>
 
@@ -181,8 +179,10 @@ export function EmergencyActivateSheet(props: EmergencyActivateSheetProps) {
         <Button
           type="button"
           className={cn(
-            "h-12 w-full gap-2",
-            mode === "live" ? "bg-red-600 hover:bg-red-700" : "",
+            "h-12 w-full gap-2 font-bold text-white disabled:opacity-40",
+            mode === "live"
+              ? "bg-red-600 hover:bg-red-700 disabled:bg-red-600"
+              : "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600",
           )}
           disabled={!ready}
           onClick={() => mut.mutate()}

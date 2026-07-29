@@ -1,5 +1,6 @@
 /**
  * BL-084 Phase C — sticky Drill/Live banner + light muster + stand-down.
+ * Field surfaces (Centre / Event Deliver / Manifest) and Hub review CTA.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -13,6 +14,7 @@ import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import {
   getActiveEmergencyForContext,
+  listActiveEmergencies,
   listMusterLines,
   standDownEmergency,
   updateMusterState,
@@ -27,21 +29,37 @@ export function EmergencyOpsBanner(props: {
   siteDaySessionId?: string | null;
   eventDaySessionId?: string | null;
   className?: string;
+  /** Hub: show any *active* emergency + Open issue CTA (clears on stand-down). */
+  variant?: "field" | "hub";
+  onOpenHubIssue?: (hubIssueId: string) => void;
 }) {
-  const { siteDaySessionId, eventDaySessionId, className } = props;
+  const {
+    siteDaySessionId,
+    eventDaySessionId,
+    className,
+    variant = "field",
+    onOpenHubIssue,
+  } = props;
   const qc = useQueryClient();
   const [musterOpen, setMusterOpen] = useState(false);
   const [standDownOpen, setStandDownOpen] = useState(false);
+  const isHub = variant === "hub";
 
   const emergencyQ = useQuery({
     queryKey: [
       "operational-emergencies",
       "active",
+      isHub ? "any" : "ctx",
       siteDaySessionId ?? "",
       eventDaySessionId ?? "",
     ],
-    queryFn: () =>
-      getActiveEmergencyForContext({ siteDaySessionId, eventDaySessionId }),
+    queryFn: async () => {
+      if (isHub) {
+        const all = await listActiveEmergencies();
+        return all[0] ?? null;
+      }
+      return getActiveEmergencyForContext({ siteDaySessionId, eventDaySessionId });
+    },
     refetchInterval: 15_000,
   });
 
@@ -67,8 +85,21 @@ export function EmergencyOpsBanner(props: {
             <p className="text-[11px] font-black uppercase tracking-wider">
               {isDrill ? "DRILL" : "LIVE EMERGENCY"} · {emergency.severity}
             </p>
-            <p className="truncate text-sm font-semibold">{emergency.situationText}</p>
+            <p className="truncate text-sm font-semibold">
+              {emergency.situationText}
+            </p>
           </div>
+          {isHub && emergency.hubIssueId && onOpenHubIssue ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="secondary"
+              className="h-9 shrink-0 font-bold"
+              onClick={() => onOpenHubIssue(emergency.hubIssueId!)}
+            >
+              Open issue
+            </Button>
+          ) : null}
           <Button
             type="button"
             size="sm"
@@ -108,6 +139,9 @@ export function EmergencyOpsBanner(props: {
         emergency={emergency}
         onDone={() => {
           void qc.invalidateQueries({ queryKey: ["operational-emergencies"] });
+          void qc.invalidateQueries({
+            queryKey: ["operational-emergencies-hub-feed"],
+          });
           invalidateIssueCaches(qc);
         }}
       />
@@ -184,26 +218,38 @@ function MusterSheet(props: {
                   {line.participantName ?? "Participant"}
                 </p>
                 <div className="grid grid-cols-3 gap-1.5">
-                  {(
-                    [
-                      { state: "expected" as const, label: "Expected", Icon: null },
-                      { state: "accounted" as const, label: "Accounted", Icon: Check },
-                      { state: "missing" as const, label: "Missing", Icon: UserX },
-                    ] as const
-                  ).map((opt) => (
-                    <MobileFieldButton
-                      key={opt.state}
-                      selected={line.state === opt.state}
-                      disabled={mut.isPending}
-                      onClick={() =>
-                        mut.mutate({ musterId: line.id, state: opt.state })
-                      }
-                      className="h-11 text-[11px]"
-                    >
-                      {opt.Icon ? <opt.Icon className="mr-1 h-3.5 w-3.5" /> : null}
-                      {opt.label}
-                    </MobileFieldButton>
-                  ))}
+                  <MobileFieldButton
+                    title="Expected"
+                    tone="neutral"
+                    active={line.state === "expected"}
+                    disabled={mut.isPending}
+                    onClick={() =>
+                      mut.mutate({ musterId: line.id, state: "expected" })
+                    }
+                    className="min-h-12 px-2 py-2"
+                  />
+                  <MobileFieldButton
+                    title="Accounted"
+                    icon={<Check className="h-4 w-4" />}
+                    tone="success"
+                    active={line.state === "accounted"}
+                    disabled={mut.isPending}
+                    onClick={() =>
+                      mut.mutate({ musterId: line.id, state: "accounted" })
+                    }
+                    className="min-h-12 px-2 py-2"
+                  />
+                  <MobileFieldButton
+                    title="Missing"
+                    icon={<UserX className="h-4 w-4" />}
+                    tone="danger"
+                    active={line.state === "missing"}
+                    disabled={mut.isPending}
+                    onClick={() =>
+                      mut.mutate({ musterId: line.id, state: "missing" })
+                    }
+                    className="min-h-12 px-2 py-2"
+                  />
                 </div>
               </li>
             ))}
@@ -234,8 +280,9 @@ function StandDownSheet(props: {
         managerStaffId,
       }),
     onSuccess: () => {
-      toast.success("Emergency stood down", {
-        description: "Hub issue closed. Banner cleared.",
+      toast.success("Stood down — floor restored", {
+        description:
+          "Hub issue stays Open for office review (Resolve or Defer). Banner clears.",
       });
       onDone();
       onOpenChange(false);
@@ -252,7 +299,7 @@ function StandDownSheet(props: {
       open={open}
       onOpenChange={onOpenChange}
       title="Stand down"
-      description="Short debrief for the audit trail, then Manager PIN."
+      description="Short debrief for the audit trail, then Manager PIN. Hub review stays open."
     >
       <div className="space-y-4 pb-4">
         <CharacterCountedTextarea

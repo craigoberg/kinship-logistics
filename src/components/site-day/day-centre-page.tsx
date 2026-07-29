@@ -114,15 +114,6 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
     bootstrapMut,
   ]);
 
-  console.log("Current Session State:", {
-    session: sessionQ.data,
-    sessionLoading: sessionQ.isLoading,
-    isReady,
-    userId: user?.id ?? null,
-    bootstrapStatus: bootstrapMut.status,
-    bootstrapError: bootstrapMut.error?.message ?? null,
-  });
-
   if (sessionQ.isLoading || bootstrapMut.isPending) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">

@@ -9,7 +9,6 @@ import {
   LogOut,
   PlusCircle,
   RotateCcw,
-  ShieldAlert,
   UtensilsCrossed,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -47,16 +46,14 @@ import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
 import { AttendanceRollPanel } from "./attendance-roll-panel";
 import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
-import { InfectiousExclusionSheet } from "./infectious-exclusion-sheet";
-import { EmergencyActivateSheet } from "@/components/ops/emergency-activate-sheet";
 import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
-import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
+import { ManagerOpsChip } from "@/components/ui/manager-ops-chip";
+import { FieldActionButton } from "@/components/ui/field-action-button";
 import { useQuery } from "@tanstack/react-query";
 import {
   clearCentreLockdown,
   getCentreLockdown,
 } from "@/lib/api/operational-emergency";
-import { Siren, Lock } from "lucide-react";
 
 interface Props {
   session: SiteDaySession;
@@ -70,9 +67,6 @@ export function ActiveDayPanel({ session }: Props) {
   const reauthRetryRef = useRef(false);
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
-  const [exclusionOpen, setExclusionOpen] = useState(false);
-  const [emergencyOpen, setEmergencyOpen] = useState(false);
-  const [lockdownOpen, setLockdownOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
   const isManager = isActiveUserManager();
   const lockdownQ = useQuery({
@@ -203,49 +197,17 @@ export function ActiveDayPanel({ session }: Props) {
           )}
         </div>
         <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setAnomalyOpen(true)}
-            className="gap-1.5"
-          >
+          <ManagerOpsChip tone="neutral" onClick={() => setAnomalyOpen(true)}>
             <PlusCircle className="h-4 w-4" /> Log anomaly
-          </Button>
-          {isManager && (
-            <>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setEmergencyOpen(true)}
-                className="gap-1.5 border-red-600/50 text-red-700 hover:bg-red-600/10"
-              >
-                <Siren className="h-4 w-4" /> Emergency / drill
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setLockdownOpen(true)}
-                className="gap-1.5 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
-              >
-                <Lock className="h-4 w-4" /> Lockdown / early close
-              </Button>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setExclusionOpen(true)}
-                className="gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
-              >
-                <ShieldAlert className="h-4 w-4" /> Infectious exclusion
-              </Button>
-            </>
-          )}
-          <Button
-            onClick={() => setCloseOpen(true)}
+          </ManagerOpsChip>
+          <FieldActionButton
+            variant="primary"
             size="sm"
-            className="gap-1.5 bg-primary"
+            fullWidth={false}
+            onClick={() => setCloseOpen(true)}
           >
             <ClipboardCheck className="h-4 w-4" /> Initiate Day Centre Closure
-          </Button>
+          </FieldActionButton>
 
           <TestOnly>
             <Button
@@ -456,25 +418,6 @@ export function ActiveDayPanel({ session }: Props) {
           setReauthOpen(false);
           closeMut.mutate();
         }}
-      />
-
-      <InfectiousExclusionSheet
-        open={exclusionOpen}
-        onOpenChange={setExclusionOpen}
-        surface="centre"
-        siteDaySessionId={session.id}
-      />
-      <EmergencyActivateSheet
-        open={emergencyOpen}
-        onOpenChange={setEmergencyOpen}
-        surface="centre"
-        siteDaySessionId={session.id}
-      />
-      <SiteOpsDeclareSheet
-        open={lockdownOpen}
-        onOpenChange={setLockdownOpen}
-        kind="lockdown"
-        siteDaySessionId={session.id}
       />
     </section>
   );

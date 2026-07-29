@@ -221,15 +221,33 @@ export async function listOpenUnifiedIssues(
       const isEventRow = isTripDaySiteIssue(r);
       const source: UnifiedIssueSource = isEventRow ? "event" : "day_centre";
       const key = `${source}:${String(r.id)}`;
+      const issueArea = String(r.issue_area ?? "");
+      const desc = String(r.issue_description ?? "");
+      const plan = String(r.workaround_plan ?? "");
+      const isHealthSafety =
+        issueArea === "health_safety" ||
+        desc.includes("[HEALTH & SAFETY]") ||
+        desc.includes("[INFECTIOUS EXCLUSION]") ||
+        desc.includes("[DRILL EMERGENCY]") ||
+        desc.includes("[LIVE EMERGENCY]") ||
+        desc.includes("[SITE DO-NOT-OPEN]") ||
+        desc.includes("[SITE LOCKDOWN") ||
+        desc.includes("[PROGRAMME SUSPENDED]");
       out.push({
         key,
         source,
-        sourceLabel: SOURCE_LABELS[source],
+        sourceLabel: isEventRow
+          ? SOURCE_LABELS[source]
+          : isHealthSafety
+            ? "Health & Safety"
+            : SOURCE_LABELS[source],
         category: sev ? sev.toUpperCase() : "NOTE",
-        subCategory: (r.owner as string | null) ?? null,
+        subCategory: isHealthSafety
+          ? "Health & Safety"
+          : (r.owner as string | null) ?? null,
         severity: sev,
-        title: String(r.issue_description ?? "Resolved issue").slice(0, 120),
-        description: String(r.issue_description ?? ""),
+        title: desc ? desc.slice(0, 120) : "Resolved issue",
+        description: plan ? `${desc}\n${plan}` : desc,
         status: "resolved",
         createdAt: String(r.created_at ?? new Date().toISOString()),
         sourceRowId: String(r.id),
@@ -346,7 +364,12 @@ export async function listOpenUnifiedIssues(
     const isHealthSafety =
       issueArea === "health_safety" ||
       desc.includes("[HEALTH & SAFETY]") ||
-      desc.includes("[INFECTIOUS EXCLUSION]");
+      desc.includes("[INFECTIOUS EXCLUSION]") ||
+      desc.includes("[DRILL EMERGENCY]") ||
+      desc.includes("[LIVE EMERGENCY]") ||
+      desc.includes("[SITE DO-NOT-OPEN]") ||
+      desc.includes("[SITE LOCKDOWN") ||
+      desc.includes("[PROGRAMME SUSPENDED]");
     out.push({
       key,
       source,

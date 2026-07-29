@@ -951,6 +951,8 @@ export function useOperationalEmergencyFeed() {
       const { supabase } = await import("@/integrations/supabase/client");
       const out: OperationalEmergencyFeedRow[] = [];
 
+      // Active Drill/Live only — stood-down tickets stay in Governance Active,
+      // they must not keep flashing the home Emergency tile.
       const emergencies = await listActiveEmergencies();
       for (const e of emergencies) {
         const mode = e.mode === "drill" ? "DRILL" : "LIVE";
@@ -985,17 +987,41 @@ export function useOperationalEmergencyFeed() {
         });
       }
 
-      // Do-not-open / suspend surface via open health_safety issues
-      const { data: siteCloseIssues } = await supabase
+      const { data: suspendedDays } = await supabase
+        .from("event_day_sessions")
+        .select(
+          "id, programme_suspend_reason, programme_suspend_severity, programme_suspend_hub_issue_id, session_date",
+        )
+        .eq("programme_suspended", true)
+        .limit(20);
+      for (const s of suspendedDays ?? []) {
+        const row = s as {
+          id: string;
+          programme_suspend_reason?: string | null;
+          programme_suspend_severity?: string | null;
+          programme_suspend_hub_issue_id?: string | null;
+          session_date?: string;
+        };
+        out.push({
+          key: `suspend-${row.id}`,
+          title: `Programme suspended · ${row.session_date ?? ""}`.trim(),
+          detail: row.programme_suspend_reason ?? "Programme on hold",
+          severity:
+            row.programme_suspend_severity === "red" ? "critical" : "warning",
+          hubIssueId: row.programme_suspend_hub_issue_id ?? null,
+        });
+      }
+
+      // Open do-not-open Hub tickets only while the session is still closed_no_go
+      // (not stood-down Drill/Live reviews).
+      const { data: doNotOpen } = await supabase
         .from("site_issues_register")
-        .select("id, issue_description, severity, status")
+        .select("id, issue_description, severity, status, session_id")
         .eq("status", "open")
         .eq("issue_area", "health_safety")
-        .or(
-          "issue_description.ilike.%[SITE DO-NOT-OPEN]%,issue_description.ilike.%[SITE LOCKDOWN%,issue_description.ilike.%[PROGRAMME SUSPENDED]%",
-        )
-        .limit(30);
-      for (const i of siteCloseIssues ?? []) {
+        .ilike("issue_description", "%[SITE DO-NOT-OPEN]%")
+        .limit(20);
+      for (const i of doNotOpen ?? []) {
         const row = i as {
           id: string;
           issue_description?: string;
@@ -1003,9 +1029,9 @@ export function useOperationalEmergencyFeed() {
         };
         if (out.some((r) => r.hubIssueId === row.id)) continue;
         out.push({
-          key: `hs-${row.id}`,
-          title: "Site / programme hold",
-          detail: row.issue_description ?? "Health & Safety hold",
+          key: `hs-dno-${row.id}`,
+          title: (row.issue_description ?? "Do not open").slice(0, 80),
+          detail: "Centre not opened — Hub Health & Safety",
           severity: row.severity === "red" ? "critical" : "warning",
           hubIssueId: row.id,
         });

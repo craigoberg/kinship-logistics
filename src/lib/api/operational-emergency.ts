@@ -112,6 +112,27 @@ function schemaHint(err: { message?: string } | null): string {
   return "";
 }
 
+/** Hub timeline stamp so Governance Active / Resolved can review Drill|Live. */
+async function stampEmergencyHubNote(args: {
+  issueId: string;
+  eventDaySessionId?: string | null;
+  staffId: string;
+  note: string;
+  kind: "append" | "resolve";
+}): Promise<void> {
+  const source = args.eventDaySessionId ? "event" : "day_centre";
+  const { error } = await supabase.from("hub_issue_notes").insert({
+    source,
+    source_row_id: args.issueId,
+    note: args.note.trim(),
+    kind: args.kind,
+    staff_id: args.staffId || null,
+  });
+  if (error) {
+    console.warn("[operational-emergency] hub note failed", error);
+  }
+}
+
 export async function listActiveEmergencies(): Promise<OperationalEmergency[]> {
   const { data, error } = await supabase
     .from("operational_emergencies")
@@ -125,6 +146,49 @@ export async function listActiveEmergencies(): Promise<OperationalEmergency[]> {
     throw error;
   }
   return (data ?? []).map((r) => rowToEmergency(r as EmergencyRow));
+}
+
+/** Open Hub tickets for Drill/Live that still need office review (incl. after stand-down). */
+export async function listOpenEmergencyHubIssues(): Promise<
+  Array<{
+    id: string;
+    title: string;
+    severity: EmergencySeverity;
+    modeHint: "drill" | "live" | "other";
+  }>
+> {
+  const { data, error } = await supabase
+    .from("site_issues_register")
+    .select("id, issue_description, severity, status")
+    .eq("status", "open")
+    .eq("issue_area", "health_safety")
+    .or(
+      "issue_description.ilike.%[DRILL EMERGENCY]%,issue_description.ilike.%[LIVE EMERGENCY]%",
+    )
+    .order("created_at", { ascending: false })
+    .limit(20);
+  if (error) {
+    if (error.message?.includes("issue_area")) return [];
+    throw error;
+  }
+  return (data ?? []).map((r) => {
+    const desc = String(
+      (r as { issue_description?: string }).issue_description ?? "",
+    );
+    const modeHint: "drill" | "live" | "other" = desc.includes("[LIVE EMERGENCY]")
+      ? "live"
+      : desc.includes("[DRILL EMERGENCY]")
+        ? "drill"
+        : "other";
+    return {
+      id: String((r as { id: string }).id),
+      title: desc || "Emergency Hub issue",
+      severity: ((r as { severity?: string }).severity === "yellow"
+        ? "yellow"
+        : "red") as EmergencySeverity,
+      modeHint,
+    };
+  });
 }
 
 export async function getActiveEmergencyForContext(args: {
@@ -267,13 +331,16 @@ export async function activateEmergency(input: {
   }
 
   const modeLabel = input.mode === "drill" ? "DRILL" : "LIVE";
+  // Keep Hub status clearly OPEN (do not pass a workaround — createIssue
+  // auto-stamps workaround_accepted_at when a plan is present, which hides
+  // the urgency of an active emergency in the Governance list).
   const issue = await createIssue({
-    sessionId: input.siteDaySessionId ?? undefined,
+    sessionId: input.siteDaySessionId ?? null,
     eventId: input.eventId ?? undefined,
     eventDaySessionId: input.eventDaySessionId ?? undefined,
     severity: input.severity,
     issueDescription: `[${modeLabel} EMERGENCY] ${situation}`,
-    workaroundPlan: "Light muster in progress. Stand-down when accounted.",
+    workaroundPlan: null,
     owner: "internal",
     issueArea: "health_safety",
   });
@@ -300,6 +367,14 @@ export async function activateEmergency(input: {
   }
 
   const emergency = rowToEmergency(data as EmergencyRow);
+
+  await stampEmergencyHubNote({
+    issueId: issue.id,
+    eventDaySessionId: input.eventDaySessionId,
+    staffId: input.managerStaffId,
+    note: `[${modeLabel} EMERGENCY] Activated — muster in progress. Stand-down when accounted.`,
+    kind: "append",
+  });
 
   if (input.siteDaySessionId) {
     await seedMusterFromCentreRoll(emergency.id, input.siteDaySessionId);
@@ -392,11 +467,28 @@ export async function standDownEmergency(input: {
     .single();
   if (error) throw error;
 
+  const modeLabel = current.mode === "drill" ? "DRILL" : "LIVE";
   if (current.hubIssueId) {
     try {
-      await markResolved(current.hubIssueId);
+      // Stand-down restores floor ops but Hub issue stays OPEN for office review
+      // (manager Resolve / Defer). Do not markResolved here.
+      await stampEmergencyHubNote({
+        issueId: current.hubIssueId,
+        eventDaySessionId: current.eventDaySessionId,
+        staffId: input.managerStaffId,
+        note: `[${modeLabel} STOOD DOWN] Floor cleared. Awaiting Hub review. Debrief: ${debrief}`,
+        kind: "append",
+      });
+      await supabase
+        .from("site_issues_register")
+        .update({
+          workaround_plan: `Stood down — awaiting Hub review. Debrief: ${debrief}`,
+          workaround_accepted_at: null,
+          status: "open",
+        })
+        .eq("id", current.hubIssueId);
     } catch (err) {
-      console.warn("[operational-emergency] Hub resolve failed", err);
+      console.warn("[operational-emergency] Hub stand-down note failed", err);
     }
   }
 
@@ -413,6 +505,7 @@ export async function standDownEmergency(input: {
       mode: current.mode,
       debrief,
       hub_issue_id: current.hubIssueId,
+      hub_issue_left_open: true,
     },
   });
 
