@@ -191,6 +191,7 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     workaround_plan: payload.workaroundPlan,
     owner: payload.owner,
     status: "open",
+    update_log: "",
     workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
     event_id: payload.eventId ?? null,
     event_day_session_id: payload.eventDaySessionId ?? null,

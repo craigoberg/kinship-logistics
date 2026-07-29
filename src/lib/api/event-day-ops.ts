@@ -1222,6 +1222,7 @@ export async function markAbsent(
         workaround_plan: plan,
         owner: "internal",
         status: "open",
+        update_log: "",
       })
       .select("id")
       .single();
@@ -1464,6 +1465,7 @@ export async function sweepAccountabilityRoll(
           issue_description: desc,
           owner: "internal",
           status: "open",
+          update_log: "",
         })
         .select("id")
         .single();

@@ -143,6 +143,7 @@ export async function raiseUnexpectedMedBagIssue(
           workaround_plan: null,
           owner: "internal",
           status: "open",
+          update_log: "",
         })
         .select("id")
         .single();

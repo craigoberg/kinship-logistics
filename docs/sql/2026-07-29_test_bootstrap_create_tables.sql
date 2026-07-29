@@ -829,7 +829,7 @@ CREATE TABLE IF NOT EXISTS public.site_issues_register (
   resolved_at timestamptz NULL,
   created_at timestamptz NULL DEFAULT now(),
   workaround_accepted_at timestamptz NULL,
-  update_log text NOT NULL,
+  update_log text NOT NULL DEFAULT '',
   deferred_until timestamptz NULL,
   council_severity text NULL,
   event_id uuid NULL,

@@ -575,6 +575,7 @@ export async function markEventAttendanceAbsent({
     workaround_plan: plan,
     owner: "internal",
     status: "open",
+    update_log: "",
   });
   if (issueErr) {
     console.warn("[markEventAttendanceAbsent] Hub issue creation failed (non-fatal):", issueErr.message);

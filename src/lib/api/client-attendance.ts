@@ -1090,6 +1090,7 @@ export async function sweepOverdueArrivals(
           workaround_plan: null,
           owner: "internal",
           status: "open",
+          update_log: "",
         })
         .select("id")
         .single();
@@ -1482,6 +1483,7 @@ export async function sweepOverdueDepartures(
           workaround_plan: null,
           owner: "internal",
           status: "open",
+          update_log: "",
         })
         .select("id")
         .single();
