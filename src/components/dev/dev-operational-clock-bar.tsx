@@ -133,8 +133,9 @@ function DevOperationalClockBarInner() {
         </button>
 
         <span
-          className="pointer-events-none select-none px-1 text-center text-[12px] font-black tracking-[0.2em]"
+          className="pointer-events-none select-none rounded bg-amber-950/25 px-2 py-0.5 text-center text-[12px] font-black tracking-[0.18em]"
           aria-label={`App lane ${laneBadge}`}
+          title={`VITE_APP_LANE → ${laneBadge}`}
         >
           {laneBadge}
         </span>

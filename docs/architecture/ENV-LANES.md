@@ -151,8 +151,27 @@ Fine for a short Alpha bootstrapping window; poor as a permanent habit.
 1. Build in **Cursor** against **DEV** DB.  
 2. Push code when ready for office.  
 3. Apply matching **SQL** on **TEST**.  
-4. **TEST** Lovable (or TEST host) always has TEST `.env` — never swap.  
-5. PROD later = third Supabase + third host + `VITE_IS_PRODUCTION=true`.
+4. **TEST** Vercel project always has TEST env — never swap.  
+5. PROD later = third Supabase + third Vercel project + `VITE_IS_PRODUCTION=true`.
+
+### Code promote: don’t ship every Cursor commit to TEST
+
+If Vercel Production tracks **`main`**, every push updates the office URL. That defeats a calm Alpha.
+
+**Recommended (simple):**
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Daily Cursor work → DEV (optional: no Vercel Production on this branch) |
+| `test` | What office Alpha runs — **only merge when you want TEST updated** |
+
+1. Vercel project → Settings → Git → Production Branch = **`test`** (not `main`).  
+2. Develop and push on `main` as usual (Cursor + DEV DB).  
+3. When a slice is ready for Alpha: merge `main` → `test` (PR or local merge + push).  
+4. Vercel rebuilds TEST only then.  
+5. Matching `docs/sql/*.sql` still run on TEST Supabase when schema changed.
+
+Alternatives: turn off auto-deploy and click Redeploy only when ready; or deploy from git tags. Prefer the `test` branch — clearest.
 
 ## GitHub
 

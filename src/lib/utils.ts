@@ -180,3 +180,23 @@ export function formatDateTime(input: Date | string | number | null | undefined)
   if (!d) return "—";
   return `${formatDate(d)} / ${formatTime(d)}`;
 }
+
+/** Human message from Error, PostgREST `{ message }`, or unknown throwables. */
+export function formatUnknownError(err: unknown): string {
+  if (err instanceof Error && err.message) return err.message;
+  if (typeof err === "string" && err.trim()) return err;
+  if (err && typeof err === "object") {
+    const o = err as { message?: unknown; error?: unknown; code?: unknown };
+    if (typeof o.message === "string" && o.message.trim()) {
+      return typeof o.code === "string" && o.code
+        ? `${o.message} (${o.code})`
+        : o.message;
+    }
+    if (typeof o.error === "string" && o.error.trim()) return o.error;
+  }
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return "Unknown error";
+  }
+}

@@ -33,7 +33,7 @@ import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
 import { TransportMethodPickerSheet } from "@/components/ui/transport-method-picker-sheet";
-import { cn } from "@/lib/utils";
+import { cn, formatUnknownError } from "@/lib/utils";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
@@ -188,7 +188,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
           qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
         }
       } catch (e) {
-        const msg = e instanceof Error ? e.message : String(e);
+        const msg = formatUnknownError(e);
         console.error("[AttendanceRollPanel] seed failed", e);
         if (!cancelled) {
           toast.error("Attendance roll could not initialise", {
