@@ -1,6 +1,6 @@
 # Environments: DEV → TEST → PROD (BL-099)
 
-**Status:** Day login shipped on DEV. TEST Supabase project created (Australia). Hosting intent: Lovable + custom domain later.
+**Status:** Day login shipped on DEV. TEST Supabase (Australia) stood up. **App host = Vercel** (Hobby → Pro for commercial/PROD). Lovable abandoned as host.
 
 ## Lane map
 
@@ -102,12 +102,58 @@ Auth users still created in TEST Supabase Authentication.
 4. Infectious exclusion declare (optional)  
 5. Log out → confirms both Auth + PIN cleared  
 
-## Promote later (DEV → TEST)
+## Long-term promotion model (code vs DB)
 
-- App build: publish from mainline to TEST host  
-- Schema: new SQL files run on TEST after DEV, **or** periodic backup DEV → restore TEST (know it overwrites TEST data)  
-- Never point PROD keys at DEV by mistake  
+**Source of truth for code:** Cursor → `git push` → GitHub `main` (or a release tag).  
+**Source of truth for each DB:** that lane’s Supabase project. Code and DB promote on **different tracks**.
+
+```text
+Cursor (build) ──push──► GitHub main
+                            │
+              ┌─────────────┼─────────────┐
+              ▼             ▼             ▼
+         Lovable DEV    Lovable TEST   (PROD later)
+         .env = DEV     .env = TEST    .env = PROD
+              │             │             │
+              ▼             ▼             ▼
+         Supabase DEV  Supabase TEST  Supabase PROD
+```
+
+| What | How it moves DEV → TEST |
+|------|-------------------------|
+| **App code** | Push to GitHub → TEST host rebuilds/publishes same commit. No separate “copy code in Lovable.” |
+| **Schema / RPCs** | New file under `docs/sql/` applied on DEV first → same file run on TEST SQL Editor (checklist). |
+| **Reference / seed data** | Optional: Admin JSON backup DEV → restore TEST (overwrites TEST data). Not every week by default. |
+| **Auth users / passwords** | Recreate or invite per Supabase project (not in JSON backup). |
+| **Secrets / `.env`** | Never promote. Each Lovable project keeps its own `.env` pointed at its DB. |
+
+### Option 1 — Cursor + Lovable DEV + Lovable TEST (two hosts)
+
+- **Cursor** = where you build (can also talk to DEV DB via local `.env`).
+- **Lovable DEV** = synced to `kinship-logistics`, `.env` → DEV DB (builder preview / optional DEV URL).
+- **Lovable TEST** = same *code lineage* from GitHub, `.env` → TEST DB (office Alpha URL).
+
+**Code promote:** commit in Cursor → push `main` → both Lovable apps pull that commit (DEV project via existing sync; TEST project via second sync or `git push` to its linked repo — see Path B).  
+**DB promote:** run new SQL on TEST; occasionally restore seed JSON if you want TEST data refreshed.
+
+Lovable awkwardness: one Lovable project ↔ one GitHub repo. Two hosts usually means **two repos** both fed from the same Cursor `main` (push to two remotes), or one host + one external TEST deploy later (Vercel, etc.).
+
+### Option 2 — One Lovable, swap `.env` DEV ↔ TEST
+
+- **Code promote:** trivial — one sync, always current.  
+- **DB promote:** same SQL + restore steps, but you must **change `.env`** to TEST, publish/smoke, then change **back** to DEV.  
+- Risk: forget to switch back → office hits DEV or builders hit TEST.
+
+Fine for a short Alpha bootstrapping window; poor as a permanent habit.
+
+### Recommended steady state
+
+1. Build in **Cursor** against **DEV** DB.  
+2. Push code when ready for office.  
+3. Apply matching **SQL** on **TEST**.  
+4. **TEST** Lovable (or TEST host) always has TEST `.env` — never swap.  
+5. PROD later = third Supabase + third host + `VITE_IS_PRODUCTION=true`.
 
 ## GitHub
 
-Not required for DB migrations. Optional later for app remote backup only.
+Required for **code** promotion to Lovable. Not required for DB DDL (that’s Supabase SQL Editor / migration pack).
