@@ -57,12 +57,42 @@ If you have Postgres client tools, `pg_dump --schema-only` from DEV → `psql` i
 VITE_SUPABASE_URL=https://YOUR_TEST_REF.supabase.co
 VITE_SUPABASE_PUBLISHABLE_KEY=...
 VITE_APP_LANE=test
+VITE_SHOW_TEST_TOOLS=true
 SUPABASE_URL=https://YOUR_TEST_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=...
-SUPABASE_SERVICE_ROLE_KEY=...   # host secrets only
+SUPABASE_SERVICE_ROLE_KEY=...   # host secrets only — never VITE_
 ```
 
 Do **not** paste service_role into chat or commit it.
+
+### Careful walkthrough — code on GitHub → Lovable TEST
+
+**Done when:** `main` on `github.com/craigoberg/kinship-logistics` has the Alpha snapshot (pushed from Cursor).
+
+Lovable does **not** “Import GitHub” as a blank new app. Use one of these:
+
+#### Path A — Existing Lovable project still synced to `kinship-logistics`
+
+1. Open that Lovable project.
+2. Wait for Git sync to pull latest `main` (or trigger sync from Project settings → Git).
+3. Confirm preview builds (libraries install from `package.json` automatically).
+4. **Do not** change this project’s env to TEST if you still use it as DEV.  
+   For TEST Alpha, prefer **Path B** (second project). If you only have one project for now, you can temporarily set TEST keys, restore/smoke, then switch env back to DEV — easy to mix up.
+
+#### Path B — Separate TEST Lovable project (recommended)
+
+1. In Lovable: **New project** (name it clearly, e.g. `Yada Connect TEST`).
+2. Connect GitHub (Project settings → Git). Lovable will create a **new** empty repo — that is normal.
+3. From Cursor/GitHub: make that new repo contain the same code as `kinship-logistics`  
+   (easiest: ask the agent to add the new remote and push `main`, or merge via GitHub UI).  
+   Or: if Lovable later offers link-to-existing-repo, use `craigoberg/kinship-logistics` only if it won’t fight your DEV project’s sync.
+4. In **TEST** Lovable only: set the env vars above to the **TEST** Supabase project.
+5. Publish → use that URL for office Alpha (custom domain later).
+
+#### After publish — restore data
+
+Admin → Backup & Restore on the **TEST** app URL, using your DEV JSON dump (Manager PIN).  
+Auth users still created in TEST Supabase Authentication.
 
 ## Smoke (TEST Alpha)
 
