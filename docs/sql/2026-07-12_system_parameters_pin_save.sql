@@ -21,8 +21,10 @@ DROP POLICY IF EXISTS "system_parameters updatable" ON public.system_parameters;
 
 DROP FUNCTION IF EXISTS public.set_system_parameter(text, jsonb, uuid, text);
 
+-- Arg rename (_staff_id → _user_id) is not allowed via CREATE OR REPLACE — drop first.
+DROP FUNCTION IF EXISTS public.is_manager(uuid);
+
 -- ─── Manager check (staff_registry.id OR auth_user_id) ───────────────────────
--- Keep arg name _user_id to match the legacy live function (CREATE OR REPLACE safe).
 CREATE OR REPLACE FUNCTION public.is_manager(_user_id uuid)
 RETURNS boolean
 LANGUAGE sql

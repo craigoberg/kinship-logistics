@@ -28,6 +28,10 @@ UPDATE public.staff_registry s
         AND lower(other.email) = lower(s.email)
    );
 
+-- Drop first when an older signature/arg name already exists (CREATE OR REPLACE
+-- cannot rename input parameters — e.g. _user_id vs _staff_id).
+DROP FUNCTION IF EXISTS public.is_manager(uuid);
+
 CREATE OR REPLACE FUNCTION public.is_manager(_staff_id uuid)
 RETURNS boolean
 LANGUAGE sql
