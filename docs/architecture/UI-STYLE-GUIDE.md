@@ -311,6 +311,11 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Open Centre Check Leader PIN** | Defined | `PinEntryTrigger` + `verifyOperatorPin` in confirm dialog | Declare Site Safe & Open — successful PIN **opens immediately** (no second Confirm tap) |
 | **Infectious exclusion / clear to return** | Defined | `InfectiousExclusionSheet` / `InfectiousClearanceSheet` | BL-084 A/A.1 manager declare + Hub clearance | Dual entry Day Centre + Event Deliver; if in care → home-safe outcome taps + handover + Manager PIN; Hub Clear to return later; Band 2 tile |
 | **Infectious home-safe disposition** | Defined | `MobileFieldButton` outcome classes (`HOME_SAFE_DISPOSITIONS`) | Leaving care when infectious exclude | Family/carer · Staff escorted · Transport/taxi · Other — **not** a logistics plan; optional note |
+| **Emergency activate (Drill\|Live)** | Defined | `EmergencyActivateSheet` | BL-084 C manager activate | Drill\|Live `MobileFieldButton` + Yellow\|Red RYGE chips + `CharacterCountedTextarea` situation + Manager `PinEntryTrigger` — Day Centre, Event Deliver, Manifest |
+| **Emergency sticky banner** | Defined | `EmergencyOpsBanner` | Active Drill/Live | Sticky top strip (amber Drill / red Live); Muster + Stand down (manager) |
+| **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Expected / Accounted / Missing via `MobileFieldButton` — not a park-evac sim |
+| **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub resolve + clear banner |
+| **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Free-text reason + Yellow\|Red + Manager PIN; kinds: do_not_open · lockdown · programme_suspend |
 
 ### Component inventory (Defined in Day Centre flow)
 
@@ -338,6 +343,9 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Infectious exclusion (BL-084 A/A.1) | `InfectiousExclusionSheet` on Day Centre + Event Deliver | Manager-only; home-safe block when `checked_in` |
 | Infectious home safe | Outcome `MobileFieldButton` + `CharacterCountedInput` handover + optional note + Manager PIN | Attests left care; floor checkout / trip absent; no second Hub LEFT TRIP ticket |
 | Clear to return (BL-084 A) | `InfectiousClearanceSheet` — attestation vs medical cert `MobileFieldButton` + Manager PIN | Hub Manage issue footer when exclusion active |
+| Emergency activate (BL-084 C) | `EmergencyActivateSheet` | Manager-only Drill\|Live; free-text why; Yellow\|Red |
+| Emergency banner / muster / stand-down | `EmergencyOpsBanner` | Sticky on Centre / Event Deliver / Manifest |
+| Site do-not-open / lockdown / suspend | `SiteOpsDeclareSheet` | Start of Day · Active Day · Event Deliver |
 
 ---
 
@@ -473,6 +481,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-07-29 | Emergency B+C MVP | `EmergencyActivateSheet` + sticky banner + light muster + stand-down; `SiteOpsDeclareSheet` do-not-open/lockdown/suspend — BL-084 |
 | 2026-07-28 | Day session login | Email + password then PIN on `/auth` — BL-099 thin gate (not full RBAC) |
 | 2026-07-27 | Infectious home-safe (A.1) | Centre + Trip entry; in-care → disposition taps + handover + Manager PIN (outcome not route); not-in-care → exclude only — BL-084 |
 | 2026-07-27 | Infectious exclusion / clear to return | Day Centre + Hub BottomSheets; Manager PIN; Health & Safety Hub area; Band 2 tile — BL-084 Phase A |

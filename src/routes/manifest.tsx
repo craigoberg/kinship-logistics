@@ -18,11 +18,15 @@ import {
   Users,
   UserCheck,
   Bus,
+  Siren,
 } from "lucide-react";
 
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { EmergencyActivateSheet } from "@/components/ops/emergency-activate-sheet";
+import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -83,6 +87,7 @@ import {
   getTodayManifestSummary,
   getStaffId,
   getActiveUserRole,
+  isActiveUserManager,
   STAFF_DIRECTORY,
   DEFAULT_STAFF_UUID,
   computePickupChainEndpoints,
@@ -106,7 +111,6 @@ import { FieldActionButton } from "@/components/ui/field-action-button";
 // DynamicOperationalForm preserved on disk as inactive fallback (see preservation guidelines).
 // PRE_TRIP_SCHEMA retained in operational-forms.ts for the inactive DynamicOperationalForm fallback.
 import { getAssetGroundedStatus } from "@/lib/api/clearance";
-import { Button } from "@/components/ui/button";
 import {
   Dialog,
   DialogContent,
@@ -157,6 +161,8 @@ function ManifestPage() {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const navigate = useNavigate();
   const manifestQueryClient = useQueryClient();
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const isManager = isActiveUserManager();
 
   // Multi-device handshake rehydration removed — RED issues now resolve
   // locally via VerbalConsultationDialog inside IssueAccumulatorPanel. No
@@ -189,6 +195,8 @@ function ManifestPage() {
   };
 
   const isLoading = isTripLoading || assetsQ.isLoading;
+  const eventDaySessionId = bundle?.trip?.eventDaySessionId ?? null;
+  const eventId = bundle?.trip?.eventId ?? null;
 
   return (
     <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
@@ -231,6 +239,22 @@ function ManifestPage() {
         </AlertDialog>
       </div>
 
+      <EmergencyOpsBanner eventDaySessionId={eventDaySessionId} />
+      {isManager ? (
+        <div className="shrink-0 border-b bg-background px-3 py-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-10 w-full gap-1.5 border-red-600/50 text-red-700 hover:bg-red-600/10"
+            onClick={() => setEmergencyOpen(true)}
+          >
+            <Siren className="h-4 w-4" />
+            Emergency / drill
+          </Button>
+        </div>
+      ) : null}
+
       {isLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
@@ -241,6 +265,14 @@ function ManifestPage() {
       ) : (
         <InitializeTripScreen fleetAssets={assetsQ.data ?? []} />
       )}
+
+      <EmergencyActivateSheet
+        open={emergencyOpen}
+        onOpenChange={setEmergencyOpen}
+        surface="manifest"
+        eventId={eventId}
+        eventDaySessionId={eventDaySessionId}
+      />
     </div>
   );
 }

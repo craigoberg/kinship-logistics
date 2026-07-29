@@ -48,8 +48,15 @@ import { AttendanceRollPanel } from "./attendance-roll-panel";
 import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
 import { InfectiousExclusionSheet } from "./infectious-exclusion-sheet";
-
-
+import { EmergencyActivateSheet } from "@/components/ops/emergency-activate-sheet";
+import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
+import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
+import { useQuery } from "@tanstack/react-query";
+import {
+  clearCentreLockdown,
+  getCentreLockdown,
+} from "@/lib/api/operational-emergency";
+import { Siren, Lock } from "lucide-react";
 
 interface Props {
   session: SiteDaySession;
@@ -64,8 +71,15 @@ export function ActiveDayPanel({ session }: Props) {
   const [closeOpen, setCloseOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [exclusionOpen, setExclusionOpen] = useState(false);
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const [lockdownOpen, setLockdownOpen] = useState(false);
   const [reauthOpen, setReauthOpen] = useState(false);
   const isManager = isActiveUserManager();
+  const lockdownQ = useQuery({
+    queryKey: ["site-lockdown", session.id],
+    queryFn: () => getCentreLockdown(session.id),
+    refetchInterval: 30_000,
+  });
   const [authRecoveryMessage, setAuthRecoveryMessage] = useState<string | null>(null);
   // Pending RED draft awaiting verbal-consultation log.
   const [verbalPending, setVerbalPending] = useState<{
@@ -137,6 +151,46 @@ export function ActiveDayPanel({ session }: Props) {
 
   return (
     <section className="space-y-5">
+      <EmergencyOpsBanner siteDaySessionId={session.id} />
+      {lockdownQ.data?.active ? (
+        <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          <p className="font-bold uppercase tracking-wide text-[11px]">
+            Lockdown / early close
+          </p>
+          <p className="font-semibold">{lockdownQ.data.reason}</p>
+          <p className="text-xs opacity-80">
+            New arrivals blocked. Complete orderly close when everyone is
+            accounted for.
+          </p>
+          {isManager ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 h-9"
+              onClick={async () => {
+                try {
+                  const staffId = getActiveUserProfile()?.staffId ?? "";
+                  await clearCentreLockdown({
+                    siteDaySessionId: session.id,
+                    managerStaffId: staffId,
+                  });
+                  void queryClient.invalidateQueries({
+                    queryKey: ["site-lockdown", session.id],
+                  });
+                  toast.success("Lockdown cleared");
+                } catch (e) {
+                  toast.error("Could not clear lockdown", {
+                    description: (e as Error).message,
+                  });
+                }
+              }}
+            >
+              Clear lockdown flag
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       <div className="flex items-start justify-between gap-3">
         <div className="space-y-1">
           <h2 className="text-lg font-semibold tracking-tight">
@@ -158,14 +212,32 @@ export function ActiveDayPanel({ session }: Props) {
             <PlusCircle className="h-4 w-4" /> Log anomaly
           </Button>
           {isManager && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setExclusionOpen(true)}
-              className="gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
-            >
-              <ShieldAlert className="h-4 w-4" /> Infectious exclusion
-            </Button>
+            <>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setEmergencyOpen(true)}
+                className="gap-1.5 border-red-600/50 text-red-700 hover:bg-red-600/10"
+              >
+                <Siren className="h-4 w-4" /> Emergency / drill
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setLockdownOpen(true)}
+                className="gap-1.5 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
+              >
+                <Lock className="h-4 w-4" /> Lockdown / early close
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setExclusionOpen(true)}
+                className="gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
+              >
+                <ShieldAlert className="h-4 w-4" /> Infectious exclusion
+              </Button>
+            </>
           )}
           <Button
             onClick={() => setCloseOpen(true)}
@@ -390,6 +462,18 @@ export function ActiveDayPanel({ session }: Props) {
         open={exclusionOpen}
         onOpenChange={setExclusionOpen}
         surface="centre"
+        siteDaySessionId={session.id}
+      />
+      <EmergencyActivateSheet
+        open={emergencyOpen}
+        onOpenChange={setEmergencyOpen}
+        surface="centre"
+        siteDaySessionId={session.id}
+      />
+      <SiteOpsDeclareSheet
+        open={lockdownOpen}
+        onOpenChange={setLockdownOpen}
+        kind="lockdown"
         siteDaySessionId={session.id}
       />
     </section>

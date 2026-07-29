@@ -494,6 +494,14 @@ export async function prepareEventHopManifest(opts: {
     sessionDate: opts.sessionDate,
   });
 
+  const { getProgrammeSuspend } = await import("@/lib/api/operational-emergency");
+  const suspended = await getProgrammeSuspend(opts.eventDaySessionId);
+  if (suspended?.active) {
+    throw new Error(
+      `Programme suspended${suspended.reason ? `: ${suspended.reason}` : ""}. Manager must clear before releasing a hop.`,
+    );
+  }
+
   const tripId = await getOrCreateEventHopTrip({
     eventId: opts.eventId,
     eventDaySessionId: opts.eventDaySessionId,

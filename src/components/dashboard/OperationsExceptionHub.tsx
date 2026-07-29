@@ -12,6 +12,7 @@ import {
   Pill,
   ShieldAlert,
   ShieldCheck,
+  Siren,
   Split,
   Stethoscope,
   Truck,
@@ -40,6 +41,7 @@ import {
   useActiveRedIncidentsFeed,
   useHubHumanIncidentsFeed,
   useInfectiousExclusionsFeed,
+  useOperationalEmergencyFeed,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
@@ -138,6 +140,7 @@ export function OperationsExceptionHub() {
     redHours:  issueUrgency.activeRedMs    / 3_600_000,
   });
   const { data: infectiousRows = [] }     = useInfectiousExclusionsFeed();
+  const { data: emergencyOpsRows = [] }   = useOperationalEmergencyFeed();
 
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
@@ -248,6 +251,20 @@ export function OperationsExceptionHub() {
       })),
     },
     {
+      id: "emergency-ops",
+      anchorId: "exception-section-emergency-ops",
+      label: "Emergency & Site Hold",
+      icon: Siren,
+      isLive: true,
+      rows: emergencyOpsRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<Siren className="mr-1 h-3.5 w-3.5" />, "Open Hub"),
+      })),
+    },
+    {
       id: "medication",
       anchorId: "exception-section-medication",
       label: "Medication Schedules",
@@ -337,7 +354,13 @@ export function OperationsExceptionHub() {
 
   // Assign buckets to bands by ID — new tiles auto-land in Band 4 if not listed.
   const BAND1_IDS = new Set(["no-show", "roll-call", "active-red"]);
-  const BAND2_IDS = new Set(["day-anomaly", "infectious-exclusion", "medication", "on-road"]);
+  const BAND2_IDS = new Set([
+    "day-anomaly",
+    "infectious-exclusion",
+    "emergency-ops",
+    "medication",
+    "on-road",
+  ]);
   const BAND3_IDS = new Set(["hub-human"]);
 
   const band1 = buckets.filter((b) => BAND1_IDS.has(b.id));

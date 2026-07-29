@@ -25,8 +25,10 @@ import {
   LogOut,
   Loader2,
   Moon,
+  Lock,
   ShieldAlert,
   ShieldCheck,
+  Siren,
   Sunrise,
   UserCheck,
   AlertTriangle,
@@ -35,6 +37,13 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FieldActionButton } from "@/components/ui/field-action-button";
+import { EmergencyActivateSheet } from "@/components/ops/emergency-activate-sheet";
+import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
+import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
+import {
+  clearProgrammeSuspend,
+  getProgrammeSuspend,
+} from "@/lib/api/operational-emergency";
 import { EventLocationPanel } from "@/components/events/event-location-panel";
 import { EventArrivalRollPanel } from "@/components/events/event-arrival-roll-panel";
 import { EventCheckOutPanel } from "@/components/events/event-checkout-panel";
@@ -426,6 +435,8 @@ function TripDayView({
   const navigate = useNavigate();
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [exclusionOpen, setExclusionOpen] = useState(false);
+  const [emergencyOpen, setEmergencyOpen] = useState(false);
+  const [suspendOpen, setSuspendOpen] = useState(false);
   const isManager = isActiveUserManager();
 
   // Keep all session data fresh after location open/close
@@ -621,8 +632,53 @@ function TripDayView({
     });
   };
 
+  const suspendQ = useQuery({
+    queryKey: ["programme-suspend", session.id],
+    queryFn: () => getProgrammeSuspend(session.id),
+    refetchInterval: 30_000,
+  });
+
   return (
     <div className="mx-auto max-w-2xl space-y-4">
+      <EmergencyOpsBanner eventDaySessionId={session.id} />
+      {suspendQ.data?.active ? (
+        <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
+          <p className="font-bold uppercase tracking-wide text-[11px]">
+            Programme suspended
+          </p>
+          <p className="font-semibold">{suspendQ.data.reason}</p>
+          <p className="text-xs opacity-80">
+            Hop / programme start blocked until a manager clears this.
+          </p>
+          {isManager ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className="mt-2 h-9"
+              onClick={async () => {
+                try {
+                  const staffId = getActiveUserProfile()?.staffId ?? "";
+                  await clearProgrammeSuspend({
+                    eventDaySessionId: session.id,
+                    managerStaffId: staffId,
+                  });
+                  void qc.invalidateQueries({
+                    queryKey: ["programme-suspend", session.id],
+                  });
+                  toast.success("Programme suspend cleared");
+                } catch (e) {
+                  toast.error("Could not clear suspend", {
+                    description: (e as Error).message,
+                  });
+                }
+              }}
+            >
+              Clear programme suspend
+            </Button>
+          ) : null}
+        </div>
+      ) : null}
       {/* Back + header */}
       <div className="flex items-start gap-3">
         <Button
@@ -741,15 +797,35 @@ function TripDayView({
       {/* Manager Health & Safety + venue issue (pre-open Log Venue is on EventLocationPanel). */}
       <div className="flex flex-col gap-2">
         {isManager && (
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setExclusionOpen(true)}
-            className="h-11 w-full gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
-          >
-            <ShieldAlert className="h-4 w-4" />
-            Infectious exclusion
-          </Button>
+          <>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setEmergencyOpen(true)}
+              className="h-11 w-full gap-1.5 border-red-600/50 text-red-700 hover:bg-red-600/10"
+            >
+              <Siren className="h-4 w-4" />
+              Emergency / drill
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setSuspendOpen(true)}
+              className="h-11 w-full gap-1.5 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
+            >
+              <Lock className="h-4 w-4" />
+              Suspend programme
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setExclusionOpen(true)}
+              className="h-11 w-full gap-1.5 border-amber-500/50 text-amber-800 hover:bg-amber-500/10"
+            >
+              <ShieldAlert className="h-4 w-4" />
+              Infectious exclusion
+            </Button>
+          </>
         )}
         {isLocationOpen && (
           <FieldActionButton
@@ -924,6 +1000,20 @@ function TripDayView({
         open={exclusionOpen}
         onOpenChange={setExclusionOpen}
         surface="trip"
+        eventId={event.id}
+        eventDaySessionId={session.id}
+      />
+      <EmergencyActivateSheet
+        open={emergencyOpen}
+        onOpenChange={setEmergencyOpen}
+        surface="trip"
+        eventId={event.id}
+        eventDaySessionId={session.id}
+      />
+      <SiteOpsDeclareSheet
+        open={suspendOpen}
+        onOpenChange={setSuspendOpen}
+        kind="programme_suspend"
         eventId={event.id}
         eventDaySessionId={session.id}
       />

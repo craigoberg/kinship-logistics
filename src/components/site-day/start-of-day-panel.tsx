@@ -2,12 +2,21 @@ import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
-import { AlertTriangle, ArrowRight, Info, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowRight,
+  DoorClosed,
+  Info,
+  Loader2,
+  ShieldAlert,
+  ShieldCheck,
+} from "lucide-react";
 
 import { Button } from "@/components/ui/button";
 import { Card } from "@/components/ui/card";
 import { Label } from "@/components/ui/label";
 import { FieldActionButton } from "@/components/ui/field-action-button";
+import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -41,7 +50,12 @@ import {
   redHasAcceptedWorkaround,
 } from "@/lib/site-day/red-workaround";
 import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
-import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
+import {
+  getStaffId,
+  isActiveUserManager,
+  resolveStaffIdWithFallback,
+  resolveStaffDisplayName,
+} from "@/lib/data-store";
 import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
 
 interface Props {
@@ -73,7 +87,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [openerPinVerified, setOpenerPinVerified] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
+  const [doNotOpenSheet, setDoNotOpenSheet] = useState(false);
   const [verbalOverrideOpen, setVerbalOverrideOpen] = useState(false);
+  const isManager = isActiveUserManager();
   // Pending RED draft from LogAnomalyModal → opens the canonical Verbal dialog.
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
@@ -337,6 +353,19 @@ export function StartOfDayPanel({ sessionId }: Props) {
           </span>
         </FieldActionButton>
 
+        {isManager && (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-11 w-full gap-2 border-amber-600/50 text-amber-900 hover:bg-amber-500/10"
+            onClick={() => setDoNotOpenSheet(true)}
+          >
+            <DoorClosed className="h-4 w-4" />
+            Do not open centre today
+          </Button>
+        )}
+
         {/* High-trust escape hatch when a Manager is unreachable digitally.
             Writes an immutable VERBAL_AUTH_OVERRIDE ledger receipt. */}
         {hasBlocking && (
@@ -485,6 +514,13 @@ export function StartOfDayPanel({ sessionId }: Props) {
         onAccepted={() => {
           setConfirmOpen(true);
         }}
+      />
+
+      <SiteOpsDeclareSheet
+        open={doNotOpenSheet}
+        onOpenChange={setDoNotOpenSheet}
+        kind="do_not_open"
+        siteDaySessionId={sessionId}
       />
     </section>
   );

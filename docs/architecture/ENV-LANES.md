@@ -173,6 +173,33 @@ If Vercel Production tracks **`main`**, every push updates the office URL. That 
 
 Alternatives: turn off auto-deploy and click Redeploy only when ready; or deploy from git tags. Prefer the `test` branch — clearest.
 
+## Schema promote checklist (DEV → TEST → PROD)
+
+Same cadence every lane:
+
+1. Ship additive SQL under `docs/sql/` (dated filename) — tables, columns, defaults, uniques, FKs, RPCs, RLS.  
+2. Run on **DEV** first; smoke.  
+3. Run the **same file** on **TEST** before/with the `test` branch code promote.  
+4. Later: same file on **PROD** — never full JSON wipe of PROD operational data.  
+
+Agent/backlog must list every new SQL in the handoff (live-db-ship-gate). First-time TEST bootstrap gaps (OpenAPI shells) are patched with targeted `2026-07-29_test_*` files as found in Alpha smoke — prefer real `pg_dump --schema-only` from DEV if drift keeps appearing.
+
+## Custom domain (TEST on Vercel)
+
+1. Vercel project → **Settings → Domains** → Add (e.g. `crm-test.yada.org.au`).  
+2. At your DNS host: add the record Vercel shows (usually CNAME → `cname.vercel-dns.com`).  
+3. Wait for SSL “Valid”.  
+4. Optional: set as primary. Keep `*.vercel.app` as fallback.  
+5. Supabase Auth → URL config: add the custom domain to redirect / site URL allow-list if day-login redirects are restricted.
+
+## Old deployments
+
+Vercel keeps history; only one **Production** is live. Safe cleanup:
+
+- Deployments → open old Ready rows → **⋯ → Delete** (or rely on **Deployment Retention** already on).  
+- Do **not** delete the current Production deploy.  
+- Preview/canceled rows can all go.
+
 ## GitHub
 
-Required for **code** promotion to Lovable. Not required for DB DDL (that’s Supabase SQL Editor / migration pack).
+Required for **code** promotion to Vercel. Not required for DB DDL (Supabase SQL Editor / `docs/sql/` pack).

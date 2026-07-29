@@ -183,6 +183,14 @@ export async function openVenueStop(
     sessionDate: stop.sessionDate,
   });
 
+  const { getProgrammeSuspend } = await import("@/lib/api/operational-emergency");
+  const suspended = await getProgrammeSuspend(eventDaySessionId);
+  if (suspended?.active) {
+    throw new Error(
+      `Programme suspended${suspended.reason ? `: ${suspended.reason}` : ""}. Manager must clear before opening activities.`,
+    );
+  }
+
   const staffId = await resolveStaffIdWithFallback();
   const now = new Date().toISOString();
 

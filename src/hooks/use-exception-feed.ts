@@ -932,3 +932,89 @@ export function useInfectiousExclusionsFeed() {
   });
 }
 
+// BL-084 Phase B+C — active emergencies + site lockdown / programme suspend
+export interface OperationalEmergencyFeedRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+  hubIssueId: string | null;
+}
+
+export function useOperationalEmergencyFeed() {
+  return useQuery<OperationalEmergencyFeedRow[]>({
+    queryKey: ["operational-emergencies-hub-feed"],
+    queryFn: async () => {
+      const { listActiveEmergencies } = await import(
+        "@/lib/api/operational-emergency"
+      );
+      const { supabase } = await import("@/integrations/supabase/client");
+      const out: OperationalEmergencyFeedRow[] = [];
+
+      const emergencies = await listActiveEmergencies();
+      for (const e of emergencies) {
+        const mode = e.mode === "drill" ? "DRILL" : "LIVE";
+        out.push({
+          key: `emg-${e.id}`,
+          title: `${mode} emergency · ${e.severity}`,
+          detail: e.situationText,
+          severity: e.severity === "red" ? "critical" : "warning",
+          hubIssueId: e.hubIssueId,
+        });
+      }
+
+      const { data: lockdownSessions } = await supabase
+        .from("site_day_sessions")
+        .select("id, lockdown_reason, lockdown_severity, lockdown_hub_issue_id, session_date")
+        .eq("lockdown_active", true)
+        .limit(20);
+      for (const s of lockdownSessions ?? []) {
+        const row = s as {
+          id: string;
+          lockdown_reason?: string | null;
+          lockdown_severity?: string | null;
+          lockdown_hub_issue_id?: string | null;
+          session_date?: string;
+        };
+        out.push({
+          key: `lock-${row.id}`,
+          title: `Centre lockdown · ${row.session_date ?? ""}`.trim(),
+          detail: row.lockdown_reason ?? "Lockdown / early close",
+          severity: row.lockdown_severity === "red" ? "critical" : "warning",
+          hubIssueId: row.lockdown_hub_issue_id ?? null,
+        });
+      }
+
+      // Do-not-open / suspend surface via open health_safety issues
+      const { data: siteCloseIssues } = await supabase
+        .from("site_issues_register")
+        .select("id, issue_description, severity, status")
+        .eq("status", "open")
+        .eq("issue_area", "health_safety")
+        .or(
+          "issue_description.ilike.%[SITE DO-NOT-OPEN]%,issue_description.ilike.%[SITE LOCKDOWN%,issue_description.ilike.%[PROGRAMME SUSPENDED]%",
+        )
+        .limit(30);
+      for (const i of siteCloseIssues ?? []) {
+        const row = i as {
+          id: string;
+          issue_description?: string;
+          severity?: string;
+        };
+        if (out.some((r) => r.hubIssueId === row.id)) continue;
+        out.push({
+          key: `hs-${row.id}`,
+          title: "Site / programme hold",
+          detail: row.issue_description ?? "Health & Safety hold",
+          severity: row.severity === "red" ? "critical" : "warning",
+          hubIssueId: row.id,
+        });
+      }
+
+      return out;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+

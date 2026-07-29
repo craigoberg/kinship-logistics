@@ -432,6 +432,10 @@ export async function toggleCheckIn(
       "@/lib/api/infectious-exclusion"
     );
     await assertNotInfectiousExcluded(row.participantId, "centre");
+    const { assertCentreNotLockedDown } = await import(
+      "@/lib/api/operational-emergency"
+    );
+    await assertCentreNotLockedDown(row.sessionId);
   }
   const next = isCheckedIn
     ? { status: "expected" as AttendanceStatus, checked_in_at: null, checked_in_by: null }

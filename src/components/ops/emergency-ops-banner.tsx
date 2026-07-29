@@ -1,0 +1,296 @@
+/**
+ * BL-084 Phase C — sticky Drill/Live banner + light muster + stand-down.
+ */
+import { useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { Check, Loader2, Siren, UserX } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
+import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
+import {
+  getActiveEmergencyForContext,
+  listMusterLines,
+  standDownEmergency,
+  updateMusterState,
+  type MusterState,
+  type OperationalEmergency,
+} from "@/lib/api/operational-emergency";
+import { invalidateIssueCaches } from "@/lib/query/invalidation";
+import { cn, formatUnknownError } from "@/lib/utils";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+
+export function EmergencyOpsBanner(props: {
+  siteDaySessionId?: string | null;
+  eventDaySessionId?: string | null;
+  className?: string;
+}) {
+  const { siteDaySessionId, eventDaySessionId, className } = props;
+  const qc = useQueryClient();
+  const [musterOpen, setMusterOpen] = useState(false);
+  const [standDownOpen, setStandDownOpen] = useState(false);
+
+  const emergencyQ = useQuery({
+    queryKey: [
+      "operational-emergencies",
+      "active",
+      siteDaySessionId ?? "",
+      eventDaySessionId ?? "",
+    ],
+    queryFn: () =>
+      getActiveEmergencyForContext({ siteDaySessionId, eventDaySessionId }),
+    refetchInterval: 15_000,
+  });
+
+  const emergency = emergencyQ.data;
+  if (!emergency) return null;
+
+  const isDrill = emergency.mode === "drill";
+
+  return (
+    <>
+      <div
+        className={cn(
+          "sticky top-0 z-[55] border-b px-3 py-2",
+          isDrill
+            ? "border-amber-700 bg-amber-500 text-amber-950"
+            : "border-red-800 bg-red-600 text-white",
+          className,
+        )}
+      >
+        <div className="flex flex-wrap items-center gap-2">
+          <Siren className="h-4 w-4 shrink-0" />
+          <div className="min-w-0 flex-1">
+            <p className="text-[11px] font-black uppercase tracking-wider">
+              {isDrill ? "DRILL" : "LIVE EMERGENCY"} · {emergency.severity}
+            </p>
+            <p className="truncate text-sm font-semibold">{emergency.situationText}</p>
+          </div>
+          <Button
+            type="button"
+            size="sm"
+            variant="secondary"
+            className="h-9 shrink-0 font-bold"
+            onClick={() => setMusterOpen(true)}
+          >
+            Muster
+          </Button>
+          {isActiveUserManager() ? (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              className={cn(
+                "h-9 shrink-0 font-bold",
+                isDrill
+                  ? "border-amber-950/40 bg-amber-950/10"
+                  : "border-white/40 bg-white/10 text-white hover:bg-white/20",
+              )}
+              onClick={() => setStandDownOpen(true)}
+            >
+              Stand down
+            </Button>
+          ) : null}
+        </div>
+      </div>
+
+      <MusterSheet
+        open={musterOpen}
+        onOpenChange={setMusterOpen}
+        emergency={emergency}
+      />
+      <StandDownSheet
+        open={standDownOpen}
+        onOpenChange={setStandDownOpen}
+        emergency={emergency}
+        onDone={() => {
+          void qc.invalidateQueries({ queryKey: ["operational-emergencies"] });
+          invalidateIssueCaches(qc);
+        }}
+      />
+    </>
+  );
+}
+
+function MusterSheet(props: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  emergency: OperationalEmergency;
+}) {
+  const { open, onOpenChange, emergency } = props;
+  const qc = useQueryClient();
+  const profile = getActiveUserProfile();
+  const staffId = profile?.staffId ?? "";
+
+  const musterQ = useQuery({
+    queryKey: ["operational-emergency-muster", emergency.id],
+    queryFn: () => listMusterLines(emergency.id),
+    enabled: open,
+  });
+
+  const mut = useMutation({
+    mutationFn: (args: { musterId: string; state: MusterState }) =>
+      updateMusterState({ ...args, staffId }),
+    onSuccess: () => {
+      void qc.invalidateQueries({
+        queryKey: ["operational-emergency-muster", emergency.id],
+      });
+    },
+    onError: (e: unknown) => {
+      toast.error("Muster update failed", { description: formatUnknownError(e) });
+    },
+  });
+
+  const lines = musterQ.data ?? [];
+  const counts = useMemo(() => {
+    let accounted = 0;
+    let missing = 0;
+    let expected = 0;
+    for (const l of lines) {
+      if (l.state === "accounted") accounted += 1;
+      else if (l.state === "missing") missing += 1;
+      else expected += 1;
+    }
+    return { accounted, missing, expected };
+  }, [lines]);
+
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Light muster"
+      description="Account for people in care — not a full park evacuation."
+    >
+      <div className="space-y-3 pb-4">
+        <p className="text-xs text-muted-foreground">
+          Accounted {counts.accounted} · Missing {counts.missing} · Still expected{" "}
+          {counts.expected}
+        </p>
+        {musterQ.isLoading ? (
+          <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
+        ) : lines.length === 0 ? (
+          <p className="text-sm text-muted-foreground">
+            No roll names to muster for this context (e.g. Manifest-only). Use
+            Stand down when the drill/incident is complete.
+          </p>
+        ) : (
+          <ul className="space-y-2">
+            {lines.map((line) => (
+              <li key={line.id} className="rounded-lg border bg-card p-2">
+                <p className="mb-2 text-sm font-semibold">
+                  {line.participantName ?? "Participant"}
+                </p>
+                <div className="grid grid-cols-3 gap-1.5">
+                  {(
+                    [
+                      { state: "expected" as const, label: "Expected", Icon: null },
+                      { state: "accounted" as const, label: "Accounted", Icon: Check },
+                      { state: "missing" as const, label: "Missing", Icon: UserX },
+                    ] as const
+                  ).map((opt) => (
+                    <MobileFieldButton
+                      key={opt.state}
+                      selected={line.state === opt.state}
+                      disabled={mut.isPending}
+                      onClick={() =>
+                        mut.mutate({ musterId: line.id, state: opt.state })
+                      }
+                      className="h-11 text-[11px]"
+                    >
+                      {opt.Icon ? <opt.Icon className="mr-1 h-3.5 w-3.5" /> : null}
+                      {opt.label}
+                    </MobileFieldButton>
+                  ))}
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+    </BottomSheet>
+  );
+}
+
+function StandDownSheet(props: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  emergency: OperationalEmergency;
+  onDone: () => void;
+}) {
+  const { open, onOpenChange, emergency, onDone } = props;
+  const profile = getActiveUserProfile();
+  const managerStaffId = profile?.staffId ?? "";
+  const [debrief, setDebrief] = useState("");
+  const [pinVerified, setPinVerified] = useState(false);
+
+  const mut = useMutation({
+    mutationFn: () =>
+      standDownEmergency({
+        emergencyId: emergency.id,
+        debriefText: debrief,
+        managerStaffId,
+      }),
+    onSuccess: () => {
+      toast.success("Emergency stood down", {
+        description: "Hub issue closed. Banner cleared.",
+      });
+      onDone();
+      onOpenChange(false);
+      setDebrief("");
+      setPinVerified(false);
+    },
+    onError: (e: unknown) => {
+      toast.error("Stand-down failed", { description: formatUnknownError(e) });
+    },
+  });
+
+  return (
+    <BottomSheet
+      open={open}
+      onOpenChange={onOpenChange}
+      title="Stand down"
+      description="Short debrief for the audit trail, then Manager PIN."
+    >
+      <div className="space-y-4 pb-4">
+        <CharacterCountedTextarea
+          label="Debrief"
+          value={debrief}
+          onValueChange={setDebrief}
+          minChars={10}
+          maxChars={800}
+          rows={4}
+          placeholder="What happened, who was accounted for, any follow-up…"
+        />
+        <PinEntryTrigger
+          title="Manager PIN — stand down"
+          onVerify={async (pin) => {
+            await verifyManagerPin(managerStaffId, pin);
+          }}
+          onSuccess={() => setPinVerified(true)}
+          disabled={debrief.trim().length < 10}
+        >
+          <Button
+            type="button"
+            variant={pinVerified ? "secondary" : "outline"}
+            className="h-12 w-full"
+            disabled={debrief.trim().length < 10}
+          >
+            {pinVerified ? "Manager PIN verified" : "Verify Manager PIN"}
+          </Button>
+        </PinEntryTrigger>
+        <Button
+          type="button"
+          className="h-12 w-full"
+          disabled={!pinVerified || debrief.trim().length < 10 || mut.isPending}
+          onClick={() => mut.mutate()}
+        >
+          {mut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+          Confirm stand-down
+        </Button>
+      </div>
+    </BottomSheet>
+  );
+}
