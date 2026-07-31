@@ -37,6 +37,7 @@ const MENUS: { key: string; label: string; description: string }[] = [
   { key: "governance", label: "Governance Hub", description: "Unified issues, incident ledger, NDIS" },
   { key: "admin", label: "Admin Configuration", description: "Lookups, parameters, access matrix" },
   { key: "sync", label: "Sync Queue", description: "Offline reconciliation and replay" },
+  { key: "help", label: "Help", description: "Searchable how-to guides (topic roles soft-filtered until BL-002)" },
 ];
 
 export function MenuAccessMatrix() {

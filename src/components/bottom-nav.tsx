@@ -13,6 +13,7 @@ import {
   Scale,
   Sun,
   Menu,
+  CircleHelp,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -28,6 +29,7 @@ export const NAV_ITEMS = [
   { to: "/transport", label: "Transport", icon: Truck, exact: false },
   { to: "/manifest", label: "Manifest", icon: RouteIcon, exact: false },
   { to: "/sync", label: "Sync Queue", icon: RefreshCw, exact: false },
+  { to: "/help", label: "Help", icon: CircleHelp, exact: false },
   { to: "/admin", label: "Admin", icon: Settings, exact: false },
 ] as const;
 

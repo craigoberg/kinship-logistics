@@ -14,6 +14,7 @@ import { Route as SyncRouteImport } from './routes/sync'
 import { Route as StaffRouteImport } from './routes/staff'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as ManifestRouteImport } from './routes/manifest'
+import { Route as HelpRouteImport } from './routes/help'
 import { Route as GovernanceRouteImport } from './routes/governance'
 import { Route as EventsRouteImport } from './routes/events'
 import { Route as EventDeliverRouteImport } from './routes/event-deliver'
@@ -48,6 +49,11 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
 const ManifestRoute = ManifestRouteImport.update({
   id: '/manifest',
   path: '/manifest',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const HelpRoute = HelpRouteImport.update({
+  id: '/help',
+  path: '/help',
   getParentRoute: () => rootRouteImport,
 } as any)
 const GovernanceRoute = GovernanceRouteImport.update({
@@ -111,6 +117,7 @@ export interface FileRoutesByFullPath {
   '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
+  '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
@@ -128,6 +135,7 @@ export interface FileRoutesByTo {
   '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
+  '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
@@ -146,6 +154,7 @@ export interface FileRoutesById {
   '/event-deliver': typeof EventDeliverRoute
   '/events': typeof EventsRoute
   '/governance': typeof GovernanceRoute
+  '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/staff': typeof StaffRoute
@@ -165,6 +174,7 @@ export interface FileRouteTypes {
     | '/event-deliver'
     | '/events'
     | '/governance'
+    | '/help'
     | '/manifest'
     | '/participants'
     | '/staff'
@@ -182,6 +192,7 @@ export interface FileRouteTypes {
     | '/event-deliver'
     | '/events'
     | '/governance'
+    | '/help'
     | '/manifest'
     | '/participants'
     | '/staff'
@@ -199,6 +210,7 @@ export interface FileRouteTypes {
     | '/event-deliver'
     | '/events'
     | '/governance'
+    | '/help'
     | '/manifest'
     | '/participants'
     | '/staff'
@@ -217,6 +229,7 @@ export interface RootRouteChildren {
   EventDeliverRoute: typeof EventDeliverRoute
   EventsRoute: typeof EventsRoute
   GovernanceRoute: typeof GovernanceRoute
+  HelpRoute: typeof HelpRoute
   ManifestRoute: typeof ManifestRoute
   ParticipantsRoute: typeof ParticipantsRoute
   StaffRoute: typeof StaffRoute
@@ -262,6 +275,13 @@ declare module '@tanstack/react-router' {
       path: '/manifest'
       fullPath: '/manifest'
       preLoaderRoute: typeof ManifestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/help': {
+      id: '/help'
+      path: '/help'
+      fullPath: '/help'
+      preLoaderRoute: typeof HelpRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/governance': {
@@ -345,6 +365,7 @@ const rootRouteChildren: RootRouteChildren = {
   EventDeliverRoute: EventDeliverRoute,
   EventsRoute: EventsRoute,
   GovernanceRoute: GovernanceRoute,
+  HelpRoute: HelpRoute,
   ManifestRoute: ManifestRoute,
   ParticipantsRoute: ParticipantsRoute,
   StaffRoute: StaffRoute,
