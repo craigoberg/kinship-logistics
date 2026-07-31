@@ -399,6 +399,7 @@ export function InfectiousExclusionSheet(props: InfectiousExclusionSheetProps) {
 
         <div className="flex gap-2 pt-1">
           <Button
+            type="button"
             variant="outline"
             className="flex-1"
             onClick={() => {
@@ -406,7 +407,7 @@ export function InfectiousExclusionSheet(props: InfectiousExclusionSheetProps) {
               onOpenChange(false);
             }}
           >
-            Cancel
+            Close
           </Button>
           <Button
             className="flex-1"

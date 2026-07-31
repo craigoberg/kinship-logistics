@@ -403,9 +403,9 @@ export function VerbalConsultationDialog({
           </div>
         </div>
 
-        <DialogFooter className="shrink-0 border-t px-5 py-3">
-          <Button variant="outline" onClick={handleClose} disabled={submitMut.isPending}>
-            Cancel
+        <DialogFooter className="shrink-0 flex-col-reverse gap-2 border-t px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={handleClose}>
+            Close
           </Button>
           <Button
             onClick={() => submitMut.mutate()}

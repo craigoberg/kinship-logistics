@@ -44,10 +44,12 @@ import { getExclusionByHubIssueId, type InfectiousExclusion } from "@/lib/api/in
 import { InfectiousClearanceSheet } from "@/components/site-day/infectious-clearance-sheet";
 import { isActiveUserManager } from "@/lib/data-store";
 import {
+  useCouncilEmailFrom,
   useCouncilEmailTemplate,
   useCouncilEmailTo,
   useCouncilSlaHours,
 } from "@/hooks/use-system-parameters";
+import { resolveCouncilMailtoFrom, cleanCouncilIssueText } from "@/lib/governance/council-email";
 import { formatDate, formatDateTime } from "@/lib/utils";
 import { toast } from "sonner";
 
@@ -119,6 +121,7 @@ function substituteCouncilTokens(
 export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview = false }: Props) {
   const qc = useQueryClient();
   const councilEmailTo = useCouncilEmailTo();
+  const councilEmailFrom = useCouncilEmailFrom();
   const councilTemplate = useCouncilEmailTemplate();
   const councilSlaHours = useCouncilSlaHours();
   const [note, setNote] = useState("");
@@ -217,13 +220,14 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
           const tokens = {
             severity: councilSev,
             deadline: formatDateTime(deadlineIso),
-            description: issue.description || issue.title,
+            description: cleanCouncilIssueText(issue.description || issue.title),
             workaround: note.trim(),
             date: formatDate(new Date().toISOString().slice(0, 10)),
           };
           const res = await dispatchCouncilEmail({
             issueId: issue.sourceRowId,
             to: councilEmailTo.trim(),
+            from: resolveCouncilMailtoFrom(councilEmailFrom),
             subject: substituteCouncilTokens(councilTemplate.subject, tokens),
             body: substituteCouncilTokens(councilTemplate.body, tokens),
             category: slaCategory,
@@ -256,7 +260,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
         ) {
           toast.message("Council escalated in Hub", {
             description:
-              "Set site_management.council_email_to in Admin to open a pre-filled mail next time.",
+              "Set Council email To under Admin → System Parameters to open a pre-filled mail next time.",
           });
         }
       }

@@ -492,9 +492,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={submitting}>
-            Cancel
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button
             onClick={submit}

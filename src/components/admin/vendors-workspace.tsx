@@ -287,8 +287,8 @@ export function VendorsWorkspace() {
               autoFocus
             />
           </div>
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setEditor(null)}>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <Button type="button" variant="outline" onClick={() => setEditor(null)}>
               Close
             </Button>
             <Button

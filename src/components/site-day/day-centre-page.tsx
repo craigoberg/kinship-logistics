@@ -23,6 +23,7 @@ import {
   fetchDayCentreBlockingReds,
   effectiveWorkaroundText,
 } from "@/lib/site-day/red-workaround";
+import { DayCentreBlockingRedResolveButton } from "./day-centre-blocking-red-resolve-button";
 
 interface DayCentrePageProps {
   /** Dev-only: show/hide the RED blocking diagnostic panel. */
@@ -170,7 +171,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
             </div>
             <div className="text-muted-foreground">
               {userIsManager
-                ? "Only a Manager can clear a RED or agree a workaround in the Governance Hub. Once every RED below has a workaround or is resolved, the Open Centre workflow becomes available again."
+                ? "Use Resolve on each RED below to clear it in place (same Hub manage dialog — resolve, defer, or note). Deferred and resolved REDs, or an accepted workaround, unlock Open Centre."
                 : "A Manager must clear the open RED issue(s), or agree a workaround, before the Day Centre can open. Please speak with the on-duty Manager and ask them to review the issue(s) listed below."}
             </div>
           </div>
@@ -186,7 +187,12 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
                 <span className="rounded bg-destructive px-2 py-0.5 text-xs font-semibold text-destructive-foreground">
                   RED
                 </span>
-                <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
+                <div className="flex items-center gap-2">
+                  <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
+                  {userIsManager ? (
+                    <DayCentreBlockingRedResolveButton issue={r} />
+                  ) : null}
+                </div>
               </div>
               <div className="mt-1 font-medium">{r.issue_description}</div>
               {effectiveWorkaroundText(r, escMap) ? (
@@ -199,7 +205,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
         </ul>
 
         {userIsManager ? (
-          <Button asChild size="sm">
+          <Button asChild size="sm" variant="outline">
             <Link to="/governance">
               Open Governance Hub
               <ArrowRight className="ml-1.5 h-3.5 w-3.5" />
@@ -207,9 +213,9 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
           </Button>
         ) : (
           <div className="rounded-md border border-amber-500/40 bg-amber-500/5 p-3 text-xs text-amber-700 dark:text-amber-200">
-            You do not have Manager access. Ask the on-duty Manager to open the
-            Governance Hub and resolve the RED issue above, or agree a
-            workaround, so the Day Centre opening can continue.
+            You do not have Manager access. Ask the on-duty Manager to Resolve
+            each RED above (or open the Governance Hub), so the Day Centre
+            opening can continue.
           </div>
         )}
       </Card>

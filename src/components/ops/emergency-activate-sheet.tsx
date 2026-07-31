@@ -176,24 +176,29 @@ export function EmergencyActivateSheet(props: EmergencyActivateSheetProps) {
           </Button>
         </PinEntryTrigger>
 
-        <Button
-          type="button"
-          className={cn(
-            "h-12 w-full gap-2 font-bold text-white disabled:opacity-40",
-            mode === "live"
-              ? "bg-red-600 hover:bg-red-700 disabled:bg-red-600"
-              : "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600",
-          )}
-          disabled={!ready}
-          onClick={() => mut.mutate()}
-        >
-          {mut.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Siren className="h-4 w-4" />
-          )}
-          {mode === "drill" ? "Activate drill" : "Activate LIVE emergency"}
-        </Button>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button
+            type="button"
+            className={cn(
+              "h-12 w-full gap-2 font-bold text-white disabled:opacity-40 sm:w-auto",
+              mode === "live"
+                ? "bg-red-600 hover:bg-red-700 disabled:bg-red-600"
+                : "bg-amber-600 hover:bg-amber-700 disabled:bg-amber-600",
+            )}
+            disabled={!ready}
+            onClick={() => mut.mutate()}
+          >
+            {mut.isPending ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Siren className="h-4 w-4" />
+            )}
+            {mode === "drill" ? "Activate drill" : "Activate LIVE emergency"}
+          </Button>
+        </div>
       </div>
     </BottomSheet>
   );

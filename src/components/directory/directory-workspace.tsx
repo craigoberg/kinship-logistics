@@ -161,8 +161,21 @@ export function DirectoryWorkspace() {
                   <EmptyRow colSpan={6} label="No personnel found." />
                 ) : (
                   filteredStaff.map((s) => {
+                    const openStaff = () => {
+                      if (!isManager) return;
+                      setEditStaff(s);
+                      setStaffOpen(true);
+                    };
                     return (
-                      <TableRow key={s.id}>
+                      <TableRow
+                        key={s.id}
+                        className={
+                          isManager
+                            ? "cursor-pointer transition-colors hover:bg-accent/40"
+                            : undefined
+                        }
+                        onClick={openStaff}
+                      >
                         <TableCell className="font-medium">{s.fullName}</TableCell>
                         <TableCell>
                           <div className="text-sm">{s.role ?? "—"}</div>
@@ -186,9 +199,9 @@ export function DirectoryWorkspace() {
                         <TableCell className="text-right">
                           {isManager ? (
                             <IconActionButton
-                              onClick={() => {
-                                setEditStaff(s);
-                                setStaffOpen(true);
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openStaff();
                               }}
                               tooltip="Edit staff"
                             >
@@ -235,8 +248,16 @@ export function DirectoryWorkspace() {
                 ) : (
                   filteredCarers.map((c) => {
                     const linked = c.participantId ? participantMap.get(c.participantId) : null;
+                    const openCarer = () => {
+                      setEditCarer(c);
+                      setCarerOpen(true);
+                    };
                     return (
-                      <TableRow key={c.id}>
+                      <TableRow
+                        key={c.id}
+                        className="cursor-pointer transition-colors hover:bg-accent/40"
+                        onClick={openCarer}
+                      >
                         <TableCell className="font-medium">{c.fullName}</TableCell>
                         <TableCell>{c.relationship ?? "—"}</TableCell>
                         <TableCell>
@@ -258,9 +279,9 @@ export function DirectoryWorkspace() {
                         </TableCell>
                         <TableCell className="text-right">
                           <IconActionButton
-                            onClick={() => {
-                              setEditCarer(c);
-                              setCarerOpen(true);
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openCarer();
                             }}
                             tooltip="Edit carer"
                           >

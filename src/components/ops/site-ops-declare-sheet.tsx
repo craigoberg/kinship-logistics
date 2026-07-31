@@ -173,15 +173,20 @@ export function SiteOpsDeclareSheet(props: {
           </Button>
         </PinEntryTrigger>
 
-        <Button
-          type="button"
-          className="h-12 w-full"
-          disabled={!ready}
-          onClick={() => mut.mutate()}
-        >
-          {mut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          Confirm
-        </Button>
+        <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button
+            type="button"
+            className="h-12 w-full sm:w-auto"
+            disabled={!ready}
+            onClick={() => mut.mutate()}
+          >
+            {mut.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+            Confirm
+          </Button>
+        </div>
       </div>
     </BottomSheet>
   );

@@ -209,13 +209,13 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
           </div>
         )}
 
-        <DialogFooter>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <Button
-            variant="ghost"
+            type="button"
+            variant="outline"
             onClick={() => handleOpenChange(false)}
-            disabled={addMut.isPending}
           >
-            Cancel
+            Close
           </Button>
           <Button
             onClick={() => addMut.mutate()}

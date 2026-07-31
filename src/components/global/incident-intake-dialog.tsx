@@ -302,6 +302,14 @@ export function IncidentIntakeDialog({
             </div>
           )}
 
+          {lane === "choose" && (
+            <div className="flex justify-start">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Close
+              </Button>
+            </div>
+          )}
+
           {/* ── Step 2: RYGE severity + description ── */}
           {(lane === "human" || lane === "asset") && (
             <div className="space-y-4">
@@ -383,10 +391,15 @@ export function IncidentIntakeDialog({
                 </div>
               )}
 
-              <div className="flex justify-between gap-2">
-                <Button variant="ghost" onClick={() => { setLane("choose"); setSeverity(null); setDescription(""); setWorkaround(""); }}>
-                  ← Back
-                </Button>
+              <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <div className="flex items-center gap-2">
+                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                    Close
+                  </Button>
+                  <Button variant="ghost" onClick={() => { setLane("choose"); setSeverity(null); setDescription(""); setWorkaround(""); }}>
+                    ← Back
+                  </Button>
+                </div>
                 <Button
                   onClick={handleRygeSubmit}
                   disabled={!canProceed || submitting}

@@ -89,6 +89,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Event Deliver Open location walkthrough** | **Defined** | `MandatedChecksList` (same as Day Centre Open) | Open location dialog before trip-leader PIN | Admin list `event_deliver.venue_open_checks`; empty = high-trust; PIN disabled until all ticked (BL-070) |
 | **Event Deliver pre-open Log Venue Issue** | **Defined** | `FieldActionButton` caution + `EventDayVerbalAnomalyFlow` | Pre-open panel + Open location dialog (Day Centre parity) | Walkthrough fails → venue RYGE (blocks open on RED). Big Red Button = INCIDENT only (does not block open). Pre-open `EventIssuesCard` below location panel |
 | **Admin mandated walkthrough editor** | **Defined** | `MandatedChecksAdminPanel` (Venue Safety template list: Add field / prompt / Yes·No·Required badges / trash) | Day Centre Open/Close + Event Deliver Open + Meal prep lists | Admin → System Parameters; persists string arrays; hidden from raw JSON table |
+| **Admin Council email (mailto)** | **Defined** | `CouncilEmailAdminPanel` | Hub / Route to Council escalate | Admin → System Parameters: To, optional From (shared mailbox), subject/body templates. Blank From = operator account. Hidden from raw JSON table. SQL: `2026-07-30_council_email_params.sql` |
 | **Meal prep walkthrough (Open meal)** | **Defined** | `MandatedChecksList` on `OpenMealSheet` | Cooked / packed meal open only (Centre + Trip Programme) | Admin key `meal.prep_checks`; empty = high-trust; skipped for takeaway / venue / own food; fridge temp stays on Open Centre |
 | **Meal prep PIN attest** | **Defined** | `PinEntryTrigger` + `verifyNamedStaffPin` / `verifyManagerPin` | Open meal cooked/packed seal | Preparer PIN (not day login) OR Manager guest override + justification; PIN success opens; API re-verifies PIN |
 | **Meal SFH Manager approval** | **Defined** | `PinEntryTrigger` + `verifyManagerPin` before preparer attest | Open meal when preparer SFH missing/expired | Strict — Manager justification + PIN; then hand tablet to preparer |
@@ -318,6 +319,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Expected / Accounted / Missing via `MobileFieldButton` — not a park-evac sim |
 | **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
 | **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
+| **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each blocker with **Resolve** (Hub manage in place). Deferred + resolved + accepted workaround unlock Open Centre. Outline Hub link secondary. |
 
 ### Component inventory (Defined in Day Centre flow)
 
@@ -484,6 +486,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-07-30 | Dialog/Sheet footer Close-left | Migrated save forms to §4.2 Close (outline, left) + primary right; Cancel→Close on ordinary forms; added Close where missing |
+| 2026-07-30 | Day Centre open-block Resolve | Manager **Resolve** on pre-open + Start of Day Cannot open blockers; Hub Active includes `awaiting_external`; defer no longer blocks Open Centre |
+| 2026-07-30 | Admin Council email (mailto) | `CouncilEmailAdminPanel` — To / From / template; blank From = normal mailto; seed SQL `2026-07-30_council_email_params.sql` |
 | 2026-07-29 | Big Red → Health & Safety | Third lane → `GlobalHealthSafetyFlow`; removed Day/Event/Manifest H&S entry chips — GUARDRAILS §13.2 |
 | 2026-07-29 | Manager Health & Safety menu | *(superseded)* Was amber chip → sheet; entry now Big Red only |
 | 2026-07-29 | Manager ops toolbar | Solid `ManagerOpsChip` (emergency red / caution amber / neutral) — never thin outline for Emergency, lockdown, infectious, do-not-open; TEST stays dashed |

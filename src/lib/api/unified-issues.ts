@@ -314,7 +314,7 @@ export async function listOpenUnifiedIssues(
       .from("site_issues_register")
       .select("*")
       // open + deferred + accepted workarounds (still operating — not Hub-resolved yet)
-      .in("status", ["open", "deferred", "workaround_accepted"])
+      .in("status", ["open", "deferred", "workaround_accepted", "awaiting_external"])
       .order("created_at", { ascending: false }),
     // §14 routing: only human_operational incidents belong in Human Incidents tab.
     // mechanical / asset incidents are tracked in Maintenance & Repairs via maintenance_items.

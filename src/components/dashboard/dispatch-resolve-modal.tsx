@@ -46,8 +46,8 @@ export function MissingComplianceSubjectDialog({
           Open <strong>Manage</strong> from the Governance Hub to fix the registry link, or
           use generic fallback resolve when the shell offers it.
         </p>
-        <DialogFooter className="gap-2">
-          <Button variant="outline" onClick={onClose}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>
           {onEditRegistry && (

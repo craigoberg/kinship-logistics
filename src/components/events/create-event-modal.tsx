@@ -466,8 +466,8 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
           </div>
         </div>
 
-        <DialogFooter className="shrink-0 border-t border-border pt-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="shrink-0 flex-col-reverse gap-2 border-t border-border pt-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">

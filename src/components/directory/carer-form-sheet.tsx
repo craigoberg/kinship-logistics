@@ -228,9 +228,9 @@ export function CarerFormSheet({
           </div>
         </div>
 
-        <SheetFooter className="border-t border-border px-6 py-3">
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+        <SheetFooter className="flex-col-reverse gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button onClick={save} disabled={busy} className="gap-1.5">
             <Save className="h-4 w-4" />

@@ -188,22 +188,31 @@ export function MealServiceRoll({
               rows={3}
               required
             />
-            <Button
-              type="button"
-              className="h-12 w-full"
-              disabled={
-                setMut.isPending || noteTarget.notes.trim().length < 3
-              }
-              onClick={() =>
-                setMut.mutate({
-                  id: noteTarget.id,
-                  status: noteTarget.status,
-                  notes: noteTarget.notes.trim(),
-                })
-              }
-            >
-              Save
-            </Button>
+            <div className="flex flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => setNoteTarget(null)}
+              >
+                Close
+              </Button>
+              <Button
+                type="button"
+                className="h-12 w-full sm:w-auto"
+                disabled={
+                  setMut.isPending || noteTarget.notes.trim().length < 3
+                }
+                onClick={() =>
+                  setMut.mutate({
+                    id: noteTarget.id,
+                    status: noteTarget.status,
+                    notes: noteTarget.notes.trim(),
+                  })
+                }
+              >
+                Save
+              </Button>
+            </div>
           </div>
         )}
       </BottomSheet>

@@ -62,7 +62,7 @@ export function ManageEventModal({
   onOpenChange,
   initialTab,
 }: Props) {
-  const [tab, setTab] = useState<TabKey>(initialTab ?? "roster");
+  const [tab, setTab] = useState<TabKey>(initialTab ?? "details");
   const [incidentOpen, setIncidentOpen] = useState(false);
   const [headerExpanded, setHeaderExpanded] = useState(false);
   const { data: events = [] } = useEvents();
@@ -136,14 +136,16 @@ export function ManageEventModal({
   }, [open, initialTab, eventSnapshot?.id]);
 
   const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = useMemo(() => [
+    { key: "details", label: "Details & Config", icon: Settings2 },
     { key: "roster", label: "Roster", icon: Users },
     ...(isOuting ? [
       { key: "itinerary" as TabKey, label: "Itinerary", icon: Map },
       { key: "days" as TabKey, label: "Trip Days", icon: CalendarDays },
-      { key: "report" as TabKey, label: "Trip Report", icon: FileText },
     ] : []),
     { key: "finance", label: "Finance & P&L", icon: Wallet },
-    { key: "details", label: "Details & Config", icon: Settings2 },
+    ...(isOuting ? [
+      { key: "report" as TabKey, label: "Trip Report", icon: FileText },
+    ] : []),
   // eslint-disable-next-line react-hooks/exhaustive-deps
   ], [isOuting]);
 

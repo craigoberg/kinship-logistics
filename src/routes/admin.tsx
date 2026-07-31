@@ -16,6 +16,7 @@ import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
 
 export const Route = createFileRoute("/admin")({
+  ssr: false,
   component: AdminPage,
 });
 

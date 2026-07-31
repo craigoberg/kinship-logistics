@@ -629,6 +629,12 @@ export function OpenMealSheet({
             />
           </div>
         )}
+
+        <div className="pt-1">
+          <Button type="button" variant="outline" onClick={() => handleOpenChange(false)}>
+            Close
+          </Button>
+        </div>
       </div>
     </BottomSheet>
   );

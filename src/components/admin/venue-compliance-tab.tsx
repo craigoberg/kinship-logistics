@@ -375,8 +375,8 @@ function AssetFormDialog({ open, onOpenChange, venue, existing, onSaved }: FormD
           />
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           <Button
             disabled={!canSave || saveMut.isPending}
             onClick={() => saveMut.mutate()}

@@ -36,6 +36,14 @@ function diagnose(issue: IssueRow, esc: EscalationRow | null): RowDiagnosis {
   if (issue.status === "resolved") {
     return { issue, escalation: esc, blocking: false, reason: "Issue resolved" };
   }
+  if (issue.status === "deferred") {
+    return {
+      issue,
+      escalation: esc,
+      blocking: false,
+      reason: "Hub-deferred — does not block Open Centre",
+    };
+  }
   if (issue.status === "workaround_accepted") {
     return {
       issue,

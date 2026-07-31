@@ -7,6 +7,7 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
@@ -438,21 +439,26 @@ export function ResolveVehicleMaintenanceModal({
               required
             />
 
-            <Button
-              type="button"
-              disabled={!canSubmit}
-              onClick={submit}
-              className="h-11 w-full bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700"
-            >
-              {submitting ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <>
-                  <ShieldCheck className="mr-1.5 h-4 w-4" />
-                  Append Resolution Receipt
-                </>
-              )}
-            </Button>
+            <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Button type="button" variant="outline" onClick={onClose}>
+                Close
+              </Button>
+              <Button
+                type="button"
+                disabled={!canSubmit}
+                onClick={submit}
+                className="h-11 w-full bg-emerald-600 text-sm font-bold text-white hover:bg-emerald-700 sm:w-auto"
+              >
+                {submitting ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <>
+                    <ShieldCheck className="mr-1.5 h-4 w-4" />
+                    Append Resolution Receipt
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
           </div>
         )}
       </DialogContent>

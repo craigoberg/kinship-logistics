@@ -227,6 +227,10 @@ export function AlternateMedPlanSheet({
           }}
           onSuccess={(pin) => saveMut.mutate(pin)}
         />
+
+        <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+          Close
+        </Button>
       </div>
     </BottomSheet>
   );

@@ -32,17 +32,12 @@ CREATE INDEX IF NOT EXISTS idx_site_day_activities_session
 
 ALTER TABLE site_day_activities ENABLE ROW LEVEL SECURITY;
 
-DO $$
-BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM pg_policies
-    WHERE tablename = 'site_day_activities'
-      AND policyname = 'anon_all_site_day_activities'
-  ) THEN
-    CREATE POLICY anon_all_site_day_activities ON site_day_activities
-      FOR ALL TO anon USING (true) WITH CHECK (true);
-  END IF;
-END $$;
+-- PIN terminal = anon; day login (BL-099) = authenticated. Both need ALL.
+DROP POLICY IF EXISTS anon_all_site_day_activities ON site_day_activities;
+DROP POLICY IF EXISTS kinship_anon_all_site_day_activities ON site_day_activities;
+CREATE POLICY kinship_anon_all_site_day_activities ON site_day_activities
+  FOR ALL TO anon, authenticated
+  USING (true) WITH CHECK (true);
 
 GRANT SELECT, INSERT, UPDATE, DELETE ON site_day_activities TO anon;
 GRANT SELECT, INSERT, UPDATE, DELETE ON site_day_activities TO authenticated;

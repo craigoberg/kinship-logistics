@@ -41,9 +41,16 @@ import {
   MandatedChecksAdminPanel,
   MANDATED_CHECK_PARAM_KEYS,
 } from "./mandated-checks-admin-panel";
+import {
+  CouncilEmailAdminPanel,
+  COUNCIL_EMAIL_PARAM_KEYS,
+} from "./council-email-admin-panel";
 import { TourRollCallDefaultsPanel } from "./tour-roll-call-defaults-panel";
 
-const HIDDEN_FROM_JSON_TABLE = new Set<string>(MANDATED_CHECK_PARAM_KEYS);
+const HIDDEN_FROM_JSON_TABLE = new Set<string>([
+  ...MANDATED_CHECK_PARAM_KEYS,
+  ...COUNCIL_EMAIL_PARAM_KEYS,
+]);
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
   return (staffRole ?? "").toLowerCase().includes("manager");
@@ -91,10 +98,13 @@ export function SystemParameterWorkspace() {
 
       <MandatedChecksAdminPanel />
 
+      <CouncilEmailAdminPanel />
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Tunable operational thresholds. Every change is appended to the operational ledger with
-          the Managers justification. Walkthrough checklists are edited above (not as JSON).
+          the Managers justification. Walkthrough checklists and Council email are edited above
+          (not as JSON).
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
@@ -265,8 +275,8 @@ function EditParameterModal({ row, onClose }: { row: SystemParameterRow; onClose
           />
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>
           <Button onClick={() => mutation.mutate()} disabled={!canSubmit}>

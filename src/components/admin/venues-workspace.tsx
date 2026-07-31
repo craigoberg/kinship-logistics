@@ -1094,8 +1094,8 @@ function CloneVenueDialog({ open, source, onOpenChange, onCloned }: CloneDialogP
           />
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button
@@ -1273,8 +1273,8 @@ function BaselineSignoffDialog({
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button onClick={handleSubmit} disabled={!canSubmit}>

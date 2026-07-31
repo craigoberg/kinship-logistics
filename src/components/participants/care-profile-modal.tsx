@@ -264,8 +264,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 </Accordion>
               </div>
 
-              <DialogFooter className="mt-1 shrink-0">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              <DialogFooter className="mt-1 shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
@@ -319,8 +319,8 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 </div>
               </div>
 
-              <DialogFooter className="mt-1 shrink-0">
-                <Button variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+              <DialogFooter className="mt-1 shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}

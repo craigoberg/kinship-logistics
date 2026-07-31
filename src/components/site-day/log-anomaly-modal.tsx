@@ -462,8 +462,9 @@ export function LogAnomalyModal({
           )}
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <Button
+            type="button"
             variant="outline"
             onClick={() => handleClose(false)}
           >

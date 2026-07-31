@@ -1006,11 +1006,11 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   className={cn(
                     "flex items-center justify-between gap-3 rounded-lg border-2 px-4 py-3",
                     present
-                      ? "border-amber-500 bg-amber-50 text-slate-900"
-                      : "border-slate-300 bg-slate-100 text-slate-900 opacity-80",
+                      ? "border-amber-500 bg-amber-50"
+                      : "border-slate-300 bg-slate-100 opacity-80",
                   )}
                 >
-                  <div className="min-w-0 flex-1">
+                  <div className="min-w-0 flex-1 text-slate-900">
                     <div className="flex flex-wrap items-center gap-1.5">
                       <span
                         className={cn(
@@ -1061,7 +1061,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="h-11 gap-1.5"
+                      className="h-11 gap-1.5 border-slate-500 bg-white text-slate-900 hover:bg-slate-50 hover:text-slate-900"
                       onClick={() => setPromoteVisitor(v)}
                     >
                       <UserRoundPlus className="h-4 w-4" />
@@ -1072,7 +1072,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                         type="button"
                         variant="secondary"
                         size="sm"
-                        className="h-11 gap-1.5"
+                        className="h-11 gap-1.5 bg-slate-800 text-white hover:bg-slate-700 hover:text-white"
                         disabled={leaveVisitorMut.isPending}
                         onClick={() => leaveVisitorMut.mutate(v)}
                       >

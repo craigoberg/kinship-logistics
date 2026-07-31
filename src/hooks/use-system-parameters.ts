@@ -5,6 +5,7 @@ import {
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
 import type { UrgencyParams } from "@/lib/governance/hub-workflow-status";
+import { DEFAULT_COUNCIL_EMAIL_TEMPLATE } from "@/lib/governance/council-email";
 import {
   listCheckpointsForAsset,
   type AssetCheckpoint,
@@ -234,6 +235,11 @@ export function useCouncilEmailTo(): string {
   return useSystemParameter<string>("site_management.council_email_to", "");
 }
 
+/** Optional shared mailbox for Council mailto From (blank = operator account). */
+export function useCouncilEmailFrom(): string {
+  return useSystemParameter<string>("site_management.council_email_from", "");
+}
+
 /** Default bus depot street address (Admin → Day Centre Bus Runs). */
 export function useDepotAddress(): string {
   return useSystemParameter<string>("depot_address", "");
@@ -337,29 +343,19 @@ export function useComplianceUrgencyParams(): UrgencyParams {
 export function useCouncilEmailTemplate(): { subject: string; body: string } {
   const value = useSystemParameter<JsonValue>(
     "site_management.council_email_template",
-    {
-      subject: "Council Maintenance Request — {severity}",
-      body:
-        "Hello Council Maintenance,\n\n" +
-        "We are logging a {severity} maintenance request from the Day Centre.\n\n" +
-        "Issue: {description}\n" +
-        "Current workaround: {workaround}\n" +
-        "Expected resolution by (per contract SLA): {deadline}\n\n" +
-        "Please confirm receipt and ETA.\n\nThank you,\nDay Centre Operations",
-    } as unknown as JsonValue,
+    DEFAULT_COUNCIL_EMAIL_TEMPLATE as unknown as JsonValue,
   );
   if (value && typeof value === "object" && !Array.isArray(value)) {
     const o = value as Record<string, JsonValue>;
     const subject = typeof o.subject === "string" ? o.subject : "";
     const body = typeof o.body === "string" ? o.body : "";
-    return { subject, body };
+    return {
+      subject: subject || DEFAULT_COUNCIL_EMAIL_TEMPLATE.subject,
+      body: body || DEFAULT_COUNCIL_EMAIL_TEMPLATE.body,
+    };
   }
   if (typeof value === "string") {
-    return { subject: "Council Maintenance Request", body: value };
+    return { subject: DEFAULT_COUNCIL_EMAIL_TEMPLATE.subject, body: value };
   }
-  return {
-    subject: "Council Maintenance Request — {severity}",
-    body:
-      "Hello Council Maintenance,\n\nIssue: {description}\nWorkaround: {workaround}\nDeadline: {deadline}\n\nThank you.",
-  };
+  return { ...DEFAULT_COUNCIL_EMAIL_TEMPLATE };
 }

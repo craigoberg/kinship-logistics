@@ -172,8 +172,8 @@ export function ScheduledMedicationModal({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancel</Button>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             {isEdit ? <Save className="h-4 w-4" /> : null}
             {pending ? "Saving…" : isEdit ? "Save changes" : "Save schedule"}

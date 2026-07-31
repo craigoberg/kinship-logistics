@@ -7,11 +7,13 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
+  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
@@ -215,6 +217,16 @@ function VehicleConsultationModal({
             </div>
           </div>
         )}
+
+        <DialogFooter className="sm:justify-start">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onClose()}
+          >
+            Close
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -526,6 +538,16 @@ function SiteDayProposalModal({
             )}
           </div>
         )}
+
+        <DialogFooter className="sm:justify-start">
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => onClose()}
+          >
+            Close
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
 

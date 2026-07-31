@@ -112,6 +112,7 @@ export const DAY_CENTRE_BLOCKING_REDS_QUERY_KEY = [
  * RED issues that can block Day Centre Open Centre.
  * Scoped to Day Centre only: `event_id` and `event_day_session_id` both null.
  * Trip morning/evening / event-floor REDs are excluded.
+ * Non-blocking: `resolved`, Hub `deferred`, or accepted workaround.
  */
 export async function fetchDayCentreBlockingReds(): Promise<{
   /** Day-scoped RED rows (any status except we still return resolved for diagnostics). */
@@ -132,7 +133,11 @@ export async function fetchDayCentreBlockingReds(): Promise<{
   if (error) throw error;
 
   const rows = (data ?? []) as DayCentreRedIssueRow[];
-  const unresolved = rows.filter((r) => r.status !== "resolved");
+  // Resolved and Hub-deferred REDs do not block Open Centre. Defer parks the
+  // issue for later Hub follow-up without holding the morning open gate.
+  const unresolved = rows.filter(
+    (r) => r.status !== "resolved" && r.status !== "deferred",
+  );
   const escMap = await fetchApprovedRedWorkarounds(unresolved.map((r) => r.id));
   const blocking = unresolved.filter(
     (r) => !redHasAcceptedWorkaround(r, escMap),

@@ -145,9 +145,9 @@ export function AddParticipantModal({ open, onOpenChange }: Props) {
           </Field>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button onClick={save} disabled={!canSave} className="gap-1.5">
             <UserPlus className="h-4 w-4" />

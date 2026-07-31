@@ -149,7 +149,11 @@ export function useLookupParameters(category: string | null | undefined) {
     },
     enabled: !!category,
     staleTime: 5 * 60_000,
-    placeholderData: category ? readLookupCache(category) : undefined,
+    // Browser-only: local cache differs from SSR empty state (Admin uses ssr:false).
+    placeholderData:
+      typeof window !== "undefined" && category
+        ? readLookupCache(category)
+        : undefined,
     retry: 1,
   });
 }

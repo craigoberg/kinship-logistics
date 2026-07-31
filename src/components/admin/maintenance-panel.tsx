@@ -536,8 +536,8 @@ function AddItemDialog({ open, onClose }: { open: boolean; onClose: () => void }
             <Input placeholder="e.g. Main hall, Toilet block 3" value={locationLabel} onChange={(e) => setLocationLabel(e.target.value)} />
           </div>
         </div>
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Close</Button>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={onClose}>Close</Button>
           <Button onClick={() => mutation.mutate()} disabled={!canSubmit}>
             {mutation.isPending && <Loader2 className="mr-1.5 h-4 w-4 animate-spin" />}
             Add Item

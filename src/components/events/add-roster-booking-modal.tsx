@@ -268,8 +268,8 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">

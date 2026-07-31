@@ -511,8 +511,9 @@ export function AttendanceTab({ participantId, participantName }: Props) {
               </div>
             </div>
           )}
-          <DialogFooter>
+          <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
             <Button
+              type="button"
               variant="outline"
               onClick={() => { setRemoveTarget(null); setRemoveReason(""); }}
             >

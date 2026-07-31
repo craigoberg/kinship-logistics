@@ -483,30 +483,33 @@ export function AddAttendanceScheduleModal({
               </Button>
             </>
           ) : (
-            <>
-              {/* Remove button only in edit mode — left-aligned, destructive */}
-              {isEdit && (
-                <Button
-                  variant="ghost"
-                  className="mr-auto gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  onClick={() => setConfirmingRemove(true)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                  Remove schedule
-                </Button>
-              )}
-              <Button variant="outline" onClick={() => onOpenChange(false)}>
+            <div className="flex w-full flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Close
               </Button>
-              <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
-                {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
-                {mutation.isPending
-                  ? "Saving…"
-                  : isEdit
-                    ? "Save changes"
-                    : "Save schedule"}
-              </Button>
-            </>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {/* Remove button only in edit mode — destructive, grouped with Save */}
+                {isEdit && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    className="gap-1.5 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setConfirmingRemove(true)}
+                  >
+                    <Trash2 className="h-4 w-4" />
+                    Remove schedule
+                  </Button>
+                )}
+                <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
+                  {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+                  {mutation.isPending
+                    ? "Saving…"
+                    : isEdit
+                      ? "Save changes"
+                      : "Save schedule"}
+                </Button>
+              </div>
+            </div>
           )}
         </DialogFooter>
       </DialogContent>

@@ -286,53 +286,79 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             ) : (
               <div className="space-y-2">
                 {certs.map((c, i) => (
-                  <div key={i} className="grid gap-2 rounded-md border border-border bg-card/40 p-3 sm:grid-cols-[1fr_1fr_180px_180px_auto]">
-                    <Input
-                      placeholder="Certificate name"
-                      value={c.name}
-                      onChange={(e) => updateCert(i, { name: e.target.value })}
-                    />
-                    <Input
-                      placeholder="Certification #"
-                      value={c.number}
-                      onChange={(e) => updateCert(i, { number: e.target.value })}
-                    />
-                    <div className="grid gap-1">
-                      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Renewal / Expiry Date
-                      </Label>
-                      <DatePicker
-                        value={parseIsoDateLocal(c.expiry ?? "")}
-                        onChange={(d) => updateCert(i, { expiry: d ? toIsoDateString(d) : null })}
-                        dateFormat="dd-MMM-yy"
-                        className="h-9 text-sm"
-                      />
-                      <p className="text-[11px] text-muted-foreground/70">
-                        Optional. Leave blank if this certification never expires.
-                      </p>
+                  <div
+                    key={i}
+                    className="space-y-3 rounded-md border border-border bg-card/40 p-3"
+                  >
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-1">
+                        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Certificate name
+                        </Label>
+                        <Input
+                          placeholder="e.g. First Aid / CPR"
+                          value={c.name}
+                          onChange={(e) => updateCert(i, { name: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
+                      <div className="grid gap-1">
+                        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Certification #
+                        </Label>
+                        <Input
+                          placeholder="Optional reference number"
+                          value={c.number}
+                          onChange={(e) => updateCert(i, { number: e.target.value })}
+                          className="h-9"
+                        />
+                      </div>
                     </div>
-                    <div className="grid gap-1">
-                      <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                        Defer Until (Manager)
-                      </Label>
-                      <DatePicker
-                        value={parseIsoDateLocal(c.deferredUntil ?? "")}
-                        onChange={(d) => updateCert(i, { deferredUntil: d ? toIsoDateString(d) : null })}
-                        dateFormat="dd-MMM-yy"
-                        className="h-9 text-sm"
-                      />
-                      <p className="text-[11px] text-muted-foreground/70">
-                        Hides this cert from the Red/Critical dashboard list until this date.
-                      </p>
+                    <div className="grid gap-2 sm:grid-cols-2">
+                      <div className="grid gap-1">
+                        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Renewal / Expiry Date
+                        </Label>
+                        <DatePicker
+                          value={parseIsoDateLocal(c.expiry ?? "")}
+                          onChange={(d) =>
+                            updateCert(i, { expiry: d ? toIsoDateString(d) : null })
+                          }
+                          dateFormat="dd-MMM-yy"
+                          className="h-9 text-sm"
+                        />
+                        <p className="text-[11px] text-muted-foreground/70">
+                          Optional. Leave blank if this certification never expires.
+                        </p>
+                      </div>
+                      <div className="grid gap-1">
+                        <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                          Defer Until (Manager)
+                        </Label>
+                        <DatePicker
+                          value={parseIsoDateLocal(c.deferredUntil ?? "")}
+                          onChange={(d) =>
+                            updateCert(i, {
+                              deferredUntil: d ? toIsoDateString(d) : null,
+                            })
+                          }
+                          dateFormat="dd-MMM-yy"
+                          className="h-9 text-sm"
+                        />
+                        <p className="text-[11px] text-muted-foreground/70">
+                          Hides this cert from the Red/Critical dashboard list until this date.
+                        </p>
+                      </div>
                     </div>
-                    <IconActionButton
-                      type="button"
-                      onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
-                      tooltip="Remove certification"
-                      className="self-start"
-                    >
-                      <Trash2 className="h-4 w-4 text-destructive" />
-                    </IconActionButton>
+                    <div className="flex justify-end">
+                      <IconActionButton
+                        type="button"
+                        onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
+                        tooltip="Remove certification"
+                      >
+                        <Trash2 className="h-4 w-4 text-destructive" />
+                      </IconActionButton>
+                    </div>
                   </div>
                 ))}
               </div>
@@ -344,28 +370,30 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           </Field>
         </div>
 
-        <SheetFooter className="flex-col items-stretch gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-end">
-          {!canSave && !busy && (
-            <p className="text-[11px] text-destructive sm:mr-auto">
-              {[
-                nameMissing && "Full name",
-                roleMissing && "Role / title",
-                personnelTypeMissing && "System access level",
-                pinMissing && "4-digit PIN",
-                pinBadFormat && "PIN must be exactly 4 digits",
-              ]
-                .filter(Boolean)
-                .join(", ")}
-              {" "}is required.
-            </p>
-          )}
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
-            Cancel
+        <SheetFooter className="flex-col-reverse gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
-          <Button onClick={save} disabled={!canSave} className="gap-1.5">
-            <Save className="h-4 w-4" />
-            {busy ? "Saving…" : isEdit ? "Save changes" : "Add personnel"}
-          </Button>
+          <div className="flex flex-col-reverse items-stretch gap-2 sm:flex-row sm:items-center sm:justify-end">
+            {!canSave && !busy && (
+              <p className="text-[11px] text-destructive">
+                {[
+                  nameMissing && "Full name",
+                  roleMissing && "Role / title",
+                  personnelTypeMissing && "System access level",
+                  pinMissing && "4-digit PIN",
+                  pinBadFormat && "PIN must be exactly 4 digits",
+                ]
+                  .filter(Boolean)
+                  .join(", ")}
+                {" "}is required.
+              </p>
+            )}
+            <Button onClick={save} disabled={!canSave} className="gap-1.5">
+              <Save className="h-4 w-4" />
+              {busy ? "Saving…" : isEdit ? "Save changes" : "Add personnel"}
+            </Button>
+          </div>
         </SheetFooter>
 
       </SheetContent>

@@ -397,23 +397,37 @@ export interface DispatchCouncilEmailArgs {
   body: string;
   category: CouncilSlaCategory;
   deadlineIso: string;
+  /**
+   * Optional shared mailbox (Admin From). When set, included as mailto `from=`.
+   * When omitted/blank, mailto opens with the operator's normal account.
+   */
+  from?: string | null;
 }
 
 /**
  * BL-062 (locked) — Council notify is **mailto only** (production stance).
  * Prefills the operator's mail client; they edit/send. We log the handoff
  * (`email_dispatched_to_council` + ledger). No server SMTP / Postmark / Lovable send.
+ *
+ * Encode with encodeURIComponent (not URLSearchParams) so spaces become `%20`.
+ * Many mail clients treat `+` from form-encoding as a literal plus sign.
  */
 export function buildCouncilMailto(
   to: string,
   subject: string,
   body: string,
+  from?: string | null,
 ): string {
-  const params = new URLSearchParams({
-    subject: subject.trim(),
-    body: body.trim(),
-  });
-  return `mailto:${encodeURIComponent(to.trim())}?${params.toString()}`;
+  const parts = [
+    `subject=${encodeURIComponent(subject.trim())}`,
+    `body=${encodeURIComponent(body.trim())}`,
+  ];
+  const fromAddr = (from ?? "").trim();
+  if (fromAddr.includes("@")) {
+    // Non-standard but honoured by some clients (e.g. Outlook Send As hint).
+    parts.push(`from=${encodeURIComponent(fromAddr)}`);
+  }
+  return `mailto:${encodeURIComponent(to.trim())}?${parts.join("&")}`;
 }
 
 /** Open the OS/browser mail composer for a council mailto URL. */
@@ -429,7 +443,13 @@ export async function dispatchCouncilEmail(
   if (!to.includes("@")) {
     throw new Error("Set a valid council recipient email address.");
   }
-  const mailto = buildCouncilMailto(to, args.subject, args.body);
+  const from = (args.from ?? "").trim();
+  const mailto = buildCouncilMailto(
+    to,
+    args.subject,
+    args.body,
+    from.includes("@") ? from : null,
+  );
 
   const { error } = await supabase
     .from("site_issues_register")
@@ -457,6 +477,7 @@ export async function dispatchCouncilEmail(
         deadline: args.deadlineIso,
         mode: "mailto",
         to,
+        from: from.includes("@") ? from : null,
       },
     });
   } catch (err) {

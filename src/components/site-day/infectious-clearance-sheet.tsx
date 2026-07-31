@@ -173,6 +173,7 @@ export function InfectiousClearanceSheet({
 
         <div className="flex gap-2 pt-1">
           <Button
+            type="button"
             variant="outline"
             className="flex-1"
             onClick={() => {
@@ -180,7 +181,7 @@ export function InfectiousClearanceSheet({
               onOpenChange(false);
             }}
           >
-            Cancel
+            Close
           </Button>
           <Button
             className="flex-1"

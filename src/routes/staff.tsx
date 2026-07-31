@@ -25,6 +25,7 @@ function StaffPage() {
         </h2>
         <p className="text-sm text-muted-foreground">
           Personnel rosters and the support network surrounding each participant.
+          Managers: tap a staff row to open the record.
         </p>
       </header>
 

@@ -33,10 +33,12 @@ import {
 } from "@/lib/api/site-issues";
 import { siteIssuesKey } from "@/hooks/use-site-issues";
 import {
+  useCouncilEmailFrom,
   useCouncilEmailTemplate,
   useCouncilEmailTo,
   useCouncilSlaHours,
 } from "@/hooks/use-system-parameters";
+import { resolveCouncilMailtoFrom, cleanCouncilIssueText } from "@/lib/governance/council-email";
 
 interface Props {
   open: boolean;
@@ -46,6 +48,7 @@ interface Props {
 
 interface CouncilDraft {
   to: string;
+  from: string;
   subject: string;
   body: string;
   category: CouncilSlaCategory;
@@ -64,6 +67,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
   const queryClient = useQueryClient();
   const hoursMap = useCouncilSlaHours();
   const defaultTo = useCouncilEmailTo();
+  const defaultFrom = useCouncilEmailFrom();
   const template = useCouncilEmailTemplate();
 
   // Recompute the suggested SLA tier + deadline from issue severity + owner.
@@ -84,7 +88,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
     () => ({
       severity: suggested.category,
       deadline: formatDateTime(suggested.deadlineIso),
-      description: issue.issueDescription,
+      description: cleanCouncilIssueText(issue.issueDescription),
       workaround: issue.workaroundPlan ?? "—",
       date: formatDate(new Date().toISOString().slice(0, 10)),
     }),
@@ -94,11 +98,19 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
   const draftInitial: CouncilDraft = useMemo(
     () => ({
       to: defaultTo,
+      from: defaultFrom,
       subject: substituteTokens(template.subject, initialTokens),
       body: substituteTokens(template.body, initialTokens),
       category: suggested.category,
     }),
-    [defaultTo, template.subject, template.body, initialTokens, suggested.category],
+    [
+      defaultTo,
+      defaultFrom,
+      template.subject,
+      template.body,
+      initialTokens,
+      suggested.category,
+    ],
   );
 
   const form = usePersistedForm<CouncilDraft>(
@@ -128,6 +140,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
       return dispatchCouncilEmail({
         issueId: issue.id,
         to: form.values.to.trim(),
+        from: resolveCouncilMailtoFrom(form.values.from),
         subject: form.values.subject.trim(),
         body: form.values.body.trim(),
         category: form.values.category,
@@ -138,10 +151,12 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
       queryClient.invalidateQueries({
         queryKey: siteIssuesKey(issue.sessionId),
       });
+      const fromHint = resolveCouncilMailtoFrom(form.values.from);
       form.reset();
       toast.success("Opening your mail…", {
-        description:
-          "Edit and send from your mail app. Issue marked as dispatched to Council — follow up with Hub notes.",
+        description: fromHint
+          ? `Edit and send. Prefer shared mailbox From: ${fromHint}. Follow up with Hub notes.`
+          : "Edit and send from your mail app. Issue marked as dispatched to Council — follow up with Hub notes.",
       });
       openCouncilMailto(res.mailto);
       onOpenChange(false);
@@ -162,7 +177,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
             Route to Council Maintenance
           </DialogTitle>
           <DialogDescription>
-            Opens your mail app with a pre-filled message (To, subject, body).
+            Opens your mail app with a pre-filled message (To, From, subject, body).
             Edit and send from there. We log the handoff and SLA deadline; follow
             up with Hub notes as Council replies.
           </DialogDescription>
@@ -218,29 +233,46 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
           </div>
         </div>
 
-        <div className="space-y-2">
-          <Label
-            htmlFor="cc-to"
-            className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-          >
-            Recipient
-          </Label>
-          <Input
-            id="cc-to"
-            type="email"
-            value={form.values.to}
-            onChange={(e) => form.setValues({ to: e.target.value })}
-            placeholder="maintenance@council.gov.au"
-          />
-          {!defaultTo && (
-            <p className="text-xs text-yellow-700">
-              No default council recipient is set. Configure{" "}
-              <code className="rounded bg-muted px-1 py-0.5">
-                site_management.council_email_to
-              </code>{" "}
-              in Admin → System Parameters.
+        <div className="grid gap-3 sm:grid-cols-2">
+          <div className="space-y-2">
+            <Label
+              htmlFor="cc-to"
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              To (recipient)
+            </Label>
+            <Input
+              id="cc-to"
+              type="email"
+              value={form.values.to}
+              onChange={(e) => form.setValues({ to: e.target.value })}
+              placeholder="maintenance@council.gov.au"
+            />
+            {!defaultTo && (
+              <p className="text-xs text-yellow-700">
+                No default To is set. Configure Admin → System Parameters → Council
+                email.
+              </p>
+            )}
+          </div>
+          <div className="space-y-2">
+            <Label
+              htmlFor="cc-from"
+              className="text-xs font-semibold uppercase tracking-wide text-muted-foreground"
+            >
+              From (optional)
+            </Label>
+            <Input
+              id="cc-from"
+              type="email"
+              value={form.values.from}
+              onChange={(e) => form.setValues({ from: e.target.value })}
+              placeholder="Blank = your mail account"
+            />
+            <p className="text-[11px] text-muted-foreground">
+              Shared mailbox when set; blank opens mailto as your normal account.
             </p>
-          )}
+          </div>
         </div>
 
         <div className="space-y-2">
@@ -272,13 +304,13 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
           />
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <Button
+            type="button"
             variant="outline"
             onClick={() => onOpenChange(false)}
-            disabled={mutation.isPending}
           >
-            Cancel
+            Close
           </Button>
           <Button
             onClick={() => mutation.mutate()}

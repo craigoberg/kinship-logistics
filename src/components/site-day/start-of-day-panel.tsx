@@ -50,6 +50,9 @@ import {
   isDayCentreScopedIssue,
   redHasAcceptedWorkaround,
 } from "@/lib/site-day/red-workaround";
+import { DayCentreBlockingRedResolveButton } from "./day-centre-blocking-red-resolve-button";
+import { ClientTime } from "@/components/ui/client-time";
+import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
 import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
 import {
   getStaffId,
@@ -120,11 +123,14 @@ export function StartOfDayPanel({ sessionId }: Props) {
     staleTime: 5_000,
   });
   const escMap = escMapQ.data ?? null;
-  const blockingIssues = dayScopedOpen.filter(
-    (i) =>
-      (i.severity === "red" && !redHasAcceptedWorkaround(i, escMap)) ||
-      (i.severity === "yellow" && !i.workaroundPlan?.trim()),
-  );
+  // Deferred REDs are parked in Hub — they must not hold Open Centre (parity
+  // with fetchDayCentreBlockingReds). Accepted workarounds also clear the gate.
+  const blockingIssues = dayScopedOpen.filter((i) => {
+    if (i.status === "deferred") return false;
+    if (i.severity === "red") return !redHasAcceptedWorkaround(i, escMap);
+    if (i.severity === "yellow") return !i.workaroundPlan?.trim();
+    return false;
+  });
   const hasBlocking = blockingIssues.length > 0;
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
   const registerIssues = sortSiteIssuesByRygeNewestFirst(dayScopedOpen);
@@ -221,13 +227,48 @@ export function StartOfDayPanel({ sessionId }: Props) {
                 {blockingIssues.length === 1 ? "" : "s"} still need a workaround
               </div>
               <p className="text-sm text-muted-foreground">
-                See the register below. RED needs a Manager-agreed workaround in
-                the Hub; YELLOW needs a workaround via Log Anomalies.
+                {isManager
+                  ? "Clear each blocker below with Resolve (same Hub manage dialog). Deferred or resolved issues, or an accepted workaround, unlock Open Centre."
+                  : "See the blockers below. RED needs a Manager; YELLOW needs a workaround via Log Anomalies."}
               </p>
             </div>
           </div>
+
+          <ul className="space-y-2">
+            {blockingIssues.map((issue) => {
+              const chip = RYGE_SEVERITY_CHIPS.find((c) => c.value === issue.severity);
+              return (
+                <li
+                  key={issue.id}
+                  className="rounded-md border border-red-600/30 bg-background/60 p-3"
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span
+                      className={`rounded px-2 py-0.5 text-xs font-semibold ${
+                        chip?.activeClass ??
+                        "bg-destructive text-destructive-foreground"
+                      }`}
+                    >
+                      {(issue.severity ?? "issue").toUpperCase()}
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <ClientTime
+                        iso={issue.createdAt}
+                        className="text-xs text-muted-foreground"
+                      />
+                      {isManager ? (
+                        <DayCentreBlockingRedResolveButton issue={issue} />
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-1 text-sm font-medium">{issue.issueDescription}</div>
+                </li>
+              );
+            })}
+          </ul>
+
           {blockingHasRed && (
-            <Button asChild size="sm" className="bg-red-600 hover:bg-red-700">
+            <Button asChild size="sm" variant="outline">
               <Link to="/governance">
                 Open Governance Hub
                 <ArrowRight className="ml-1.5 h-4 w-4" />

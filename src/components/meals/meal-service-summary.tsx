@@ -149,7 +149,7 @@ export function MealServiceSummary(props: MealServiceSummaryProps) {
             )}
           </p>
         ) : preparerName ? (
-          <p className="text-xs text-muted-foreground">
+          <div className="text-xs text-muted-foreground">
             Prepared by{" "}
             <span className="font-medium text-foreground">{preparerName}</span>
             {props.preparerCertStatus && (
@@ -174,7 +174,7 @@ export function MealServiceSummary(props: MealServiceSummaryProps) {
             {attestorName && props.prepAttestationMode === "preparer_pin" && (
               <> · PIN attested</>
             )}
-          </p>
+          </div>
         ) : null}
         {props.preparerAckNote?.trim() && (
           <p className="text-xs text-amber-900 dark:text-amber-100">

@@ -271,9 +271,9 @@ export function ResolveComplianceAssetModal({ asset, onClose, onResolved }: Prop
           )}
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={onClose} disabled={mut.isPending}>
-            Cancel
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={onClose}>
+            Close
           </Button>
           <Button onClick={() => mut.mutate()} disabled={!canSubmit}>
             {mut.isPending ? (

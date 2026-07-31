@@ -157,13 +157,13 @@ export function BulkDeferGroupModal({
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <Button
-            variant="ghost"
+            type="button"
+            variant="outline"
             onClick={() => onClose(false)}
-            disabled={mut.isPending}
           >
-            Cancel
+            Close
           </Button>
           <Button
             onClick={() => mut.mutate()}

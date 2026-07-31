@@ -389,11 +389,13 @@ export function EventDetailsTab({ event, onSaved, onClose }: Props) {
         </div>
       </div>
 
-      <div className="flex items-center justify-end gap-2 border-t border-border pt-4">
-        {onClose && (
-          <Button variant="outline" onClick={onClose}>
+      <div className="flex flex-col-reverse gap-2 border-t border-border pt-4 sm:flex-row sm:items-center sm:justify-between">
+        {onClose ? (
+          <Button type="button" variant="outline" onClick={onClose}>
             Close
           </Button>
+        ) : (
+          <span />
         )}
         <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
           <Save className="h-4 w-4" />

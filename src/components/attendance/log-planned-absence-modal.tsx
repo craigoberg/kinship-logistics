@@ -219,9 +219,9 @@ export function LogPlannedAbsenceModal({
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>
-            Cancel
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <CalendarOff className="h-4 w-4" />

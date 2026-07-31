@@ -393,9 +393,9 @@ export function VerbalAuthOverrideDialog({
           </ul>
         </div>
 
-        <div className="flex shrink-0 justify-end gap-2 border-t border-border px-5 py-3">
-          <Button variant="outline" onClick={handleClose} disabled={submitMut.isPending}>
-            Cancel
+        <div className="flex shrink-0 flex-col-reverse gap-2 border-t border-border px-5 py-3 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={handleClose}>
+            Close
           </Button>
           <Button
             onClick={() => submitMut.mutate()}
