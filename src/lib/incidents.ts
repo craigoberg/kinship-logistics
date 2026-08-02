@@ -10,6 +10,11 @@ export interface OperationalIncident {
   reportedBy: string;
   status: "pending" | "resolved";
   createdAt: string;
+  /** When it happened (operator). Falls back to createdAt when unset. */
+  occurredAt: string;
+  affectedParticipantIds: string[];
+  assistingStaffIds: string[];
+  noParticipantInvolved: boolean;
 }
 
 interface RaiseIncidentInput {
@@ -19,6 +24,11 @@ interface RaiseIncidentInput {
   vehicleId?: string;
   eventId?: string;
   reportedBy: string;
+  /** Required for new filings — when the event actually happened. */
+  occurredAt: string;
+  affectedParticipantIds?: string[];
+  assistingStaffIds?: string[];
+  noParticipantInvolved?: boolean;
 }
 
 /**
@@ -37,6 +47,12 @@ export async function raiseOperationalIncident(
     event_id: input.eventId ?? null,
     reported_by: input.reportedBy,
     status: "pending" as const,
+    occurred_at: input.occurredAt,
+    affected_participant_ids: input.affectedParticipantIds ?? [],
+    assisting_staff_ids: input.assistingStaffIds ?? [],
+    // Legacy single column — first selected (nullable) for older readers.
+    assisting_staff_id: input.assistingStaffIds?.[0] ?? null,
+    no_participant_involved: input.noParticipantInvolved ?? false,
   };
 
   const { data, error } = await supabase
@@ -51,6 +67,7 @@ export async function raiseOperationalIncident(
   }
 
   const row = data as Record<string, unknown>;
+  const createdAt = String(row.created_at ?? new Date().toISOString());
   const incident: OperationalIncident = {
     id: String(row.id),
     incidentType: row.incident_type as OperationalIncident["incidentType"],
@@ -60,7 +77,19 @@ export async function raiseOperationalIncident(
     eventId: (row.event_id as string | null) ?? undefined,
     reportedBy: String(row.reported_by ?? ""),
     status: row.status as OperationalIncident["status"],
-    createdAt: String(row.created_at ?? new Date().toISOString()),
+    createdAt,
+    occurredAt: String(row.occurred_at ?? createdAt),
+    affectedParticipantIds: Array.isArray(row.affected_participant_ids)
+      ? (row.affected_participant_ids as string[])
+      : [],
+    assistingStaffIds: (() => {
+      if (Array.isArray(row.assisting_staff_ids)) {
+        return row.assisting_staff_ids as string[];
+      }
+      const legacy = row.assisting_staff_id as string | null;
+      return legacy ? [legacy] : [];
+    })(),
+    noParticipantInvolved: Boolean(row.no_participant_involved),
   };
 
   if (incident.severity === "sev1") {

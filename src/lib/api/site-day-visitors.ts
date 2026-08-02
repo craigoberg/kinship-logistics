@@ -7,7 +7,11 @@ import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { operationalNowIso } from "@/lib/operational-clock";
 
-export type SiteDayVisitorKind = "trial" | "friend" | "family" | "other";
+export type SiteDayVisitorKind =
+  | "trial"
+  | "friend_family"
+  | "site"
+  | "other";
 
 export type SiteDayVisitor = {
   id: string;
@@ -37,10 +41,16 @@ type DbRow = {
 
 export const VISITOR_KIND_LABELS: Record<SiteDayVisitorKind, string> = {
   trial: "Trial",
-  friend: "Friend",
-  family: "Family",
+  friend_family: "Friend / Family",
+  site: "Site visitor",
   other: "Other",
 };
+
+/** Display label; maps legacy friend/family rows until SQL migrate runs. */
+export function visitorKindLabel(kind: string): string {
+  if (kind === "friend" || kind === "family") return "Friend / Family";
+  return VISITOR_KIND_LABELS[kind as SiteDayVisitorKind] ?? kind;
+}
 
 function toVisitor(r: DbRow): SiteDayVisitor {
   return {

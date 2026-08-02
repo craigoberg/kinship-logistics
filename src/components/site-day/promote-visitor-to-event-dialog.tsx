@@ -27,7 +27,7 @@ import {
   type GuestBookingPrefill,
 } from "@/lib/api/event-guest";
 import {
-  VISITOR_KIND_LABELS,
+  visitorKindLabel,
   type SiteDayVisitor,
 } from "@/lib/api/site-day-visitors";
 import { listEvents, type EventManifest } from "@/lib/data-store";
@@ -44,7 +44,7 @@ const LIVE_STATUSES = new Set(["Planning", "Confirmed", "Open"]);
 
 function buildPrefill(visitor: SiteDayVisitor): GuestBookingPrefill {
   const { firstName, lastName } = splitDisplayNameForGuest(visitor.displayName);
-  const kindLabel = VISITOR_KIND_LABELS[visitor.kind];
+  const kindLabel = visitorKindLabel(visitor.kind);
   const note = visitor.note?.trim();
   const opsNote = note
     ? `From Day Centre visitor (${kindLabel}): ${note}`

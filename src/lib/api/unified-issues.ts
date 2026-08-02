@@ -28,6 +28,8 @@ export interface UnifiedIssue {
   description: string;
   status: string;
   createdAt: string;
+  /** When it happened (operator). Same as createdAt when not captured. */
+  occurredAt: string;
   sourceRowId: string;
   eventId?: string | null;
   raw: unknown;
@@ -99,6 +101,15 @@ function incidentSevToUnified(sev: string | null | undefined): UnifiedSeverity {
   if (sev === "sev2") return "yellow";
   if (sev === "sev3") return "green";
   return null;
+}
+
+function occurredAtFromRow(
+  row: Record<string, unknown>,
+  createdAt: string,
+): string {
+  const v = row.occurred_at;
+  if (typeof v === "string" && v.trim()) return v;
+  return createdAt;
 }
 
 export type UnifiedIssueTab = "active" | "deferred" | "resolved";
@@ -176,6 +187,7 @@ export async function listOpenUnifiedIssues(
         description: desc,
         status,
         createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
         sourceRowId: String(r.id),
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
@@ -250,6 +262,7 @@ export async function listOpenUnifiedIssues(
         description: plan ? `${desc}\n${plan}` : desc,
         status: "resolved",
         createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
         sourceRowId: String(r.id),
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
@@ -273,6 +286,7 @@ export async function listOpenUnifiedIssues(
           description: String(r.description ?? ""),
           status: "resolved",
           createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
           sourceRowId: String(r.id),
           eventId: (r.event_id as string | null) ?? null,
           raw: r,
@@ -296,6 +310,7 @@ export async function listOpenUnifiedIssues(
           description: `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"} (${r.vehicle_info ?? "vehicle"}).`,
           status: "resolved",
           createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
           sourceRowId: String(r.id),
           raw: r,
           lastActivityAt: activityAt.get(key) ?? null,
@@ -389,6 +404,7 @@ export async function listOpenUnifiedIssues(
       description: desc,
       status: String(r.status ?? "open"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
       sourceRowId: String(r.id),
       eventId,
       raw: r,
@@ -413,6 +429,7 @@ export async function listOpenUnifiedIssues(
         description: String(r.description ?? ""),
         status: String(r.status ?? "pending"),
         createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
         sourceRowId: String(r.id),
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
@@ -446,6 +463,7 @@ export async function listOpenUnifiedIssues(
           : `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"} (${r.vehicle_info ?? "vehicle"}). Status: ${status}.`,
         status,
         createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
         sourceRowId: String(r.id),
         raw: r,
         lastActivityAt: activityAt.get(key) ?? null,
@@ -639,6 +657,7 @@ async function fetchDeferredNonDayCentreIssues(
       description: String(r.description ?? ""),
       status: String(r.status ?? "pending"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
       sourceRowId: String(r.id),
       eventId: (r.event_id as string | null) ?? null,
       raw: r,
@@ -661,6 +680,7 @@ async function fetchDeferredNonDayCentreIssues(
       description: `Gate ${r.gate_id ?? "?"} — ${r.driver_name ?? "driver"}. Status: ${r.status ?? "pending"}.`,
       status: String(r.status ?? "pending"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
+          occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
       sourceRowId: String(r.id),
       raw: r,
       lastActivityAt: activityAt.get(key) ?? null,
@@ -682,6 +702,7 @@ async function fetchDeferredNonDayCentreIssues(
       description: (a.description ?? "") + (a.expiry_date ? ` (expires ${formatDate(a.expiry_date)})` : ""),
       status: a.status,
       createdAt: a.updated_at,
+      occurredAt: a.updated_at,
       sourceRowId: a.id,
       raw: a,
       lastActivityAt: activityAt.get(key) ?? null,

@@ -22,6 +22,8 @@ export const deferralAcrossOpsTopic: HelpTopic = {
   relatedIds: [
     "ryge-philosophy",
     "hub-three-streams",
+    "hub-update-sla",
+    "checkin-roll-escalations",
     "governance-hub-issue",
     "day-centre-happy-path",
     "event-deliver-happy-path",
@@ -45,7 +47,7 @@ export const deferralAcrossOpsTopic: HelpTopic = {
     },
     {
       heading: "Event rolls — Deferred until",
-      body: "Morning / evening accountability: when overdue, use roll deferral (PIN on Yellow; verbal consultation path on Red) to push Deferred until for one person or all outstanding. Banners use the pushed time — quiet grace until then, then Yellow, then Red after Admin red minutes. Late return on the bus: defer rather than forcing hotel “Accounted” while still en route.",
+      body: "Morning / evening accountability: when overdue, use roll deferral (PIN on Yellow; verbal consultation path on Red) to push Deferred until for one person or all outstanding. Banners use the pushed time — quiet grace until then, then Yellow, then Red after the Admin-configured red window (Tour roll call settings). Late return on the bus: defer rather than forcing hotel “Accounted” while still en route. See Check-in & roll call escalations.",
     },
     {
       heading: "Compliance / venue baseline grace",

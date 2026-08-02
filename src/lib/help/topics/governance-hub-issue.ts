@@ -20,6 +20,7 @@ export const governanceHubIssueTopic: HelpTopic = {
   menus: ["governance"],
   roles: ["manager", "assistant_manager", "support_worker"],
   relatedIds: [
+    "hub-update-sla",
     "ryge-philosophy",
     "hub-three-streams",
     "deferral-across-ops",
@@ -33,19 +34,19 @@ export const governanceHubIssueTopic: HelpTopic = {
     },
     {
       heading: "Find the issue",
-      body: "Use the tab / tile that matches the subject (person vs asset vs expiry), then severity (RED → YELLOW → GREEN). Tap the card to open Manage issue.",
+      body: "Use the tab / tile that matches the subject (person vs asset vs expiry), then severity (RED → YELLOW → GREEN). Also watch urgency badges — Update Due / Stale mean the ticket needs a fresh Log Note (see Hub regular updates).",
     },
     {
       heading: "Read the trail",
-      body: "Check RYGE severity, when it was raised, verbal-workaround tags, and prior Hub notes. Stale or deferred-until urgency may colour the card.",
+      body: "Check RYGE severity, when it was raised, verbal-workaround tags, and prior Hub notes. Stale or deferred-until urgency may colour the card independently of severity.",
     },
     {
-      heading: "Add an update",
-      body: "Log Note with what changed operationally. Keep facts clear for auditors — free text is retained in packs.",
+      heading: "Add an update (keep open items alive)",
+      body: "Log Note with what changed operationally. Unless the item is Deferred to a next-action date, open tickets escalate to Update Due then Stale when nobody logs activity — thresholds are in Admin System Parameters.",
     },
     {
       heading: "Progress, defer, or resolve",
-      body: "Confirm verbal RED when needed, Defer / Set next action date to park with a deadline, Resolve to close, or escalate to council where applicable. Sign with PIN when the dialog requires it.",
+      body: "Confirm verbal RED when needed, Defer / Set next action date to pause the silence clock until a deadline, Resolve to close, or escalate to council where applicable. Sign with PIN when the dialog requires it.",
     },
   ],
 };

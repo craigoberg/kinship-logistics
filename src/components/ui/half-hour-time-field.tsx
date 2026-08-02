@@ -8,11 +8,6 @@ import {
   PopoverTrigger,
 } from "@/components/ui/popover";
 import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
-import {
   HALF_HOUR_CLOCK_OPTIONS,
   isHalfHourClockTime,
   isValidClockTime,
@@ -91,7 +86,7 @@ export function HalfHourTimeField({
   };
 
   return (
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover modal={false} open={open} onOpenChange={setOpen}>
       <div className={cn("relative", className)}>
         <Input
           id={id}
@@ -110,23 +105,19 @@ export function HalfHourTimeField({
           inputMode="numeric"
           maxLength={5}
         />
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <PopoverTrigger asChild>
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                disabled={disabled}
-                className="absolute right-0 top-0 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
-                aria-label="Pick nearest half hour"
-              >
-                <Clock className="h-4 w-4" />
-              </Button>
-            </PopoverTrigger>
-          </TooltipTrigger>
-          <TooltipContent>Pick half-hour time</TooltipContent>
-        </Tooltip>
+        <PopoverTrigger asChild>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            disabled={disabled}
+            className="absolute right-0 top-0 h-8 w-8 shrink-0 text-muted-foreground hover:text-foreground"
+            aria-label="Pick nearest half hour"
+            title="Pick half-hour time"
+          >
+            <Clock className="h-4 w-4" />
+          </Button>
+        </PopoverTrigger>
       </div>
       <PopoverContent className="w-36 p-1" align="end">
         <div

@@ -34,6 +34,8 @@ export interface CharacterCountedTextareaProps
   maxChars?: number;
   /** If true, the empty-state thick red outline is rendered. Default true. */
   required?: boolean;
+  /** Optional short hint shown opposite the label. */
+  hint?: string;
   /** Counter format: "minimum" → `10/10 minimum`; "standard" → `10 / 20 min · len/max`. */
   counterMode?: "minimum" | "standard";
 }

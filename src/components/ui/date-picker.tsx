@@ -93,7 +93,7 @@ export function DatePicker({
   const [isOpen, setIsOpen] = React.useState(false);
 
   return (
-    <Popover open={isOpen} onOpenChange={setIsOpen}>
+    <Popover modal={false} open={isOpen} onOpenChange={setIsOpen}>
       <PopoverTrigger asChild>
         <Button
           type="button"

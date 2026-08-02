@@ -23,6 +23,7 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
     "events-create-confirm-open",
     "event-open-checks",
     "event-overnight-hotel",
+    "checkin-roll-escalations",
     "meals-service",
     "medication-rounds",
     "manifest-start-run",

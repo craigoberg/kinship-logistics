@@ -587,6 +587,7 @@ export async function clearInfectiousExclusion(
         description: resolutionNote,
         status: "open",
         createdAt: row.declared_at,
+        occurredAt: row.declared_at,
         sourceRowId: row.hub_issue_id,
         eventId: row.event_id ?? null,
         raw: {},

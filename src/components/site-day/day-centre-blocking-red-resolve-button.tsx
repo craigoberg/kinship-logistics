@@ -40,6 +40,7 @@ function toUnifiedIssue(row: DayCentreManageableIssue): UnifiedIssue {
     description: desc,
     status: row.status ?? "open",
     createdAt,
+    occurredAt: createdAt,
     sourceRowId: row.id,
     eventId,
     raw: row,

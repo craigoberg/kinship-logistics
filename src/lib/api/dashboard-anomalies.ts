@@ -60,8 +60,15 @@ export async function ensureDashboardAnomalyIncident(args: {
         description,
         status: "pending",
         createdAt: String(row.created_at ?? new Date().toISOString()),
+        occurredAt: String(
+          (row as { occurred_at?: string }).occurred_at ??
+            row.created_at ??
+            new Date().toISOString(),
+        ),
         sourceRowId: String(row.id),
         raw: row,
+        lastActivityAt: null,
+        deferredUntil: null,
       },
       "Auto-created from Dashboard start/end-day anomaly feed.",
     ).catch(() => {
@@ -71,6 +78,7 @@ export async function ensureDashboardAnomalyIncident(args: {
 
   const id = String(row.id);
   const description = String(row.description ?? "");
+  const createdAt = String(row.created_at ?? new Date().toISOString());
   return {
     key: `incident:${id}`,
     source: "incident",
@@ -81,9 +89,14 @@ export async function ensureDashboardAnomalyIncident(args: {
     title: args.title.slice(0, 120),
     description,
     status: String(row.status ?? "pending"),
-    createdAt: String(row.created_at ?? new Date().toISOString()),
+    createdAt,
+    occurredAt: String(
+      (row as { occurred_at?: string }).occurred_at ?? createdAt,
+    ),
     sourceRowId: id,
     eventId: (row.event_id as string | null) ?? null,
     raw: row,
+    lastActivityAt: null,
+    deferredUntil: null,
   };
 }

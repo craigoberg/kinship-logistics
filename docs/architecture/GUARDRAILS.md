@@ -1317,7 +1317,7 @@ The button always opens `IncidentIntakeDialog` at the lane-chooser step:
 
 | Lane | Label | Outcome |
 | :-- | :-- | :-- |
-| Human / Operational | Injury, welfare, dispute, near-miss | HUB Human side — `incidentType = human_operational` (RYGE form) |
+| Human / Operational | Injury, welfare, medical assist (e.g. EpiPen), dispute, near-miss | HUB Human side — `incidentType = human_operational` (RYGE form) |
 | Equipment & Asset Fault | Bus, iPad, trolley, venue equipment — **any non-human asset** | HUB Asset side — `mechanical` + `maintenance_items` (RYGE form) |
 | **Health & Safety** | Emergency / drill, lockdown / do-not-open / programme suspend, infectious exclusion | Closes the dialog → opens `GlobalHealthSafetyFlow` (manager PIN sheets). **No** `operational_incidents` INCIDENT write. Drill/Live stay **out of** Human/Asset forms. |
 
@@ -1336,6 +1336,10 @@ After selecting Human or Asset the operator **always** sees the RYGE severity di
 | GREEN | Note / near-miss / informational | Description only |
 | YELLOW | Issue present, self-resolvable | Description + workaround plan required |
 | RED | Critical | Description → verbal consultation required (§13.4) |
+
+**Occurred at vs Logged at (BL-106):** Human and Asset lanes require operator **Occurred at** (Sydney date + time via `OccurredAtFields`). `created_at` remains system **Logged at**. Human lane also requires **affected client(s)** (or explicit “No client involved”) and **staff who assisted / involved** (multi-select; may differ from reporter). Same Occurred-at field on Log Anomaly / site_issues / maintenance mirrors.
+
+**Mobile shell:** `IncidentIntakeDialog` and `VerbalConsultationDialog` use `BottomSheet` on phone (`useIsMobile`) and `Dialog` on desktop, with sticky Close-left + primary File footer and §4.4 tap targets. Field content unchanged.
 
 ### 13.4 RED Verbal Consultation (INCIDENT / FAULT path)
 

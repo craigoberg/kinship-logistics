@@ -9,7 +9,7 @@ CREATE TABLE IF NOT EXISTS public.site_day_visitors (
   session_id              uuid NOT NULL REFERENCES public.site_day_sessions(id) ON DELETE CASCADE,
   display_name            text NOT NULL,
   kind                    text NOT NULL
-                          CHECK (kind IN ('trial', 'friend', 'family', 'other')),
+                          CHECK (kind IN ('trial', 'friend_family', 'site', 'other')),
   linked_participant_id   uuid REFERENCES public.participants(id) ON DELETE SET NULL,
   note                    text,
   arrived_at              timestamptz NOT NULL DEFAULT now(),

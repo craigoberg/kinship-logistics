@@ -284,6 +284,10 @@ function IssuesList({
                       { label: "Location", value: location },
                       { label: "Reported by", value: reporter ?? "Unknown staff" },
                       {
+                        label: "Occurred",
+                        value: <FormattedDateTime value={i.occurredAt} />,
+                      },
+                      {
                         label: "Logged",
                         value: <FormattedDateTime value={i.createdAt} />,
                       },

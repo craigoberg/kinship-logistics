@@ -98,6 +98,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
     owner: "internal" | "council";
+    occurredAt: string;
   } | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
@@ -473,8 +474,12 @@ export function StartOfDayPanel({ sessionId }: Props) {
         context={{
           kind: "site-day",
           sessionId,
-          onRedRequested: (description, owner) => {
-            setVerbalPending({ description, owner });
+          onRedRequested: (description, owner, meta) => {
+            setVerbalPending({
+              description,
+              owner,
+              occurredAt: meta.occurredAt,
+            });
           },
         }}
         defaultSeverity={
@@ -508,6 +513,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
               issueDescription: prefixed,
               workaroundPlan: payload.notes,
               owner: verbalPending.owner,
+              occurredAt: verbalPending.occurredAt,
             });
             queryClient.invalidateQueries({ queryKey: ["site-issues", sessionId] });
             queryClient.invalidateQueries({ queryKey: ["governance-unified-issues"] });
@@ -525,6 +531,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
                   sourceRefId: issue.id,
                   locationLabel: `Day Centre — Session ${sessionId.slice(0, 8)}`,
                   reportedBy: reporterName,
+                  occurredAt: verbalPending.occurredAt,
                 });
                 queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
               } catch (maintErr) {

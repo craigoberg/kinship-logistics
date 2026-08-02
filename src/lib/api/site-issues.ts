@@ -35,6 +35,8 @@ export interface SiteIssue {
   resolvedAt: string | null;
   workaroundAcceptedAt: string | null;
   createdAt: string;
+  /** When it happened (operator). Falls back to createdAt when unset. */
+  occurredAt: string;
 }
 
 interface SiteIssueRow {
@@ -56,6 +58,7 @@ interface SiteIssueRow {
   resolved_at: string | null;
   workaround_accepted_at: string | null;
   created_at: string;
+  occurred_at?: string | null;
 }
 
 function rowToIssue(r: SiteIssueRow): SiteIssue {
@@ -82,6 +85,7 @@ function rowToIssue(r: SiteIssueRow): SiteIssue {
     resolvedAt: r.resolved_at,
     workaroundAcceptedAt: r.workaround_accepted_at ?? null,
     createdAt: r.created_at,
+    occurredAt: r.occurred_at ?? r.created_at,
   };
 }
 
@@ -157,6 +161,8 @@ export interface NewSiteIssue {
   eventDaySessionId?: string | null;
   /** BL-084 — Hub area tag (e.g. health_safety). */
   issueArea?: SiteIssueArea | null;
+  /** When the issue actually happened (UTC ISO). Defaults to now if omitted. */
+  occurredAt?: string | null;
 }
 
 export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
@@ -195,6 +201,7 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
     event_id: payload.eventId ?? null,
     event_day_session_id: payload.eventDaySessionId ?? null,
+    occurred_at: payload.occurredAt ?? new Date().toISOString(),
   };
   if (payload.issueArea) {
     insertPayload.issue_area = payload.issueArea;

@@ -39,6 +39,7 @@ export function EventDayVerbalAnomalyFlow({
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
     owner: ResponsibilityOwner;
+    occurredAt: string;
   } | null>(null);
 
   const subjectLabel = `${eventTitle} · ${formatDate(sessionDate)}`;
@@ -53,8 +54,12 @@ export function EventDayVerbalAnomalyFlow({
           eventId,
           eventDaySessionId,
           locationLabel: subjectLabel,
-          onRedRequested: (description, owner) => {
-            setVerbalPending({ description, owner });
+          onRedRequested: (description, owner, meta) => {
+            setVerbalPending({
+              description,
+              owner,
+              occurredAt: meta.occurredAt,
+            });
           },
         }}
       />
@@ -87,6 +92,7 @@ export function EventDayVerbalAnomalyFlow({
               owner: pending.owner,
               eventId,
               eventDaySessionId,
+              occurredAt: pending.occurredAt,
             });
 
             // RED venue issues also land in Maintenance & Repairs (§14.2).
@@ -103,6 +109,7 @@ export function EventDayVerbalAnomalyFlow({
                   eventId,
                   locationLabel: subjectLabel,
                   reportedBy: reporterName,
+                  occurredAt: pending.occurredAt,
                 });
                 qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
               } catch (err) {

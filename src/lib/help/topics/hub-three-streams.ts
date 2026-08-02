@@ -21,6 +21,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
   roles: ["manager", "assistant_manager", "support_worker"],
   relatedIds: [
     "ryge-philosophy",
+    "hub-update-sla",
     "deferral-across-ops",
     "governance-hub-issue",
     "red-verbal-consultation",
@@ -52,7 +53,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     },
     {
       heading: "Active vs Deferred vs resolved",
-      body: "Active lists what needs attention now. Defer parks an item until a next-action date (see Defer how-to). Resolve closes the operational loop with justification; Compliance may archive/renew instead of a simple resolve.",
+      body: "Active lists what needs attention now — and open Active items need regular Log Notes or they show Update Due / Stale (see Hub regular updates). Defer parks an item until a next-action date (see Defer how-to). Resolve closes the operational loop with justification; Compliance may archive/renew instead of a simple resolve.",
     },
   ],
 };

@@ -73,6 +73,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
 | **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds |
 | **Time entry (half-hour + exact)** | Defined | `HalfHourTimeField` | Roll call times, tour defaults | Single `HH:mm` input + clock popup (24h half-hour slots). **Not** separate dropdown + second field |
+| **Occurred at (vs Logged at)** | **Defined** | `OccurredAtFields` (`DatePicker` + `HalfHourTimeField`) | Big Red Human/Asset, Log Anomaly, any late-filed issue | Operator when-it-happened; system `created_at` = logged. No future; Hub shows both |
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
 | **PIN capture** | Defined | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` | Login, step-up auth | GUARDRAILS §2.3 — never OS keyboard PIN |
 | **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
@@ -122,6 +123,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold` — variants: `primary` (blue), `success` (green), `caution` (amber, use `pulse`), `destructive` (red), `secondary` (muted). `fullWidth={false}` for toolbar chips. See `src/components/ui/field-action-button.tsx` |
 | **Manager ops toolbar** | **Defined** | `ManagerOpsChip` → `FieldActionButton` solid fills | Emergency / lockdown / infectious / do-not-open / suspend chips **inside** H&S sheet or Start-of-Day | **Never** thin outline on dark UI. Tones: `emergency`=solid red, `caution`=solid amber+black, `neutral`=muted. `layout="chip"` or `stack`. |
 | **Big Red → Health & Safety** | **Defined** | `IncidentIntakeDialog` lane 3 → `GlobalHealthSafetyFlow` | Every screen via Big Red | Third lane opens H&S BottomSheet (Emergency · site hold · Infectious). **No** INCIDENT write. **No** duplicate H&S/Emergency chips on Day Centre Active, Event Deliver, or Manifest. Log anomaly / Close / Log Venue Issue stay on primary bars. Start-of-Day **Do not open** may remain on that panel. |
+| **Big Red Incident shell (mobile)** | **Defined** | `IncidentIntakeDialog` + `VerbalConsultationDialog`: `BottomSheet` mobile / `Dialog` desktop; sticky Close-left + `FieldActionButton` primary; multi-select lists `min-h-14` solid selected | Phone-first Big Red Human/Asset + RED verbal | Same fields; no wizard. H&S lane already sheets. Filter + tall tap lists (not `Select`) for clients/staff/managers. |
 | **Field multi-option picker** | Defined | `MobileFieldButton` with `badgeWhenIdle` | Start point, return depart point, 3-option layouts | Use `tone="success"` for location pickers; `badgeWhenIdle="Default"` or `"Recommended"` for the pre-selected option. No hand-rolled `optionClass`. |
 | **Field select (many items)** | Defined (exception) | shadcn `Select` | Bus run picker, event picker when list > ~6 items | Acceptable exception to tap-list rule when the option set is too long for cards. Field routes with ≤6 options must use `MobileFieldButton`. |
 | **Walkaround severity display** | Defined | `SEVERITY_DISPLAY` constant | Walkaround issue chips in `IssueAccumulatorPanel` | Colours match `RYGE_SEVERITY_CHIPS` active state. Also used for ledger text (emoji + label). Do not hand-roll a local `severityChip()`. |
@@ -486,6 +488,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-02 | Big Red mobile shell | Incident + RED verbal: BottomSheet on mobile, sticky File footer, min-h-14 tap lists, stacked severity / Occurred at — touch-first |
+| 2026-08-02 | Occurred at vs Logged at | `OccurredAtFields` on Big Red Human/Asset + Log Anomaly; Hub shows both; Human lane structured client(s) + assisting staff (multi) — BL-106 |
 | 2026-07-30 | Dialog/Sheet footer Close-left | Migrated save forms to §4.2 Close (outline, left) + primary right; Cancel→Close on ordinary forms; added Close where missing |
 | 2026-07-30 | Day Centre open-block Resolve | Manager **Resolve** on pre-open + Start of Day Cannot open blockers; Hub Active includes `awaiting_external`; defer no longer blocks Open Centre |
 | 2026-07-30 | Admin Council email (mailto) | `CouncilEmailAdminPanel` — To / From / template; blank From = normal mailto; seed SQL `2026-07-30_council_email_params.sql` |

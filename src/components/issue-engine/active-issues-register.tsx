@@ -132,7 +132,7 @@ export function ActiveIssuesRegister({
                       {i.sourceLabel}
                     </Badge>
                     <span>·</span>
-                    <ClientTime iso={i.createdAt} />
+                    <ClientTime iso={i.occurredAt} />
                     {workaround && (
                       <Badge className="bg-amber-500 text-black">
                         Workaround in force

@@ -40,7 +40,12 @@ interface Props {
   onClose: (changed: boolean) => void;
 }
 
-const KINDS: SiteDayVisitorKind[] = ["trial", "friend", "family", "other"];
+const KINDS: SiteDayVisitorKind[] = [
+  "trial",
+  "friend_family",
+  "site",
+  "other",
+];
 
 export function AddVisitorModal({ open, sessionId, onClose }: Props) {
   const qc = useQueryClient();
@@ -113,8 +118,9 @@ export function AddVisitorModal({ open, sessionId, onClose }: Props) {
         <DialogHeader>
           <DialogTitle>Add visitor</DialogTitle>
           <DialogDescription>
-            Non-registered guest on site today (trial, friend, family, or other).
-            Not a client on the attendance roll — mark left before Close Centre.
+            Non-registered person on site today — trial, friend/family, site
+            visitor (tradie, inspector, council, etc.), or other. Not a client on
+            the attendance roll — mark left before Close Centre.
           </DialogDescription>
         </DialogHeader>
 
@@ -200,7 +206,7 @@ export function AddVisitorModal({ open, sessionId, onClose }: Props) {
               onChange={(e) => setNote(e.target.value)}
               rows={2}
               maxLength={300}
-              placeholder="e.g. Trying day programme with support worker…"
+              placeholder="e.g. AC repair / fire inspection / with support worker…"
             />
           </div>
         </div>

@@ -438,6 +438,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
         rows={[
           { label: "Location", value: location },
           { label: "Reported by", value: reporter ?? "Unknown staff" },
+          { label: "Occurred", value: <FormattedDateTime value={issue.occurredAt} /> },
           { label: "Logged", value: <FormattedDateTime value={issue.createdAt} /> },
           reviewStarted
             ? {

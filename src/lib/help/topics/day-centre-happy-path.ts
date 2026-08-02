@@ -20,6 +20,7 @@ export const dayCentreHappyPathTopic: HelpTopic = {
   menus: ["day"],
   roles: ["support_worker", "manager", "assistant_manager", "driver"],
   relatedIds: [
+    "checkin-roll-escalations",
     "meals-service",
     "medication-rounds",
     "red-verbal-consultation",

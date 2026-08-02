@@ -28,9 +28,26 @@ import { getStaffId, resolveStaffIdWithFallback, resolveStaffDisplayName } from 
 import { siteIssuesKey, activeSiteIssuesKey } from "@/hooks/use-site-issues";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
+import { OccurredAtFields } from "@/components/issue-engine/occurred-at-fields";
+import {
+  defaultOccurredAtParts,
+  isOccurredAtPartsValid,
+  occurredAtPartsToIso,
+} from "@/lib/ui/occurred-at";
 // `raiseOperationalEscalation` + `setPhase` removed: RED no longer triggers a
 // multi-device handshake. The local operator now opens a VerbalConsultationDialog
 // directly via the `onRedRequested` callback below.
+
+/** Extra fields passed with RED hand-off (BL-106 occurred at). */
+export type AnomalyRedMeta = {
+  occurredAt: string;
+};
+
+export type AnomalyRedRequested = (
+  description: string,
+  owner: ResponsibilityOwner,
+  meta: AnomalyRedMeta,
+) => void;
 
 /**
  * Reentrant Issue/Escalation modal — `context` selects the pipeline.
@@ -56,7 +73,7 @@ export type AnomalyContext =
        * The parent panel opens VerbalConsultationDialog and, on acceptance,
        * writes the `[VERBAL WORKAROUND]` open ticket itself.
        */
-      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
+      onRedRequested?: AnomalyRedRequested;
     }
   | {
       kind: "pre-trip";
@@ -68,9 +85,10 @@ export type AnomalyContext =
         description: string;
         workaround: string | null;
         owner: ResponsibilityOwner;
+        occurredAt: string;
       }) => void;
       /** Pre-trip RED — parent opens VerbalConsultationDialog. */
-      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
+      onRedRequested?: AnomalyRedRequested;
     }
   | {
       /**
@@ -84,7 +102,7 @@ export type AnomalyContext =
       eventDaySessionId: string;
       /** Optional venue/session label for maintenance item context. */
       locationLabel?: string;
-      onRedRequested?: (description: string, owner: ResponsibilityOwner) => void;
+      onRedRequested?: AnomalyRedRequested;
     };
 
 interface Props {
@@ -100,17 +118,26 @@ interface AnomalyDraft {
   severity: RygeSeverity;
   description: string;
   workaround: string;
+  /** YYYY-MM-DD */
+  occurredDate: string;
+  /** HH:mm */
+  occurredTime: string;
 }
 
 // All floor-logged anomalies are owned by the internal team. Council
 // routing is performed downstream from the Governance Hub.
 const DEFAULT_OWNER: ResponsibilityOwner = "internal";
 
-const makeInitial = (severity: RygeSeverity): AnomalyDraft => ({
-  severity,
-  description: "",
-  workaround: "",
-});
+const makeInitial = (severity: RygeSeverity): AnomalyDraft => {
+  const parts = defaultOccurredAtParts();
+  return {
+    severity,
+    description: "",
+    workaround: "",
+    occurredDate: parts.date,
+    occurredTime: parts.time,
+  };
+};
 
 // `triggerEscalation` event broadcaster removed — RED now opens the local
 // VerbalConsultationDialog instead of dispatching a multi-device alert.
@@ -156,27 +183,40 @@ export function LogAnomalyModal({
   const descriptionOk = values.description.trim().length >= MIN_CHARS;
   const workaroundOk =
     !requiresWorkaround || values.workaround.trim().length >= MIN_CHARS;
+  const occurredParts = {
+    date: values.occurredDate || "",
+    time: values.occurredTime || "",
+  };
+  const occurredOk = isOccurredAtPartsValid(occurredParts);
 
   const blockingErrors = useMemo(() => {
     const errs: string[] = [];
+    if (!occurredOk) errs.push("Occurred at (date + time) is required.");
     if (!descriptionOk)
       errs.push(`Issue Description must be at least ${MIN_CHARS} characters.`);
     if (!workaroundOk)
       errs.push(`Yellow workaround must be at least ${MIN_CHARS} characters.`);
     return errs;
-  }, [descriptionOk, workaroundOk]);
+  }, [occurredOk, descriptionOk, workaroundOk]);
 
   const mutation = useMutation({
     mutationFn: async () => {
       const workaroundPlan =
         values.severity === "yellow" ? values.workaround.trim() : null;
+      const occurredAt = occurredAtPartsToIso({
+        date: values.occurredDate,
+        time: values.occurredTime,
+      });
+      if (!occurredAt) throw new Error("Occurred at is required.");
 
       // ---------- Pre-trip context: no site_session in scope ----------
       if (context.kind === "pre-trip") {
         if (values.severity === "red") {
           // Single-user verbal flow: hand off to the parent to open the
           // VerbalConsultationDialog. No DB writes here.
-          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
+          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER, {
+            occurredAt,
+          });
           return { kind: "pre-trip", severity: "red" as RygeSeverity } as const;
         }
 
@@ -185,6 +225,7 @@ export function LogAnomalyModal({
           description: values.description.trim(),
           workaround: workaroundPlan,
           owner: DEFAULT_OWNER,
+          occurredAt,
         });
         return { kind: "pre-trip", severity: values.severity } as const;
       }
@@ -192,7 +233,9 @@ export function LogAnomalyModal({
       // ---------- Event-day context (§12.6) ----------
       if (context.kind === "event-day") {
         if (values.severity === "red") {
-          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
+          context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER, {
+            occurredAt,
+          });
           return { kind: "event-day-red" as const };
         }
         const issue = await createIssue({
@@ -203,6 +246,7 @@ export function LogAnomalyModal({
           owner: DEFAULT_OWNER,
           eventId: context.eventId,
           eventDaySessionId: context.eventDaySessionId,
+          occurredAt,
         });
         return { kind: "event-day" as const, issue, eventDaySessionId: context.eventDaySessionId };
       }
@@ -214,7 +258,9 @@ export function LogAnomalyModal({
         // Single-user verbal flow: parent opens VerbalConsultationDialog and,
         // on acceptance, writes the `[VERBAL WORKAROUND]` site_issues_register
         // ticket. The session phase is NOT flipped to `escalated_lock`.
-        context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER);
+        context.onRedRequested?.(values.description.trim(), DEFAULT_OWNER, {
+          occurredAt,
+        });
         return { kind: "site-day-red" as const };
       }
 
@@ -224,6 +270,7 @@ export function LogAnomalyModal({
         issueDescription: values.description.trim(),
         workaroundPlan,
         owner: DEFAULT_OWNER,
+        occurredAt,
       };
       const issue = await createIssue(payload);
       return { kind: "site-day" as const, issue };
@@ -262,6 +309,7 @@ export function LogAnomalyModal({
               eventId: eventCtx.eventId,
               locationLabel: eventCtx.locationLabel ?? null,
               reportedBy: reporterName,
+              occurredAt: result.issue.occurredAt,
             });
             queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
           } catch (err) {
@@ -310,6 +358,7 @@ export function LogAnomalyModal({
               sourceRefId: issue.id,
               locationLabel: `Day Centre — Session ${sId.slice(0, 8)}`,
               reportedBy: reporterName,
+              occurredAt: issue.occurredAt,
             });
             queryClient.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
           } catch (err) {
@@ -350,7 +399,8 @@ export function LogAnomalyModal({
   });
 
 
-  const canSubmit = descriptionOk && workaroundOk && !mutation.isPending;
+  const canSubmit =
+    descriptionOk && workaroundOk && occurredOk && !mutation.isPending;
 
   const handleClose = (next: boolean) => {
     onOpenChange(next);
@@ -388,6 +438,14 @@ export function LogAnomalyModal({
         )}
 
         <div className="space-y-4 py-1">
+          <OccurredAtFields
+            value={occurredParts}
+            onChange={(next) =>
+              setValues({ occurredDate: next.date, occurredTime: next.time })
+            }
+            disabled={mutation.isPending}
+          />
+
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Severity

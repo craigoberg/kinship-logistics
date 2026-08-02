@@ -323,6 +323,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
         rows={[
           { label: "Location", value: item.locationLabel },
           { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
+          { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
           { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
           reviewStarted && reviewStartedNote
             ? {
@@ -706,7 +707,8 @@ function ItemsList({ tab, onManage }: ItemsListProps) {
                       : []),
                     { label: "Location", value: item.locationLabel },
                     { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
-                    { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
+                    { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
+          { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
                     {
                       label: "Updated",
                       value: <FormattedDateTime value={item.updatedAt} />,

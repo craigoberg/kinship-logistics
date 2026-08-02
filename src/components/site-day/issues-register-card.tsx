@@ -53,7 +53,13 @@ export function IssuesRegisterCard({ issue }: Props) {
           {sevLabel}
         </span>
         <span className="text-xs text-muted-foreground">
-          <ClientTime iso={issue.createdAt} />
+          Occurred <ClientTime iso={issue.occurredAt} />
+          {issue.occurredAt !== issue.createdAt && (
+            <>
+              {" "}
+              · Logged <ClientTime iso={issue.createdAt} />
+            </>
+          )}
         </span>
         {issue.owner === "council" && (
           <Badge variant="outline" className="gap-1 text-[10px]">

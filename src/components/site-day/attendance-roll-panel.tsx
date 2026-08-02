@@ -56,7 +56,7 @@ import {
   listSiteDayVisitors,
   markSiteDayVisitorLeft,
   siteDayVisitorsKey,
-  VISITOR_KIND_LABELS,
+  visitorKindLabel,
   type SiteDayVisitor,
 } from "@/lib/api/site-day-visitors";
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
@@ -1024,7 +1024,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                         variant="outline"
                         className="border border-slate-400 bg-white text-[10px] uppercase text-slate-900"
                       >
-                        {VISITOR_KIND_LABELS[v.kind]}
+                        {visitorKindLabel(v.kind)}
                       </Badge>
                       {present ? (
                         <Badge className="bg-amber-500 text-[10px] uppercase text-white">

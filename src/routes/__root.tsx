@@ -22,6 +22,7 @@ import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
 import { Toaster } from "../components/ui/sonner";
+import { TooltipProvider } from "../components/ui/tooltip";
 import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
 import {
   markOperationalClockClientReady,
@@ -184,22 +185,25 @@ function RootComponent() {
 
   return (
     <QueryClientProvider client={queryClient}>
-      <AuthGate />
-      {isAuthRoute ? (
-        // Bare-shell terminal view — no AppShell chrome on the sign-in screen.
-        <Outlet />
-      ) : (
-        <>
-          <DevOperationalClockBar />
-          {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-          <AppShell>
-            <Outlet />
-          </AppShell>
-          <NotificationSimulator />
-          <RoleAwareGuardians />
-        </>
-      )}
-      <Toaster />
+      {/* Root provider so global overlays (Big Red Incident) work outside AppShell. */}
+      <TooltipProvider delayDuration={300}>
+        <AuthGate />
+        {isAuthRoute ? (
+          // Bare-shell terminal view — no AppShell chrome on the sign-in screen.
+          <Outlet />
+        ) : (
+          <>
+            <DevOperationalClockBar />
+            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+            <AppShell>
+              <Outlet />
+            </AppShell>
+            <NotificationSimulator />
+            <RoleAwareGuardians />
+          </>
+        )}
+        <Toaster />
+      </TooltipProvider>
     </QueryClientProvider>
   );
 }

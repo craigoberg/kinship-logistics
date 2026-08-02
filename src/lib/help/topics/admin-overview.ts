@@ -22,6 +22,8 @@ export const adminOverviewTopic: HelpTopic = {
   relatedIds: [
     "admin-venues",
     "admin-vendors",
+    "hub-update-sla",
+    "checkin-roll-escalations",
     "event-open-checks",
     "add-staff",
   ],
@@ -40,7 +42,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "System Parameters — structured panels",
-      body: "Prefer named panels over raw JSON: Tour roll call defaults; Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack.",
+      body: "Prefer named panels over raw JSON: Multi-day tour roll calls (default times + Green/Yellow/Red alert minutes + max deferral); Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack. Hub Update Due / Stale thresholds and attendance no-show / roll-call grace keys also live here as System Parameters.",
     },
     {
       heading: "System Parameters — JSON table",

@@ -79,6 +79,7 @@ export function ActiveDayPanel({ session }: Props) {
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
     owner: ResponsibilityOwner;
+    occurredAt: string;
   } | null>(null);
 
 
@@ -363,8 +364,8 @@ export function ActiveDayPanel({ session }: Props) {
           context={{
             kind: "site-day",
             sessionId: session.id,
-            onRedRequested: (description, owner) => {
-              setVerbalPending({ description, owner });
+            onRedRequested: (description, owner, meta) => {
+              setVerbalPending({ description, owner, occurredAt: meta.occurredAt });
             },
           }}
         />
@@ -394,6 +395,7 @@ export function ActiveDayPanel({ session }: Props) {
               issueDescription: prefixed,
               workaroundPlan: payload.notes,
               owner: verbalPending.owner,
+              occurredAt: verbalPending.occurredAt,
             });
             queryClient.invalidateQueries({ queryKey: siteIssuesKey(session.id) });
             queryClient.invalidateQueries({ queryKey: activeSiteIssuesKey(session.id) });

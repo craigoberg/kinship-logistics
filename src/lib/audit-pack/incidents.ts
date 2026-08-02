@@ -27,6 +27,7 @@ export interface AuditIncidentRow {
   hubSource: string;
   id: string;
   createdAt: string;
+  occurredAt: string;
   severity: string;
   status: string;
   description: string;
@@ -119,6 +120,7 @@ export async function listAuditIncidents(
       hubSource: "incident",
       id,
       createdAt: String(r.created_at ?? ""),
+      occurredAt: String(r.occurred_at ?? r.created_at ?? ""),
       severity: String(r.severity ?? ""),
       status: String(r.status ?? ""),
       description: String(r.description ?? ""),
@@ -156,6 +158,7 @@ export async function listAuditIncidents(
       hubSource,
       id,
       createdAt: String(r.created_at ?? ""),
+      occurredAt: String(r.occurred_at ?? r.created_at ?? ""),
       severity: String(r.severity ?? ""),
       status: String(r.status ?? ""),
       description: String(r.issue_description ?? ""),
@@ -195,6 +198,7 @@ export async function assembleIncidentsSection(
       "hubSource",
       "id",
       "createdAt",
+      "occurredAt",
       "severity",
       "status",
       "description",
@@ -216,6 +220,7 @@ export async function assembleIncidentsSection(
       ...r,
       reporterId: auditIdentity().staffKey(r.reporterId),
       createdAt: auditDateTime(r.createdAt),
+      occurredAt: auditDateTime(r.occurredAt),
       deferredUntil: auditDateTime(r.deferredUntil) || auditDate(r.deferredUntil),
       resolvedAt: auditDateTime(r.resolvedAt),
       lastNoteAt: auditDateTime(r.lastNoteAt),

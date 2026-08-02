@@ -43,7 +43,7 @@ export function BottomSheet({
           className,
         )}
       >
-        <SheetHeader className="mb-4">
+        <SheetHeader className="mb-4 shrink-0 pr-8">
           <SheetTitle className="text-left text-lg">{title}</SheetTitle>
           {description && (
             <SheetDescription className="text-left text-sm">{description}</SheetDescription>

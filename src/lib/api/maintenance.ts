@@ -46,6 +46,8 @@ export interface MaintenanceItem {
   resolvedAt: string | null;
   createdAt: string;
   updatedAt: string;
+  /** When the fault actually happened. Falls back to createdAt when unset. */
+  occurredAt: string;
   /** Timestamp of the most recent maintenance note; null if no notes yet. */
   lastNoteAt: string | null;
 }
@@ -68,6 +70,8 @@ export interface NewMaintenanceItem {
   eventId?: string | null;
   locationLabel?: string | null;
   reportedBy?: string | null;
+  /** When the fault actually happened (UTC ISO). */
+  occurredAt?: string | null;
 }
 
 // ── Row → domain mappers ──────────────────────────────────────────────────────
@@ -94,6 +98,7 @@ function rowToItem(r: Record<string, any>): MaintenanceItem {
     resolvedAt: r.resolved_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
+    occurredAt: r.occurred_at ?? r.created_at,
     lastNoteAt: r.last_note_at ?? null,
   };
 }
@@ -173,7 +178,7 @@ export async function listMaintenanceItems(
   let q = supabase
     .from("maintenance_items")
     .select(
-      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, last_note_at",
+      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, occurred_at, last_note_at",
     )
     .order("created_at", { ascending: false });
 
@@ -245,6 +250,7 @@ export async function createMaintenanceItem(
       event_id: item.eventId ?? null,
       location_label: item.locationLabel ?? null,
       reported_by: item.reportedBy ?? null,
+      occurred_at: item.occurredAt ?? new Date().toISOString(),
     })
     .select()
     .single();

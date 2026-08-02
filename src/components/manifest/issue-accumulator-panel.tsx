@@ -125,6 +125,7 @@ export function IssueAccumulatorPanel({
   const [verbalPending, setVerbalPending] = useState<{
     description: string;
     owner: "internal" | "council";
+    occurredAt: string;
   } | null>(null);
 
   const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
@@ -515,6 +516,7 @@ export function IssueAccumulatorPanel({
                   vehicle_id: asset.id,
                   reported_by: driverName || "driver",
                   status: "pending",
+                  occurred_at: draft.occurredAt,
                 })
                 .select("id")
                 .single();
@@ -535,8 +537,12 @@ export function IssueAccumulatorPanel({
               });
             }
           },
-          onRedRequested: (description, owner) => {
-            setVerbalPending({ description, owner });
+          onRedRequested: (description, owner, meta) => {
+            setVerbalPending({
+              description,
+              owner,
+              occurredAt: meta.occurredAt,
+            });
           },
         }}
       />
@@ -577,6 +583,7 @@ export function IssueAccumulatorPanel({
                 vehicle_id: asset.id,
                 reported_by: driverName || "driver",
                 status: "pending",
+                occurred_at: verbalPending.occurredAt,
               })
               .select("id")
               .single();
