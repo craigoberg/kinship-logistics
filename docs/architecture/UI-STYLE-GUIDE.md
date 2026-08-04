@@ -77,6 +77,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
 | **PIN capture** | Defined | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` | Login, step-up auth | GUARDRAILS §2.3 — never OS keyboard PIN |
 | **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
+| **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
 | **Field single-select (compact)** | Defined | `MobileOptionButton` | Enum rows, med status | Same visual contract |
 | **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` |
@@ -488,6 +489,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-04 | Staff day-login password set | Edit personnel: set/reset Auth password via manager PIN + service-role server fn — interim Alpha (BL-002 later) |
 | 2026-08-02 | Big Red mobile shell | Incident + RED verbal: BottomSheet on mobile, sticky File footer, min-h-14 tap lists, stacked severity / Occurred at — touch-first |
 | 2026-08-02 | Occurred at vs Logged at | `OccurredAtFields` on Big Red Human/Asset + Log Anomaly; Hub shows both; Human lane structured client(s) + assisting staff (multi) — BL-106 |
 | 2026-07-30 | Dialog/Sheet footer Close-left | Migrated save forms to §4.2 Close (outline, left) + primary right; Cancel→Close on ordinary forms; added Close where missing |

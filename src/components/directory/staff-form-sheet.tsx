@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Plus, Trash2, Save } from "lucide-react";
+import { KeyRound, Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -15,7 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
-import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -25,13 +25,17 @@ import {
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { PinPad } from "@/components/auth/pin-pad";
+import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
+import { verifyManagerPin } from "@/components/auth/pin-verify";
 import {
   useInsertStaffMember,
   useUpdateStaffMember,
 } from "@/hooks/use-supabase-data";
-import { hashPin } from "@/lib/data-store";
+import { setStaffDayLoginPassword } from "@/lib/api/staff-auth";
+import { getActiveUserProfile, hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 import { ACCESS_ROLES } from "@/lib/access-roles";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
 
 
 
@@ -56,10 +60,14 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [notes, setNotes] = useState("");
   const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
+  const [dayPassword, setDayPassword] = useState("");
+  const [dayPasswordConfirm, setDayPasswordConfirm] = useState("");
+  const [passwordPinOpen, setPasswordPinOpen] = useState(false);
+  const [passwordBusy, setPasswordBusy] = useState(false);
 
   const insert = useInsertStaffMember();
   const update = useUpdateStaffMember();
-  const busy = insert.isPending || update.isPending;
+  const busy = insert.isPending || update.isPending || passwordBusy;
 
   useEffect(() => {
     if (!open) return;
@@ -73,6 +81,9 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setNotes(staff?.notes ?? "");
     setPin("");
     setCerts(staff?.certifications ?? []);
+    setDayPassword("");
+    setDayPasswordConfirm("");
+    setPasswordPinOpen(false);
   }, [open, staff]);
 
   const updateCert = (i: number, patch: Partial<StaffCertification>) => {
@@ -113,28 +124,13 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         });
         return;
       }
-      const payload: StaffPayload = {
-        fullName: fullName.trim(),
-        role: role.trim() || null,
-        personnelType: personnelType || null,
-        phone: phone.trim() || null,
-        email: email.trim() || null,
-        streetAddress: streetAddress.trim() || null,
-        active,
-        notes: notes.trim() || null,
-        certifications: certs
-          .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
-          .map((c) => ({
-            name: c.name.trim(),
-            number: c.number.trim(),
-            expiry: c.expiry || null,
-          })),
-      };
+      let pinHash: string | null | undefined;
       if (trimmedPin) {
         console.log("[staff-form] hashing PIN");
-        payload.pinHash = await hashPin(trimmedPin);
+        pinHash = await hashPin(trimmedPin);
         console.log("[staff-form] PIN hashed OK");
       }
+      const payload = buildStaffPayload(pinHash);
       console.log("[staff-form] sending mutation", payload);
       if (isEdit && staff) {
         await update.mutateAsync({ id: staff.id, payload });
@@ -163,6 +159,86 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const pinMissing = !isEdit && !pinValidLive;
   const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
   const canSave = !busy && !nameMissing && !roleMissing && !personnelTypeMissing && !pinMissing && !pinBadFormat;
+
+  const formEmail = email.trim().toLowerCase();
+  const formEmailValid = formEmail.includes("@");
+  const dayPasswordTooShort = dayPassword.length > 0 && dayPassword.length < 6;
+  const dayPasswordMismatch =
+    dayPasswordConfirm.length > 0 && dayPassword !== dayPasswordConfirm;
+  const dayPasswordMissing = !dayPassword;
+  const dayPasswordConfirmMissing = !dayPasswordConfirm;
+  const canSetDayPassword =
+    isEdit &&
+    !!staff &&
+    formEmailValid &&
+    !dayPasswordMissing &&
+    !dayPasswordConfirmMissing &&
+    !dayPasswordTooShort &&
+    !dayPasswordMismatch &&
+    !passwordBusy;
+
+  const buildStaffPayload = (pinHash?: string | null): StaffPayload => ({
+    fullName: fullName.trim(),
+    role: role.trim() || null,
+    personnelType: personnelType || null,
+    phone: phone.trim() || null,
+    email: email.trim() || null,
+    streetAddress: streetAddress.trim() || null,
+    active,
+    notes: notes.trim() || null,
+    certifications: certs
+      .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
+      .map((c) => ({
+        name: c.name.trim(),
+        number: c.number.trim(),
+        expiry: c.expiry || null,
+      })),
+    ...(pinHash !== undefined ? { pinHash } : {}),
+  });
+
+  const applyDayPassword = async (actorPin: string) => {
+    if (!staff) return;
+    const profile = getActiveUserProfile();
+    const actorStaffId = profile?.staffId ?? "";
+    if (!actorStaffId) {
+      throw new Error("Active staff profile required for manager PIN step-up.");
+    }
+    if (!formEmailValid) {
+      throw new Error("Enter a valid email for day login before setting the password.");
+    }
+    setPasswordBusy(true);
+    try {
+      // Persist email (and current form fields) so the server reads the right address.
+      const saved = (staff.email ?? "").trim().toLowerCase();
+      if (formEmail !== saved || email.trim() !== (staff.email ?? "").trim()) {
+        await update.mutateAsync({ id: staff.id, payload: buildStaffPayload() });
+      }
+      const result = await setStaffDayLoginPassword({
+        targetStaffId: staff.id,
+        newPassword: dayPassword,
+        actorStaffId,
+        actorPin,
+      });
+      setDayPassword("");
+      setDayPasswordConfirm("");
+      const bits = [
+        result.createdAuthUser ? "Auth user created" : "Password updated",
+        result.linkedAuthUserId ? "auth_user_id linked" : null,
+      ].filter(Boolean);
+      toast.success("Day-login password set", {
+        description: `${result.email}${bits.length ? ` · ${bits.join(" · ")}` : ""}`,
+      });
+    } catch (err) {
+      toast.error("Set password failed", {
+        description: (err as Error)?.message ?? String(err),
+        className: "!bg-red-600 !text-white !border-red-700",
+        duration: 12_000,
+      });
+      throw err;
+    } finally {
+      setPasswordBusy(false);
+    }
+  };
 
   return (
 
@@ -224,8 +300,17 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             <Field label="Phone">
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
             </Field>
-            <Field label="Email">
-              <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
+            <Field label="Email (day login)">
+              <Input
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                type="email"
+                autoComplete="off"
+                placeholder="name@example.com"
+              />
+              <p className="text-[11px] text-muted-foreground/70">
+                Same email as Supabase Auth day login. Also editable in the password section below.
+              </p>
             </Field>
             <Field label="Street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
@@ -368,6 +453,98 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           <Field label="Notes">
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </Field>
+
+          {isEdit && staff && (
+            <section className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Day-login password (Supabase Auth)
+                </Label>
+                <p className="mt-1 text-[11px] text-muted-foreground">
+                  Email + password for morning day login — separate from the 4-digit PIN. Setting
+                  the password also saves the email on this record if you just typed it. Interim
+                  Alpha control — RBAC will revisit later.
+                </p>
+              </div>
+              <Field label="Email for day login" required>
+                <Input
+                  type="email"
+                  autoComplete="off"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="name@example.com"
+                  aria-invalid={!formEmailValid}
+                  className={requiredFieldOutline(!formEmailValid)}
+                />
+                {!formEmailValid && (
+                  <p className="text-[11px] text-destructive">
+                    Enter the email this person will use at day login.
+                  </p>
+                )}
+              </Field>
+              <Field label="New password" required>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={dayPassword}
+                  onChange={(e) => setDayPassword(e.target.value)}
+                  aria-invalid={dayPasswordMissing || dayPasswordTooShort}
+                  className={requiredFieldOutline(
+                    dayPasswordMissing || dayPasswordTooShort,
+                  )}
+                />
+                {(dayPasswordMissing || dayPasswordTooShort) && (
+                  <p className="text-[11px] text-destructive">
+                    {dayPasswordMissing
+                      ? "Password is required."
+                      : "Password must be at least 6 characters."}
+                  </p>
+                )}
+              </Field>
+              <Field label="Confirm password" required>
+                <Input
+                  type="password"
+                  autoComplete="new-password"
+                  value={dayPasswordConfirm}
+                  onChange={(e) => setDayPasswordConfirm(e.target.value)}
+                  aria-invalid={dayPasswordConfirmMissing || dayPasswordMismatch}
+                  className={requiredFieldOutline(
+                    dayPasswordConfirmMissing || dayPasswordMismatch,
+                  )}
+                />
+                {(dayPasswordConfirmMissing || dayPasswordMismatch) && (
+                  <p className="text-[11px] text-destructive">
+                    {dayPasswordConfirmMissing
+                      ? "Confirm password is required."
+                      : "Passwords do not match."}
+                  </p>
+                )}
+              </Field>
+              {!canSetDayPassword && !passwordBusy && (
+                <p className={cn("text-[11px] text-destructive")}>
+                  {[
+                    !formEmailValid && "Email for day login",
+                    dayPasswordMissing && "New password",
+                    dayPasswordConfirmMissing && "Confirm password",
+                    dayPasswordTooShort && "Password min 6 characters",
+                    dayPasswordMismatch && "Passwords must match",
+                  ]
+                    .filter(Boolean)
+                    .join(", ")}
+                </p>
+              )}
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!canSetDayPassword}
+                className="gap-1.5"
+                onClick={() => setPasswordPinOpen(true)}
+              >
+                <KeyRound className="h-4 w-4" />
+                {passwordBusy ? "Setting…" : "Set day-login password"}
+              </Button>
+            </section>
+          )}
         </div>
 
         <SheetFooter className="flex-col-reverse gap-2 border-t border-border px-6 py-3 sm:flex-row sm:items-center sm:justify-between">
@@ -395,6 +572,26 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             </Button>
           </div>
         </SheetFooter>
+
+        <PinEntryDialog
+          open={passwordPinOpen}
+          onOpenChange={setPasswordPinOpen}
+          title="Authorise password set"
+          description="Manager PIN required to set this person's day-login password."
+          length={4}
+          busy={passwordBusy}
+          onVerify={async (actorPin) => {
+            const staffId = getActiveUserProfile()?.staffId;
+            if (!staffId) {
+              throw new Error("Active staff profile required for PIN step-up.");
+            }
+            await verifyManagerPin(staffId, actorPin);
+            await applyDayPassword(actorPin);
+          }}
+          onSuccess={() => {
+            setPasswordPinOpen(false);
+          }}
+        />
 
       </SheetContent>
     </Sheet>
