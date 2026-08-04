@@ -666,10 +666,32 @@ export interface ActiveUserProfile {
   vehicleName?: string | null;
 }
 
+/**
+ * Map staff_registry access key / title → binary terminal role.
+ * Prefer `personnel_type` (SYSTEM ACCESS LEVEL). Fall back to `role` (title),
+ * which may be free text ("Driver", "Asnt Manager") or an ACCESS_ROLES key.
+ */
 function classifyRole(staffRole: string | null): UserRole | null {
   const normalized = (staffRole ?? "").trim().toLowerCase().replace(/\s+/g, "_");
-  if (normalized === "support_worker") return "driver";
-  if (normalized === "coordinator" || normalized.includes("manager")) return "coordinator";
+  if (!normalized || normalized === "guardian") return null;
+  if (
+    normalized === "driver" ||
+    normalized === "support_worker" ||
+    normalized === "support" ||
+    normalized.includes("driver")
+  ) {
+    return "driver";
+  }
+  if (
+    normalized === "coordinator" ||
+    normalized === "manager" ||
+    normalized === "assistant_manager" ||
+    normalized.includes("manager")
+  ) {
+    return "coordinator";
+  }
+  // Display-only dashboard seats do not get a floor terminal session.
+  if (normalized === "dashboard") return null;
   return null;
 }
 
@@ -702,6 +724,7 @@ export async function loginWithPin(
     id: string;
     full_name?: string | null;
     role: string | null;
+    personnel_type?: string | null;
   }>;
   if (error || rows.length === 0) {
     console.error("[data-store] RPC auth failed or returned no rows:", error);
@@ -709,18 +732,29 @@ export async function loginWithPin(
   }
 
   const record = rows[0];
-  const normalizedDbRole = (record.role ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  const accessKey = (record.personnel_type ?? "").trim();
+  const titleOrRole = (record.role ?? "").trim();
+  const normalizedAccess = accessKey.toLowerCase().replace(/\s+/g, "_");
+  const normalizedTitle = titleOrRole.toLowerCase().replace(/\s+/g, "_");
 
-  if (normalizedDbRole === "guardian") {
+  if (normalizedAccess === "guardian" || normalizedTitle === "guardian") {
     throw new GuardianPinError(
       "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
     );
   }
 
-  const role = classifyRole(record.role);
+  // SYSTEM ACCESS LEVEL first; title/role column as fallback (legacy free text).
+  const role = classifyRole(accessKey || null) ?? classifyRole(titleOrRole || null);
   if (!role) {
-    console.error("[data-store] Unmapped role variance detected:", record.role ?? "");
-    return null;
+    console.error("[data-store] Unmapped role variance detected:", {
+      personnel_type: record.personnel_type ?? null,
+      role: record.role ?? null,
+    });
+    throw new Error(
+      `PIN matched ${record.full_name || "this person"}, but their access level ` +
+        `(${accessKey || titleOrRole || "unset"}) cannot sign into the terminal. ` +
+        `In Staff → Edit, set SYSTEM ACCESS LEVEL to Driver, Support Worker, Manager, or Assistant Manager.`,
+    );
   }
 
   // Best-effort vehicle lookup for drivers — schema may not expose a
@@ -5837,10 +5871,11 @@ export async function verifyCoordinatorPin(
   }
   const rows = (
     Array.isArray(data) ? data : data ? [data] : []
-  ) as Array<{ id: string; role: string }>;
+  ) as Array<{ id: string; role: string | null; personnel_type?: string | null }>;
   const row = rows.find((r) => r.id === staffId);
   if (!row) return false;
-  const role = classifyRole(row.role);
+  const role =
+    classifyRole(row.personnel_type ?? null) ?? classifyRole(row.role ?? null);
   if (role !== "coordinator") {
     throw new Error(
       "The selected staff member does not hold a Coordinator or Manager role and cannot authorise RED overrides.",

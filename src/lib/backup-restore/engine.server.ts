@@ -123,17 +123,21 @@ export async function verifyManagerPin(staffId: string, pin: string): Promise<vo
   const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
     id: string;
     role: string | null;
+    personnel_type?: string | null;
   }>;
   const row = rows.find((r) => r.id === staffId);
   if (!row) throw new Error("Incorrect manager PIN.");
 
-  // Match verifyCoordinatorPin / classifyRole — do not rely on is_manager RPC,
-  // which may be missing or use a different arg name in some environments.
-  const normalized = (row.role ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+  // Match login classifyRole — prefer SYSTEM ACCESS LEVEL, then title/role.
+  const access = (row.personnel_type ?? row.role ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, "_");
   const isCoordinator =
-    normalized === "coordinator" ||
-    normalized.includes("manager") ||
-    normalized === "assistant_manager";
+    access === "coordinator" ||
+    access === "manager" ||
+    access === "assistant_manager" ||
+    access.includes("manager");
   if (!isCoordinator) {
     throw new Error("Selected operator is not a manager.");
   }
