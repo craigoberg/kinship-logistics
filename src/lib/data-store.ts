@@ -2771,6 +2771,10 @@ export async function insertEventBooking(
     participant_transport_required: input.participantTransportRequired ?? true,
     outbound_transport_mode: input.outboundTransportMode ?? "bus",
     return_transport_mode: input.returnTransportMode ?? "bus",
+    // TEST bootstrap: NOT NULL without DEFAULT — always send.
+    transport_med_bag_required: input.transportMedBagRequired ?? "not_set",
+    pickup_order: 0,
+    is_guest_booking: !!input.isGuestBooking,
     trip_pickup_address_override: trimmedOverride.length > 0 ? trimmedOverride : null,
     dynamic_medical_notes_snapshot:
       snapshot && snapshot.trim().length > 0 ? snapshot : null,
@@ -2787,14 +2791,10 @@ export async function insertEventBooking(
         ? null
         : input.returnBusRunCode?.trim() || null;
   }
-  if (input.transportMedBagRequired !== undefined) {
-    insertPayload.transport_med_bag_required = input.transportMedBagRequired;
-  }
   if (input.transportMedNotes !== undefined) {
     insertPayload.transport_med_notes = input.transportMedNotes?.trim() || null;
   }
   if (input.isGuestBooking) {
-    insertPayload.is_guest_booking = true;
     insertPayload.host_participant_id = input.hostParticipantId?.trim() || null;
     insertPayload.guest_ops_note = input.guestOpsNote?.trim() || null;
     insertPayload.funding_claim_type =
@@ -2802,7 +2802,7 @@ export async function insertEventBooking(
   } else if (input.fundingClaimType) {
     insertPayload.funding_claim_type = input.fundingClaimType;
   }
-  // pickup_order is set via coordinator drag (reorderEventRosterPickupOrder) after migration.
+  // pickup_order starts at 0; coordinator drag reorders via reorderEventRosterPickupOrder.
 
   let { data, error } = await supabase
     .from("event_roster_bookings")
