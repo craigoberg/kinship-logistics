@@ -146,6 +146,7 @@ export async function seedEventAttendanceRoll(
       participant_id: row.participant_id,
       expected_arrival_at: expectedAt,
       arrival_method: mapTransportMode(outboundMode),
+      status: "expected",
       return_transport: returnMode,
       arrival_bus_run_code:
         outboundMode === "bus" ? row.outbound_bus_run_code?.trim() || null : null,
@@ -155,6 +156,15 @@ export async function seedEventAttendanceRoll(
   });
 
   if (payload.length === 0) return 0;
+
+  const isMissingOnConflictTarget = (err: {
+    code?: string;
+    message?: string;
+  }) =>
+    err.code === "42P10" ||
+    /no unique|exclusion constraint matching the ON CONFLICT/i.test(
+      err.message ?? "",
+    );
 
   let { data: inserted, error: insErr } = await supabase
     .from("event_attendance_log")
@@ -183,6 +193,37 @@ export async function seedEventAttendanceRoll(
     inserted = retry.data;
     insErr = retry.error;
   }
+
+  // TEST bootstrap may lack UNIQUE — insert only people not already on the roll
+  if (insErr && isMissingOnConflictTarget(insErr)) {
+    const existing = await listEventAttendanceRoll(eventDaySessionId);
+    const have = new Set(existing.map((r) => r.participantId));
+    const missing = payload.filter((r) => !have.has(r.participant_id));
+    if (missing.length === 0) return 0;
+    const { data: plain, error: plainErr } = await supabase
+      .from("event_attendance_log")
+      .insert(missing)
+      .select("id");
+    if (plainErr && isSchemaMismatchError(plainErr)) {
+      const legacy = missing.map((row) => {
+        const {
+          arrival_bus_run_code: _a,
+          return_bus_run_code: _r,
+          ...rest
+        } = row;
+        return rest;
+      });
+      const retry = await supabase
+        .from("event_attendance_log")
+        .insert(legacy)
+        .select("id");
+      if (retry.error) throw retry.error;
+      return retry.data?.length ?? 0;
+    }
+    if (plainErr) throw plainErr;
+    return plain?.length ?? 0;
+  }
+
   if (insErr) throw insErr;
   return inserted?.length ?? 0;
 }
