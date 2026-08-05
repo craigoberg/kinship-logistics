@@ -120,6 +120,7 @@ export async function getOrCreateEventHopTrip(opts: {
   if (existing) return (existing as { id: string }).id;
 
   // Create a minimal planning-phase trip row.
+  // TEST bootstrap: trip_origin / trip_return NOT NULL without DEFAULT.
   const { data, error } = await supabase
     .from("transport_trips")
     .insert({
@@ -134,6 +135,8 @@ export async function getOrCreateEventHopTrip(opts: {
       start_odometer_km: 0,
       status: "planned",
       started_at: new Date(opts.sessionDate + "T00:00:00").toISOString(),
+      trip_origin: "depot",
+      trip_return: "none",
     })
     .select("id")
     .single();
