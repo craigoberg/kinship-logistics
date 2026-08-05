@@ -42,6 +42,62 @@ export interface ActivityRollRow {
 export const activityRollKey = (venueStopId: string) =>
   ["event-activity-roll", venueStopId] as const;
 
+type ActivityRollSeedRow = {
+  venue_stop_id: string;
+  event_day_session_id: string;
+  participant_id: string;
+  status: ActivityRollStatus;
+  marked_absent_at?: string;
+};
+
+function isMissingOnConflictTarget(err: {
+  code?: string;
+  message?: string;
+}): boolean {
+  return (
+    err.code === "42P10" ||
+    /no unique|exclusion constraint matching the ON CONFLICT/i.test(
+      err.message ?? "",
+    )
+  );
+}
+
+/** Upsert activity roll rows; insert-missing when UNIQUE is absent (TEST bootstrap). */
+export async function upsertActivityRollIgnoreDuplicates(
+  rows: ActivityRollSeedRow[],
+): Promise<void> {
+  if (rows.length === 0) return;
+  const { error } = await supabase.from("event_activity_rolls").upsert(rows, {
+    onConflict: "venue_stop_id,participant_id",
+    ignoreDuplicates: true,
+  });
+  if (!error) return;
+  if (!isMissingOnConflictTarget(error)) throw error;
+
+  const byStop = new Map<string, ActivityRollSeedRow[]>();
+  for (const r of rows) {
+    const list = byStop.get(r.venue_stop_id) ?? [];
+    list.push(r);
+    byStop.set(r.venue_stop_id, list);
+  }
+  for (const [stopId, stopRows] of byStop) {
+    const { data: existing, error: listErr } = await supabase
+      .from("event_activity_rolls")
+      .select("participant_id")
+      .eq("venue_stop_id", stopId);
+    if (listErr) throw listErr;
+    const have = new Set(
+      (existing ?? []).map((r) => (r as { participant_id: string }).participant_id),
+    );
+    const missing = stopRows.filter((r) => !have.has(r.participant_id));
+    if (missing.length === 0) continue;
+    const { error: insErr } = await supabase
+      .from("event_activity_rolls")
+      .insert(missing);
+    if (insErr) throw insErr;
+  }
+}
+
 // ─── Expected arrival gate ────────────────────────────────────────────────────
 
 /**
@@ -106,12 +162,11 @@ export async function ensureActivityRollLeftTripPlaceholders(
   }));
 
   // Insert missing only — do not overwrite checked_in / already-seeded rows.
-  const { error: seedErr } = await supabase.from("event_activity_rolls").upsert(rows, {
-    onConflict: "venue_stop_id,participant_id",
-    ignoreDuplicates: true,
-  });
-  if (seedErr) {
-    console.warn("[ensureActivityRollLeftTripPlaceholders] seed failed:", seedErr.message);
+  try {
+    await upsertActivityRollIgnoreDuplicates(rows);
+  } catch (seedErr) {
+    const msg = seedErr instanceof Error ? seedErr.message : String(seedErr);
+    console.warn("[ensureActivityRollLeftTripPlaceholders] seed failed:", msg);
   }
 
   // Promote expected → absent for anyone already on the roll who left the trip.
@@ -228,13 +283,7 @@ export async function openVenueStop(
     });
 
     if (participants.length > 0) {
-      const { error: seedErr } = await supabase
-        .from("event_activity_rolls")
-        .upsert(participants, {
-          onConflict: "venue_stop_id,participant_id",
-          ignoreDuplicates: true,
-        });
-      if (seedErr) throw seedErr;
+      await upsertActivityRollIgnoreDuplicates(participants);
     }
   }
 

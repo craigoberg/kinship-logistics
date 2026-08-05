@@ -849,12 +849,14 @@ async function excludeFromOpenActivityAndBus(
       status: "absent" as const,
       marked_absent_at: now,
     }));
-    const { error: insErr } = await supabase.from("event_activity_rolls").upsert(placeholders, {
-      onConflict: "venue_stop_id,participant_id",
-      ignoreDuplicates: true,
-    });
-    if (insErr) {
-      console.warn("[excludeFromOpenActivityAndBus] placeholder insert failed:", insErr.message);
+    try {
+      const { upsertActivityRollIgnoreDuplicates } = await import(
+        "@/lib/api/event-activity-roll"
+      );
+      await upsertActivityRollIgnoreDuplicates(placeholders);
+    } catch (insErr) {
+      const msg = insErr instanceof Error ? insErr.message : String(insErr);
+      console.warn("[excludeFromOpenActivityAndBus] placeholder insert failed:", msg);
     }
   }
 
