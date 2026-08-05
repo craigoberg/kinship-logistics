@@ -156,6 +156,7 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
 
 export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   const qc = useQueryClient();
+  const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
 
   const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
