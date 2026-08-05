@@ -125,39 +125,75 @@ export async function updateCentreHours(
 
   const staffId = await resolveStaffIdWithFallback();
   const nowIso = new Date().toISOString();
+  // HH:MM is enough for Postgres `time` and bootstrap `text` columns.
+  const payload = {
+    day_of_week: input.dayOfWeek,
+    open_time: input.openTime,
+    close_time: input.closeTime,
+    updated_at: nowIso,
+    updated_by_staff_id: staffId || null,
+  };
 
-  // Upsert because the row should always exist post-migration, but the
-  // SQL editor step may have been skipped.
-  const { data, error } = await supabase
+  // Prefer UPDATE (row should exist). Fall back to INSERT / upsert when missing.
+  const updated = await supabase
     .from("centre_operating_hours")
-    .upsert(
-      {
-        day_of_week: input.dayOfWeek,
-        open_time: `${input.openTime}:00`,
-        close_time: `${input.closeTime}:00`,
-        updated_at: nowIso,
-        updated_by_staff_id: staffId,
-      },
-      { onConflict: "day_of_week" },
-    )
+    .update({
+      open_time: payload.open_time,
+      close_time: payload.close_time,
+      updated_at: payload.updated_at,
+      updated_by_staff_id: payload.updated_by_staff_id,
+    })
+    .eq("day_of_week", input.dayOfWeek)
     .select("day_of_week, open_time, close_time, updated_at, updated_by_staff_id")
-    .single();
-  if (error) throw error;
+    .maybeSingle();
 
-  await writeToLedger({
-    staff_id: staffId,
-    category: "CENTRE",
-    severity: "INFO",
-    action_type: "CENTRE_HOURS_UPDATED",
-    gps_lat: null,
-    gps_lng: null,
-    metadata: {
-      day_of_week: input.dayOfWeek,
-      open_time: input.openTime,
-      close_time: input.closeTime,
-      justification,
-    },
-  });
+  let data = updated.data;
+  let error = updated.error;
+
+  if (!error && !data) {
+    const inserted = await supabase
+      .from("centre_operating_hours")
+      .insert(payload)
+      .select("day_of_week, open_time, close_time, updated_at, updated_by_staff_id")
+      .single();
+    data = inserted.data;
+    error = inserted.error;
+  }
+
+  if (error) {
+    const msg = error.message ?? "";
+    if (/policy|permission|rls|42501/i.test(msg)) {
+      throw new Error(
+        "Centre hours save blocked by database permissions. Run docs/sql/2026-08-05_centre_operating_hours_anon_pk.sql on this Supabase project, then hard refresh.",
+      );
+    }
+    if (/on conflict|unique|primary key|42P10/i.test(msg)) {
+      throw new Error(
+        "Centre hours table is missing a primary key on day_of_week. Run docs/sql/2026-08-05_centre_operating_hours_anon_pk.sql, then hard refresh.",
+      );
+    }
+    throw new Error(`Centre hours save failed: ${msg}`);
+  }
+  if (!data) {
+    throw new Error("Centre hours save returned no row. Check seed data / SQL migration.");
+  }
+
+  if (staffId) {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "CENTRE",
+      severity: "INFO",
+      action_type: "CENTRE_HOURS_UPDATED",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: {
+        day_of_week: input.dayOfWeek,
+        open_time: input.openTime,
+        close_time: input.closeTime,
+        justification,
+      },
+    });
+  }
 
   return toRow(data as DbRow);
 }

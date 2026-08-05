@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2, Save } from "lucide-react";
@@ -57,13 +57,22 @@ export function CentreOperatingHoursWorkspace() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
+      <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
           Facility-wide open/close defaults. Tier 2 of the daily seeder ladder:
-          used when a participant has no per-client schedule override.
+          used when a participant has no per-client schedule override. Change a
+          time, enter a short justification, then Save.
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
+
+      {rows.length === 0 && (
+        <p className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-sm text-destructive">
+          No weekday rows found. Run{" "}
+          <code className="text-xs">docs/sql/2026-08-05_centre_operating_hours_anon_pk.sql</code>{" "}
+          on this Supabase project, then hard refresh.
+        </p>
+      )}
 
       <div className="rounded-md border">
         <Table>
@@ -93,6 +102,11 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
   const [closeTime, setCloseTime] = useState(row.closeTime);
   const [just, setJust] = useState("");
 
+  useEffect(() => {
+    setOpenTime(row.openTime);
+    setCloseTime(row.closeTime);
+  }, [row.openTime, row.closeTime, row.updatedAt]);
+
   const mut = useMutation({
     mutationFn: () =>
       updateCentreHours({
@@ -110,14 +124,12 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
   });
 
   const dirty = openTime !== row.openTime || closeTime !== row.closeTime;
-  const canSave =
-    canEdit &&
-    dirty &&
-    just.trim().length >= MIN_TIMELINE_NOTE &&
+  const justOk = just.trim().length >= MIN_TIMELINE_NOTE;
+  const timesOk =
     /^\d{2}:\d{2}$/.test(openTime) &&
     /^\d{2}:\d{2}$/.test(closeTime) &&
-    openTime < closeTime &&
-    !mut.isPending;
+    openTime < closeTime;
+  const canSave = canEdit && dirty && justOk && timesOk && !mut.isPending;
 
   return (
     <TableRow>
@@ -139,7 +151,7 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
         />
       </TableCell>
       <TableCell className="text-xs text-muted-foreground">
-        <ClientTime iso={row.updatedAt} />
+        {row.updatedAt ? <ClientTime iso={row.updatedAt} /> : "—"}
       </TableCell>
       <TableCell>
         {canEdit && dirty ? (
@@ -156,6 +168,16 @@ function CentreHoursRow({ row, canEdit }: { row: CentreHourRow; canEdit: boolean
               placeholder="Why is this changing?"
               className="text-xs"
             />
+            {!canSave && !mut.isPending && (
+              <p className="text-[11px] text-destructive">
+                {[
+                  !justOk && `Justification (min ${MIN_TIMELINE_NOTE} chars)`,
+                  !timesOk && "Open must be before close (HH:mm)",
+                ]
+                  .filter(Boolean)
+                  .join(" · ")}
+              </p>
+            )}
             <Button size="sm" onClick={() => mut.mutate()} disabled={!canSave}>
               {mut.isPending ? (
                 <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
