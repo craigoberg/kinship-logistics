@@ -8,6 +8,7 @@
  *      docs/sql/2026-07-11_maintenance_items_v2.sql
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -238,22 +239,39 @@ export async function listMaintenanceNotes(
 export async function createMaintenanceItem(
   item: NewMaintenanceItem,
 ): Promise<MaintenanceItem> {
-  const { data, error } = await supabase
+  // TEST bootstrap: status / defer_count NOT NULL without DEFAULT — always send.
+  const payload: Record<string, unknown> = {
+    title: item.title,
+    description: item.description,
+    severity: item.severity ?? "yellow",
+    status: "open",
+    source: item.source ?? "manual",
+    source_ref_id: item.sourceRefId ?? null,
+    venue_id: item.venueId ?? null,
+    event_id: item.eventId ?? null,
+    location_label: item.locationLabel ?? null,
+    reported_by: item.reportedBy ?? null,
+    defer_count: 0,
+    occurred_at: item.occurredAt ?? new Date().toISOString(),
+  };
+
+  let { data, error } = await supabase
     .from("maintenance_items")
-    .insert({
-      title: item.title,
-      description: item.description,
-      severity: item.severity ?? "yellow",
-      source: item.source ?? "manual",
-      source_ref_id: item.sourceRefId ?? null,
-      venue_id: item.venueId ?? null,
-      event_id: item.eventId ?? null,
-      location_label: item.locationLabel ?? null,
-      reported_by: item.reportedBy ?? null,
-      occurred_at: item.occurredAt ?? new Date().toISOString(),
-    })
+    .insert(payload)
     .select()
     .single();
+
+  // Pre-occurred_at DBs — strip and retry once.
+  if (error && isSchemaMismatchError(error)) {
+    const { occurred_at: _omit, ...withoutOccurred } = payload;
+    const retry = await supabase
+      .from("maintenance_items")
+      .insert(withoutOccurred)
+      .select()
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
 
   if (error) throw error;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
