@@ -257,6 +257,8 @@ export interface NewParticipant {
 }
 
 export async function insertParticipant(input: NewParticipant): Promise<Participant> {
+  // dual_witness_pin_hash is NOT NULL on some DBs (TEST bootstrap) — never send null.
+  // participant_kind may also lack a DEFAULT on bootstrap — always set client.
   const row = {
     first_name: input.firstName,
     last_name: input.lastName,
@@ -265,14 +267,28 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     regular_pickup_address: input.regularPickupAddress ?? null,
     iddsi_level_liquids: input.iddsi.liquids,
     iddsi_level_solids: input.iddsi.foods,
-    dual_witness_pin_hash: input.dualWitnessPinHash ?? null,
+    dual_witness_pin_hash: input.dualWitnessPinHash?.trim() || "",
+    participant_kind: "client",
   };
   const { data, error } = await supabase
     .from("participants")
     .insert(row)
     .select("*")
     .single();
-  if (error) throw error;
+  if (error) {
+    const msg = error.message ?? "";
+    if (/dual_witness_pin_hash|null value/i.test(msg)) {
+      throw new Error(
+        `Could not add participant (${msg}). Run docs/sql/2026-08-05_participants_add_client_defaults.sql if this persists after refresh.`,
+      );
+    }
+    if (/participant_kind/i.test(msg)) {
+      throw new Error(
+        `Could not add participant (${msg}). Run docs/sql/2026-08-05_participants_add_client_defaults.sql on this Supabase project.`,
+      );
+    }
+    throw error;
+  }
   return rowToParticipant(data as ParticipantRow);
 }
 
