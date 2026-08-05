@@ -346,10 +346,10 @@ export async function upsertEventVenueStop(
     meal_slot: kind === "meal" ? input.meal_slot ?? null : null,
     meal_source: kind === "meal" ? input.meal_source ?? null : null,
     menu_notes: kind === "meal" ? input.menu_notes?.trim() || null : null,
+    // TEST bootstrap: phase / movement_method NOT NULL without DEFAULT.
     movement_method:
-      kind === "meal" || kind === "medication_round" ? "on_site" : undefined,
+      kind === "meal" || kind === "medication_round" ? "on_site" : "bus",
   };
-  if (payload.movement_method === undefined) delete payload.movement_method;
 
   if (input.id) {
     const { data, error } = await supabase
@@ -364,7 +364,7 @@ export async function upsertEventVenueStop(
 
   const { data, error } = await supabase
     .from("event_venue_stops")
-    .insert(payload)
+    .insert({ ...payload, phase: "pending" })
     .select("*")
     .single();
   if (error) throw error;
@@ -616,8 +616,15 @@ export async function ensureEventItineraryStops(eventId: string): Promise<number
       session_date: sessionDate,
       venue_id: venueId,
       stop_order: 0,
+      activity_kind: "venue",
+      phase: "pending",
+      movement_method: "bus",
     });
-    if (!error) inserted += 1;
+    if (error) {
+      console.error("[ensureEventItineraryStops] insert failed", error);
+      continue;
+    }
+    inserted += 1;
   }
 
   return inserted;
