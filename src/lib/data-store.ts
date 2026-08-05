@@ -4493,6 +4493,9 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     leg_index: i + 1,
     status: "pending" as LegStatus,
     medication_handover_status: "not_required" as MedicationHandoverStatus,
+    // TEST bootstrap: these booleans are NOT NULL without DEFAULT.
+    medication_handover_confirmed: false,
+    unexpected_medication_logged: false,
     ...s,
   }));
 
@@ -5025,11 +5028,18 @@ export async function startDayCentreRun(
       .eq("trip_id", existing.id)
       .order("leg_index", { ascending: true });
     if (legErr) throwPg("[startDayCentreRun:existingLegs]", legErr);
-    return {
-      trip: existing,
-      legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-      eventTitle: `${centreLabel} — ${input.busRunLabel}`,
-    };
+    if ((legRows ?? []).length > 0) {
+      return {
+        trip: existing,
+        legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+        eventTitle: `${centreLabel} — ${input.busRunLabel}`,
+      };
+    }
+    // Orphan trip from a failed leg insert (e.g. NOT NULL booleans) — cancel and recreate.
+    await supabase
+      .from("transport_trips")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", existing.id);
   }
 
   // 1. Build roster from participant_attendance_schedules.
@@ -5232,6 +5242,9 @@ export async function startDayCentreRun(
     leg_index: i + 1,
     status: "pending" as LegStatus,
     medication_handover_status: "not_required" as MedicationHandoverStatus,
+    // TEST bootstrap: these booleans are NOT NULL without DEFAULT.
+    medication_handover_confirmed: false,
+    unexpected_medication_logged: false,
     ...s,
   }));
 
@@ -5240,7 +5253,14 @@ export async function startDayCentreRun(
     .insert(legPayload)
     .select("*")
     .order("leg_index", { ascending: true });
-  if (legErr) throwPg("[startDayCentreRun:legs]", legErr);
+  if (legErr) {
+    // Don't leave a leg-less active trip for the next Start Run reuse.
+    await supabase
+      .from("transport_trips")
+      .update({ status: "cancelled", updated_at: new Date().toISOString() })
+      .eq("id", trip.id);
+    throwPg("[startDayCentreRun:legs]", legErr);
+  }
 
   const dirLabel = direction === "afternoon" ? "Return" : "Morning";
   return {
