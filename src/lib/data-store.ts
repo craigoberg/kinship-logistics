@@ -4346,6 +4346,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     driver_staff_id: input.driverStaffId,
     event_id: input.eventId,
     status: "active" as const,
+    // TEST bootstrap: started_at NOT NULL without DEFAULT — always send.
+    started_at: resolveOperationalNow().toISOString(),
     start_odometer: input.startOdometerKm,
     start_odometer_km: input.startOdometerKm,
     start_odometer_variance_reason:
@@ -5102,6 +5104,8 @@ export async function startDayCentreRun(
     bus_run_code: input.busRunCode,
     status: "active" as const,
     trip_date: today,
+    // TEST bootstrap: started_at NOT NULL without DEFAULT — always send.
+    started_at: resolveOperationalNow().toISOString(),
     start_odometer: input.startOdometerKm,
     start_odometer_km: input.startOdometerKm,
     trip_origin: tripOrigin,
