@@ -259,10 +259,16 @@ export async function openSiteDayActivity(
   const act = toActivity(data as DbRow);
 
   if (act.activityKind === "meal") {
-    const { seedSiteDayMealServiceRoll } = await import(
-      "@/lib/api/site-day-meal-service"
-    );
-    await seedSiteDayMealServiceRoll(act.id, act.sessionId);
+    try {
+      const { seedSiteDayMealServiceRoll } = await import(
+        "@/lib/api/site-day-meal-service"
+      );
+      await seedSiteDayMealServiceRoll(act.id, act.sessionId);
+    } catch (e) {
+      // Meal open already persisted; roll UI re-seeds on mount. Do not
+      // surface a false "Could not open activity" after attestation saved.
+      console.warn("[openSiteDayActivity] meal roll seed", e);
+    }
   }
 
   await writeToLedger({

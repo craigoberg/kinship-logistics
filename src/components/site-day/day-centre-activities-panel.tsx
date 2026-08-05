@@ -92,8 +92,13 @@ export function DayCentreActivitiesPanel({ sessionId }: Props) {
       id: string;
       mealOpen?: MealOpenPayload | null;
     }) => openSiteDayActivity(id, mealOpen),
-    onSuccess: () => {
+    onSuccess: (act) => {
       void qc.invalidateQueries({ queryKey: siteDayActivitiesKey(sessionId) });
+      if (act.activityKind === "meal") {
+        void qc.invalidateQueries({
+          queryKey: ["site-day-meal-service-roll", act.id],
+        });
+      }
       toast.success("Activity opened");
     },
     onError: (e: Error) =>

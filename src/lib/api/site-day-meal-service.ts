@@ -26,6 +26,18 @@ export function siteDayMealRollKey(activityId: string) {
   return ["site-day-meal-service-roll", activityId] as const;
 }
 
+function isMissingOnConflictTarget(err: {
+  code?: string;
+  message?: string;
+}): boolean {
+  const code = err.code ?? "";
+  const msg = err.message ?? "";
+  return (
+    code === "42P10" ||
+    /no unique|exclusion constraint matching the ON CONFLICT/i.test(msg)
+  );
+}
+
 export async function seedSiteDayMealServiceRoll(
   activityId: string,
   sessionId: string,
@@ -47,7 +59,14 @@ export async function seedSiteDayMealServiceRoll(
     ),
   ];
   if (ids.length === 0) return 0;
-  const payload = ids.map((participant_id) => ({
+
+  // Skip people already on the roll (idempotent without UNIQUE on TEST bootstrap)
+  const existing = await listSiteDayMealServiceRoll(activityId);
+  const have = new Set(existing.map((r) => r.participantId));
+  const missing = ids.filter((id) => !have.has(id));
+  if (missing.length === 0) return existing.length;
+
+  const payload = missing.map((participant_id) => ({
     activity_id: activityId,
     participant_id,
     status: "expected",
@@ -60,10 +79,22 @@ export async function seedSiteDayMealServiceRoll(
     })
     .select("id");
   if (insErr) {
-    if (isSchemaMismatchError(insErr)) return 0;
+    if (isSchemaMismatchError(insErr)) return existing.length;
+    // Bootstrap tables may lack UNIQUE — plain insert for missing ids only
+    if (isMissingOnConflictTarget(insErr)) {
+      const { data: inserted, error: plainErr } = await supabase
+        .from("site_day_meal_service_rolls")
+        .insert(payload)
+        .select("id");
+      if (plainErr) {
+        if (isSchemaMismatchError(plainErr)) return existing.length;
+        throw plainErr;
+      }
+      return existing.length + (inserted?.length ?? 0);
+    }
     throw insErr;
   }
-  return data?.length ?? 0;
+  return existing.length + (data?.length ?? 0);
 }
 
 export async function listSiteDayMealServiceRoll(
