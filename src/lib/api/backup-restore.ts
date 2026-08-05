@@ -5,11 +5,14 @@ import {
   parseBackupManifest,
   type BackupManifest,
 } from "@/lib/backup-restore/manifest";
+import { schemaCatalogSummary } from "@/lib/backup-restore/schema-catalog";
 import {
   getBackupSummary,
   runFullBackup,
   runFullRestore,
 } from "@/lib/api/backup-restore.functions";
+
+export type { BackupManifest };
 
 export interface BackupTablePreview {
   name: string;
@@ -30,6 +33,14 @@ export interface RestoreResult {
   skippedTables: string[];
   rowCount: number;
   warnings: string[];
+  schemaApplied: boolean;
+  schemaStatements: number;
+}
+
+export interface RestoreModeOptions {
+  applyStructure: boolean;
+  restoreData: boolean;
+  restoreLoginDetails: boolean;
 }
 
 /** True when running Vite dev or VITE_APP_ENV is not production. */
@@ -41,12 +52,30 @@ export function shouldDefaultPreserveAuth(): boolean {
   return import.meta.env.DEV;
 }
 
+/** Defaults for restore checkboxes based on lane. */
+export function defaultRestoreModes(): RestoreModeOptions {
+  const preserveLoginByDefault = shouldDefaultPreserveAuth();
+  return {
+    applyStructure: false,
+    restoreData: true,
+    restoreLoginDetails: !preserveLoginByDefault,
+  };
+}
+
 export function getProtectedTableLabels(): readonly string[] {
   return PRESERVE_LOCAL_TABLES;
 }
 
 export function getAuthProtectedTableLabels(): readonly string[] {
   return AUTH_PROTECTED_TABLES;
+}
+
+export function describeBackupSchema(manifest: BackupManifest | null): string {
+  if (!manifest) return "";
+  if (manifest.version < 2 || !manifest.schema) {
+    return "Data only (no schema catalog — create a new v2 backup for infrastructure restore).";
+  }
+  return schemaCatalogSummary(manifest.schema);
 }
 
 export async function fetchBackupSummary(): Promise<BackupSummary> {
@@ -79,14 +108,18 @@ export function saveBackupToDisk(manifest: BackupManifest): void {
 
 export async function restoreFromBackup(args: {
   manifest: BackupManifest;
-  preserveAuthCredentials: boolean;
+  applyStructure: boolean;
+  restoreData: boolean;
+  restoreLoginDetails: boolean;
   managerStaffId: string;
   managerPin: string;
 }): Promise<RestoreResult> {
   const json = await runFullRestore({
     data: {
       manifest: args.manifest,
-      preserveAuthCredentials: args.preserveAuthCredentials,
+      applyStructure: args.applyStructure,
+      restoreData: args.restoreData,
+      restoreLoginDetails: args.restoreLoginDetails,
       managerStaffId: args.managerStaffId,
       managerPin: args.managerPin,
     },

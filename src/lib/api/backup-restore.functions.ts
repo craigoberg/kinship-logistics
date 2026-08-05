@@ -34,7 +34,9 @@ export const runFullBackup = createServerFn({ method: "POST" }).handler(async ()
 
 const restoreInput = z.object({
   manifest: z.unknown(),
-  preserveAuthCredentials: z.boolean().optional(),
+  applyStructure: z.boolean(),
+  restoreData: z.boolean(),
+  restoreLoginDetails: z.boolean(),
   managerStaffId: z.string().uuid(),
   managerPin: z.string().min(4).max(6),
 });
@@ -45,7 +47,9 @@ export const runFullRestore = createServerFn({ method: "POST" })
     try {
       const manifest = parseBackupManifest(data.manifest);
       const result = await restoreFullBackup(manifest, {
-        preserveAuthCredentials: data.preserveAuthCredentials !== false,
+        applyStructure: data.applyStructure,
+        restoreData: data.restoreData,
+        restoreLoginDetails: data.restoreLoginDetails,
         managerStaffId: data.managerStaffId,
         managerPin: data.managerPin,
       });

@@ -58,7 +58,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "Backup & Restore",
-      body: "Full database backup download and restore. Can preserve local login / staff_registry when moving between environments — use only with the documented RPC prerequisites.",
+      body: "v2 JSON backup: each run discovers tables plus live schema (FKs, RPCs, RLS). On restore choose Apply infrastructure, Restore table data, and/or Restore login details (off keeps this environment’s PINs/config). Auth email passwords are not in the file — recreate in Supabase Auth. Needs backup RPCs + service role key.",
     },
   ],
 };

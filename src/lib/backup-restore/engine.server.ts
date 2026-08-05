@@ -8,7 +8,14 @@ import {
   type BackupManifest,
   type BackupTableBundle,
 } from "@/lib/backup-restore/manifest";
+import { orderTablesBySchemaCatalog } from "@/lib/backup-restore/order-tables";
 import { prepareRowsForRestore } from "@/lib/backup-restore/sanitize-rows";
+import { applySchemaCatalog } from "@/lib/backup-restore/schema-apply.server";
+import {
+  isSchemaCatalog,
+  schemaCatalogSummary,
+  type SchemaCatalog,
+} from "@/lib/backup-restore/schema-catalog";
 import {
   createPublishableServerClient,
   createServiceServerClient,
@@ -46,6 +53,21 @@ async function orderTablesForRestore(
   });
   if (error) throw new Error(`order_tables_for_restore failed: ${error.message}`);
   return (data as string[] | null) ?? tables;
+}
+
+async function fetchSchemaCatalog(
+  client = createPublishableServerClient(),
+): Promise<SchemaCatalog> {
+  const { data, error } = await client.rpc("export_backup_schema_catalog");
+  if (error) {
+    throw new Error(
+      `export_backup_schema_catalog failed. Apply docs/sql/2026-08-05_backup_schema_catalog_rpcs.sql — ${error.message}`,
+    );
+  }
+  if (!isSchemaCatalog(data)) {
+    throw new Error("export_backup_schema_catalog returned an unexpected shape.");
+  }
+  return data;
 }
 
 async function fetchTableRows(
@@ -93,6 +115,7 @@ export async function summarizeBackupTarget(): Promise<BackupSummary> {
 export async function createFullBackup(): Promise<BackupManifest> {
   const client = createPublishableServerClient();
   const tableNames = await listPublicTables();
+  const schema = await fetchSchemaCatalog(client);
   const tables: Record<string, BackupTableBundle> = {};
   let totalRows = 0;
 
@@ -110,6 +133,7 @@ export async function createFullBackup(): Promise<BackupManifest> {
     tableCount: tableNames.length,
     rowCount: totalRows,
     tables,
+    schema,
   };
 }
 
@@ -128,7 +152,6 @@ export async function verifyManagerPin(staffId: string, pin: string): Promise<vo
   const row = rows.find((r) => r.id === staffId);
   if (!row) throw new Error("Incorrect manager PIN.");
 
-  // Match login classifyRole — prefer SYSTEM ACCESS LEVEL, then title/role.
   const access = (row.personnel_type ?? row.role ?? "")
     .trim()
     .toLowerCase()
@@ -148,13 +171,16 @@ async function insertRestoreRows(
   tableName: string,
   rows: Record<string, unknown>[],
   warnings: string[],
-): Promise<number> {
+  options?: { quietSkips?: boolean },
+): Promise<{ inserted: number; failed: Record<string, unknown>[] }> {
   const prepared = prepareRowsForRestore(tableName, rows);
   warnings.push(...prepared.warnings);
-  if (prepared.rows.length === 0) return 0;
+  if (prepared.rows.length === 0) return { inserted: 0, failed: [] };
 
   const chunkSize = 500;
   let inserted = 0;
+  const failed: Record<string, unknown>[] = [];
+  const skipSamples: string[] = [];
 
   for (let i = 0; i < prepared.rows.length; i += chunkSize) {
     const chunk = prepared.rows.slice(i, i + chunkSize);
@@ -167,19 +193,50 @@ async function insertRestoreRows(
     for (const row of chunk) {
       const { error: rowErr } = await service.from(tableName).insert(row);
       if (rowErr) {
-        const ref = String(row.id ?? row.key ?? row.uuid ?? "unknown");
-        warnings.push(`Skipped ${tableName} row (${ref}): ${rowErr.message}`);
+        failed.push(row);
+        if (!options?.quietSkips && skipSamples.length < 5) {
+          const ref = String(row.id ?? row.key ?? row.uuid ?? "unknown");
+          skipSamples.push(`${tableName} (${ref}): ${rowErr.message}`);
+        }
       } else {
         inserted += 1;
       }
     }
   }
 
-  return inserted;
+  if (!options?.quietSkips && failed.length > 0) {
+    warnings.push(
+      `Skipped ${failed.length} row(s) in ${tableName}` +
+        (skipSamples.length
+          ? ` — e.g. ${skipSamples[0]}${failed.length > 1 ? ` (+${failed.length - 1} more)` : ""}`
+          : "."),
+    );
+  }
+
+  return { inserted, failed };
+}
+
+async function orderTablesForDataRestore(
+  tables: string[],
+  catalog: SchemaCatalog | null,
+  client: SupabaseClient,
+): Promise<string[]> {
+  if (catalog) {
+    return orderTablesBySchemaCatalog(tables, catalog);
+  }
+  return orderTablesForRestore(tables, client);
 }
 
 export interface RestoreOptions {
-  preserveAuthCredentials: boolean;
+  /** Create/align tables, FKs, indexes, RPCs, triggers, RLS from backup schema */
+  applyStructure: boolean;
+  /** Truncate + reload public table rows */
+  restoreData: boolean;
+  /**
+   * When restoreData is true: overwrite staff_registry / env protected tables.
+   * When false: preserve local login + env config (DEV-safe).
+   */
+  restoreLoginDetails: boolean;
   managerStaffId: string;
   managerPin: string;
 }
@@ -191,6 +248,8 @@ export interface RestoreResult {
   skippedTables: string[];
   rowCount: number;
   warnings: string[];
+  schemaApplied: boolean;
+  schemaStatements: number;
 }
 
 export async function restoreFullBackup(
@@ -199,33 +258,82 @@ export async function restoreFullBackup(
 ): Promise<RestoreResult> {
   await verifyManagerPin(options.managerStaffId, options.managerPin);
 
+  if (!options.applyStructure && !options.restoreData) {
+    throw new Error("Select at least one of: Apply infrastructure, Restore table data.");
+  }
+
   const service = createServiceServerClient();
   const readClient = createPublishableServerClient();
+  const warnings: string[] = [];
+  let schemaApplied = false;
+  let schemaStatements = 0;
+
+  // ---- Structure first (discovers missing tables before data load) ----
+  if (options.applyStructure) {
+    if (!manifest.schema || !isSchemaCatalog(manifest.schema)) {
+      throw new Error(
+        "This backup has no schema catalog (v1 or incomplete v2). Create a new backup after applying 2026-08-05_backup_schema_catalog_rpcs.sql, or uncheck Apply infrastructure.",
+      );
+    }
+    const applied = await applySchemaCatalog(service, manifest.schema);
+    schemaApplied = true;
+    schemaStatements = applied.statements;
+    warnings.push(
+      `Applied schema from backup (${schemaCatalogSummary(manifest.schema)}; ${applied.statements} DDL steps).`,
+    );
+    warnings.push(...applied.warnings);
+  }
+
+  if (!options.restoreData) {
+    return {
+      truncatedTables: [],
+      restoredTables: [],
+      preservedTables: [],
+      skippedTables: [],
+      rowCount: 0,
+      warnings,
+      schemaApplied,
+      schemaStatements,
+    };
+  }
+
+  // Re-list tables after schema apply (new tables appear)
   const currentTables = await listPublicTables(readClient);
   const currentSet = new Set(currentTables);
 
-  const preservedTables = options.preserveAuthCredentials
-    ? [...PRESERVE_LOCAL_TABLES]
-    : [];
+  const preservedTables = options.restoreLoginDetails
+    ? []
+    : [...PRESERVE_LOCAL_TABLES];
 
   const backupTableNames = Object.keys(manifest.tables);
   const tablesToTruncate = currentTables.filter((t) => !preservedTables.includes(t));
   const tablesToRestore = backupTableNames.filter((t) => currentSet.has(t));
   const skippedTables = backupTableNames.filter((t) => !currentSet.has(t));
 
-  const warnings: string[] = [];
   if (skippedTables.length > 0) {
     warnings.push(
-      `Skipped ${skippedTables.length} table(s) from backup that do not exist in this database.`,
+      `Skipped ${skippedTables.length} table(s) from backup that do not exist in this database` +
+        (options.applyStructure
+          ? " even after schema apply."
+          : ". Enable Apply infrastructure, or create tables first."),
     );
   }
-  if (options.preserveAuthCredentials) {
+  if (!options.restoreLoginDetails) {
     warnings.push(
-      `Preserved local tables: ${preservedTables.join(", ")}. DEV login credentials and environment config were not overwritten.`,
+      `Preserved local login/config tables: ${preservedTables.join(", ")}.`,
     );
+  } else {
+    warnings.push("Login details restored from backup (staff_registry and env tables overwritten).");
   }
 
-  const orderedTruncate = await orderTablesForRestore(tablesToTruncate, readClient);
+  const catalog: SchemaCatalog | null =
+    manifest.schema && isSchemaCatalog(manifest.schema) ? manifest.schema : null;
+
+  const orderedTruncate = await orderTablesForDataRestore(
+    tablesToTruncate,
+    catalog,
+    readClient,
+  );
   const { error: truncateErr } = await service.rpc("truncate_backup_tables", {
     p_tables: orderedTruncate,
   });
@@ -235,25 +343,73 @@ export async function restoreFullBackup(
     );
   }
 
-  const orderedRestore = await orderTablesForRestore(
-    tablesToRestore.filter((t) => !preservedTables.includes(t)),
+  // Hard gate: drop ALL public FKs before inserts (one RPC). Without this, child
+  // tables fail when parents sort wrong or session rows load after attendance.
+  const { data: droppedFkCount, error: dropFkErr } = await service.rpc(
+    "backup_drop_all_public_fks",
+  );
+  if (dropFkErr) {
+    throw new Error(
+      `FK load window unavailable — apply docs/sql/2026-08-05_backup_fk_load_window.sql on this database, then hard-refresh. (${dropFkErr.message})`,
+    );
+  }
+  warnings.push(
+    `FK load window: dropped ${Number(droppedFkCount ?? 0)} foreign key(s) before data insert.`,
+  );
+
+  const restoreTargets = tablesToRestore.filter((t) => !preservedTables.includes(t));
+  const orderedRestore = await orderTablesForDataRestore(
+    restoreTargets,
+    catalog,
     readClient,
   );
 
   let rowCount = 0;
   const restoredTables: string[] = [];
+  /** Rows that failed first pass — retry after all parents are loaded */
+  const retryQueue: { tableName: string; rows: Record<string, unknown>[] }[] = [];
 
   for (const tableName of orderedRestore) {
-    if (preservedTables.includes(tableName)) continue;
     const bundle = manifest.tables[tableName];
     if (!bundle?.rows?.length) {
       restoredTables.push(tableName);
       continue;
     }
 
-    rowCount += await insertRestoreRows(service, tableName, bundle.rows, warnings);
-
+    const result = await insertRestoreRows(service, tableName, bundle.rows, warnings, {
+      quietSkips: true,
+    });
+    rowCount += result.inserted;
     restoredTables.push(tableName);
+    if (result.failed.length) {
+      retryQueue.push({ tableName, rows: result.failed });
+    }
+  }
+
+  // Second pass: parents from earlier failures may now exist
+  let retrySkipped = 0;
+  for (const item of retryQueue) {
+    const result = await insertRestoreRows(service, item.tableName, item.rows, warnings);
+    rowCount += result.inserted;
+    retrySkipped += result.failed.length;
+  }
+  if (retryQueue.length) {
+    warnings.push(
+      `Retry pass: re-attempted rows from ${retryQueue.length} table(s); ${retrySkipped} still skipped.`,
+    );
+  }
+
+  const { data: restoredFkCount, error: restoreFkErr } = await service.rpc(
+    "backup_restore_all_public_fks",
+  );
+  if (restoreFkErr) {
+    warnings.push(
+      `WARNING: could not re-apply FKs after data load — run SELECT backup_restore_all_public_fks(); in SQL Editor. (${restoreFkErr.message})`,
+    );
+  } else {
+    warnings.push(
+      `FK load window: re-applied ${Number(restoredFkCount ?? 0)} foreign key(s) (orphans left NOT VALID if validate failed).`,
+    );
   }
 
   return {
@@ -261,7 +417,9 @@ export async function restoreFullBackup(
     restoredTables,
     preservedTables,
     skippedTables,
-    rowCount: rowCount,
+    rowCount,
     warnings,
+    schemaApplied,
+    schemaStatements,
   };
 }

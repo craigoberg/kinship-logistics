@@ -45,6 +45,8 @@ import {
   canManageSystemParameters,
 } from "@/lib/api/system-parameters";
 import {
+  defaultRestoreModes,
+  describeBackupSchema,
   downloadFullBackup,
   fetchBackupSummary,
   getProtectedTableLabels,
@@ -52,7 +54,6 @@ import {
   readBackupFile,
   restoreFromBackup,
   saveBackupToDisk,
-  shouldDefaultPreserveAuth,
   type BackupManifest,
 } from "@/lib/api/backup-restore";
 import { getActiveUserProfile, listStaffRegistry } from "@/lib/data-store";
@@ -171,7 +172,13 @@ export function BackupRestoreWorkspace() {
   const [pinOpen, setPinOpen] = useState(false);
   const [restoreProgressOpen, setRestoreProgressOpen] = useState(false);
   const [backupProgressOpen, setBackupProgressOpen] = useState(false);
-  const [preserveAuth, setPreserveAuth] = useState(shouldDefaultPreserveAuth);
+  const [applyStructure, setApplyStructure] = useState(
+    () => defaultRestoreModes().applyStructure,
+  );
+  const [restoreData, setRestoreData] = useState(() => defaultRestoreModes().restoreData);
+  const [restoreLoginDetails, setRestoreLoginDetails] = useState(
+    () => defaultRestoreModes().restoreLoginDetails,
+  );
   const [managerStaffId, setManagerStaffId] = useState(profile?.staffId ?? "");
 
   const permissionQ = useQuery({
@@ -207,7 +214,7 @@ export function BackupRestoreWorkspace() {
     onSuccess: ({ manifest }) => {
       saveBackupToDisk(manifest);
       toast.success("Backup saved", {
-        description: `${manifest.tableCount} tables, ${manifest.rowCount.toLocaleString()} rows.`,
+        description: `${manifest.tableCount} tables, ${manifest.rowCount.toLocaleString()} rows · ${describeBackupSchema(manifest)}`,
       });
       summaryQ.refetch();
     },
@@ -223,7 +230,9 @@ export function BackupRestoreWorkspace() {
       if (!staffId) throw new Error("Select the authorising manager.");
       return restoreFromBackup({
         manifest: pendingManifest,
-        preserveAuthCredentials: preserveAuth,
+        applyStructure,
+        restoreData,
+        restoreLoginDetails,
         managerStaffId: staffId,
         managerPin: pin,
       });
@@ -231,11 +240,24 @@ export function BackupRestoreWorkspace() {
     onSuccess: (result) => {
       setConfirmRestoreOpen(false);
       setPendingManifest(null);
+      const parts: string[] = [];
+      if (result.schemaApplied) {
+        parts.push(`schema (${result.schemaStatements} steps)`);
+      }
+      if (result.restoredTables.length || result.rowCount) {
+        parts.push(
+          `${result.rowCount.toLocaleString()} rows / ${result.restoredTables.length} tables`,
+        );
+      }
       toast.success("Restore completed", {
-        description: `${result.rowCount.toLocaleString()} rows restored across ${result.restoredTables.length} tables.`,
+        description: parts.join(" · ") || "Done.",
       });
       if (result.warnings.length > 0) {
-        toast.message("Restore notes", { description: result.warnings.join(" ") });
+        const fkNote = result.warnings.find((w) => w.startsWith("FK load window:"));
+        const rest = result.warnings.filter((w) => !w.startsWith("FK load window:"));
+        toast.message("Restore notes", {
+          description: [fkNote, ...rest].filter(Boolean).slice(0, 5).join(" · "),
+        });
       }
       summaryQ.refetch();
     },
@@ -252,27 +274,46 @@ export function BackupRestoreWorkspace() {
   const restoreActiveStep = useAnimatedActiveStep(restoreProgressOpen, 3, 9000);
 
   const backupSteps = [
-    { label: "Discovering public tables", state: stepState(0, backupActiveStep, backupProgressOpen) },
+    { label: "Discovering tables + live schema", state: stepState(0, backupActiveStep, backupProgressOpen) },
     { label: "Reading row data from Supabase", state: stepState(1, backupActiveStep, backupProgressOpen) },
-    { label: "Preparing download file", state: stepState(2, backupActiveStep, backupProgressOpen) },
+    { label: "Preparing download file (v2)", state: stepState(2, backupActiveStep, backupProgressOpen) },
   ] as const;
 
   const restoreSteps = [
     { label: "Manager PIN verified", state: "done" as const },
     {
-      label: preserveAuth
-        ? "Truncating tables (preserving local login & config)"
-        : "Truncating existing tables",
+      label: applyStructure
+        ? "Applying infrastructure from backup schema"
+        : "Skipping infrastructure (data-only)",
       state: stepState(1, restoreActiveStep, restoreProgressOpen),
     },
-    { label: "Inserting rows from backup", state: stepState(2, restoreActiveStep, restoreProgressOpen) },
+    {
+      label: !restoreData
+        ? "Skipping table data"
+        : restoreLoginDetails
+          ? "Truncating + loading all table data (incl. login)"
+          : "Truncating + loading data (preserving local login)",
+      state: stepState(2, restoreActiveStep, restoreProgressOpen),
+    },
     { label: "Finalising restore", state: stepState(3, restoreActiveStep, restoreProgressOpen) },
   ];
+
+  const restoreModeValid = applyStructure || restoreData;
+  const pendingHasSchema =
+    !!pendingManifest &&
+    pendingManifest.version >= 2 &&
+    !!pendingManifest.schema;
 
   const onFileChosen = async (file: File | undefined) => {
     if (!file) return;
     try {
       const manifest = await readBackupFile(file);
+      if (applyStructure && (manifest.version < 2 || !manifest.schema)) {
+        toast.message("No schema in this backup", {
+          description:
+            "Turn off Apply infrastructure, or create a new v2 backup after the schema catalog RPCs are installed.",
+        });
+      }
       setPendingManifest(manifest);
       setConfirmRestoreOpen(true);
     } catch (e) {
@@ -304,8 +345,8 @@ export function BackupRestoreWorkspace() {
               Full database backup
             </h3>
             <p className="text-sm text-muted-foreground">
-              Scans the live database each run to discover all public tables, then
-              exports a JSON bundle named{" "}
+              Each run discovers all public tables and live schema (columns, FKs,
+              indexes, RPCs, triggers, RLS), then exports a v2 JSON bundle named{" "}
               <code>{nextBackupLabelPreview()}.json</code>.
             </p>
           </div>
@@ -391,29 +432,72 @@ export function BackupRestoreWorkspace() {
             Restore from backup
           </h3>
           <p className="text-sm text-muted-foreground">
-            Clears all public tables (except protected login tables when enabled),
-            then reloads every table from the backup file. Requires manager PIN and{" "}
-            <code>SUPABASE_SERVICE_ROLE_KEY</code> on the server.
+            Choose what to apply. Infrastructure creates missing tables/FKs/RPCs from
+            the backup schema; data truncates and reloads rows; login overwrites{" "}
+            <code>{protectedTables.join(", ")}</code>. Requires manager PIN and{" "}
+            <code>SUPABASE_SERVICE_ROLE_KEY</code>.
           </p>
         </div>
 
-        <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/60 p-3">
-          <div className="space-y-0.5">
-            <Label htmlFor="preserve-auth" className="text-sm font-medium">
-              Preserve local login credentials
-            </Label>
-            <p className="text-xs text-muted-foreground">
-              Keeps <code>{protectedTables.join(", ")}</code> untouched — DEV
-              dummy PINs, SMS config, and export state are not overwritten by a
-              PROD restore.
-            </p>
+        <div className="space-y-2">
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/60 p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="apply-structure" className="text-sm font-medium">
+                Apply infrastructure (schema)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Create/align tables, columns, constraints, indexes, functions,
+                triggers, and RLS from the backup catalog (empty-project / disaster).
+              </p>
+            </div>
+            <Switch
+              id="apply-structure"
+              checked={applyStructure}
+              onCheckedChange={setApplyStructure}
+            />
           </div>
-          <Switch
-            id="preserve-auth"
-            checked={preserveAuth}
-            onCheckedChange={setPreserveAuth}
-          />
+
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/60 p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="restore-data" className="text-sm font-medium">
+                Restore table data
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Truncate public tables then reload rows from the backup.
+              </p>
+            </div>
+            <Switch
+              id="restore-data"
+              checked={restoreData}
+              onCheckedChange={setRestoreData}
+            />
+          </div>
+
+          <div className="flex items-center justify-between gap-3 rounded-md border border-border bg-background/60 p-3">
+            <div className="space-y-0.5">
+              <Label htmlFor="restore-login" className="text-sm font-medium">
+                Restore login details
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                Overwrite <code>{protectedTables.join(", ")}</code> (PINs / env
+                config). Off = keep this environment&apos;s login (typical for
+                PROD→DEV).
+              </p>
+            </div>
+            <Switch
+              id="restore-login"
+              checked={restoreLoginDetails}
+              onCheckedChange={setRestoreLoginDetails}
+              disabled={!restoreData}
+            />
+          </div>
         </div>
+
+        {!restoreModeValid ? (
+          <p className="text-sm text-destructive">
+            Turn on infrastructure and/or table data before restoring.
+          </p>
+        ) : null}
 
         <div className="space-y-1">
           <Label className="text-xs">Authorising manager</Label>
@@ -441,7 +525,7 @@ export function BackupRestoreWorkspace() {
         <Button
           variant="destructive"
           onClick={() => fileInputRef.current?.click()}
-          disabled={restoreMut.isPending}
+          disabled={restoreMut.isPending || !restoreModeValid}
         >
           <Upload className="mr-2 h-4 w-4" />
           Choose backup file to restore
@@ -451,23 +535,36 @@ export function BackupRestoreWorkspace() {
       <AlertDialog open={confirmRestoreOpen} onOpenChange={setConfirmRestoreOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Restore full database?</AlertDialogTitle>
+            <AlertDialogTitle>Confirm restore?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 {pendingManifest ? (
                   <>
                     <p>
-                      <strong>{pendingManifest.label}</strong> from project{" "}
-                      <code>{pendingManifest.sourceProjectRef}</code> —{" "}
+                      <strong>{pendingManifest.label}</strong> (v{pendingManifest.version})
+                      from <code>{pendingManifest.sourceProjectRef}</code> —{" "}
                       {pendingManifest.tableCount} tables,{" "}
                       {pendingManifest.rowCount.toLocaleString()} rows.
                     </p>
-                    <p>
-                      This will truncate existing data and reload from the backup.
-                      {preserveAuth
-                        ? ` Login table(s) (${protectedTables.join(", ")}) will be preserved.`
-                        : " All tables including staff PINs will be overwritten."}
-                    </p>
+                    <p className="text-xs">{describeBackupSchema(pendingManifest)}</p>
+                    <ul className="list-disc space-y-1 pl-4">
+                      <li>
+                        Infrastructure:{" "}
+                        {applyStructure
+                          ? pendingHasSchema
+                            ? "yes — apply schema catalog"
+                            : "requested but backup has no schema (will fail)"
+                          : "no"}
+                      </li>
+                      <li>
+                        Table data:{" "}
+                        {restoreData
+                          ? restoreLoginDetails
+                            ? "yes — including login tables"
+                            : "yes — preserving local login/config"
+                          : "no"}
+                      </li>
+                    </ul>
                   </>
                 ) : (
                   <p>No backup loaded.</p>
@@ -479,7 +576,12 @@ export function BackupRestoreWorkspace() {
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <Button
               variant="destructive"
-              disabled={!pendingManifest || restoreMut.isPending}
+              disabled={
+                !pendingManifest ||
+                restoreMut.isPending ||
+                !restoreModeValid ||
+                (applyStructure && !pendingHasSchema)
+              }
               onClick={() => {
                 setConfirmRestoreOpen(false);
                 setPinOpen(true);

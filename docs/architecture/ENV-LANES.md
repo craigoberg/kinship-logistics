@@ -21,31 +21,39 @@ Renaming a Supabase **display name** does not change URL or keys.
 
 ## Load DEV → TEST (what actually happens)
 
-Supabase Dashboard **cannot** restore Project A into Project B. Use the **app** JSON backup for **data**, and a **schema dump** for empty TEST tables.
+Supabase Dashboard **cannot** restore Project A into Project B. Use the **app** Admin JSON backup (v2 = data + discovered schema).
 
-### Order (do not skip)
+### Order (prefer v2 backup — do not skip RPCs)
 
-1. **DEV data dump (done when you have the `.json`)**  
-   App on DEV → Admin → Backup & Restore → download.
-2. **Schema onto empty TEST** (required — JSON restore does not create tables)  
-   **Preferred (no pg_dump):** run in TEST SQL Editor:  
-   `docs/sql/2026-07-29_test_bootstrap_create_tables.sql`  
-   (CREATE TABLE shells + permissive anon RLS from live DEV OpenAPI — **not** a full FK/RPC clone).
-3. **Backup RPCs on TEST**  
-   Run `docs/sql/2026-07-11_backup_restore_rpcs.sql` in TEST SQL Editor.
-4. **Core PIN/auth RPCs on TEST** (app login needs these — not in the JSON):  
-   At minimum re-apply from `docs/sql/` the PIN verify / manager helpers you use on DEV  
-   (e.g. `2026-06-21_verify_operator_pin_sha256.sql`, `2026-07-04_fix_is_manager_staff_auth_link.sql`, `2026-07-12_system_parameters_pin_save.sql`).  
-   If something 404s later, we add the specific RPC file.
-5. **Point local app at TEST** (temp `.env` — never commit):  
-   - `VITE_SUPABASE_URL` / `SUPABASE_URL` = TEST URL  
-   - `VITE_SUPABASE_PUBLISHABLE_KEY` / `SUPABASE_PUBLISHABLE_KEY` = TEST anon  
-   - `SUPABASE_SERVICE_ROLE_KEY` = TEST service_role (server only; never `VITE_`)  
-   - `VITE_APP_LANE=test`
-6. **Restore JSON** in app → Admin → Backup & Restore (Manager PIN).  
-   For Alpha, restore `staff_registry` (leave “preserve local login” **off** unless you know you need it).
-7. **Auth users on TEST** (not in JSON): Authentication → create day-login emails; optional `docs/sql/2026-07-28_staff_auth_user_link_backfill.sql`.
-8. Smoke → then point env back to DEV when done building.
+1. **RPCs on source (DEV) and target (TEST)**  
+   - `docs/sql/2026-07-11_backup_restore_rpcs.sql`  
+   - `docs/sql/2026-08-05_backup_schema_catalog_rpcs.sql` (`export_backup_schema_catalog`, `exec_backup_ddl`)
+2. **DEV backup** — Admin → Backup & Restore → download (v2 embeds live schema each run).
+3. **Point app at TEST** (temp `.env` — never commit): TEST URL / anon / `SUPABASE_SERVICE_ROLE_KEY` / `VITE_APP_LANE=test`.
+4. **Restore with mode switches** (Manager PIN):  
+   | Goal | Infrastructure | Table data | Login details |
+   |------|----------------|------------|---------------|
+   | Empty structure / promote schema | on | off | n/a |
+   | Refresh seed data only | off | on | off (keep TEST PINs) or on |
+   | Full disaster / new project | on | on | on (Alpha) or off (keep local) |
+5. **Auth users on TEST** (not in JSON): Authentication → create day-login emails; optional `docs/sql/2026-07-28_staff_auth_user_link_backfill.sql`.
+6. Smoke → point env back to DEV when done building.
+
+**Legacy path** (pre-v2 or if schema apply fails): bootstrap shells `2026-07-29_test_bootstrap_create_tables.sql` + structure sync pack `2026-08-05_TEST_STRUCTURE_SYNC_ORDER.md`, then data-only restore.
+
+### Align TEST schema to DEV (after bootstrap + data)
+
+Full run order: `docs/sql/2026-08-05_TEST_STRUCTURE_SYNC_ORDER.md`
+
+| Step | File | What |
+|------|------|------|
+| 1 Columns | `2026-08-05_test_align_dev_columns.sql` | missing tables, ADD COLUMN, DEFAULT, NOT NULL |
+| 2 Constraints | `2026-08-05_test_align_dev_constraints.sql` | CHECK / UNIQUE / FK / indexes |
+| 3 Enums/RPCs/triggers | `2026-08-05_test_align_dev_enums_funcs_triggers.sql` | enums, functions, triggers, EXECUTE grants |
+| 4 RLS | `2026-08-05_test_align_dev_rls.sql` | replace public policies with DEV set |
+
+Full checklist: `docs/sql/2026-08-05_TEST_STRUCTURE_SYNC_ORDER.md`.  
+Dumps: `docs/architecture/dev-schema-dumps/`. Generators: `scripts/generate-test-align-dev-*`.
 
 ### Alternative: pg_dump (fuller DDL)
 
@@ -123,8 +131,8 @@ Cursor (build) ──push──► GitHub main
 |------|-------------------------|
 | **App code** | Push to GitHub → TEST host rebuilds/publishes same commit. No separate “copy code in Lovable.” |
 | **Schema / RPCs** | New file under `docs/sql/` applied on DEV first → same file run on TEST SQL Editor (checklist). |
-| **Reference / seed data** | Optional: Admin JSON backup DEV → restore TEST (overwrites TEST data). Not every week by default. |
-| **Auth users / passwords** | Recreate or invite per Supabase project (not in JSON backup). |
+| **Schema + seed data** | Admin v2 JSON: discover schema each backup; restore with Infrastructure / Data / Login checkboxes. Not every week by default. |
+| **Auth users / passwords** | Recreate or invite per Supabase project (not in JSON backup — PINs in `staff_registry` only when Login details is on). |
 | **Secrets / `.env`** | Never promote. Each Lovable project keeps its own `.env` pointed at its DB. |
 
 ### Option 1 — Cursor + Lovable DEV + Lovable TEST (two hosts)
@@ -182,7 +190,70 @@ Same cadence every lane:
 3. Run the **same file** on **TEST** before/with the `test` branch code promote.  
 4. Later: same file on **PROD** — never full JSON wipe of PROD operational data.  
 
-Agent/backlog must list every new SQL in the handoff (live-db-ship-gate). First-time TEST bootstrap gaps (OpenAPI shells) are patched with targeted `2026-07-29_test_*` files as found in Alpha smoke — prefer real `pg_dump --schema-only` from DEV if drift keeps appearing.
+Agent/backlog must list every new SQL in the handoff (live-db-ship-gate).
+
+**Baseline locked 2026-08-05:** TEST was brought in line with DEV via catalog dumps + align scripts (`docs/sql/2026-08-05_TEST_STRUCTURE_SYNC_ORDER.md`). From this point, **stay in sync by forward migrations only** — do not rebuild TEST from OpenAPI bootstrap again unless creating a brand-new empty project.
+
+## Stay in sync (operating rules)
+
+### Golden rule
+
+**No schema change exists unless it is a dated file under `docs/sql/`.**  
+Never “just fix it” in the Supabase Dashboard SQL Editor on one lane without committing the same script to git and running it on the other lanes.
+
+### Every schema change (DEV → TEST → later PROD)
+
+| Step | Who | Action |
+|------|-----|--------|
+| 1 | Agent / builder | Write idempotent `docs/sql/YYYY-MM-DD_short_name.sql` (IF NOT EXISTS / DO blocks) |
+| 2 | User | Run on **DEV** → hard refresh → smoke the feature |
+| 3 | User | Run **same file** on **TEST** before (or with) merging code to `test` |
+| 4 | Agent | Handoff lists SQL paths + validation queries (live-db-ship-gate) |
+| 5 | Later | Same file on **PROD** when promoting that release |
+
+Code and SQL are a **pair**: if the PR needs a column/RPC/policy, the SQL file ships in the same change set.
+
+### What never auto-copies
+
+- Table **data** (attendance, trips, issues) — only intentional Admin JSON restore / seed  
+- `auth.users` — recreate per project  
+- Secrets / `.env` — per lane  
+
+### Drift watch (lightweight)
+
+Monthly (or any time something “works on DEV, fails on TEST”):
+
+1. Run `docs/sql/2026-08-05_dev_structure_dump_queries.sql` on **DEV** and **TEST** (A–D).  
+2. Diff counts: enums, functions, triggers, policy_count, FK count, unvalidated FKs.  
+3. If drift: fix with a **new** dated SQL (or regenerate an align pack from dumps) — do not hand-edit only one lane.
+
+Generators (when regenerating a pack):  
+`scripts/generate-test-align-dev-*.mjs` / `.ps1` + dumps in `docs/architecture/dev-schema-dumps/`.
+
+### PROD create (empty project) — infrastructure SQL process
+
+When standing up PROD (or any new empty Supabase):
+
+1. **Freeze a schema release** — git tag or known commit on `main` / `test`.  
+2. **Build a schema pack from that DEV** (preferred over replaying years of patch files):  
+   - Re-run dump queries A–E + constraints/indexes on DEV  
+   - Generate align SQL (columns → constraints → enums/funcs/triggers → RLS), **or**  
+   - `pg_dump --schema-only --schema=public` if Postgres client tools are available (gold standard)  
+3. Run pack on **empty PROD** (no operational data yet).  
+4. Apply any **forward** `docs/sql/` files dated after the freeze.  
+5. Seed only what PROD needs (staff, system_parameters, lookups) — **not** a full live attendance restore.  
+6. Create Auth users; link `staff_registry.auth_user_id`.  
+7. Point PROD Vercel env at PROD Supabase (`VITE_APP_LANE=prod`, `VITE_IS_PRODUCTION=true`).
+
+After PROD exists, promote exactly like TEST: **same dated SQL file**, never wipe PROD tables for routine releases.
+
+### Anti-patterns (cause today’s disaster again)
+
+- OpenAPI / PostgREST “create table shells” as the long-term schema source  
+- Dashboard-only FK/default fixes on one project  
+- Different SQL on DEV vs TEST “just for now”  
+- Skipping `2026-08-05_backup_schema_catalog_rpcs.sql` then expecting Infrastructure restore to work  
+- Relying only on OpenAPI table shells when a v2 backup + Infrastructure apply is available
 
 ## Custom domain (TEST on Vercel)
 

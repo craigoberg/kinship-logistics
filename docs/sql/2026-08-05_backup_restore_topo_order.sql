@@ -1,39 +1,9 @@
 -- ============================================================================
--- 2026-07-11 — Admin backup / restore helpers
+-- 2026-08-05 — Fix order_tables_for_restore: true topological sort by FK edges
 --
--- Dynamic table discovery (public schema) + service-role-only truncate for
--- full restore. Apply in Supabase SQL editor on each environment.
+-- Previous version sorted by FK *count*, which put high-FK parents (e.g.
+-- transport_trips) AFTER their children (trip_legs). Apply on DEV + TEST.
 -- ============================================================================
-
--- ---------- list_backup_tables ----------
--- Returns every user table in public schema. Called on each backup run so new
--- migrations are picked up automatically.
-
-CREATE OR REPLACE FUNCTION public.list_backup_tables()
-RETURNS TABLE(table_name text)
-LANGUAGE sql
-STABLE
-SECURITY DEFINER
-SET search_path = public
-AS $$
-  SELECT c.relname::text
-    FROM pg_class c
-    JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'public'
-     AND c.relkind = 'r'
-     AND c.relname NOT LIKE 'pg_%'
-     AND c.relname NOT LIKE 'sql_%'
-     AND c.relname NOT LIKE '\_backup\_%' ESCAPE '\'
-   ORDER BY c.relname;
-$$;
-
-REVOKE ALL ON FUNCTION public.list_backup_tables() FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.list_backup_tables()
-  TO anon, authenticated, service_role;
-
--- ---------- order_tables_for_restore ----------
--- True topological order: parents before children (FK edge walk).
--- Note: sorting by FK *count* is wrong — parents with many FKs sorted after children.
 
 CREATE OR REPLACE FUNCTION public.order_tables_for_restore(p_tables text[])
 RETURNS text[]
@@ -60,6 +30,7 @@ BEGIN
       EXIT;
     END IF;
 
+    -- Tables with no parent still in the remaining set
     SELECT COALESCE(array_agg(t ORDER BY t), ARRAY[]::text[])
       INTO v_ready
       FROM unnest(v_remaining) AS t
@@ -87,6 +58,7 @@ BEGIN
     );
   END LOOP;
 
+  -- Cycles / leftovers
   IF cardinality(v_remaining) IS NOT NULL AND cardinality(v_remaining) > 0 THEN
     v_ordered := v_ordered || (
       SELECT COALESCE(array_agg(x ORDER BY x), ARRAY[]::text[])
@@ -102,34 +74,5 @@ REVOKE ALL ON FUNCTION public.order_tables_for_restore(text[]) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.order_tables_for_restore(text[])
   TO anon, authenticated, service_role;
 
--- ---------- truncate_backup_tables ----------
--- Destructive — service_role only. Clears listed tables before restore insert.
-
-CREATE OR REPLACE FUNCTION public.truncate_backup_tables(p_tables text[])
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-SET search_path = public
-AS $$
-DECLARE
-  v_sql text;
-BEGIN
-  IF p_tables IS NULL OR array_length(p_tables, 1) IS NULL THEN
-    RETURN;
-  END IF;
-
-  v_sql := format(
-    'TRUNCATE TABLE %s RESTART IDENTITY CASCADE',
-    (
-      SELECT string_agg(quote_ident(t), ', ' ORDER BY t)
-        FROM unnest(p_tables) AS t
-    )
-  );
-
-  EXECUTE v_sql;
-END;
-$$;
-
-REVOKE ALL ON FUNCTION public.truncate_backup_tables(text[]) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION public.truncate_backup_tables(text[])
-  TO service_role;
+-- Validation (expect transport_trips before trip_legs):
+-- SELECT * FROM unnest(order_tables_for_restore(ARRAY['trip_legs','transport_trips'])) WITH ORDINALITY;

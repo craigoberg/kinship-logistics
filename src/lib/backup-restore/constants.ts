@@ -11,7 +11,7 @@ export const ENV_PROTECTED_TABLES = [
   "myob_export_batches",
 ] as const;
 
-/** All tables skipped when "Preserve local login credentials" is enabled. */
+/** All tables skipped when "Restore login details" is OFF. */
 export const PRESERVE_LOCAL_TABLES = [
   ...AUTH_PROTECTED_TABLES,
   ...ENV_PROTECTED_TABLES,
@@ -33,6 +33,8 @@ export const AUTH_PROTECTED_COLUMNS: Record<string, readonly string[]> = {
   participants: ["dual_witness_pin_hash"],
 };
 
-export const BACKUP_FORMAT_VERSION = 1 as const;
+/** v1 = data only; v2 = data + live schema catalog */
+export const BACKUP_FORMAT_VERSION = 2 as const;
+export const BACKUP_FORMAT_VERSIONS = [1, 2] as const;
 
 export const BACKUP_PRODUCT_LABEL = "Yada Connect";
