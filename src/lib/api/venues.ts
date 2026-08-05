@@ -384,17 +384,21 @@ export async function submitBaselineSignoff(
   }
 
   // Insert signoff row.
+  // Always send signed_off_at — TEST bootstrap had NOT NULL without DEFAULT now().
   const { data: signoff, error: sErr } = await supabase
     .from("venue_safety_baseline_signoffs")
     .insert({
       venue_id: input.venue_id,
-      signed_off_by_staff_id: staffId,
+      signed_off_by_staff_id: staffId || null,
+      signed_off_at: new Date().toISOString(),
       evidence_ref: input.evidence_ref.trim(),
       notes: input.notes?.trim() || null,
     })
     .select("*")
     .single();
-  if (sErr) throw sErr;
+  if (sErr) {
+    throw new Error(`Baseline sign-off failed: ${sErr.message}`);
+  }
 
   // Insert answers.
   if (input.answers.length > 0) {
