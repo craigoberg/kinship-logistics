@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   getTodaySession,
@@ -19,14 +19,17 @@ export const SITE_SESSION_QUERY_KEY = ["site-day-session", "today"] as const;
  * (subscribeToSiteSession below) plus explicit `invalidateQueries` after
  * writes is the freshness rail.
  *
- * When the operational (SIM) date changes, refetch so "today" is not a
- * stale prior-day row left in the shared cache key.
+ * When the operational (SIM) date *changes* (hydrate unlock or SIM jump),
+ * refetch so "today" is not a stale prior-day row. Do not invalidate on
+ * initial mount — that cancelled the first fetch and left Day Centre stuck
+ * on "Loading today's session…".
  */
 export function useSiteSession() {
   const queryClient = useQueryClient();
   const { isReady } = useAuthReady();
   const today = useOperationalTodayIso();
   const canQuery = isReady;
+  const prevTodayRef = useRef<string | null>(null);
   const q = useQuery<SiteDaySession | null>({
     queryKey: SITE_SESSION_QUERY_KEY,
     queryFn: getTodaySession,
@@ -36,6 +39,9 @@ export function useSiteSession() {
   });
 
   useEffect(() => {
+    const prev = prevTodayRef.current;
+    prevTodayRef.current = today;
+    if (prev === null || prev === today) return;
     void queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
   }, [today, queryClient]);
 

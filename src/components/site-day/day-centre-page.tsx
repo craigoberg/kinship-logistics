@@ -82,8 +82,9 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
   const bootstrapMut = useMutation({
     mutationFn: () => ensureTodaySession(),
     onSuccess: (row) => {
+      // Seed cache — avoid invalidate here (cancels in-flight reads and can
+      // bounce Day Centre back to a perpetual loading state).
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, row);
-      queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
     },
     onError: (err: Error) => {
       // Allow retry on next render / via the manual Retry button.
@@ -107,8 +108,12 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
     // workaround is blocking. REDs with accepted workarounds are carried.
     if (openRedsQ.isLoading) return;
     if (hasBlockingRed) return;
-    bootstrappedForDateRef.current = operationalToday;
-    bootstrapMut.mutate();
+    if (bootstrapMut.isPending) return;
+    bootstrapMut.mutate(undefined, {
+      onSuccess: () => {
+        bootstrappedForDateRef.current = operationalToday;
+      },
+    });
   }, [
     operationalToday,
     isReady,
@@ -118,10 +123,13 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
     sessionQ.data,
     openRedsQ.isLoading,
     hasBlockingRed,
-    bootstrapMut,
+    bootstrapMut.isPending,
+    bootstrapMut.mutate,
   ]);
 
-  if (sessionQ.isLoading || bootstrapMut.isPending) {
+  // Only block on the first load / provision — keep showing a known session
+  // while background refetch or bootstrap retry runs.
+  if ((sessionQ.isLoading && !session) || (bootstrapMut.isPending && !session)) {
     return (
       <div className="flex items-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="h-4 w-4 animate-spin" /> Loading today's session…
