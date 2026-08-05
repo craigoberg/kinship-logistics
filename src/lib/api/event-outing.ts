@@ -874,6 +874,39 @@ function tripDaySeedRow(
   return row;
 }
 
+function isMissingOnConflictTarget(err: {
+  code?: string;
+  message?: string;
+}): boolean {
+  const code = err.code ?? "";
+  const msg = err.message ?? "";
+  return (
+    code === "42P10" ||
+    /no unique|exclusion constraint matching the ON CONFLICT/i.test(msg)
+  );
+}
+
+/** Upsert trip days; fall back to insert-missing when UNIQUE is absent (TEST bootstrap). */
+async function upsertTripDaySeeds(
+  eventId: string,
+  rows: Record<string, unknown>[],
+): Promise<void> {
+  const { error } = await supabase
+    .from("event_day_sessions")
+    .upsert(rows, { onConflict: "event_id,session_date", ignoreDuplicates: true });
+  if (!error) return;
+  if (!isMissingOnConflictTarget(error)) throw error;
+
+  const existing = await listEventDaySessions(eventId);
+  const have = new Set(existing.map((s) => s.session_date));
+  const missing = rows.filter((r) => !have.has(String(r.session_date)));
+  if (missing.length === 0) return;
+  const { error: insErr } = await supabase
+    .from("event_day_sessions")
+    .insert(missing);
+  if (insErr) throw insErr;
+}
+
 /**
  * Multi-day tours — copy evening/morning roll times to days still unset.
  * Per-day overrides are preserved.
@@ -1046,10 +1079,7 @@ export async function resetEventDaySessions(
     : null;
   const rows = dates.map((d) => tripDaySeedRow(eventId, d, defaults));
 
-  const { error: seedErr } = await supabase
-    .from("event_day_sessions")
-    .upsert(rows, { onConflict: "event_id,session_date", ignoreDuplicates: true });
-  if (seedErr) throw seedErr;
+  await upsertTripDaySeeds(eventId, rows);
 
   return listEventDaySessions(eventId);
 }
@@ -1087,10 +1117,7 @@ export async function seedEventDaySessions(
     : null;
   const rows = dates.map((d) => tripDaySeedRow(eventId, d, defaults));
 
-  const { error } = await supabase
-    .from("event_day_sessions")
-    .upsert(rows, { onConflict: "event_id,session_date", ignoreDuplicates: true });
-  if (error) throw error;
+  await upsertTripDaySeeds(eventId, rows);
 
   // ignoreDuplicates returns no rows — always re-list so the UI sees existing trip days.
   return listEventDaySessions(eventId);
