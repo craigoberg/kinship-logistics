@@ -1104,7 +1104,7 @@ export async function sweepOverdueArrivals(
         .update({
           escalation_issue_id: issue.id as string,
           escalation_severity: insertSeverity,
-          escalation_raised_at: new Date().toISOString(),
+          escalation_raised_at: operationalNowIso(),
         })
         .eq("id", r.id);
 
@@ -1497,7 +1497,7 @@ export async function sweepOverdueDepartures(
         .update({
           departure_issue_id: issue.id as string,
           departure_severity: insertSeverity,
-          departure_raised_at: new Date().toISOString(),
+          departure_raised_at: operationalNowIso(),
         })
         .eq("id", r.id);
 

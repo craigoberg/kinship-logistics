@@ -2,7 +2,7 @@
 // Floor row embedded method override (UI Style Guide): wide row confirms
 // check-in/out with the current method; method chip only updates selection.
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   AlertTriangle,
@@ -66,6 +66,10 @@ import {
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import {
+  getOperationalClockSnapshot,
+  subscribeOperationalClock,
+} from "@/lib/operational-clock";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
@@ -84,7 +88,11 @@ interface Props {
 
 const ROLL_KEY = (sid: string) => ["client-attendance-roll", sid] as const;
 
-export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
+/**
+ * Always-mounted host so arrival/departure Y→R sweeps run under SIM clock
+ * even when Check-In / Check-Out tabs are unmounted (Activities / Issues).
+ */
+export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string }) {
   const qc = useQueryClient();
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const redMins = useSystemParameter<number>("attendance_red_threshold_mins", 60);
@@ -96,6 +104,58 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     "attendance_departure_red_threshold_mins",
     60,
   );
+  const clockSnap = useSyncExternalStore(
+    subscribeOperationalClock,
+    getOperationalClockSnapshot,
+    () => "ssr:live",
+  );
+  const participantsQ = useQuery({
+    queryKey: ["participants", "all-for-roll"],
+    queryFn: listParticipants,
+    staleTime: 5 * 60_000,
+  });
+  const nameMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    for (const p of participantsQ.data ?? []) map[p.id] = p.fullName;
+    return map;
+  }, [participantsQ.data]);
+
+  useQuery({
+    queryKey: ["attendance-overdue-sweep", sessionId, clockSnap],
+    queryFn: async () => {
+      if (Object.keys(nameMap).length === 0) return { swept: false };
+      await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
+        (e) => {
+          const msg = e instanceof Error ? e.message : String(e);
+          console.error("[AttendanceOverdueSweepHost] arrival sweep failed", e);
+          toast.error("Attendance overdue sweep failed", { description: msg });
+        },
+      );
+      await sweepOverdueDepartures(
+        sessionId,
+        depYellowMins,
+        depRedMins,
+        nameMap,
+      ).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[AttendanceOverdueSweepHost] departure sweep failed", e);
+        toast.error("Departure overdue sweep failed", { description: msg });
+      });
+      await qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+      return { swept: true };
+    },
+    refetchInterval: 60_000,
+    refetchIntervalInBackground: false,
+    refetchOnWindowFocus: false,
+    staleTime: 0,
+    enabled: !!sessionId && participantsQ.isSuccess,
+  });
+
+  return null;
+}
+
+export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
+  const qc = useQueryClient();
 
   const [adjustRow, setAdjustRow] = useState<ClientAttendanceRow | null>(null);
   const [bulkOpen, setBulkOpen] = useState(false);
@@ -202,31 +262,12 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     };
   }, [sessionId, qc]);
 
+  // Overdue Y→R promotion lives in AttendanceOverdueSweepHost (always mounted
+  // on Active Day). This query only reads the roll — after a SIM jump the host
+  // sweeps then invalidates so badges reflect post-sweep severity immediately.
   const rollQ = useQuery({
     queryKey: ROLL_KEY(sessionId),
-    queryFn: async () => {
-      const rows = await listAttendanceRoll(sessionId);
-      if (Object.keys(nameMap).length > 0) {
-        await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
-          (e) => {
-            const msg = e instanceof Error ? e.message : String(e);
-            console.error("[AttendanceRollPanel] arrival sweep failed", e);
-            toast.error("Attendance overdue sweep failed", { description: msg });
-          },
-        );
-        await sweepOverdueDepartures(
-          sessionId,
-          depYellowMins,
-          depRedMins,
-          nameMap,
-        ).catch((e) => {
-          const msg = e instanceof Error ? e.message : String(e);
-          console.error("[AttendanceRollPanel] departure sweep failed", e);
-          toast.error("Departure overdue sweep failed", { description: msg });
-        });
-      }
-      return rows;
-    },
+    queryFn: () => listAttendanceRoll(sessionId),
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,

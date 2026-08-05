@@ -43,7 +43,10 @@ import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
-import { AttendanceRollPanel } from "./attendance-roll-panel";
+import {
+  AttendanceOverdueSweepHost,
+  AttendanceRollPanel,
+} from "./attendance-roll-panel";
 import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
 import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
@@ -146,6 +149,7 @@ export function ActiveDayPanel({ session }: Props) {
 
   return (
     <section className="space-y-5">
+      <AttendanceOverdueSweepHost sessionId={session.id} />
       <EmergencyOpsBanner siteDaySessionId={session.id} />
       {lockdownQ.data?.active ? (
         <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">

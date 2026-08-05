@@ -619,11 +619,12 @@ export function useComplianceCategories() {
 }
 
 // ---------------------------------------------------------------------------
-// NO-SHOW / MISSING — clients who are overdue for today's Day Centre session.
+// NO-SHOW / MISSING — clients overdue for today's Day Centre session.
 //
-// The attendance sweep already marks status = 'overdue' when expected_arrival_at
-// passes without check-in. This tile just surfaces that count.
-// Yellow: any overdue. Red: overdue AND expected_arrival_at was > redHours ago.
+// Sweep writes escalation_severity yellow|red on client_attendance_log while
+// status stays expected (never "overdue"). Tile surfaces those open arrival
+// escalations. Yellow/red on the tile follows escalation_severity; redHours is
+// a fallback when severity is yellow but wall/SIM age already exceeds redHours.
 // ---------------------------------------------------------------------------
 
 export interface NoShowTileRow {
@@ -633,37 +634,48 @@ export interface NoShowTileRow {
   severity: Severity;
 }
 
-async function fetchTodayOverdueAttendees(): Promise<
-  Array<{ participant_id: string; expected_arrival_at: string; session_id: string }>
+async function fetchTodayOverdueAttendees(sessionDate: string): Promise<
+  Array<{
+    participant_id: string;
+    expected_arrival_at: string;
+    session_id: string;
+    escalation_severity: string | null;
+  }>
 > {
-  const date = getSydneyIsoDate();
   const sessionRes = await supabase
     .from("site_day_sessions")
     .select("id")
-    .eq("session_date", date)
+    .eq("session_date", sessionDate)
     .maybeSingle();
   if (sessionRes.error || !sessionRes.data) return [];
   const sessionId = sessionRes.data.id as string;
   const { data, error } = await supabase
     .from("client_attendance_log")
-    .select("participant_id, expected_arrival_at, session_id")
+    .select(
+      "participant_id, expected_arrival_at, session_id, escalation_severity",
+    )
     .eq("session_id", sessionId)
-    .eq("status", "overdue");
+    .in("escalation_severity", ["yellow", "red"])
+    .is("checked_in_at", null)
+    .neq("status", "absent")
+    .neq("status", "checked_out");
   if (error) throw error;
   return (data ?? []) as Array<{
     participant_id: string;
     expected_arrival_at: string;
     session_id: string;
+    escalation_severity: string | null;
   }>;
 }
 
 export function useNoShowTileFeed(params?: { redHours?: number }) {
   const redHours = params?.redHours ?? 2;
-  const redMs    = redHours * 3_600_000;
+  const redMs = redHours * 3_600_000;
+  const today = useOperationalTodayIso();
 
   const overdueQ = useQuery({
-    queryKey: ["no-show-tile-feed", getSydneyIsoDate()],
-    queryFn: fetchTodayOverdueAttendees,
+    queryKey: ["no-show-tile-feed", today],
+    queryFn: () => fetchTodayOverdueAttendees(today),
     staleTime: 30_000,
     refetchOnWindowFocus: true,
   });
@@ -677,10 +689,13 @@ export function useNoShowTileFeed(params?: { redHours?: number }) {
     const now = operationalNowMs();
     const byId = new Map((participantsQ.data ?? []).map((p) => [p.id, p]));
     return (overdueQ.data ?? []).map((r) => {
-      const expectedMs  = new Date(r.expected_arrival_at).getTime();
+      const expectedMs = new Date(r.expected_arrival_at).getTime();
       const overdueForMs = now - expectedMs;
-      const overdueMin   = Math.floor(overdueForMs / 60_000);
-      const severity: Severity = overdueForMs >= redMs ? "critical" : "warning";
+      const overdueMin = Math.floor(overdueForMs / 60_000);
+      const severity: Severity =
+        r.escalation_severity === "red" || overdueForMs >= redMs
+          ? "critical"
+          : "warning";
       const name = byId.get(r.participant_id)?.fullName ?? "Unknown client";
       const expectedTime = r.expected_arrival_at.slice(11, 16);
       return {

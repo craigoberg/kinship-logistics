@@ -1,5 +1,9 @@
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import {
+  operationalNowMs,
+  subscribeOperationalClock,
+} from "@/lib/operational-clock";
 
 /**
  * Live HH:MM:SS counter for escalation / issue lifecycle.
@@ -9,6 +13,7 @@ import { cn } from "@/lib/utils";
  *              elapsed span between `since` and `until` (used for closed
  *              summaries).
  *
+ * Uses the operational/SIM clock when overridden (frozen until nudged).
  * SSR-safe: emits `--:--:--` until the first client mount so server HTML
  * matches client HTML (mirrors <ClientTime>).
  */
@@ -48,9 +53,14 @@ export function ElapsedTimer({ since, until, label, className }: ElapsedTimerPro
       setNow(untilMs!);
       return;
     }
-    setNow(Date.now());
-    const id = window.setInterval(() => setNow(Date.now()), 1000);
-    return () => window.clearInterval(id);
+    const tick = () => setNow(operationalNowMs());
+    tick();
+    const id = window.setInterval(tick, 1000);
+    const unsub = subscribeOperationalClock(tick);
+    return () => {
+      window.clearInterval(id);
+      unsub();
+    };
   }, [sinceMs, frozen, untilMs]);
 
   if (sinceMs == null) return null;

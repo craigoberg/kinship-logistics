@@ -11,6 +11,7 @@ import { useSiteIssues } from "@/hooks/use-site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { ensureTodaySession } from "@/lib/api/site-day-sessions";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
 import { getActiveUserProfile, getEscalationBySourceIssue, isActiveUserManager } from "@/lib/data-store";
 import { StartOfDayPanel } from "./start-of-day-panel";
 import { ActiveDayPanel } from "./active-day-panel";
@@ -74,9 +75,10 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
   });
 
 
-  // One-shot bootstrap: if no row exists for today, provision exactly one
-  // so every child component reads the same session_id.
-  const bootstrappedRef = useRef(false);
+  // One-shot bootstrap per operational (SIM) date: if no row exists for
+  // today, provision exactly one so every child reads the same session_id.
+  const operationalToday = useOperationalTodayIso();
+  const bootstrappedForDateRef = useRef<string | null>(null);
   const bootstrapMut = useMutation({
     mutationFn: () => ensureTodaySession(),
     onSuccess: (row) => {
@@ -85,7 +87,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
     },
     onError: (err: Error) => {
       // Allow retry on next render / via the manual Retry button.
-      bootstrappedRef.current = false;
+      bootstrappedForDateRef.current = null;
       console.error("[DayCentrePage] ensureTodaySession failed", err);
       toast.error("Could not provision today's session", {
         description: err.message,
@@ -94,17 +96,21 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
   });
 
   useEffect(() => {
-    if (bootstrappedRef.current) return;
+    if (bootstrappedForDateRef.current === operationalToday) return;
     if (!isReady || !isSignedIn) return;
     if (sessionQ.isLoading || sessionQ.isError) return;
-    if (sessionQ.data) return;
+    if (sessionQ.data) {
+      bootstrappedForDateRef.current = operationalToday;
+      return;
+    }
     // Do not auto-provision today's session while a RED without an agreed
     // workaround is blocking. REDs with accepted workarounds are carried.
     if (openRedsQ.isLoading) return;
     if (hasBlockingRed) return;
-    bootstrappedRef.current = true;
+    bootstrappedForDateRef.current = operationalToday;
     bootstrapMut.mutate();
   }, [
+    operationalToday,
     isReady,
     isSignedIn,
     sessionQ.isLoading,
@@ -140,7 +146,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
               size="sm"
               variant="outline"
               onClick={() => {
-                bootstrappedRef.current = false;
+                bootstrappedForDateRef.current = null;
                 bootstrapMut.reset();
                 queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
                 bootstrapMut.mutate();
@@ -266,7 +272,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
           variant="outline"
           disabled={!isReady || !isSignedIn || bootstrapMut.isPending}
           onClick={() => {
-            bootstrappedRef.current = false;
+            bootstrappedForDateRef.current = null;
             bootstrapMut.mutate();
           }}
         >
