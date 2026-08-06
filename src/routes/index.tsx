@@ -5,6 +5,8 @@ import { Button } from "@/components/ui/button";
 import { useParticipants } from "@/hooks/use-supabase-data";
 import { TodaysMedicationCard } from "@/components/medication/todays-medication-card";
 import { OperationsExceptionHub } from "@/components/dashboard/OperationsExceptionHub";
+import { EmergencyFloorAlert } from "@/components/ops/emergency-floor-alert";
+import { useFloorAnnouncement } from "@/hooks/use-floor-announcement";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -19,10 +21,20 @@ export const Route = createFileRoute("/")({
 
 function Dashboard() {
   const { data: participants = [] } = useParticipants();
+  const { announcement } = useFloorAnnouncement();
+  const emergencyActive = announcement?.kind === "emergency";
 
   const iddsiAlerts = participants.filter(
     (p) => p.iddsi.liquids >= 3 || p.iddsi.foods <= 4,
   );
+
+  if (emergencyActive) {
+    return (
+      <div className="mx-auto max-w-6xl">
+        <EmergencyFloorAlert />
+      </div>
+    );
+  }
 
   return (
     <div className="mx-auto max-w-6xl space-y-6">

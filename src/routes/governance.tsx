@@ -2,6 +2,9 @@ import { createFileRoute } from "@tanstack/react-router";
 import { GovernanceHubWorkspace } from "@/components/admin/governance-hub-workspace";
 
 export const Route = createFileRoute("/governance")({
+  validateSearch: (s: Record<string, unknown>) => ({
+    issue: typeof s.issue === "string" && s.issue.length > 0 ? s.issue : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Governance Hub — Yada Connect" },
@@ -12,6 +15,7 @@ export const Route = createFileRoute("/governance")({
 });
 
 function GovernancePage() {
+  const { issue } = Route.useSearch();
   return (
     <div className="mx-auto w-full max-w-6xl space-y-6 p-4 md:p-6">
       <header className="space-y-1">
@@ -22,7 +26,7 @@ function GovernancePage() {
           Review human incidents, track maintenance &amp; repairs, and manage compliance renewals across fleet, venues, and staff.
         </p>
       </header>
-      <GovernanceHubWorkspace />
+      <GovernanceHubWorkspace openIssueId={issue} />
     </div>
   );
 }

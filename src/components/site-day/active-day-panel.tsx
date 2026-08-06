@@ -49,7 +49,6 @@ import {
 } from "./attendance-roll-panel";
 import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 import { ManagerOpsChip } from "@/components/ui/manager-ops-chip";
 import { FieldActionButton } from "@/components/ui/field-action-button";
 import { useQuery } from "@tanstack/react-query";
@@ -150,7 +149,6 @@ export function ActiveDayPanel({ session }: Props) {
   return (
     <section className="space-y-5">
       <AttendanceOverdueSweepHost sessionId={session.id} />
-      <EmergencyOpsBanner siteDaySessionId={session.id} />
       {lockdownQ.data?.active ? (
         <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
           <p className="font-bold uppercase tracking-wide text-[11px]">

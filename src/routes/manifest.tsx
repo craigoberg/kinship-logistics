@@ -24,7 +24,6 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -242,8 +241,6 @@ function ManifestPage() {
           </AlertDialogContent>
         </AlertDialog>
       </div>
-
-      <EmergencyOpsBanner eventDaySessionId={eventDaySessionId} />
 
       {isLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">

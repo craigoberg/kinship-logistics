@@ -46,10 +46,12 @@ import {
   COUNCIL_EMAIL_PARAM_KEYS,
 } from "./council-email-admin-panel";
 import { TourRollCallDefaultsPanel } from "./tour-roll-call-defaults-panel";
+import { MotdAdminPanel, MOTD_PARAM_KEYS } from "./motd-admin-panel";
 
 const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...MANDATED_CHECK_PARAM_KEYS,
   ...COUNCIL_EMAIL_PARAM_KEYS,
+  ...MOTD_PARAM_KEYS,
 ]);
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
@@ -94,6 +96,8 @@ export function SystemParameterWorkspace() {
 
   return (
     <div className="space-y-4">
+      <MotdAdminPanel />
+
       <TourRollCallDefaultsPanel />
 
       <MandatedChecksAdminPanel />

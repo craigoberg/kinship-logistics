@@ -34,7 +34,6 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { FieldActionButton } from "@/components/ui/field-action-button";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 import {
   clearProgrammeSuspend,
   getProgrammeSuspend,
@@ -631,7 +630,6 @@ function TripDayView({
 
   return (
     <div className="mx-auto max-w-2xl space-y-4">
-      <EmergencyOpsBanner eventDaySessionId={session.id} />
       {suspendQ.data?.active ? (
         <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
           <p className="font-bold uppercase tracking-wide text-[11px]">

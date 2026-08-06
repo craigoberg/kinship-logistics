@@ -80,8 +80,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
 | **Field single-select (compact)** | Defined | `MobileOptionButton` | Enum rows, med status | Same visual contract |
-| **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` |
-| **Desktop/mobile dialog** | Defined | `Dialog` / `AlertDialog` | Standard modals | `PinEntryDialog` uses bottom sheet on mobile |
+| **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` + `overflow-y-auto` (built into `BottomSheet` / bottom `SheetContent`) |
+| **Desktop/mobile dialog** | Defined | `Dialog` / `AlertDialog` | Standard modals | Primitives: `max-h-[90dvh] overflow-y-auto` so footers stay reachable. Sticky header/footer shells override with `overflow-hidden` + inner scroll. `PinEntryDialog` uses bottom sheet on mobile |
 | **Issue / anomaly declaration** | Defined | `IssueDeclarationPanel` / `LogAnomalyModal` | RYGE gates | Do not hand-roll severity forms |
 | **RED verbal consultation** | Defined | `VerbalConsultationDialog` | RED path | Manager by name; operator PIN only |
 | **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
@@ -318,8 +318,11 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Infectious exclusion / clear to return** | Defined | `InfectiousExclusionSheet` / `InfectiousClearanceSheet` | BL-084 A/A.1 manager declare + Hub clearance | Entry via Big Red → Health & Safety (centre/trip context); if in care → home-safe + Manager PIN; Hub Clear to return; Band 2 tile |
 | **Infectious home-safe disposition** | Defined | `MobileFieldButton` outcome classes (`HOME_SAFE_DISPOSITIONS`) | Leaving care when infectious exclude | Family/carer · Staff escorted · Transport/taxi · Other — **not** a logistics plan; optional note |
 | **Emergency activate (Drill\|Live)** | Defined | `EmergencyActivateSheet` | BL-084 C manager activate | Entry via Big Red → Health & Safety. Drill\|Live `MobileFieldButton` + Yellow\|Red + `CharacterCountedTextarea` + Manager PIN |
-| **Emergency sticky banner** | Defined | `EmergencyOpsBanner` | Active Drill/Live only | Sticky strip on Day Centre, Event Deliver, Manifest, Governance Hub while `status=active`. **Clears on stand-down.** Hub Open issue CTA while active. Post-stand-down review = open Health & Safety card on Active (no banner) |
-| **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Expected / Accounted / Missing via `MobileFieldButton` — not a park-evac sim |
+| **Emergency sticky banner** | Defined | `FloorAnnouncementStrip` → `EmergencyOpsBanner` (hub) | Active Drill/Live only | Global AppShell strip on **every** signed-in page while `status=active`. Live = pulsing siren/label; Drill = solid amber. Actions: Open issue → `/governance?issue=`, Muster, Stand down. **Clears on stand-down.** Post-stand-down review = open Health & Safety card on Active (no banner) |
+| **Emergency Dashboard floor alert** | Defined | `EmergencyFloorAlert` | Dashboard `/` only | Informational fire-alarm panel (no buttons). Yellow = **STANDBY**; Red = **EVACUATE TO MUSTER POINT**. Live pulses; Drill solid amber. Side menu stays usable. Replaces normal Dashboard tiles while active |
+| **Message of the Day strip** | Defined | `FloorAnnouncementStrip` MOTD | Admin `floor_motd` non-empty | Calm sky strip on every page when no emergency. Empty/cleared = off. Priority: Emergency > (future Med) > MOTD |
+| **MOTD Admin** | Defined | `MotdAdminPanel` | Admin → System Parameters | Text box + Save / Clear → `system_parameters.floor_motd` |
+| **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Yellow/Standby = “light muster”. **Red** = “Evacuate — muster at muster point” + EVACUATE callout; same Expected / Accounted / Missing taps for the care roll (not a whole-site visitor list). Empty roll when activated without Day Centre / trip day context |
 | **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
 | **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
 | **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each blocker with **Resolve** (Hub manage in place). Deferred + resolved + accepted workaround unlock Open Centre. Outline Hub link secondary. |
@@ -352,7 +355,8 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Infectious home safe | Outcome `MobileFieldButton` + `CharacterCountedInput` handover + optional note + Manager PIN | Attests left care; floor checkout / trip absent; no second Hub LEFT TRIP ticket |
 | Clear to return (BL-084 A) | `InfectiousClearanceSheet` — attestation vs medical cert `MobileFieldButton` + Manager PIN | Hub Manage issue footer when exclusion active |
 | Emergency activate (BL-084 C) | `EmergencyActivateSheet` via Big Red H&S | Manager-only Drill\|Live; free-text why; Yellow\|Red |
-| Emergency banner / muster / stand-down | `EmergencyOpsBanner` | Sticky on Centre / Event Deliver / Manifest / Hub |
+| Emergency banner / muster / stand-down | `FloorAnnouncementStrip` + `EmergencyOpsBanner` | Global AppShell strip; Dashboard `EmergencyFloorAlert` |
+| Message of the Day | `MotdAdminPanel` + MOTD strip | `floor_motd` system parameter |
 | Site do-not-open / lockdown / suspend | `SiteOpsDeclareSheet` | Big Red H&S · Start of Day do-not-open chip |
 
 ---
@@ -489,6 +493,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-06 | Muster sheet severity copy | Red → Evacuate/muster-point title + callout; Yellow → standby light muster; empty-roll explains missing Day Centre/trip context — BL-084 |
+| 2026-08-06 | Global floor announcements | AppShell `FloorAnnouncementStrip` (Emergency + MOTD); Dashboard `EmergencyFloorAlert` (STANDBY/EVACUATE, info-only); Admin `MotdAdminPanel` / `floor_motd` — BL-084 |
+| 2026-08-06 | Overlay vertical scroll | `DialogContent` / `AlertDialogContent`: `max-h-[90dvh] overflow-y-auto`; bottom/side `SheetContent` overflow defaults — footers reachable on short viewports (Manifest / Event Deliver). Sticky shells keep `overflow-hidden` + inner scroll |
 | 2026-08-04 | Staff day-login password set | Edit personnel: set/reset Auth password via manager PIN + service-role server fn — interim Alpha (BL-002 later) |
 | 2026-08-02 | Big Red mobile shell | Incident + RED verbal: BottomSheet on mobile, sticky File footer, min-h-14 tap lists, stacked severity / Occurred at — touch-first |
 | 2026-08-02 | Occurred at vs Logged at | `OccurredAtFields` on Big Red Human/Asset + Log Anomaly; Hub shows both; Human lane structured client(s) + assisting staff (multi) — BL-106 |

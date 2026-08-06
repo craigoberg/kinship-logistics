@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -46,10 +46,11 @@ import type {
 } from "@/lib/api/unified-issues";
 import { ManageIssueDialog } from "./resolve-issue-dialog";
 import { sortUnifiedIssuesByRygeThenExpiry } from "@/lib/governance-sort";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
+  /** Deep-link from global emergency strip (`/governance?issue=`). */
+  openIssueId?: string | null;
 }
 
 const CATEGORY_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }> = [
@@ -307,7 +308,7 @@ function IssuesList({
   );
 }
 
-export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
+export function UnifiedIssuesPanel({ onManageRenewal, openIssueId }: Props) {
   const [managing, setManaging] = useState<UnifiedIssue | null>(null);
   const [managingWorkflow, setManagingWorkflow] = useState<HubWorkflowStatus>("open");
   const [tab, setTab] = useState<UnifiedIssueTab>("active");
@@ -318,6 +319,7 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   });
   const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
   const activeIssuesQ = useUnifiedIssues("active");
+  const openedDeepLinkRef = useRef<string | null>(null);
 
   useRealtimeInvalidate({
     table: "site_issues_register",
@@ -336,29 +338,38 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
     queryKeys: [unifiedIssuesKey],
   });
 
-  const openHubIssueById = (hubIssueId: string) => {
+  useEffect(() => {
+    if (!openIssueId) {
+      openedDeepLinkRef.current = null;
+      return;
+    }
+    if (openedDeepLinkRef.current === openIssueId) return;
+    if (activeIssuesQ.isLoading) return;
     const match = (activeIssuesQ.data ?? []).find(
       (i) =>
         (i.source === "day_centre" || i.source === "event") &&
-        i.sourceRowId === hubIssueId,
+        i.sourceRowId === openIssueId,
     );
     if (!match) {
       toast.message("Issue not in Active list", {
         description: "Hard refresh or check Deferred. It may still be loading.",
       });
+      openedDeepLinkRef.current = openIssueId;
       return;
     }
     setTab("active");
     setManaging(match);
     setManagingWorkflow(deriveIssueWorkflowStatus(match, reviewStartedKeys));
-  };
+    openedDeepLinkRef.current = openIssueId;
+  }, [
+    openIssueId,
+    activeIssuesQ.isLoading,
+    activeIssuesQ.data,
+    reviewStartedKeys,
+  ]);
 
   return (
     <div className="space-y-4">
-      <EmergencyOpsBanner
-        variant="hub"
-        onOpenHubIssue={openHubIssueById}
-      />
       <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
         <TabsList>
           <TabsTrigger value="active">Active</TabsTrigger>

@@ -111,31 +111,32 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
           const ind = getInd(p.id);
           return (
             <li key={p.id}>
-              <button onClick={() => onSelect(p)} className="w-full text-left">
-                <Card className="flex items-start justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-semibold">{p.fullName}</span>
-                      {pending.has(p.id) && (
-                        <PendingBadge
-                          onClick={() =>
-                            setVerifying({
-                              schedule: pending.get(p.id)!,
-                              participantName: p.fullName,
-                            })
-                          }
-                        />
-                      )}
-                    </div>
-                    <DailyTransportSummary ind={ind} />
-                    <div className="flex flex-wrap gap-1.5">
-                      <MedDayChips ind={ind} />
-                      <IddsiChips p={p} />
-                    </div>
+              <Card
+                onClick={() => onSelect(p)}
+                className="flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-accent/40"
+              >
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-semibold">{p.fullName}</span>
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                </Card>
-              </button>
+                  <DailyTransportSummary ind={ind} />
+                  <div className="flex flex-wrap gap-1.5">
+                    <MedDayChips ind={ind} />
+                    <IddsiChips p={p} />
+                  </div>
+                </div>
+                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              </Card>
             </li>
           );
         })}

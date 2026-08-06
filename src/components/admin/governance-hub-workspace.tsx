@@ -6,7 +6,10 @@ import { MaintenancePanel } from "./maintenance-panel";
 
 type HubTab = "issues" | "maintenance" | "assets";
 
-export function GovernanceHubWorkspace() {
+export function GovernanceHubWorkspace(props: {
+  openIssueId?: string | null;
+}) {
+  const { openIssueId } = props;
   const [hubTab, setHubTab] = useState<HubTab>("issues");
   const [manageAssetId, setManageAssetId] = useState<string | null>(null);
 
@@ -24,6 +27,7 @@ export function GovernanceHubWorkspace() {
 
       <TabsContent value="issues" className="space-y-4">
         <UnifiedIssuesPanel
+          openIssueId={openIssueId}
           onManageRenewal={(assetId) => {
             setManageAssetId(assetId);
             setHubTab("assets");
