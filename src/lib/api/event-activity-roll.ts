@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { assertMorningRollCompleteBeforeProgramme } from "@/lib/api/event-deliver-status";
+import { operationalNowIso } from "@/lib/operational-clock";
 import {
   encodeActivitySkipNotes,
   type ActivitySkipReason,
@@ -20,7 +21,8 @@ import {
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 export type StopPhase = "pending" | "active" | "completed";
-export type MovementMethod = "bus" | "walk" | "on_site";
+/** How the group moves TO a venue stop — null/unset until leave-from-current asks. */
+export type MovementMethod = "bus" | "walk" | "on_site" | "other";
 export type ActivityRollStatus = "expected" | "checked_in" | "absent";
 
 export interface ActivityRollRow {
@@ -152,7 +154,7 @@ export async function ensureActivityRollLeftTripPlaceholders(
   }
   if (!leftTrip?.length) return;
 
-  const now = new Date().toISOString();
+  const now = operationalNowIso();
   const rows = leftTrip.map((r) => ({
     venue_stop_id: venueStopId,
     event_day_session_id: eventDaySessionId,
@@ -214,13 +216,185 @@ function toRow(r: Record<string, unknown>): ActivityRollRow {
   };
 }
 
+// ─── Plan leave movement (destination stays pending until confirm) ───────────
+
+const MOVEMENT_PLAN_LABEL: Record<MovementMethod, string> = {
+  bus: "Bus",
+  walk: "Walk",
+  other: "Other",
+  on_site: "On-site",
+};
+
+/**
+ * Trip leader picks how to reach a pending destination. Does **not** open the
+ * activity or create a Manifest — confirm (Release / Leave) does that next.
+ * Reversible via `clearPlannedVenueMovement` until confirm.
+ */
+export async function planVenueMovement(
+  stop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  },
+  method: MovementMethod,
+  eventDaySessionId: string,
+): Promise<void> {
+  await assertMorningRollCompleteBeforeProgramme({
+    eventId: stop.eventId,
+    sessionId: eventDaySessionId,
+    sessionDate: stop.sessionDate,
+  });
+
+  const { getProgrammeSuspend } = await import("@/lib/api/operational-emergency");
+  const suspended = await getProgrammeSuspend(eventDaySessionId);
+  if (suspended?.active) {
+    throw new Error(
+      `Programme suspended${suspended.reason ? `: ${suspended.reason}` : ""}. Manager must clear before planning movement.`,
+    );
+  }
+
+  const { data: row, error: loadErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!row) throw new Error("Venue stop not found.");
+  const phase = (row as { phase?: string | null }).phase ?? "pending";
+  if (phase !== "pending") {
+    throw new Error("Movement is already underway or this stop is open.");
+  }
+  const current = (row as { movement_method?: string | null }).movement_method;
+  if (current === method) return;
+
+  const { error } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: method })
+    .eq("id", stop.id)
+    .eq("phase", "pending");
+  if (error) throw error;
+
+  const staffId = await resolveStaffIdWithFallback();
+  void writeToLedger({
+    staff_id: staffId,
+    category: "TRIP",
+    severity: "INFO",
+    action_type: "ACTIVITY_MOVEMENT_PLANNED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      description: `${MOVEMENT_PLAN_LABEL[method]} movement planned — ${stop.venueName ?? "stop"}`,
+      venue_stop_id: stop.id,
+      event_id: stop.eventId,
+      session_date: stop.sessionDate,
+      movement_method: method,
+    },
+  });
+}
+
+/** @deprecated Prefer planVenueMovement(..., "bus") */
+export async function planVenueBusMovement(
+  stop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  },
+  eventDaySessionId: string,
+): Promise<void> {
+  await planVenueMovement(stop, "bus", eventDaySessionId);
+}
+
+/**
+ * Undo planned leave method before confirm. Manifest/trip only exists after
+ * bus Release — clearing `movement_method` re-opens the picker.
+ */
+export async function clearPlannedVenueMovement(opts: {
+  toStopId: string;
+  eventId: string;
+  sessionDate: string;
+  hopIndex: number;
+  eventDaySessionId: string;
+  venueName?: string | null;
+}): Promise<void> {
+  const { listEventTransportRuns } = await import(
+    "@/lib/api/event-hop-transport"
+  );
+  const runs = await listEventTransportRuns({
+    eventId: opts.eventId,
+    sessionId: opts.eventDaySessionId,
+    sessionDate: opts.sessionDate,
+  });
+  const hop = runs.find(
+    (r) => r.kind === "venue_hop" && r.hopIndex === opts.hopIndex,
+  );
+  if (
+    hop?.tripId ||
+    hop?.status === "released" ||
+    hop?.status === "active" ||
+    hop?.status === "completed"
+  ) {
+    throw new Error(
+      "Group already released to the bus — movement can’t be changed.",
+    );
+  }
+
+  const { data: row, error: loadErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", opts.toStopId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!row) throw new Error("Destination stop not found.");
+  const phase = (row as { phase?: string | null }).phase ?? "pending";
+  const method = (row as { movement_method?: string | null }).movement_method;
+  if (phase !== "pending") {
+    throw new Error("Destination is already open — can’t change movement.");
+  }
+  if (!method) return;
+
+  const { error } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: null })
+    .eq("id", opts.toStopId)
+    .eq("phase", "pending");
+  if (error) throw error;
+
+  const staffId = await resolveStaffIdWithFallback();
+  void writeToLedger({
+    staff_id: staffId,
+    category: "TRIP",
+    severity: "INFO",
+    action_type: "ACTIVITY_MOVEMENT_CLEARED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      description: `${MOVEMENT_PLAN_LABEL[method as MovementMethod] ?? "Leave"} cancelled — re-choose how to reach ${opts.venueName ?? "next stop"}`,
+      venue_stop_id: opts.toStopId,
+      event_id: opts.eventId,
+      session_date: opts.sessionDate,
+      hop_index: opts.hopIndex,
+      cleared_method: method,
+    },
+  });
+}
+
+/** @deprecated Prefer clearPlannedVenueMovement */
+export async function clearPlannedVenueBusMovement(
+  opts: Parameters<typeof clearPlannedVenueMovement>[0],
+): Promise<void> {
+  await clearPlannedVenueMovement(opts);
+}
+
 // ─── Open a stop (start activity) ────────────────────────────────────────────
 /**
  * Seed the activity roll from all currently checked-in participants in the
  * event_attendance_log for this session, then mark the stop as active.
  *
- * Called by trip leader when starting an activity (walk, on-site).
- * For bus hops, the stop is opened with movement_method='bus' and no roll is seeded.
+ * Walk / on-site / meal / med: trip leader opens here.
+ * Bus hops: do **not** call this — destination opens on hop arrive via
+ * `finalizeEventVenueHop` after Release + Manifest.
  */
 export async function openVenueStop(
   stop: {
@@ -232,6 +406,12 @@ export async function openVenueStop(
   },
   eventDaySessionId: string,
 ): Promise<void> {
+  if (stop.movementMethod === "bus") {
+    throw new Error(
+      "Bus destinations open when the hop arrives. Choose By Bus, Release group to bus, then complete the Manifest hop.",
+    );
+  }
+
   await assertMorningRollCompleteBeforeProgramme({
     eventId: stop.eventId,
     sessionId: eventDaySessionId,
@@ -247,7 +427,7 @@ export async function openVenueStop(
   }
 
   const staffId = await resolveStaffIdWithFallback();
-  const now = new Date().toISOString();
+  const now = operationalNowIso();
 
   // 1. Mark stop active
   const { error: phaseErr } = await supabase
@@ -261,30 +441,28 @@ export async function openVenueStop(
     .eq("id", stop.id);
   if (phaseErr) throw phaseErr;
 
-  // 2. For walk/on-site: seed checked-in as expected + left-trip Absent as placeholders
-  if (stop.movementMethod !== "bus") {
-    const { data: floor, error: attErr } = await supabase
-      .from("event_attendance_log")
-      .select("participant_id, status")
-      .eq("event_day_session_id", eventDaySessionId)
-      .in("status", ["checked_in", "absent"]);
-    if (attErr) throw attErr;
+  // 2. Walk/on-site: seed checked-in as expected + left-trip Absent as placeholders
+  const { data: floor, error: attErr } = await supabase
+    .from("event_attendance_log")
+    .select("participant_id, status")
+    .eq("event_day_session_id", eventDaySessionId)
+    .in("status", ["checked_in", "absent"]);
+  if (attErr) throw attErr;
 
-    const participants = (floor ?? []).map((r) => {
-      const status = (r as { status: string }).status;
-      const isAbsent = status === "absent";
-      return {
-        venue_stop_id: stop.id,
-        event_day_session_id: eventDaySessionId,
-        participant_id: (r as { participant_id: string }).participant_id,
-        status: isAbsent ? ("absent" as const) : ("expected" as const),
-        ...(isAbsent ? { marked_absent_at: now } : {}),
-      };
-    });
+  const participants = (floor ?? []).map((r) => {
+    const status = (r as { status: string }).status;
+    const isAbsent = status === "absent";
+    return {
+      venue_stop_id: stop.id,
+      event_day_session_id: eventDaySessionId,
+      participant_id: (r as { participant_id: string }).participant_id,
+      status: isAbsent ? ("absent" as const) : ("expected" as const),
+      ...(isAbsent ? { marked_absent_at: now } : {}),
+    };
+  });
 
-    if (participants.length > 0) {
-      await upsertActivityRollIgnoreDuplicates(participants);
-    }
+  if (participants.length > 0) {
+    await upsertActivityRollIgnoreDuplicates(participants);
   }
 
   // 3. Auto-set expected_arrival_by on first venue open (if not already set)
@@ -318,21 +496,151 @@ export async function openVenueStop(
   });
 }
 
+// ─── Leave current venue for next (leave-from-current handoff) ───────────────
+
+export type LeaveVenueResult = {
+  mode: "planned";
+  method: MovementMethod;
+};
+
+/** People still `expected` on the activity check-in roll (blocks leave/complete). */
+export async function countOutstandingActivityExpected(
+  venueStopId: string,
+): Promise<number> {
+  const { count, error } = await supabase
+    .from("event_activity_rolls")
+    .select("id", { count: "exact", head: true })
+    .eq("venue_stop_id", venueStopId)
+    .eq("status", "expected");
+  if (error) throw error;
+  return count ?? 0;
+}
+
+async function assertActivityRollClearToLeave(venueStopId: string): Promise<void> {
+  const outstanding = await countOutstandingActivityExpected(venueStopId);
+  if (outstanding <= 0) return;
+  throw new Error(
+    `${outstanding} person${outstanding === 1 ? "" : "s"} still outstanding on the activity check-in. Confirm or mark Not at activity before leaving.`,
+  );
+}
+
+/**
+ * Plan leave method only (all modes). Confirm is separate:
+ * - Bus → Release (`prepareEventHopManifest`)
+ * - Walk / other / on_site → `confirmNonBusLeave`
+ */
+export async function leaveVenueForNext(opts: {
+  fromStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  toStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  method: MovementMethod;
+  eventDaySessionId: string;
+}): Promise<LeaveVenueResult> {
+  await assertActivityRollClearToLeave(opts.fromStop.id);
+  await planVenueMovement(
+    {
+      id: opts.toStop.id,
+      eventId: opts.toStop.eventId,
+      sessionDate: opts.toStop.sessionDate,
+      venueName: opts.toStop.venueName,
+    },
+    opts.method,
+    opts.eventDaySessionId,
+  );
+  return { mode: "planned", method: opts.method };
+}
+
+/**
+ * Confirm walk / other / on_site leave: open next activity + complete current.
+ * Bus confirm is Release → Manifest.
+ */
+export async function confirmNonBusLeave(opts: {
+  fromStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  toStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  eventDaySessionId: string;
+}): Promise<{ openedStopId: string }> {
+  await assertActivityRollClearToLeave(opts.fromStop.id);
+
+  const { data: row, error } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", opts.toStop.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!row) throw new Error("Destination stop not found.");
+  const phase = (row as { phase?: string | null }).phase ?? "pending";
+  const method = (row as { movement_method?: string | null })
+    .movement_method as MovementMethod | null;
+  if (phase !== "pending") {
+    throw new Error("Destination is already open or completed.");
+  }
+  if (!method || method === "bus") {
+    throw new Error("Choose Walk, Other, or On-site before confirming leave.");
+  }
+
+  await openVenueStop(
+    {
+      id: opts.toStop.id,
+      eventId: opts.toStop.eventId,
+      sessionDate: opts.toStop.sessionDate,
+      venueName: opts.toStop.venueName,
+      movementMethod: method,
+    },
+    opts.eventDaySessionId,
+  );
+  await closeVenueStop({
+    id: opts.fromStop.id,
+    eventId: opts.fromStop.eventId,
+    venueName: opts.fromStop.venueName,
+    sessionDate: opts.fromStop.sessionDate,
+  });
+  return { openedStopId: opts.toStop.id };
+}
+
 // ─── Close a stop (complete activity) ────────────────────────────────────────
 
 export async function closeVenueStop(
-  stop: { id: string; eventId: string; venueName: string | null },
+  stop: {
+    id: string;
+    eventId: string;
+    venueName: string | null;
+    sessionDate?: string;
+  },
 ): Promise<void> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = new Date().toISOString();
+  const now = operationalNowIso();
 
   const prior = await supabase
     .from("event_venue_stops")
-    .select("id, activity_kind")
+    .select("id, activity_kind, session_date, phase")
     .eq("id", stop.id)
     .maybeSingle();
   if (prior.error) throw prior.error;
-  if ((prior.data as { activity_kind?: string } | null)?.activity_kind === "meal") {
+  const priorRow = prior.data as {
+    activity_kind?: string;
+    session_date?: string;
+    phase?: string | null;
+  } | null;
+  if (priorRow?.activity_kind === "meal") {
     const { countOutstandingMealServes } = await import(
       "@/lib/api/event-meal-service"
     );
@@ -342,6 +650,18 @@ export async function closeVenueStop(
         `${outstanding} person${outstanding === 1 ? "" : "s"} still expected on the meal roll. Mark Served / Modified / Own order / Declined / N/A before completing.`,
       );
     }
+  } else if (
+    priorRow?.activity_kind !== "medication_round" &&
+    (priorRow?.phase ?? "pending") === "active"
+  ) {
+    // Walk / other / on-site venue: individual activity check-in required (§12.13).
+    // Origin with no seeded roll → count 0 (allowed).
+    await assertActivityRollClearToLeave(stop.id);
+  }
+
+  // Already completed by hop finalize / Release — idempotent success.
+  if ((priorRow?.phase ?? "pending") === "completed") {
+    return;
   }
 
   const { error } = await supabase
@@ -363,6 +683,62 @@ export async function closeVenueStop(
       event_id: stop.eventId,
     },
   });
+}
+
+/**
+ * Undo a premature Complete / Close & leave so activity check-in can finish.
+ * If the next venue was opened by that leave and still has no confirmed
+ * check-ins, reset it to pending (waiting).
+ */
+export async function reopenVenueActivityCheckIn(opts: {
+  stopId: string;
+  eventId: string;
+  sessionDate: string;
+  nextStopId?: string | null;
+}): Promise<void> {
+  const { error } = await supabase
+    .from("event_venue_stops")
+    .update({ phase: "active", closed_at: null })
+    .eq("id", opts.stopId)
+    .eq("phase", "completed");
+  if (error) throw error;
+
+  if (!opts.nextStopId) return;
+
+  const { data: next, error: nextErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", opts.nextStopId)
+    .maybeSingle();
+  if (nextErr) throw nextErr;
+  const nextRow = next as {
+    phase?: string | null;
+    movement_method?: string | null;
+  } | null;
+  if ((nextRow?.phase ?? "pending") !== "active") return;
+  if (nextRow?.movement_method === "bus") return;
+
+  const { count: confirmed, error: rollErr } = await supabase
+    .from("event_activity_rolls")
+    .select("id", { count: "exact", head: true })
+    .eq("venue_stop_id", opts.nextStopId)
+    .eq("status", "checked_in");
+  if (rollErr) throw rollErr;
+  if ((confirmed ?? 0) > 0) return;
+
+  const { error: resetErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "pending",
+      movement_method: null,
+      opened_at: null,
+      opened_by_id: null,
+      closed_at: null,
+    })
+    .eq("id", opts.nextStopId);
+  if (resetErr) throw resetErr;
+
+  await supabase.from("event_activity_rolls").delete().eq("venue_stop_id", opts.nextStopId);
 }
 
 // ─── Venue stop count for a session day ──────────────────────────────────────
@@ -388,7 +764,7 @@ export async function countTodayVenueStops(
 
 export async function toggleActivityCheckIn(row: ActivityRollRow): Promise<ActivityRollRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = new Date().toISOString();
+  const now = operationalNowIso();
   const isIn = row.status === "checked_in";
 
   const patch = isIn
@@ -414,7 +790,7 @@ export async function markActivitySkip(
   opts: { reason: ActivitySkipReason; note?: string },
 ): Promise<ActivityRollRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = new Date().toISOString();
+  const now = operationalNowIso();
   const notes = encodeActivitySkipNotes(opts);
 
   const patch: Record<string, unknown> = {

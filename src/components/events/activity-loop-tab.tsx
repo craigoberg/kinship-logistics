@@ -1,13 +1,12 @@
 /**
  * ActivityLoopTab — Event Deliver Phase B (GUARDRAILS §12.13 / BL-068)
  *
- * Shows today's venue stops in order. For each stop after Stop 0 (origin):
- *   • Trip leader picks movement method (Bus / Walk / On-site)
- *   • Bus: confirms bus departed; §11 Manifest handles individual boarding
- *   • Walk / On-site: individual per-person check-in roll (same UI as arrival roll)
- *   • Close: group assumed done — no per-person close-out
- *
- * Multiple stops can be Active simultaneously (e.g. free time with split groups).
+ * Leave-from-current handoffs — trip leader stays on the current stop card:
+ *   • Active card order: yellow Log issue → activity check-in → leave / movement
+ *   • Leave for {next}: pick method → confirm panel (Method + Undo chips) → confirm
+ *   • Bus confirm = Release (Manifest); Walk/Other/On-site = open next check-in
+ *   • Pending destinations are waiting-only (no Release / movement picker)
+ *   • Final stop of day: plain Complete (evening / check-out)
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
@@ -25,14 +24,17 @@ import {
   Pill,
   Play,
   RotateCcw,
+  TrainFront,
   UserCheck,
   UserX,
   UtensilsCrossed,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { EventHopReleasePanel } from "@/components/events/event-hop-release-panel";
+import { LeaveMovementConfirmPanel } from "@/components/events/leave-movement-confirm-panel";
+import { EventDayVerbalAnomalyFlow } from "@/components/events/event-day-verbal-anomaly-flow";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { FieldActionButton } from "@/components/ui/field-action-button";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import {
   ProgrammeAbsentDialog,
@@ -40,6 +42,7 @@ import {
   type ProgrammeAbsentResult,
 } from "@/components/events/trip-absent-disposition-dialog";
 import { cn, formatTime } from "@/lib/utils";
+import { sortByParticipantSurname } from "@/lib/ui/sort-participants";
 import {
   isMealStop,
   isMedicationStop,
@@ -68,7 +71,10 @@ import { assertMedicationRoundManaged } from "@/lib/medication/todays-medication
 import {
   listActivityRoll,
   openVenueStop,
+  leaveVenueForNext,
   closeVenueStop,
+  reopenVenueActivityCheckIn,
+  countOutstandingActivityExpected,
   toggleActivityCheckIn,
   markActivitySkip,
   clearActivityAbsent,
@@ -77,6 +83,10 @@ import {
   type MovementMethod,
   type StopPhase,
 } from "@/lib/api/event-activity-roll";
+import {
+  eventTransportRunsKey,
+  listEventTransportRuns,
+} from "@/lib/api/event-hop-transport";
 import {
   countOutstandingMealServes,
   openMealVenueStop,
@@ -107,6 +117,7 @@ import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
 
 interface Props {
   eventId: string;
+  eventTitle: string;
   eventDaySessionId: string;
   sessionDate: string;
 }
@@ -116,8 +127,24 @@ const participantsKey = () => ["participants"] as const;
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
-export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Props) {
+export function ActivityLoopTab({
+  eventId,
+  eventTitle,
+  eventDaySessionId,
+  sessionDate,
+}: Props) {
   const qc = useQueryClient();
+  const [issueActivityLabel, setIssueActivityLabel] = useState<string | null>(
+    null,
+  );
+  const [issueFlowOpen, setIssueFlowOpen] = useState(false);
+  /** After walk/other leave — expand destination so check-in is obvious. */
+  const [focusStopId, setFocusStopId] = useState<string | null>(null);
+
+  const openActivityIssue = (activityLabel: string) => {
+    setIssueActivityLabel(activityLabel);
+    setIssueFlowOpen(true);
+  };
 
   const { data: allStops = [], isLoading: stopsLoading } = useQuery({
     queryKey: stopsKey(eventId),
@@ -164,6 +191,9 @@ export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Pro
   const invalidateStops = () => {
     void qc.invalidateQueries({ queryKey: stopsKey(eventId) });
     void qc.invalidateQueries({ queryKey: eventDeliverStatusKey(eventDaySessionId) });
+    void qc.invalidateQueries({
+      queryKey: ["event-transport-runs", eventId, sessionDate, eventDaySessionId],
+    });
   };
 
   // BL-077 — ensure Programme always has a Medication round row (Day Centre parity).
@@ -215,12 +245,27 @@ export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Pro
           eventDaySessionId={eventDaySessionId}
           participantMap={participantMap}
           programmeBlocked={morningRollBlocksProgramme}
+          forceExpanded={focusStopId === todayStops[0]!.id}
           onChanged={invalidateStops}
+          onWalkOpened={(id) => setFocusStopId(id)}
+          onLogIssue={openActivityIssue}
         />
         <div className="rounded-lg border border-dashed bg-muted/30 py-6 text-center text-sm text-muted-foreground">
           <MapPin className="mx-auto mb-1.5 h-4 w-4 opacity-40" />
           No destination stops yet — add venues in Events › Itinerary to unlock the activity loop.
         </div>
+        <EventDayVerbalAnomalyFlow
+          eventId={eventId}
+          eventTitle={eventTitle}
+          eventDaySessionId={eventDaySessionId}
+          sessionDate={sessionDate}
+          activityLabel={issueActivityLabel}
+          open={issueFlowOpen}
+          onOpenChange={(open) => {
+            setIssueFlowOpen(open);
+            if (!open) setIssueActivityLabel(null);
+          }}
+        />
       </div>
     );
   }
@@ -234,24 +279,21 @@ export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Pro
         </div>
       )}
 
-      {/* Hotel omitted from today's itinerary — still the boarding origin */}
-      {hotelOmitted && (
-        <div className="rounded-xl border-2 border-border bg-card px-4 py-3">
-          <div className="flex items-center gap-3">
-            <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-600 text-[11px] font-bold text-white">
-              ★
-            </div>
-            <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="truncate font-semibold text-sm">{overnightWake.label}</span>
-                <Badge className="bg-slate-600 text-white text-[10px]">Overnight / wake</Badge>
-              </div>
-              <p className="text-[11px] text-muted-foreground">
-                Leave here for the first activity — boarding origin (not listed as a stop today)
-              </p>
-            </div>
-          </div>
-        </div>
+      {/* Hotel omitted from today's itinerary — still the boarding / leave origin */}
+      {hotelOmitted && wakeOriginStop && (
+        <WakeLeaveCard
+          wakeLabel={overnightWake.label}
+          fromStop={wakeOriginStop}
+          nextStop={
+            todayStops.find((s) => isVenueTransportStop(s)) ?? null
+          }
+          outboundHopIndex={0}
+          eventId={eventId}
+          eventDaySessionId={eventDaySessionId}
+          programmeBlocked={morningRollBlocksProgramme}
+          onChanged={invalidateStops}
+          onWalkOpened={(id) => setFocusStopId(id)}
+        />
       )}
 
       {todayStops.map((stop, idx) => {
@@ -277,15 +319,30 @@ export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Pro
             if (!prevStop && hotelOmitted) prevStop = wakeOriginStop;
           }
         }
+        let nextStop: EventVenueStop | null = null;
+        if (!meal && !med) {
+          for (let i = idx + 1; i < todayStops.length; i++) {
+            if (isVenueTransportStop(todayStops[i]!)) {
+              nextStop = todayStops[i]!;
+              break;
+            }
+          }
+        }
         const venueHopIdx = todayStops
           .slice(0, idx + 1)
           .filter((s) => isVenueTransportStop(s)).length - 1;
-        const hopIndex =
+        const inboundHopIndex =
           meal || med
             ? null
             : hotelOmitted
               ? venueHopIdx
               : venueHopIdx - 1;
+        const outboundHopIndex =
+          meal || med || !nextStop
+            ? null
+            : hotelOmitted
+              ? venueHopIdx + 1
+              : venueHopIdx;
 
         return (
           <StopCard
@@ -297,12 +354,310 @@ export function ActivityLoopTab({ eventId, eventDaySessionId, sessionDate }: Pro
             eventDaySessionId={eventDaySessionId}
             participantMap={participantMap}
             prevStop={prevStop}
-            hopIndex={hopIndex != null && hopIndex >= 0 ? hopIndex : null}
+            nextStop={nextStop}
+            inboundHopIndex={
+              inboundHopIndex != null && inboundHopIndex >= 0
+                ? inboundHopIndex
+                : null
+            }
+            outboundHopIndex={outboundHopIndex}
             programmeBlocked={morningRollBlocksProgramme}
+            forceExpanded={focusStopId === stop.id}
             onChanged={invalidateStops}
+            onWalkOpened={(id) => setFocusStopId(id)}
+            onLogIssue={openActivityIssue}
           />
         );
       })}
+
+      <EventDayVerbalAnomalyFlow
+        eventId={eventId}
+        eventTitle={eventTitle}
+        eventDaySessionId={eventDaySessionId}
+        sessionDate={sessionDate}
+        activityLabel={issueActivityLabel}
+        open={issueFlowOpen}
+        onOpenChange={(open) => {
+          setIssueFlowOpen(open);
+          if (!open) setIssueActivityLabel(null);
+        }}
+      />
+    </div>
+  );
+}
+
+// ─── Leave helpers ────────────────────────────────────────────────────────────
+
+function stopDisplayName(s: EventVenueStop, fallback = "Stop"): string {
+  return s.label_override ?? s.venue_name ?? fallback;
+}
+
+function LeaveMethodButtons({
+  nextName,
+  disabled,
+  onPick,
+}: {
+  nextName: string;
+  disabled?: boolean;
+  onPick: (method: MovementMethod) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-medium text-foreground">
+        How are you getting to {nextName}?
+      </p>
+      <p className="text-xs text-muted-foreground">
+        Asked every hop — bus, walk, on-site, or other (train / tram / public).
+      </p>
+      {(
+        [
+          {
+            method: "bus" as const,
+            label: "By Bus",
+            sub: "Release here → driver boards via Manifest (§11)",
+            icon: <Bus className="h-5 w-5" />,
+          },
+          {
+            method: "walk" as const,
+            label: "Walking",
+            sub: "Opens next stop with individual check-in roll",
+            icon: <Footprints className="h-5 w-5" />,
+          },
+          {
+            method: "other" as const,
+            label: "Other (train / tram / public…)",
+            sub: "Not the trip bus — individual check-in at the next stop",
+            icon: <TrainFront className="h-5 w-5" />,
+          },
+          {
+            method: "on_site" as const,
+            label: "On-site / Already there",
+            sub: "Next activity is at the same place — check-in roll",
+            icon: <MapPin className="h-5 w-5" />,
+          },
+        ] as const
+      ).map((opt) => (
+        <MobileFieldButton
+          key={opt.method}
+          title={opt.label}
+          subtitle={opt.sub}
+          icon={opt.icon}
+          onClick={() => onPick(opt.method)}
+          disabled={disabled}
+        />
+      ))}
+    </div>
+  );
+}
+
+/** Hotel-omitted wake base — Leave for first activity lives here. */
+function WakeLeaveCard({
+  wakeLabel,
+  fromStop,
+  nextStop,
+  outboundHopIndex,
+  eventId,
+  eventDaySessionId,
+  programmeBlocked,
+  onChanged,
+  onWalkOpened,
+}: {
+  wakeLabel: string;
+  fromStop: EventVenueStop;
+  nextStop: EventVenueStop | null;
+  outboundHopIndex: number;
+  eventId: string;
+  eventDaySessionId: string;
+  programmeBlocked: boolean;
+  onChanged: () => void;
+  onWalkOpened?: (stopId: string) => void;
+}) {
+  const [expanded, setExpanded] = useState(true);
+  const [leaveSheetOpen, setLeaveSheetOpen] = useState(false);
+  const nextName = nextStop ? stopDisplayName(nextStop, "next stop") : null;
+  const sessionDate = nextStop?.session_date ?? fromStop.session_date;
+
+  const { data: transportRuns = [] } = useQuery({
+    queryKey: eventTransportRunsKey(eventId, sessionDate, eventDaySessionId),
+    queryFn: () =>
+      listEventTransportRuns({
+        eventId,
+        sessionId: eventDaySessionId,
+        sessionDate,
+      }),
+    enabled: !!nextStop,
+    staleTime: 10_000,
+  });
+  const outHop = transportRuns.find(
+    (r) => r.kind === "venue_hop" && r.hopIndex === outboundHopIndex,
+  );
+  // Prior-night hotel is often already "completed" — use hop / next phase instead.
+  const leftAlready =
+    !!nextStop &&
+    ((nextStop.phase ?? "pending") !== "pending" ||
+      outHop?.status === "released" ||
+      outHop?.status === "active" ||
+      outHop?.status === "completed");
+  const leavePlanned =
+    !!nextStop &&
+    !leftAlready &&
+    !!nextStop.movement_method &&
+    (nextStop.phase ?? "pending") === "pending";
+  const plannedMethod = (nextStop?.movement_method ?? null) as MovementMethod | null;
+
+  const leaveMut = useMutation({
+    mutationFn: (method: MovementMethod) => {
+      if (!nextStop) throw new Error("No next stop.");
+      return leaveVenueForNext({
+        fromStop: {
+          id: fromStop.id,
+          eventId,
+          sessionDate: nextStop.session_date,
+          venueName: fromStop.label_override ?? fromStop.venue_name,
+        },
+        toStop: {
+          id: nextStop.id,
+          eventId,
+          sessionDate: nextStop.session_date,
+          venueName: nextStop.label_override ?? nextStop.venue_name,
+        },
+        method,
+        eventDaySessionId,
+      });
+    },
+    onSuccess: (result) => {
+      setLeaveSheetOpen(false);
+      setExpanded(true);
+      toast.success(
+        `${result.method === "bus" ? "Bus" : result.method === "walk" ? "Walk" : result.method === "other" ? "Other" : "On-site"} to ${nextName} — confirm when ready.`,
+      );
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  if (!nextStop) {
+    return (
+      <div className="rounded-xl border-2 border-border bg-card px-4 py-3">
+        <div className="flex items-center gap-3">
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-600 text-[11px] font-bold text-white">
+            ★
+          </div>
+          <div className="min-w-0 flex-1">
+            <span className="truncate font-semibold text-sm">{wakeLabel}</span>
+            <Badge className="ml-2 bg-slate-600 text-white text-[10px]">
+              Overnight / wake
+            </Badge>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="rounded-xl border-2 border-border bg-card">
+      <div className="flex items-center gap-3 px-4 py-3">
+        <div
+          className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-3"
+          onClick={() => setExpanded((p) => !p)}
+          role="button"
+          aria-expanded={expanded}
+        >
+          <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-slate-600 text-[11px] font-bold text-white">
+            {leftAlready ? <CheckCircle2 className="h-4 w-4" /> : "★"}
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="truncate font-semibold text-sm">{wakeLabel}</span>
+              <Badge className="bg-slate-600 text-white text-[10px]">
+                Overnight / wake
+              </Badge>
+            </div>
+            <p className="text-[11px] text-muted-foreground">
+              {leftAlready
+                ? `Left for ${nextName}`
+                : `Leave here for ${nextName}`}
+            </p>
+          </div>
+          {expanded ? (
+            <ChevronUp className="h-4 w-4 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+          )}
+        </div>
+        {!leftAlready && (
+          <Button
+            type="button"
+            size="sm"
+            className="h-11 shrink-0 gap-1"
+            disabled={programmeBlocked || leaveMut.isPending}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (programmeBlocked) {
+                toast.error("Morning roll must be complete first.");
+                return;
+              }
+              if (leavePlanned) setExpanded(true);
+              else setLeaveSheetOpen(true);
+            }}
+          >
+            {leaveMut.isPending ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : leavePlanned && plannedMethod === "bus" ? (
+              <>Release to bus</>
+            ) : leavePlanned ? (
+              <>Confirm leave…</>
+            ) : (
+              <>Leave for {nextName}…</>
+            )}
+          </Button>
+        )}
+      </div>
+      {expanded && !leftAlready && (
+        <div className="space-y-3 border-t px-4 pb-4 pt-3">
+          {programmeBlocked ? (
+            <p className="text-xs text-muted-foreground">
+              Morning roll must be complete before leaving.
+            </p>
+          ) : leavePlanned && plannedMethod && nextStop ? (
+            <LeaveMovementConfirmPanel
+              eventId={eventId}
+              sessionId={eventDaySessionId}
+              sessionDate={sessionDate}
+              hopIndex={outboundHopIndex}
+              fromStopId={fromStop.id}
+              toStopId={nextStop.id}
+              fromLabel={wakeLabel}
+              toLabel={nextName!}
+              method={plannedMethod}
+              fromVenueName={fromStop.label_override ?? fromStop.venue_name}
+              toVenueName={nextStop.label_override ?? nextStop.venue_name}
+              onChanged={onChanged}
+              onNonBusConfirmed={(id) => onWalkOpened?.(id)}
+            />
+          ) : (
+            <LeaveMethodButtons
+              nextName={nextName!}
+              disabled={leaveMut.isPending}
+              onPick={(m) => leaveMut.mutate(m)}
+            />
+          )}
+        </div>
+      )}
+      <BottomSheet
+        open={leaveSheetOpen}
+        onOpenChange={setLeaveSheetOpen}
+        title={`Leave for ${nextName}`}
+        description="How is the group moving to the next stop?"
+      >
+        <div className="pb-2">
+          <LeaveMethodButtons
+            nextName={nextName!}
+            disabled={leaveMut.isPending}
+            onPick={(m) => leaveMut.mutate(m)}
+          />
+        </div>
+      </BottomSheet>
     </div>
   );
 }
@@ -317,10 +672,16 @@ interface StopCardProps {
   eventDaySessionId: string;
   participantMap: Map<string, Participant>;
   prevStop?: EventVenueStop | null;
-  /** Explicit hop index for Manifest release (required when hotel is omitted). */
-  hopIndex?: number | null;
+  nextStop?: EventVenueStop | null;
+  /** Inbound hop index (Manifest hop that arrives here). */
+  inboundHopIndex?: number | null;
+  /** Outbound hop index (leave here → next). */
+  outboundHopIndex?: number | null;
   programmeBlocked?: boolean;
+  forceExpanded?: boolean;
   onChanged: () => void;
+  onWalkOpened?: (stopId: string) => void;
+  onLogIssue?: (activityLabel: string) => void;
 }
 
 function StopCard({
@@ -331,21 +692,33 @@ function StopCard({
   eventDaySessionId,
   participantMap,
   prevStop = null,
-  hopIndex = null,
+  nextStop = null,
+  inboundHopIndex = null,
+  outboundHopIndex = null,
   programmeBlocked = false,
+  forceExpanded = false,
   onChanged,
+  onWalkOpened,
+  onLogIssue,
 }: StopCardProps) {
   const phase = (stop.phase ?? "pending") as StopPhase;
-  const [methodSheetOpen, setMethodSheetOpen] = useState(false);
-  const [expanded, setExpanded] = useState(phase === "active");
+  const [leaveSheetOpen, setLeaveSheetOpen] = useState(false);
+  const [expanded, setExpanded] = useState(
+    phase === "active" || isOrigin,
+  );
 
   const qc = useQueryClient();
+
+  useEffect(() => {
+    if (forceExpanded) setExpanded(true);
+  }, [forceExpanded]);
 
   const [mealSheetOpen, setMealSheetOpen] = useState(false);
   const [altMedOpen, setAltMedOpen] = useState(false);
 
   const meal = isMealStop(stop);
   const med = isMedicationStop(stop);
+  const venue = !meal && !med;
 
   const presenceQ = useQuery({
     queryKey: ["trip-med-presence", eventDaySessionId],
@@ -359,7 +732,7 @@ function StopCard({
   );
 
   const openMut = useMutation({
-    mutationFn: (method: MovementMethod) =>
+    mutationFn: (method: Exclude<MovementMethod, "bus">) =>
       openVenueStop(
         {
           id: stop.id,
@@ -373,7 +746,6 @@ function StopCard({
     onSuccess: () => {
       toast.success(med ? "Medication round started." : "Activity started.");
       setExpanded(true);
-      setMethodSheetOpen(false);
       onChanged();
       qc.invalidateQueries({ queryKey: activityRollKey(stop.id) });
     },
@@ -424,6 +796,7 @@ function StopCard({
         id: stop.id,
         eventId,
         venueName: stop.label_override ?? stop.venue_name,
+        sessionDate: stop.session_date,
       });
     },
     onSuccess: () => {
@@ -438,17 +811,93 @@ function StopCard({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const stopName =
-    stop.label_override ??
-    stop.venue_name ??
-    (meal
+  const stopName = stopDisplayName(
+    stop,
+    meal
       ? (stop.meal_slot ?? "meal").replace(/_/g, " ")
       : med
         ? "Medication round"
-        : `Stop ${stopIndex}`);
-  const movement = (stop.movement_method ??
+        : `Stop ${stopIndex}`,
+  );
+  const nextName = nextStop ? stopDisplayName(nextStop, "next stop") : null;
+  const movementRaw = stop.movement_method as MovementMethod | null | undefined;
+  const nextMovement = nextStop?.movement_method as MovementMethod | null | undefined;
+  const movement = (movementRaw ??
     (meal || med ? "on_site" : "bus")) as MovementMethod;
-  const isBus = !meal && !med && movement === "bus";
+  const isBus = venue && movement === "bus";
+  const hasNext = venue && !!nextStop && outboundHopIndex != null;
+  const canLeaveHere =
+    venue &&
+    hasNext &&
+    (isOrigin || phase === "active") &&
+    phase !== "completed";
+  const leavePlanned =
+    canLeaveHere &&
+    !!nextMovement &&
+    (nextStop!.phase ?? "pending") === "pending";
+  const busLeavePlanned = leavePlanned && nextMovement === "bus";
+  const pendingWaiting =
+    venue && !isOrigin && phase === "pending";
+
+  const { data: transportRuns = [] } = useQuery({
+    queryKey: eventTransportRunsKey(
+      eventId,
+      stop.session_date,
+      eventDaySessionId,
+    ),
+    queryFn: () =>
+      listEventTransportRuns({
+        eventId,
+        sessionId: eventDaySessionId,
+        sessionDate: stop.session_date,
+      }),
+    enabled: pendingWaiting && inboundHopIndex != null,
+    staleTime: 10_000,
+  });
+  const inboundHop = transportRuns.find(
+    (r) => r.kind === "venue_hop" && r.hopIndex === inboundHopIndex,
+  );
+
+  const leaveMut = useMutation({
+    mutationFn: (method: MovementMethod) => {
+      if (!nextStop) throw new Error("No next stop.");
+      return leaveVenueForNext({
+        fromStop: {
+          id: stop.id,
+          eventId,
+          sessionDate: stop.session_date,
+          venueName: stop.label_override ?? stop.venue_name,
+        },
+        toStop: {
+          id: nextStop.id,
+          eventId,
+          sessionDate: nextStop.session_date,
+          venueName: nextStop.label_override ?? nextStop.venue_name,
+        },
+        method,
+        eventDaySessionId,
+      });
+    },
+    onSuccess: (result) => {
+      setLeaveSheetOpen(false);
+      setExpanded(true);
+      toast.success(
+        `${result.method === "bus" ? "Bus" : result.method === "walk" ? "Walk" : result.method === "other" ? "Other" : "On-site"} to ${nextName} — confirm when ready.`,
+      );
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const { data: outstandingActivity = 0 } = useQuery({
+    queryKey: [...activityRollKey(stop.id), "outstanding-expected"],
+    queryFn: () => countOutstandingActivityExpected(stop.id),
+    enabled: venue && phase === "active" && !isOrigin,
+    staleTime: 5_000,
+  });
+  const activityCheckInBlocksLeave =
+    venue && phase === "active" && !isOrigin && outstandingActivity > 0;
+
   const flashRed = med && phase === "active" && medRound.urgency === "red";
   const flashAmber = med && phase === "active" && medRound.urgency === "amber";
 
@@ -461,34 +910,118 @@ function StopCard({
   };
 
   const statusBusy =
-    openMut.isPending || openMealMut.isPending || closeMut.isPending;
+    openMut.isPending ||
+    openMealMut.isPending ||
+    closeMut.isPending ||
+    leaveMut.isPending;
 
-  // Day Centre parity: when active, show the roll without hunting in a dropdown.
   useEffect(() => {
-    if (phase === "active" && !isOrigin) setExpanded(true);
-  }, [phase, isOrigin]);
+    if (phase === "active") setExpanded(true);
+  }, [phase]);
+
+  useEffect(() => {
+    if (leavePlanned) setExpanded(true);
+  }, [leavePlanned]);
 
   const handleStatusAction = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (isOrigin) return;
-    if (phase === "pending") {
-      if (programmeBlocked) {
-        toast.error("Morning roll must be complete before this activity can start.");
-        return;
-      }
-      if (meal) setMealSheetOpen(true);
-      else if (med) openMut.mutate("on_site");
-      else setMethodSheetOpen(true);
-      return;
-    }
-    if (phase === "active") {
-      closeMut.mutate();
-      return;
-    }
     if (phase === "completed") {
       setExpanded((p) => !p);
+      return;
+    }
+    if (meal && phase === "pending") {
+      if (programmeBlocked) {
+        toast.error("Morning roll must be complete first.");
+        return;
+      }
+      setMealSheetOpen(true);
+      return;
+    }
+    if (med && phase === "pending") {
+      if (programmeBlocked) {
+        toast.error("Morning roll must be complete first.");
+        return;
+      }
+      openMut.mutate("on_site");
+      return;
+    }
+    if (meal || med) {
+      if (
+        phase === "active" &&
+        med &&
+        (!medRound.canCompleteRound || medRound.isLoading)
+      ) {
+        return;
+      }
+      if (phase === "active") closeMut.mutate();
+      return;
+    }
+    // Venue pending — locked until arrive (leave-from-previous opens walk).
+    if (phase === "pending") {
+      if (programmeBlocked) {
+        toast.error("Morning roll must be complete first.");
+        return;
+      }
+      toast.message("Open unlocks when the group arrives.", {
+        description: prevStop
+          ? `Leave from ${stopDisplayName(prevStop)} first.`
+          : "Leave from the current stop first.",
+      });
+      setExpanded(true);
+      return;
+    }
+    // Venue active / origin — leave or final Complete
+    if (canLeaveHere) {
+      if (programmeBlocked) {
+        toast.error("Morning roll must be complete first.");
+        return;
+      }
+      if (activityCheckInBlocksLeave) {
+        toast.error(
+          `${outstandingActivity} still outstanding — check in (or Not at activity) before leaving.`,
+        );
+        setExpanded(true);
+        return;
+      }
+      if (leavePlanned) setExpanded(true);
+      else setLeaveSheetOpen(true);
+      return;
+    }
+    if (phase === "active" && !hasNext) {
+      if (activityCheckInBlocksLeave) {
+        toast.error(
+          `${outstandingActivity} still outstanding — check in (or Not at activity) before completing.`,
+        );
+        setExpanded(true);
+        return;
+      }
+      closeMut.mutate();
     }
   };
+
+  const ctaLabel = (() => {
+    if (phase === "completed") return "Done";
+    if (meal || med) {
+      return phase === "pending" ? "Open" : "Complete";
+    }
+    // Leave-from-current: origin / active with a next stop — never fake Open.
+    if (canLeaveHere) {
+      if (busLeavePlanned) return "Release to bus";
+      if (leavePlanned) return "Confirm leave…";
+      return isOrigin ? `Leave for ${nextName}…` : "Close & leave…";
+    }
+    if (phase === "pending") return "Open";
+    return "Complete";
+  })();
+
+  const ctaDisabled =
+    statusBusy ||
+    (phase === "pending" && venue && !canLeaveHere) ||
+    (phase === "pending" && programmeBlocked && !canLeaveHere) ||
+    activityCheckInBlocksLeave ||
+    (phase === "active" &&
+      med &&
+      (!medRound.canCompleteRound || medRound.isLoading));
 
   return (
     <div
@@ -503,13 +1036,10 @@ function StopCard({
         phase === "completed" && !expanded && "opacity-70",
       )}
     >
-      {/* Header row — Centre-style status button on the right */}
       <div className="flex items-center gap-3 px-4 py-3">
         <div
           className="flex min-w-0 flex-1 cursor-pointer select-none items-center gap-3"
-          onClick={() => {
-            if (!isOrigin) setExpanded((p) => !p);
-          }}
+          onClick={() => setExpanded((p) => !p)}
           role="button"
           aria-expanded={expanded}
         >
@@ -518,7 +1048,7 @@ function StopCard({
               "flex h-8 w-8 shrink-0 items-center justify-center rounded-full text-[11px] font-bold",
               phase === "completed"
                 ? "bg-emerald-600 text-white"
-                : phase === "active"
+                : phase === "active" || isOrigin
                   ? "bg-primary text-primary-foreground"
                   : "bg-muted text-muted-foreground",
             )}
@@ -566,12 +1096,11 @@ function StopCard({
                   Due soon
                 </Badge>
               )}
-              {!meal &&
-                !med &&
+              {venue &&
                 (phase === "active" || phase === "completed") &&
-                movement && <MethodBadge method={movement} />}
+                movementRaw && <MethodBadge method={movement} />}
             </div>
-            {stop.venue_type && !meal && !med && (
+            {stop.venue_type && venue && (
               <p className="text-[11px] text-muted-foreground">{stop.venue_type}</p>
             )}
             {meal && stop.menu_notes && (
@@ -590,9 +1119,16 @@ function StopCard({
                     : "All timed doses managed — ready to complete"}
               </p>
             )}
-            {phase === "completed" && stopWithOps.closed_at && (
+            {phase === "completed" &&
+              (stopWithOps.opened_at || stopWithOps.closed_at) && (
               <p className="text-[11px] text-muted-foreground">
-                Completed {formatTime(stopWithOps.closed_at)}
+                {stopWithOps.opened_at && (
+                  <>Opened {formatTime(stopWithOps.opened_at)}</>
+                )}
+                {stopWithOps.opened_at && stopWithOps.closed_at && " · "}
+                {stopWithOps.closed_at && (
+                  <>Completed {formatTime(stopWithOps.closed_at)}</>
+                )}
                 {!expanded ? " · tap row to review" : ""}
               </p>
             )}
@@ -601,78 +1137,107 @@ function StopCard({
                 Opened {formatTime(stopWithOps.opened_at)}
               </p>
             )}
-            {phase === "pending" && programmeBlocked && !isOrigin && (
+            {pendingWaiting && !programmeBlocked && (
               <p className="text-[11px] text-amber-700 dark:text-amber-200">
-                Morning roll required before Open
+                {inboundHop?.status === "active"
+                  ? "In transit — opens when the bus arrives"
+                  : inboundHop?.status === "released"
+                    ? "Waiting for bus — group released from previous stop"
+                    : prevStop
+                      ? `Waiting — leave from ${stopDisplayName(prevStop)}`
+                      : "Waiting for group to leave previous stop"}
               </p>
             )}
           </div>
 
-          {!isOrigin && (
-            expanded ? (
-              <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
-            ) : (
-              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
-            )
+          {expanded ? (
+            <ChevronUp className="h-4 w-4 shrink-0 text-muted-foreground" />
+          ) : (
+            <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
           )}
         </div>
 
-        {!isOrigin && (
-          <Button
-            type="button"
-            size="sm"
-            variant={
-              phase === "pending"
-                ? "default"
-                : phase === "active"
-                  ? "secondary"
-                  : "outline"
-            }
-            className="h-11 min-h-11 shrink-0 gap-1"
-            disabled={
-              statusBusy ||
-              (phase === "pending" && programmeBlocked) ||
-              (phase === "active" &&
-                med &&
-                (!medRound.canCompleteRound || medRound.isLoading))
-            }
-            title={
-              phase === "active" && med && !medRound.canCompleteRound
+        <Button
+          type="button"
+          size="sm"
+          variant={
+            phase === "pending"
+              ? "default"
+              : phase === "active" || isOrigin
+                ? "secondary"
+                : "outline"
+          }
+          className="h-11 min-h-11 shrink-0 gap-1 max-w-[10.5rem] whitespace-normal text-left leading-tight"
+          disabled={ctaDisabled}
+          title={
+            pendingWaiting
+              ? "Opens when the group arrives from the previous stop"
+              : phase === "active" && med && !medRound.canCompleteRound
                 ? "Administer or resolve every outstanding timed dose first"
                 : undefined
-            }
-            onClick={handleStatusAction}
-          >
-            {statusBusy ? (
-              <Loader2 className="h-3.5 w-3.5 animate-spin" />
-            ) : phase === "pending" ? (
-              <>
-                <Play className="h-3.5 w-3.5" />
-                Open
-              </>
-            ) : phase === "active" ? (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Complete
-              </>
-            ) : (
-              <>
-                <CheckCircle2 className="h-3.5 w-3.5" />
-                Done
-              </>
-            )}
-          </Button>
-        )}
+          }
+          onClick={handleStatusAction}
+        >
+          {statusBusy ? (
+            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          ) : phase === "pending" && !meal && !med ? (
+            <>
+              <Play className="h-3.5 w-3.5 shrink-0" />
+              Open
+            </>
+          ) : phase === "completed" ? (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              Done
+            </>
+          ) : (
+            <>
+              {canLeaveHere ? null : <CheckCircle2 className="h-3.5 w-3.5 shrink-0" />}
+              {phase === "pending" && (meal || med) ? (
+                <>
+                  <Play className="h-3.5 w-3.5" />
+                  Open
+                </>
+              ) : (
+                ctaLabel
+              )}
+            </>
+          )}
+        </Button>
       </div>
 
-      {/* Expanded body — rolls / review (status CTAs live on the header) */}
-      {expanded && !isOrigin && (
+      {expanded && (
         <div className="space-y-3 border-t px-4 pb-4 pt-3">
           {phase === "pending" && programmeBlocked && (
             <p className="text-xs text-muted-foreground">
-              Morning roll must be complete before this activity can start.
+              Morning roll must be complete before programme continues.
             </p>
           )}
+
+          {pendingWaiting && !programmeBlocked && (
+            <p className="text-xs text-muted-foreground">
+              Stay on the current activity card to leave. This stop opens when the
+              group arrives
+              {movementRaw === "bus" || inboundHop
+                ? " (bus hop via Manifest)."
+                : "."}
+            </p>
+          )}
+
+          {/* Top → bottom: Log issue → check-in / activity → leave for next */}
+          {phase !== "completed" &&
+            onLogIssue &&
+            (phase === "active" || (canLeaveHere && venue)) && (
+              <FieldActionButton
+                variant="caution"
+                size="sm"
+                className="w-full gap-2"
+                onClick={() => onLogIssue(stopName)}
+              >
+                <AlertTriangle className="h-4 w-4" />
+                Log issue — {stopName}
+              </FieldActionButton>
+            )}
 
           {phase === "active" && (
             <>
@@ -706,29 +1271,77 @@ function StopCard({
                   eventDaySessionId={eventDaySessionId}
                   editable
                 />
-              ) : isBus ? (
-                prevStop && hopIndex != null ? (
-                  <EventHopReleasePanel
-                    eventId={eventId}
-                    sessionId={eventDaySessionId}
-                    sessionDate={stop.session_date}
-                    hopIndex={hopIndex}
-                    fromStopId={prevStop.id}
-                    toStopId={stop.id}
-                    label={`${prevStop.label_override ?? prevStop.venue_name ?? "Origin"} → ${stopName}`}
-                  />
-                ) : (
-                  <BusHopPanel />
-                )
-              ) : (
+              ) : !isBus && !canLeaveHere ? (
                 <ActivityRollPanel
                   venueStopId={stop.id}
                   eventId={eventId}
                   eventDaySessionId={eventDaySessionId}
                   participantMap={participantMap}
                 />
+              ) : !canLeaveHere && isBus ? (
+                <p className="text-xs text-muted-foreground">
+                  Group arrived — activity open. Final stop: Complete when done.
+                </p>
+              ) : !isBus && canLeaveHere ? (
+                <ActivityRollPanel
+                  venueStopId={stop.id}
+                  eventId={eventId}
+                  eventDaySessionId={eventDaySessionId}
+                  participantMap={participantMap}
+                />
+              ) : null}
+            </>
+          )}
+
+          {phase === "active" && venue && activityCheckInBlocksLeave && (
+            <p className="text-xs text-amber-700 dark:text-amber-200">
+              Check everyone in (or Not at activity) before Close &amp; leave —
+              {outstandingActivity} outstanding.
+            </p>
+          )}
+
+          {phase === "active" && venue && canLeaveHere && isBus && (
+            <p className="text-xs text-muted-foreground">
+              Finish the activity here, then Close &amp; leave (choose Bus / Walk
+              for {nextName}).
+            </p>
+          )}
+
+          {canLeaveHere && !programmeBlocked && !activityCheckInBlocksLeave && (
+            <>
+              {leavePlanned &&
+              nextMovement &&
+              outboundHopIndex != null &&
+              nextStop ? (
+                <LeaveMovementConfirmPanel
+                  eventId={eventId}
+                  sessionId={eventDaySessionId}
+                  sessionDate={stop.session_date}
+                  hopIndex={outboundHopIndex}
+                  fromStopId={stop.id}
+                  toStopId={nextStop.id}
+                  fromLabel={stopName}
+                  toLabel={nextName!}
+                  method={nextMovement}
+                  fromVenueName={stop.label_override ?? stop.venue_name}
+                  toVenueName={nextStop.label_override ?? nextStop.venue_name}
+                  onChanged={onChanged}
+                  onNonBusConfirmed={(id) => onWalkOpened?.(id)}
+                />
+              ) : (
+                <LeaveMethodButtons
+                  nextName={nextName!}
+                  disabled={leaveMut.isPending}
+                  onPick={(m) => leaveMut.mutate(m)}
+                />
               )}
             </>
+          )}
+
+          {isOrigin && phase !== "completed" && !canLeaveHere && (
+            <p className="text-xs text-muted-foreground">
+              Departure base — leave for the first activity when the group is ready.
+            </p>
           )}
 
           {phase === "completed" && meal && (
@@ -771,37 +1384,30 @@ function StopCard({
               movement={movement}
               isBus={isBus}
               prevStop={prevStop}
+              nextStop={nextStop}
+              eventId={eventId}
               eventDaySessionId={eventDaySessionId}
               participantMap={participantMap}
+              onChanged={onChanged}
             />
           )}
         </div>
       )}
 
-      {/* Movement method picker */}
       <BottomSheet
-        open={methodSheetOpen}
-        onOpenChange={setMethodSheetOpen}
-        title="How are people getting there?"
-        description={`Movement method for ${stopName}`}
+        open={leaveSheetOpen}
+        onOpenChange={setLeaveSheetOpen}
+        title={nextName ? `Leave for ${nextName}` : "Leave"}
+        description="How is the group moving to the next stop?"
       >
-        <div className="space-y-2 pb-2">
-          {(
-            [
-              { method: "bus" as MovementMethod, label: "By Bus", sub: "Driver manages boarding via Manifest (§11)", icon: <Bus className="h-5 w-5" /> },
-              { method: "walk" as MovementMethod, label: "Walking", sub: "Individual tap check-in before the walk", icon: <Footprints className="h-5 w-5" /> },
-              { method: "on_site" as MovementMethod, label: "On-site / Already there", sub: "All present at this location — individual check-in roll", icon: <MapPin className="h-5 w-5" /> },
-            ] as const
-          ).map((opt) => (
-            <MobileFieldButton
-              key={opt.method}
-              title={opt.label}
-              subtitle={opt.sub}
-              icon={opt.icon}
-              onClick={() => openMut.mutate(opt.method)}
-              disabled={openMut.isPending}
+        <div className="pb-2">
+          {nextName && (
+            <LeaveMethodButtons
+              nextName={nextName}
+              disabled={leaveMut.isPending}
+              onPick={(m) => leaveMut.mutate(m)}
             />
-          ))}
+          )}
         </div>
       </BottomSheet>
 
@@ -838,8 +1444,11 @@ function CompletedActivityDetail({
   movement,
   isBus,
   prevStop,
+  nextStop,
+  eventId,
   eventDaySessionId,
   participantMap,
+  onChanged,
 }: {
   stop: EventVenueStop & {
     opened_at?: string | null;
@@ -849,11 +1458,15 @@ function CompletedActivityDetail({
   movement: MovementMethod;
   isBus: boolean;
   prevStop: EventVenueStop | null;
+  nextStop: EventVenueStop | null;
+  eventId: string;
   eventDaySessionId: string;
   participantMap: Map<string, Participant>;
+  onChanged: () => void;
 }) {
   const openedAt = stop.opened_at ?? null;
   const closedAt = stop.closed_at ?? null;
+  const qc = useQueryClient();
 
   const { data: roll = [], isLoading: rollLoading } = useQuery({
     queryKey: activityRollKey(stop.id),
@@ -861,6 +1474,25 @@ function CompletedActivityDetail({
       listActivityRoll(stop.id, { eventDaySessionId }),
     staleTime: 60_000,
     enabled: !isBus,
+  });
+
+  const resumeMut = useMutation({
+    mutationFn: () =>
+      reopenVenueActivityCheckIn({
+        stopId: stop.id,
+        eventId,
+        sessionDate: stop.session_date,
+        nextStopId: nextStop?.id ?? null,
+      }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: activityRollKey(stop.id) });
+      if (nextStop) {
+        void qc.invalidateQueries({ queryKey: activityRollKey(nextStop.id) });
+      }
+      toast.success(`Resumed check-in at ${stopName}.`);
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
   });
 
   const { data: floorAbsentNotes = {} } = useQuery({
@@ -905,18 +1537,23 @@ function CompletedActivityDetail({
           <MethodBadge method={movement} />
         </div>
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
-          {openedAt && (
+          {openedAt ? (
             <span className="inline-flex items-center gap-1">
               <Clock className="h-3 w-3" />
               Opened {formatTime(openedAt)}
             </span>
-          )}
-          {closedAt && (
-            <span className="inline-flex items-center gap-1">
-              <CheckCircle2 className="h-3 w-3" />
-              Closed {formatTime(closedAt)}
+          ) : (
+            <span className="inline-flex items-center gap-1 text-amber-700 dark:text-amber-200">
+              <Clock className="h-3 w-3" />
+              Opened time not recorded
             </span>
           )}
+          {closedAt ? (
+            <span className="inline-flex items-center gap-1">
+              <CheckCircle2 className="h-3 w-3" />
+              Completed {formatTime(closedAt)}
+            </span>
+          ) : null}
         </div>
         {isBus && prevStop && (
           <p className="text-xs text-muted-foreground">
@@ -942,6 +1579,22 @@ function CompletedActivityDetail({
               </Badge>
             )}
           </div>
+          {expected > 0 && (
+            <FieldActionButton
+              variant="primary"
+              size="sm"
+              className="w-full"
+              disabled={resumeMut.isPending}
+              onClick={() => resumeMut.mutate()}
+            >
+              {resumeMut.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Resume activity check-in
+            </FieldActionButton>
+          )}
           {rollLoading ? (
             <div className="flex justify-center py-3">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -952,7 +1605,11 @@ function CompletedActivityDetail({
             </p>
           ) : (
             <ul className="space-y-1.5">
-              {roll.map((row) => {
+              {sortByParticipantSurname(
+                roll,
+                (r) => r.participantId,
+                participantMap,
+              ).map((row) => {
                 const participant = participantMap.get(row.participantId);
                 const name = participant?.fullName ?? row.participantId.slice(0, 8);
                 const isIn = row.status === "checked_in";
@@ -1014,13 +1671,18 @@ function CompletedActivityDetail({
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Issues during this activity
         </p>
+        <p className="text-[11px] text-muted-foreground">
+          Trip-day issues logged while this stop was open (plus 5 minutes after
+          complete). Use <span className="font-medium">Log issue</span> on the
+          Active card to add one during the activity.
+        </p>
         {issuesLoading ? (
           <div className="flex justify-center py-3">
             <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
           </div>
         ) : issuesInWindow.length === 0 ? (
           <p className="rounded-lg border border-dashed bg-muted/30 py-3 text-center text-xs text-muted-foreground">
-            No trip-day issues logged while this activity was open.
+            No issues logged during this activity.
           </p>
         ) : (
           <ul className="space-y-1.5">
@@ -1052,23 +1714,6 @@ function CompletedActivityDetail({
           </ul>
         )}
       </div>
-    </div>
-  );
-}
-
-// ─── Bus hop panel ────────────────────────────────────────────────────────────
-
-function BusHopPanel() {
-  return (
-    <div className="rounded-lg border border-blue-500/30 bg-blue-500/10 p-3 space-y-1">
-      <div className="flex items-center gap-2 text-xs font-semibold text-blue-300">
-        <Bus className="h-4 w-4" />
-        Bus hop — individual boarding managed by driver via Manifest
-      </div>
-      <p className="text-xs text-blue-200/70">
-        The driver runs the §11 boarding roll for each passenger. Once the bus has departed,
-        close this activity to proceed.
-      </p>
     </div>
   );
 }
@@ -1211,12 +1856,24 @@ function ActivityRollPanel({
 
   const checkedIn = rows.filter((r) => r.status === "checked_in").length;
   const absentCount = rows.filter((r) => r.status === "absent").length;
+  const outstanding = rows.filter((r) => r.status === "expected").length;
   const assignable = rows.filter((r) => r.status !== "absent").length;
+  const allAccounted = rows.length > 0 && outstanding === 0;
   const busy =
     toggleMut.isPending ||
     undoSkipMut.isPending ||
     programmeAbsentMut.isPending ||
     reinstateMut.isPending;
+
+  /** List may collapse only when everyone is accounted for. */
+  const [listExpanded, setListExpanded] = useState(true);
+  useEffect(() => {
+    if (!allAccounted) {
+      setListExpanded(true);
+      return;
+    }
+    setListExpanded(false);
+  }, [allAccounted]);
 
   if (isLoading) {
     return (
@@ -1234,10 +1891,20 @@ function ActivityRollPanel({
     );
   }
 
-  const ordered = [
-    ...rows.filter((r) => r.status !== "absent"),
-    ...rows.filter((r) => r.status === "absent"),
-  ];
+  // Surname A–Z; absent / confirmed only change style — do not push absent to bottom.
+  const ordered = sortByParticipantSurname(
+    rows,
+    (r) => r.participantId,
+    participantMap,
+  );
+
+  const statusLabel = allAccounted
+    ? `${checkedIn} / ${assignable} confirmed${
+        absentCount > 0 ? ` · ${absentCount} not here` : ""
+      }`
+    : `${outstanding} outstanding · ${checkedIn} / ${assignable}`;
+
+  const showList = !allAccounted || listExpanded;
 
   return (
     <div className="space-y-2">
@@ -1245,13 +1912,49 @@ function ActivityRollPanel({
         <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
           Activity check-in
         </p>
-        <Badge variant="outline" className="text-xs">
-          {checkedIn} / {assignable} confirmed
-          {absentCount > 0 ? ` · ${absentCount} not here` : ""}
-        </Badge>
+        <button
+          type="button"
+          disabled={!allAccounted}
+          aria-expanded={showList}
+          aria-label={
+            allAccounted
+              ? listExpanded
+                ? "Collapse activity check-in list"
+                : "Expand activity check-in list"
+              : `${outstanding} people still outstanding on activity check-in`
+          }
+          title={
+            allAccounted
+              ? listExpanded
+                ? "Collapse list"
+                : "Expand list to change check-ins"
+              : "Finish check-in before the list can collapse"
+          }
+          onClick={() => {
+            if (!allAccounted) return;
+            setListExpanded((v) => !v);
+          }}
+          className={cn(
+            "inline-flex h-11 min-h-11 items-center gap-1.5 rounded-lg border-2 px-2.5 text-xs font-bold touch-manipulation",
+            "disabled:cursor-default",
+            allAccounted
+              ? "border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40"
+              : "border-destructive bg-destructive text-destructive-foreground shadow-md ring-2 ring-destructive/40",
+          )}
+        >
+          {statusLabel}
+          {allAccounted ? (
+            listExpanded ? (
+              <ChevronUp className="h-3.5 w-3.5 shrink-0" />
+            ) : (
+              <ChevronDown className="h-3.5 w-3.5 shrink-0" />
+            )
+          ) : null}
+        </button>
       </div>
 
-      {ordered.map((row) => {
+      {showList
+        ? ordered.map((row) => {
         const participant = participantMap.get(row.participantId);
         const name = participant?.fullName ?? row.participantId.slice(0, 8);
         const isIn = row.status === "checked_in";
@@ -1362,7 +2065,8 @@ function ActivityRollPanel({
             }
           />
         );
-      })}
+      })
+        : null}
 
       <ProgrammeAbsentDialog
         open={absentTarget != null}
@@ -1404,9 +2108,36 @@ function ActivityRollPanel({
 // ─── Method badge ─────────────────────────────────────────────────────────────
 
 function MethodBadge({ method }: { method: MovementMethod }) {
-  if (method === "bus") return <Badge className="bg-blue-600 text-white text-[10px]"><Bus className="mr-1 h-3 w-3" />Bus</Badge>;
-  if (method === "walk") return <Badge className="bg-teal-600 text-white text-[10px]"><Footprints className="mr-1 h-3 w-3" />Walk</Badge>;
-  return <Badge className="bg-slate-600 text-white text-[10px]"><MapPin className="mr-1 h-3 w-3" />On-site</Badge>;
+  if (method === "bus") {
+    return (
+      <Badge className="bg-blue-600 text-white text-[10px]">
+        <Bus className="mr-1 h-3 w-3" />
+        Bus
+      </Badge>
+    );
+  }
+  if (method === "walk") {
+    return (
+      <Badge className="bg-teal-600 text-white text-[10px]">
+        <Footprints className="mr-1 h-3 w-3" />
+        Walk
+      </Badge>
+    );
+  }
+  if (method === "other") {
+    return (
+      <Badge className="bg-violet-600 text-white text-[10px]">
+        <TrainFront className="mr-1 h-3 w-3" />
+        Other
+      </Badge>
+    );
+  }
+  return (
+    <Badge className="bg-slate-600 text-white text-[10px]">
+      <MapPin className="mr-1 h-3 w-3" />
+      On-site
+    </Badge>
+  );
 }
 
 // ─── Phase config ─────────────────────────────────────────────────────────────

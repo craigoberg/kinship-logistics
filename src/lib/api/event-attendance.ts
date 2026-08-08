@@ -254,7 +254,7 @@ export async function toggleEventCheckIn(
   row: EventAttendanceRow,
 ): Promise<EventAttendanceRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const isIn = row.status === "checked_in";
   if (!isIn && row.participantId) {
     const { assertNotInfectiousExcluded } = await import(
@@ -406,7 +406,7 @@ export async function checkoutEventParticipant(
     throw new Error("Participant must be checked in before departure handover.");
   }
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const runCode =
     returnTransport === "bus" ? (returnBusRunCode ?? "").trim() || null : null;
 

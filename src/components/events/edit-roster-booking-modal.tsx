@@ -44,6 +44,8 @@ interface Props {
   eventTicketPrice?: number;
   /** §12.3.1 — show outbound/return transport mode pickers for outing events. */
   eventKind?: string;
+  /** When false (Closed / billing_locked), money fields are read-only. */
+  financeWritable?: boolean;
 }
 
 const STATUS_OPTIONS = ["Confirmed", "Waitlisted", "Cancelled"] as const;
@@ -66,6 +68,7 @@ export function EditRosterBookingModal({
   eventTitle,
   eventTicketPrice = 0,
   eventKind = "legacy",
+  financeWritable = true,
 }: Props) {
   const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
   const [bookingStatus, setBookingStatus] = useState<string>("Confirmed");
@@ -175,7 +178,8 @@ export function EditRosterBookingModal({
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      const willRefund = showRefundPanel && issueRefund && parsedRefund > 0;
+      const willRefund =
+        financeWritable && showRefundPanel && issueRefund && parsedRefund > 0;
 
       const newOverride = tripPickupOverride.trim();
       const originalOverride = (booking.tripPickupAddressOverride ?? "").trim();
@@ -185,7 +189,7 @@ export function EditRosterBookingModal({
         bookingId: booking.id,
         bookingStatus,
         notes: notes.trim() ? notes.trim() : null,
-        amendedPrice: priceChanged ? parsedAmended : null,
+        amendedPrice: financeWritable && priceChanged ? parsedAmended : null,
         currentAmountPaid: collected,
         eventId: booking.eventId,
         eventTitle: eventTitle ?? "Event",
@@ -262,6 +266,12 @@ export function EditRosterBookingModal({
 
         <div className="-mx-6 flex-1 overflow-y-auto px-6">
           <div className="space-y-3 pt-1">
+          {!financeWritable && (
+            <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Billing locked — price amendments and refunds are disabled. Status and logistics can
+              still be updated.
+            </div>
+          )}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Booking status
@@ -301,6 +311,7 @@ export function EditRosterBookingModal({
               step="0.01"
               min="0"
               value={amendedPrice}
+              disabled={!financeWritable}
               onChange={(e) => {
                 setAmendedPrice(e.target.value);
                 setDirty(true);
@@ -358,7 +369,8 @@ export function EditRosterBookingModal({
                   </div>
                 </div>
                 <Switch
-                  checked={issueRefund}
+                  checked={issueRefund && financeWritable}
+                  disabled={!financeWritable}
                   onCheckedChange={(v) => {
                     setIssueRefund(v);
                     setDirty(true);
@@ -366,7 +378,7 @@ export function EditRosterBookingModal({
                 />
               </div>
 
-              {issueRefund && (
+              {issueRefund && financeWritable && (
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[10px] font-semibold uppercase tracking-wide text-destructive">

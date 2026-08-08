@@ -58,6 +58,10 @@ import { useLookupParameters } from "@/hooks/use-supabase-data";
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 const rollKey = (sessionId: string) => ["event-attendance-log", sessionId] as const;
 
@@ -184,6 +188,16 @@ export function EventArrivalRollPanel({
       ]),
     );
   }, [participants]);
+
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  const sortedRows = useMemo(
+    () =>
+      sortByParticipantSurname(rows, (r) => r.participantId, surnameById),
+    [rows, surnameById],
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: rollKey(sessionId) });
@@ -412,7 +426,7 @@ export function EventArrivalRollPanel({
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const absentPriorSessionId = priorAbsenceMap[row.participantId];
             const absentDayLabel = absentPriorSessionId
               ? priorSessionLabel[absentPriorSessionId]
@@ -618,7 +632,9 @@ function RollCard({
     <li
       className={cn(
         "rounded-lg border px-3 py-2",
-        isIn && "border-emerald-500/40 bg-emerald-500/5",
+        // Hi-vis checked-in — solid success fill (§4.5 / UI-STYLE-GUIDE)
+        isIn &&
+          "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
         isOut && "border-muted bg-muted/20 opacity-80",
         isAbsent && "border-destructive/60 bg-destructive/5",
         !isIn && !isOut && !isAbsent && arrivalUrgency === "warning" && "border-amber-400 bg-amber-50",
@@ -708,7 +724,14 @@ function RollCard({
                 )}
               </div>
               {row.checkedInAt && (
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                <p
+                  className={cn(
+                    "mt-0.5 text-[11px] leading-snug",
+                    isIn
+                      ? "text-success-foreground/90"
+                      : "text-muted-foreground",
+                  )}
+                >
                   In <ClientTime iso={row.checkedInAt} />
                   {row.checkedOutAt && (
                     <>

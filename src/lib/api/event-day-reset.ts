@@ -263,11 +263,13 @@ export async function resetEventDayToStartOfDay(
       .eq("event_day_session_id", sessionId),
   );
 
+  // Clear runtime; unset movement so Programme asks Bus/Walk/On-site/Other each leave.
+  // Meals/meds → on_site. Requires docs/sql/2026-08-07_venue_stop_movement_ask_other.sql
+  // (NULL allowed on movement_method).
   const { error: stopErr } = await supabase
     .from("event_venue_stops")
     .update({
       phase: "pending",
-      movement_method: "bus",
       opened_at: null,
       closed_at: null,
       opened_by_id: null,
@@ -275,6 +277,27 @@ export async function resetEventDayToStartOfDay(
     .eq("event_id", eventId)
     .eq("session_date", sessionDate);
   if (stopErr) throw new Error(`event_venue_stops reset: ${stopErr.message}`);
+
+  const { error: clearMoveErr } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: null })
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .or("activity_kind.eq.venue,activity_kind.is.null");
+  if (clearMoveErr) {
+    throw new Error(
+      `event_venue_stops clear movement: ${clearMoveErr.message}. Run docs/sql/2026-08-07_venue_stop_movement_ask_other.sql`,
+    );
+  }
+  const { error: onSiteErr } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: "on_site" })
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .in("activity_kind", ["meal", "medication_round"]);
+  if (onSiteErr) {
+    throw new Error(`event_venue_stops meal/med reset: ${onSiteErr.message}`);
+  }
 
   // SIM clock first so overnight open / check-in stamps match trip-day morning.
   setOperationalClockOverride({ date: sessionDate, time: START_OF_DAY_CLOCK });
@@ -298,7 +321,7 @@ export async function resetEventDayToStartOfDay(
       close_declared_at: null,
       close_leader_notes: null,
       expected_arrival_by: null,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     });
   }
 

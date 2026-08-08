@@ -114,14 +114,14 @@ export function SystemParameterWorkspace() {
       </div>
 
       <div className="rounded-md border">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead>Key</TableHead>
-              <TableHead>Value</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead className="w-20" />
+              <TableHead className="w-[22%]">Key</TableHead>
+              <TableHead className="w-[12%]">Value</TableHead>
+              <TableHead className="w-[42%]">Description</TableHead>
+              <TableHead className="w-[14%]">Updated</TableHead>
+              <TableHead className="w-[10%] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -134,14 +134,19 @@ export function SystemParameterWorkspace() {
             ) : (
               rows.map((r) => (
                 <TableRow key={r.key}>
-                  <TableCell className="font-mono text-xs">{r.key}</TableCell>
-                  <TableCell className="font-mono">{formatValue(r.value)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{r.description}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="align-top font-mono text-xs break-all">
+                    {r.key}
+                  </TableCell>
+                  <TableCell className="align-top font-mono text-xs whitespace-pre-wrap break-words">
+                    {formatValue(r.value)}
+                  </TableCell>
+                  <TableCell className="align-top text-sm text-muted-foreground whitespace-normal break-words">
+                    {r.description}
+                  </TableCell>
+                  <TableCell className="align-top text-xs text-muted-foreground whitespace-nowrap">
                     <ClientTime iso={r.updated_at} />
                   </TableCell>
-
-                  <TableCell>
+                  <TableCell className="align-top text-right">
                     {canEdit && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
                         <Pencil className="mr-1 h-3 w-3" /> Edit

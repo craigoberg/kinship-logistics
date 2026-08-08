@@ -705,15 +705,24 @@ import {
   insertEventBooking,
   updateEventBooking,
   recordEventPaymentMilestone,
+  recordEventRefundMilestone,
+  updateEventPaymentMilestone,
+  deleteEventPaymentMilestone,
   listEventLedger,
   listEventPaymentLedger,
   listEventPaymentLedgerForEvent,
   insertEventLedger,
+  updateEventLedger,
+  deleteEventLedger,
   type NewEvent,
   type UpdateEventInput,
   type NewEventBooking,
   type NewEventLedger,
+  type UpdateEventLedgerInput,
   type PaymentMilestoneInput,
+  type EventRefundMilestoneInput,
+  type UpdateEventPaymentMilestoneInput,
+  type DeleteEventPaymentMilestoneInput,
   type UpdateBookingInput,
 } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
@@ -919,6 +928,14 @@ export function useInsertEventBooking() {
   });
 }
 
+function invalidateEventFinance(qc: ReturnType<typeof useQueryClient>, eventId: string) {
+  qc.invalidateQueries({ queryKey: ["event_financial_ledger", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_manifest"] });
+  qc.invalidateQueries({ queryKey: ["events"] });
+}
+
 export function useInsertEventLedger() {
   const qc = useQueryClient();
   const online = useOnlineStatus();
@@ -931,10 +948,36 @@ export function useInsertEventLedger() {
       return insertEventLedger(input);
     },
     onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+      invalidateEventFinance(qc, vars.eventId);
     },
     onError: (err: Error) => {
       toast.error("Could not log event expense", { description: err.message });
+    },
+  });
+}
+
+export function useUpdateEventLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateEventLedgerInput) => updateEventLedger(input),
+    onSuccess: (_, vars) => {
+      invalidateEventFinance(qc, vars.eventId);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update expense", { description: err.message });
+    },
+  });
+}
+
+export function useDeleteEventLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; eventId: string }) => deleteEventLedger(input),
+    onSuccess: (_, vars) => {
+      invalidateEventFinance(qc, vars.eventId);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not delete expense", { description: err.message });
     },
   });
 }
@@ -948,27 +991,84 @@ export function useEventBookingsForParticipant(participantId: string | null | un
   });
 }
 
+function invalidateBookingMoney(
+  qc: ReturnType<typeof useQueryClient>,
+  vars: { eventId: string; participantId: string },
+) {
+  qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
+  qc.invalidateQueries({
+    queryKey: ["event_roster_bookings", "by-participant", vars.participantId],
+  });
+  qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+  qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
+  qc.invalidateQueries({
+    queryKey: ["event_payment_ledger", vars.participantId, vars.eventId],
+  });
+  qc.invalidateQueries({
+    queryKey: ["participant_financial_ledger", vars.participantId],
+  });
+  qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+  qc.invalidateQueries({ queryKey: ["event_manifest"] });
+  qc.invalidateQueries({ queryKey: ["events"] });
+  qc.invalidateQueries({ queryKey: ["participants"] });
+}
+
 export function useRecordEventPaymentMilestone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: PaymentMilestoneInput) => recordEventPaymentMilestone(input),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.participantId, vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
-      qc.invalidateQueries({ queryKey: ["event_manifest"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateBookingMoney(qc, vars);
     },
     onError: (err: Error) => {
       toast.error("Could not record payment milestone", {
         description: err.message,
         className: "border-red-500 bg-red-600 text-white font-medium",
       });
+    },
+  });
+}
+
+export function useRecordEventRefundMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EventRefundMilestoneInput) => recordEventRefundMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not record refund", {
+        description: err.message,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
+    },
+  });
+}
+
+export function useUpdateEventPaymentMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateEventPaymentMilestoneInput) =>
+      updateEventPaymentMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update payment", { description: err.message });
+    },
+  });
+}
+
+export function useDeleteEventPaymentMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DeleteEventPaymentMilestoneInput) =>
+      deleteEventPaymentMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not delete payment", { description: err.message });
     },
   });
 }

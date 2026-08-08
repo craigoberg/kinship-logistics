@@ -393,7 +393,7 @@ export function ManageEventModal({
         <Sheet open={open} onOpenChange={onOpenChange}>
           <SheetContent
             side="bottom"
-            className="flex h-[100dvh] flex-col rounded-t-2xl border-t border-border bg-card p-0 pb-[env(safe-area-inset-bottom)]"
+            className="flex h-[100dvh] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card p-0 pb-[env(safe-area-inset-bottom)]"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{event.title}</SheetTitle>

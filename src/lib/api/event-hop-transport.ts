@@ -36,6 +36,7 @@ import {
   transportRunKeysForDirection,
 } from "@/lib/event-bus-runs";
 import { listLookupParameters, LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 export type EventTransportRunKind = "outbound" | "venue_hop" | "return";
 
@@ -284,12 +285,23 @@ export async function listEventTransportRuns(opts: {
         : "waiting";
 
   // ── Venue hops (programme pairs + omitted-hotel wake hop; bus only) ───────
+  // Walk / on-site destinations are skipped. Unset movement still appears as a
+  // potential bus hop (waiting for trip leader to choose Bus + Release).
   for (const hop of programmeHops) {
     const from = hop.from;
     const to = hop.to;
     const i = hop.hopIndex;
-    const movement = (to as EventVenueStop & { movement_method?: string }).movement_method ?? "bus";
-    if (movement !== "bus") continue;
+    const movementRaw = (
+      to as EventVenueStop & { movement_method?: string | null }
+    ).movement_method;
+    // Only bus hops appear on Manifest. walk / on_site / other skip.
+    if (
+      movementRaw === "walk" ||
+      movementRaw === "on_site" ||
+      movementRaw === "other"
+    ) {
+      continue;
+    }
 
     const fromName = stopLabel(from);
     const toName = stopLabel(to);
@@ -311,14 +323,13 @@ export async function listEventTransportRuns(opts: {
         : hopTrips.some(
             (t) => Number(t.hop_index) === i - 1 && tripStatus(t) === "completed",
           );
+    const busPlanned = movementRaw === "bus";
 
     if (hopTrip) {
       const st = tripStatus(hopTrip);
       if (st === "completed") hopStatus = "completed";
       else if (st === "active") hopStatus = "active";
       else hopStatus = "released";
-    } else if (priorHopDone && locationOpen && allCheckedIn) {
-      hopStatus = "ready";
     } else if (!locationOpen) {
       hopStatus = "blocked";
       hopDetail = "Open location on Event Deliver before in-day hops";
@@ -331,6 +342,15 @@ export async function listEventTransportRuns(opts: {
     } else if (!priorHopDone) {
       hopStatus = "waiting";
       hopDetail = "Waiting — complete the previous hop first";
+    } else if (!busPlanned) {
+      hopStatus = "waiting";
+      hopDetail =
+        "Waiting — trip leader chooses By Bus and Releases on Programme";
+    } else {
+      // Destination still pending; Release unlocks Manifest (not Open).
+      hopStatus = "ready";
+      hopDetail =
+        "Ready for trip leader Release on Programme — then start here";
     }
 
     cards.push({
@@ -479,7 +499,7 @@ export async function seedBusManifestForHop(opts: {
   return manifest.length;
 }
 
-/** Trip leader or system prepares a hop before the driver opens Manifest. */
+/** Trip leader prepares a hop before the driver opens Manifest (Release only). */
 export async function prepareEventHopManifest(opts: {
   eventId: string;
   eventDaySessionId: string;
@@ -499,6 +519,36 @@ export async function prepareEventHopManifest(opts: {
   if (suspended?.active) {
     throw new Error(
       `Programme suspended${suspended.reason ? `: ${suspended.reason}` : ""}. Manager must clear before releasing a hop.`,
+    );
+  }
+
+  const { data: toStop, error: toErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", opts.toStopId)
+    .maybeSingle();
+  if (toErr) throw toErr;
+  if (!toStop) throw new Error("Destination stop not found.");
+  const toPhase = (toStop as { phase?: string | null }).phase ?? "pending";
+  const toMovement = (toStop as { movement_method?: string | null }).movement_method;
+  if (toPhase !== "pending") {
+    throw new Error(
+      "Destination is already open or completed — Release is only before the hop arrives.",
+    );
+  }
+  if (toMovement !== "bus") {
+    throw new Error(
+      "Choose By Bus on Programme before releasing the group to the bus.",
+    );
+  }
+
+  const { countOutstandingActivityExpected } = await import(
+    "@/lib/api/event-activity-roll"
+  );
+  const outstandingFrom = await countOutstandingActivityExpected(opts.fromStopId);
+  if (outstandingFrom > 0) {
+    throw new Error(
+      `${outstandingFrom} person${outstandingFrom === 1 ? "" : "s"} still outstanding on the activity check-in. Confirm or mark Not at activity before releasing to the bus.`,
     );
   }
 
@@ -522,9 +572,29 @@ export async function prepareEventHopManifest(opts: {
 
   await supabase
     .from("event_day_sessions")
-    .update({ phase: "in_transit", updated_at: new Date().toISOString() })
+    .update({ phase: "in_transit", updated_at: operationalNowIso() })
     .eq("id", opts.eventDaySessionId)
     .in("phase", ["active", "at_base"]);
+
+  // Leave-from-current: Release completes the origin stop (custody handed to bus).
+  const { closeVenueStop } = await import("@/lib/api/event-activity-roll");
+  const { data: fromRow } = await supabase
+    .from("event_venue_stops")
+    .select("id, label_override, venues(name)")
+    .eq("id", opts.fromStopId)
+    .maybeSingle();
+  const fromVenues = (
+    fromRow as { venues?: { name?: string } | null } | null
+  )?.venues;
+  await closeVenueStop({
+    id: opts.fromStopId,
+    eventId: opts.eventId,
+    venueName:
+      (fromRow as { label_override?: string | null } | null)?.label_override ??
+      fromVenues?.name ??
+      null,
+    sessionDate: opts.sessionDate,
+  });
 
   const staffId = await resolveStaffIdWithFallback();
   await writeToLedger({
@@ -539,6 +609,8 @@ export async function prepareEventHopManifest(opts: {
       event_id: opts.eventId,
       session_id: opts.eventDaySessionId,
       hop_index: opts.hopIndex,
+      from_stop_id: opts.fromStopId,
+      to_stop_id: opts.toStopId,
     },
   });
 
@@ -737,7 +809,7 @@ export async function startEventVenueHop(
     trip_origin: "depot",
     trip_return: "none",
     origin_address: labels.fromAddress,
-    updated_at: new Date().toISOString(),
+    updated_at: operationalNowIso(),
   };
   let { data: updatedTrip, error: updErr } = await supabase
     .from("transport_trips")
@@ -802,13 +874,13 @@ export async function finalizeEventVenueHop(trip: TransportTrip): Promise<void> 
   if (trip.tripKind !== "event_venue_hop") return;
   if (!trip.eventDaySessionId) return;
 
+  const now = operationalNowIso();
   await supabase
     .from("event_day_sessions")
-    .update({ phase: "active", updated_at: new Date().toISOString() })
+    .update({ phase: "active", updated_at: now })
     .eq("id", trip.eventDaySessionId)
     .eq("phase", "in_transit");
 
-  const now = new Date().toISOString();
   if (trip.venueStopFromId) {
     await supabase
       .from("event_venue_stops")

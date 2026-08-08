@@ -346,9 +346,10 @@ export async function upsertEventVenueStop(
     meal_slot: kind === "meal" ? input.meal_slot ?? null : null,
     meal_source: kind === "meal" ? input.meal_source ?? null : null,
     menu_notes: kind === "meal" ? input.menu_notes?.trim() || null : null,
-    // TEST bootstrap: phase / movement_method NOT NULL without DEFAULT.
+    // Venue hops: unset until leave-from-current asks Bus/Walk/On-site/Other.
+    // Meals/meds are always on-site. (NULL requires 2026-08-07 movement SQL.)
     movement_method:
-      kind === "meal" || kind === "medication_round" ? "on_site" : "bus",
+      kind === "meal" || kind === "medication_round" ? "on_site" : null,
   };
 
   if (input.id) {

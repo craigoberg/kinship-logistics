@@ -8,6 +8,7 @@ import { writeToLedger, tryGetGps, writeToLedgerOrThrow } from "@/lib/api/ledger
 import { listAttendanceRoll } from "@/lib/api/client-attendance";
 import { emitMockSms } from "@/lib/notifications/mock-sms";
 import { setPhase } from "@/lib/api/site-day-sessions";
+import { compareBySurname } from "@/lib/ui/sort-participants";
 
 export type EmergencyMode = "drill" | "live";
 export type EmergencySeverity = "yellow" | "red";
@@ -224,10 +225,43 @@ export async function listMusterLines(emergencyId: string): Promise<MusterLine[]
   const { data, error } = await supabase
     .from("operational_emergency_muster")
     .select("*")
-    .eq("emergency_id", emergencyId)
-    .order("participant_name", { ascending: true });
+    .eq("emergency_id", emergencyId);
   if (error) throw error;
-  return (data ?? []).map((r) => rowToMuster(r as MusterRow));
+  const lines = (data ?? []).map((r) => rowToMuster(r as MusterRow));
+  const ids = [
+    ...new Set(lines.map((l) => l.participantId).filter((id): id is string => !!id)),
+  ];
+  if (!ids.length) return lines;
+
+  const { data: parts } = await supabase
+    .from("participants")
+    .select("id, first_name, last_name")
+    .in("id", ids);
+  const surnameById = new Map<
+    string,
+    { id: string; firstName?: string; lastName?: string }
+  >();
+  for (const p of parts ?? []) {
+    const row = p as { id: string; first_name?: string; last_name?: string };
+    surnameById.set(row.id, {
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+    });
+  }
+
+  return [...lines].sort((a, b) =>
+    compareBySurname(
+      {
+        ...(a.participantId ? surnameById.get(a.participantId) : undefined),
+        id: a.participantId ?? a.id,
+      },
+      {
+        ...(b.participantId ? surnameById.get(b.participantId) : undefined),
+        id: b.participantId ?? b.id,
+      },
+    ),
+  );
 }
 
 async function seedMusterFromCentreRoll(

@@ -40,6 +40,10 @@ import {
   selectionFromEventMode,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 const rollKey = (sessionId: string) => ["event-attendance-log", sessionId] as const;
 
@@ -136,9 +140,34 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busRunOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
 
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  // One surname A–Z list for assignable + handed-over — status styles the row
+  // only (no jump into a separate “Handed to transport” block).
+  const activeRoll = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rows.filter(
+          (r) => r.status === "checked_in" || r.status === "checked_out",
+        ),
+        (r) => r.participantId,
+        surnameById,
+      ),
+    [rows, surnameById],
+  );
+  const leftTrip = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rows.filter((r) => r.status === "absent"),
+        (r) => r.participantId,
+        surnameById,
+      ),
+    [rows, surnameById],
+  );
   const pending = rows.filter((r) => r.status === "checked_in");
   const done = rows.filter((r) => r.status === "checked_out");
-  const leftTrip = rows.filter((r) => r.status === "absent");
   /** Still with the group — gates Close trip (Absent placeholders do not block). */
   const stillWithGroup = pending.length;
   const assignedCount = done.length;
@@ -185,7 +214,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
         </div>
       ) : (
         <ul className="space-y-2">
-          {pending.map((row) => (
+          {activeRoll.map((row) => (
             <CheckOutCard
               key={row.id}
               row={row}
@@ -220,28 +249,6 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
                         participantName: nameMap[row.participantId] ?? "Participant",
                       })
                     }
-                  />
-                ))}
-              </ul>
-            </li>
-          )}
-
-          {done.length > 0 && (
-            <li className="pt-1">
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Handed to transport
-              </p>
-              <ul className="space-y-2">
-                {done.map((row) => (
-                  <CheckOutCard
-                    key={row.id}
-                    row={row}
-                    name={nameMap[row.participantId] ?? "Loading…"}
-                    busy={busy}
-                    editable={!isClosed}
-                    onCheckout={() => {}}
-                    busRunOpts={busRunOpts}
-                    onUndo={() => undoMut.mutate(row)}
                   />
                 ))}
               </ul>

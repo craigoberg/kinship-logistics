@@ -1,10 +1,17 @@
 -- ============================================================================
--- 2026-08-05 — Backup restore FK load window (required for clean data restore)
+-- 2026-08-05 — TEST recovery after failed restore wipe
 --
--- Drops ALL public foreign keys into a stash, then restores them after data load.
--- service_role only. Apply on DEV + TEST before next restore.
+-- 1) Re-apply FK load window (safeupdate-safe DELETE … WHERE true)
+-- 2) Re-seed bootstrap manager PIN 1234
+-- 3) Fix verify_operator_pin (return all matches + personnel_type)
+--
+-- Does NOT truncate or delete operational data except replacing the
+-- bootstrap manager row. Run on TEST only.
 -- ============================================================================
 
+CREATE EXTENSION IF NOT EXISTS pgcrypto;
+
+-- ---------- FK stash + RPCs ----------
 CREATE TABLE IF NOT EXISTS public._backup_fk_restore_stash (
   id bigserial PRIMARY KEY,
   table_name text NOT NULL,
@@ -13,12 +20,10 @@ CREATE TABLE IF NOT EXISTS public._backup_fk_restore_stash (
 );
 
 ALTER TABLE public._backup_fk_restore_stash ENABLE ROW LEVEL SECURITY;
-
 REVOKE ALL ON TABLE public._backup_fk_restore_stash FROM PUBLIC, anon, authenticated;
 GRANT ALL ON TABLE public._backup_fk_restore_stash TO service_role;
 GRANT ALL ON SEQUENCE public._backup_fk_restore_stash_id_seq TO service_role;
 
--- Exclude stash + other internal tables from discovery
 CREATE OR REPLACE FUNCTION public.list_backup_tables()
 RETURNS TABLE(table_name text)
 LANGUAGE sql
@@ -36,6 +41,9 @@ AS $$
      AND c.relname NOT LIKE '\_backup\_%' ESCAPE '\'
    ORDER BY c.relname;
 $$;
+
+GRANT EXECUTE ON FUNCTION public.list_backup_tables()
+  TO anon, authenticated, service_role;
 
 CREATE OR REPLACE FUNCTION public.backup_drop_all_public_fks()
 RETURNS integer
@@ -59,13 +67,10 @@ BEGIN
   SELECT COUNT(*)::integer INTO v_stashed
     FROM public._backup_fk_restore_stash;
 
-  -- Idempotent: if FKs already dropped and stash is populated, do not wipe stash
   IF v_live = 0 THEN
     RETURN v_stashed;
   END IF;
 
-  -- WHERE true: Supabase safeupdate blocks bare DELETE without a WHERE clause
-  -- WHERE true: Supabase safeupdate blocks bare DELETE without a WHERE clause
   DELETE FROM public._backup_fk_restore_stash WHERE true;
 
   FOR r IN
@@ -105,7 +110,6 @@ DECLARE
   r record;
   n integer := 0;
 BEGIN
-  -- Add NOT VALID first so orphans don't block the restore finish
   FOR r IN
     SELECT table_name, constraint_name, definition
       FROM public._backup_fk_restore_stash
@@ -145,7 +149,6 @@ BEGIN
     END;
   END LOOP;
 
-  -- WHERE true: Supabase safeupdate
   DELETE FROM public._backup_fk_restore_stash WHERE true;
   RETURN n;
 END;
@@ -156,13 +159,55 @@ REVOKE ALL ON FUNCTION public.backup_restore_all_public_fks() FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.backup_drop_all_public_fks() TO service_role;
 GRANT EXECUTE ON FUNCTION public.backup_restore_all_public_fks() TO service_role;
 
--- Keep list_backup_tables grants
-GRANT EXECUTE ON FUNCTION public.list_backup_tables()
+-- ---------- PIN verify + bootstrap manager ----------
+DROP FUNCTION IF EXISTS public.verify_operator_pin(text);
+
+CREATE OR REPLACE FUNCTION public.verify_operator_pin(entered_pin text)
+RETURNS TABLE (
+  id uuid,
+  full_name text,
+  role text,
+  personnel_type text
+)
+LANGUAGE sql
+SECURITY DEFINER
+STABLE
+SET search_path = public, extensions
+AS $$
+  SELECT s.id, s.full_name, s.role, s.personnel_type
+  FROM public.staff_registry s
+  WHERE s.active = true
+    AND s.pin_hash IS NOT NULL
+    AND s.pin_hash = encode(digest(entered_pin, 'sha256'), 'hex');
+$$;
+
+REVOKE ALL ON FUNCTION public.verify_operator_pin(text) FROM PUBLIC;
+GRANT EXECUTE ON FUNCTION public.verify_operator_pin(text)
   TO anon, authenticated, service_role;
 
--- Validation:
--- SELECT backup_drop_all_public_fks();  -- returns count > 0, then:
--- SELECT backup_restore_all_public_fks(); -- put them back
--- SELECT COUNT(*) FROM pg_constraint c
---   JOIN pg_namespace n ON n.oid = c.connamespace
---  WHERE n.nspname = 'public' AND c.contype = 'f';
+DELETE FROM public.staff_registry
+WHERE full_name = 'TEST Bootstrap Manager'
+   OR email = 'bootstrap@test.local';
+
+INSERT INTO public.staff_registry (
+  full_name,
+  role,
+  personnel_type,
+  pin_hash,
+  active,
+  email
+)
+VALUES (
+  'TEST Bootstrap Manager',
+  'manager',
+  'manager',
+  encode(digest('1234', 'sha256'), 'hex'),
+  true,
+  'bootstrap@test.local'
+);
+
+-- ---------- Validation (expect rows) ----------
+-- SELECT count(*) FROM staff_registry;  -- at least 1
+-- SELECT * FROM verify_operator_pin('1234');  -- bootstrap manager
+-- SELECT backup_drop_all_public_fks();   -- number
+-- SELECT backup_restore_all_public_fks(); -- put FKs back before app restore

@@ -77,6 +77,10 @@ import { AddVisitorModal } from "./add-visitor-modal";
 import { PromoteVisitorToEventDialog } from "./promote-visitor-to-event-dialog";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 export type AttendanceRollMode = "all" | "check_in" | "check_out";
 
@@ -420,31 +424,46 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   }
 
   const allRows = rollQ.data ?? [];
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participantsQ.data ?? []),
+    [participantsQ.data],
+  );
+  // Surname A–Z; status only changes row style — never move checked-in into a
+  // second section (that bounce was distracting on the floor).
   const rows = useMemo(() => {
+    let filtered: ClientAttendanceRow[];
     if (mode === "check_in") {
-      // Still need arrival (expected / absent placeholders).
-      return allRows.filter(
-        (r) =>
-          r.status !== "checked_in" &&
-          r.status !== "checked_out" &&
-          !r.checkedOutAt,
+      // Expected + checked-in + absent stay in one fixed list; departed go below.
+      filtered = allRows.filter(
+        (r) => r.status !== "checked_out" && !r.checkedOutAt,
       );
+    } else if (mode === "check_out") {
+      filtered = allRows.filter((r) => r.status === "checked_in");
+    } else {
+      filtered = allRows;
     }
-    if (mode === "check_out") {
-      return allRows.filter((r) => r.status === "checked_in");
-    }
-    return allRows;
-  }, [allRows, mode]);
-  /** Check-In tab: people already on site (visible record; actions on Check-Out). */
-  const alreadyInRows = useMemo(() => {
-    if (mode !== "check_in") return [];
-    return allRows.filter((r) => r.status === "checked_in");
-  }, [allRows, mode]);
+    return sortByParticipantSurname(
+      filtered,
+      (r) => r.participantId,
+      surnameById,
+    );
+  }, [allRows, mode, surnameById]);
   const leftTodayRows = useMemo(() => {
     if (mode !== "check_in") return [];
-    return allRows.filter((r) => r.status === "checked_out");
-  }, [allRows, mode]);
-  const visitors = visitorsQ.data ?? [];
+    return sortByParticipantSurname(
+      allRows.filter((r) => r.status === "checked_out"),
+      (r) => r.participantId,
+      surnameById,
+    );
+  }, [allRows, mode, surnameById]);
+  const visitors = useMemo(() => {
+    const list = visitorsQ.data ?? [];
+    return [...list].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, undefined, {
+        sensitivity: "base",
+      }),
+    );
+  }, [visitorsQ.data]);
   const visitorsPresent = visitors.filter((v) => !v.leftAt);
   const showVisitors = mode !== "check_out";
   const showCheckInActions = mode !== "check_out";
@@ -585,10 +604,13 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       {!rollQ.isError &&
         mode === "check_in" &&
         allRows.length > 0 &&
-        rows.length === 0 &&
-        alreadyInRows.length > 0 && (
+        rows.length > 0 &&
+        rows.every(
+          (r) => r.status === "checked_in" || r.status === "absent",
+        ) &&
+        rows.some((r) => r.status === "checked_in") && (
           <Card className="border-dashed border-emerald-500/40 bg-emerald-500/5 p-3 text-sm text-muted-foreground">
-            All expected arrivals are checked in. Names below — use{" "}
+            All expected arrivals are checked in. Use{" "}
             <span className="font-semibold text-foreground">Check-Out</span> to
             depart people still on site.
           </Card>
@@ -628,10 +650,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
             ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
             : null;
           const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
-          // WCAG: on Green/Yellow/Absent tinted surfaces, force solid charcoal
-          // so text + timestamp both clear AA contrast.
-          const subTextCls =
-            isIn || isYellow || isAbsent || isOut
+          // Hi-vis green = white text; Yellow/Absent/Out keep charcoal on tints.
+          const subTextCls = isIn
+            ? "text-success-foreground/90"
+            : isYellow || isAbsent || isOut
               ? "text-slate-900/80"
               : "text-muted-foreground";
           const busy =
@@ -678,7 +700,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
                   isIn && !isYellow && !isRed &&
-                    "border-green-600 bg-green-50 text-slate-900",
+                    "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
                   !isIn && !isRed && !isYellow && !isAbsent && !isOut &&
                     "border-border bg-card",
                   isYellow &&
@@ -916,76 +938,6 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
           );
         })}
       </ul>
-
-      {mode === "check_in" && alreadyInRows.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Already checked in{" "}
-            <span className="font-mono normal-case text-muted-foreground/70">
-              ({alreadyInRows.length})
-            </span>
-          </h4>
-          <ul className="space-y-1.5">
-            {alreadyInRows.map((r) => {
-              const displayName = nameMap[r.participantId] ?? "client";
-              const clinicalChips = clinicalFlagsFromParticipant(
-                participantById.get(r.participantId) ?? {},
-              );
-              const busy = undoMut.isPending;
-              return (
-                <li
-                  key={r.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border-2 border-green-600/50 bg-green-50 px-3 py-2.5 text-slate-900"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-sm font-semibold">
-                        {displayName}
-                      </span>
-                      <Badge className="bg-green-600 text-[10px] uppercase text-white">
-                        In
-                      </Badge>
-                      {clinicalChips.length > 0 && (
-                        <ClinicalFlagChips
-                          chips={clinicalChips}
-                          personName={displayName}
-                        />
-                      )}
-                    </div>
-                    {r.checkedInAt && (
-                      <p className="mt-0.5 text-xs text-slate-900/80">
-                        In{" "}
-                        <ClientTime
-                          iso={r.checkedInAt}
-                          options={{ hour: "2-digit", minute: "2-digit" }}
-                        />
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setUndoTarget(r)}
-                    className={cn(
-                      "inline-flex min-h-11 min-w-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                      "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                      "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                      "disabled:pointer-events-none disabled:opacity-50",
-                    )}
-                    title="Undo check-in"
-                    aria-label={`Undo check-in for ${displayName}`}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                      Undo
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
       {mode === "check_in" && leftTodayRows.length > 0 && (
         <div className="space-y-2 pt-1">

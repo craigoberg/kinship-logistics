@@ -3049,24 +3049,10 @@ export interface PaymentMilestoneResult {
 export async function recordEventPaymentMilestone(
   input: PaymentMilestoneInput,
 ): Promise<PaymentMilestoneResult> {
+  await assertEventFinanceWritable(input.eventId);
   if (!Number.isFinite(input.paymentAmount) || input.paymentAmount <= 0) {
     throw new Error("Payment amount must be greater than zero.");
   }
-  const newTotal = Number((input.currentAmountPaid + input.paymentAmount).toFixed(2));
-  const fullyPaid = input.ticketPrice > 0 && newTotal >= input.ticketPrice;
-
-  const { data: bookingData, error: bookingErr } = await supabase
-    .from("event_roster_bookings")
-    .update({ amount_paid: newTotal, is_fully_paid: fullyPaid })
-    .eq("id", input.bookingId)
-    .select(BOOKING_PARTICIPANT_SELECT)
-    .single();
-  if (bookingErr) {
-    console.error("[recordEventPaymentMilestone] booking update failed", bookingErr);
-    throw bookingErr;
-  }
-
-  const booking = rowToBooking(bookingData as BookingRow);
 
   const ledger = await insertLedgerEntry({
     participantId: input.participantId,
@@ -3077,7 +3063,184 @@ export async function recordEventPaymentMilestone(
     isReconciled: true,
   });
 
+  const paid = await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+
+  const { data: bookingData, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .eq("id", input.bookingId)
+    .single();
+  if (bookingErr) {
+    console.error("[recordEventPaymentMilestone] booking reload failed", bookingErr);
+    throw bookingErr;
+  }
+
+  const booking = rowToBooking(bookingData as BookingRow);
+  booking.amountPaid = paid.amountPaid;
+  booking.isFullyPaid = paid.isFullyPaid;
   return { booking, ledger };
+}
+
+export interface EventRefundMilestoneInput {
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  ticketPrice: number;
+  refundAmount: number;
+  refundDate: string;
+  reason?: string | null;
+}
+
+export async function recordEventRefundMilestone(
+  input: EventRefundMilestoneInput,
+): Promise<PaymentMilestoneResult> {
+  await assertEventFinanceWritable(input.eventId);
+  if (!Number.isFinite(input.refundAmount) || input.refundAmount <= 0) {
+    throw new Error("Refund amount must be greater than zero.");
+  }
+
+  const current = await listEventPaymentLedger(input.participantId, input.eventId);
+  const netPaid = Number(current.reduce((s, e) => s + e.amount, 0).toFixed(2));
+  if (input.refundAmount > netPaid + 0.001) {
+    throw new Error(
+      `Refund cannot exceed amount paid ($${Math.max(0, netPaid).toFixed(2)}).`,
+    );
+  }
+
+  const reason = (input.reason ?? "").trim() || "Refund";
+  const ledger = await insertLedgerEntry({
+    participantId: input.participantId,
+    transactionDate: input.refundDate,
+    financialCode: "EVENT_REFUND",
+    description: `${reason} — ${input.eventTitle} [event:${input.eventId}]`,
+    amount: -Math.abs(input.refundAmount),
+    isReconciled: true,
+  });
+
+  const paid = await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+
+  const { data: bookingData, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .eq("id", input.bookingId)
+    .single();
+  if (bookingErr) throw bookingErr;
+
+  const booking = rowToBooking(bookingData as BookingRow);
+  booking.amountPaid = paid.amountPaid;
+  booking.isFullyPaid = paid.isFullyPaid;
+  return { booking, ledger };
+}
+
+export interface UpdateEventPaymentMilestoneInput {
+  ledgerId: string;
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  ticketPrice: number;
+  transactionDate: string;
+  amount: number;
+  /** Absolute dollars; sign derived from financial code. */
+  financialCode: "EVENT_PMT" | "EVENT_REFUND";
+  description: string;
+}
+
+export async function updateEventPaymentMilestone(
+  input: UpdateEventPaymentMilestoneInput,
+): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("Amount must be greater than zero.");
+  }
+
+  const marker = `[event:${input.eventId}]`;
+  const { data: existing, error: loadErr } = await supabase
+    .from("participant_financial_ledger")
+    .select("id, description, financial_code")
+    .eq("id", input.ledgerId)
+    .eq("participant_id", input.participantId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existing) throw new Error("Payment milestone not found.");
+  const desc = String((existing as { description?: string }).description ?? "");
+  if (!desc.includes(marker)) {
+    throw new Error("Ledger row is not tagged to this event.");
+  }
+
+  const signed =
+    input.financialCode === "EVENT_REFUND"
+      ? -Math.abs(input.amount)
+      : Math.abs(input.amount);
+  const clean = input.description.trim().replace(/\s*\[event:[^\]]+\]\s*$/i, "");
+  const { error } = await supabase
+    .from("participant_financial_ledger")
+    .update({
+      transaction_date: input.transactionDate,
+      financial_code: input.financialCode,
+      amount: signed,
+      description: `${clean || "Event payment"} ${marker}`,
+    })
+    .eq("id", input.ledgerId);
+  if (error) throw error;
+
+  await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+}
+
+export interface DeleteEventPaymentMilestoneInput {
+  ledgerId: string;
+  bookingId: string;
+  eventId: string;
+  participantId: string;
+  ticketPrice: number;
+}
+
+export async function deleteEventPaymentMilestone(
+  input: DeleteEventPaymentMilestoneInput,
+): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  const marker = `[event:${input.eventId}]`;
+  const { data: existing, error: loadErr } = await supabase
+    .from("participant_financial_ledger")
+    .select("id, description")
+    .eq("id", input.ledgerId)
+    .eq("participant_id", input.participantId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existing) throw new Error("Payment milestone not found.");
+  const desc = String((existing as { description?: string }).description ?? "");
+  if (!desc.includes(marker)) {
+    throw new Error("Ledger row is not tagged to this event.");
+  }
+
+  const { error } = await supabase
+    .from("participant_financial_ledger")
+    .delete()
+    .eq("id", input.ledgerId);
+  if (error) throw error;
+
+  await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
 }
 
 // ---------- update booking (status + notes, optional cancellation refund) ----------
@@ -3129,6 +3292,16 @@ export async function updateEventBooking(
     !!input.refund &&
     Number.isFinite(input.refund.amount) &&
     input.refund.amount > 0;
+  const moneyTouch =
+    issueRefund ||
+    (input.amendedPrice != null && Number.isFinite(input.amendedPrice));
+  const lockEventId = input.refund?.eventId ?? input.eventId;
+  if (moneyTouch) {
+    if (!lockEventId) {
+      throw new Error("Event id required for financial booking changes.");
+    }
+    await assertEventFinanceWritable(lockEventId);
+  }
 
   const updatePayload: Record<string, unknown> = {
     booking_status: input.bookingStatus,
@@ -3392,7 +3565,54 @@ export interface NewEventLedger {
   vendorName?: string | null;
 }
 
+export function isEventFinanceLocked(
+  event: Pick<EventManifest, "status" | "billingLocked">,
+): boolean {
+  return event.billingLocked || event.status === "Closed";
+}
+
+/** Load event and throw if Closed / billing_locked. */
+export async function assertEventFinanceWritable(
+  eventId: string,
+): Promise<EventManifest> {
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("*")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Event not found.");
+  const event = rowToEvent(data as EventManifestRow);
+  if (isEventFinanceLocked(event)) {
+    throw new Error(
+      "Billing locked — this event is Closed. No further financial edits are permitted.",
+    );
+  }
+  return event;
+}
+
+/** Net paid from event-tagged ledger rows → booking amount_paid / is_fully_paid. */
+export async function recomputeBookingPaidFromEventLedger(opts: {
+  bookingId: string;
+  participantId: string;
+  eventId: string;
+  ticketBaseline: number;
+}): Promise<{ amountPaid: number; isFullyPaid: boolean }> {
+  const entries = await listEventPaymentLedger(opts.participantId, opts.eventId);
+  const net = Number(entries.reduce((s, e) => s + e.amount, 0).toFixed(2));
+  const amountPaid = Math.max(0, net);
+  const baseline = Number(opts.ticketBaseline) || 0;
+  const isFullyPaid = baseline > 0 && amountPaid + 0.001 >= baseline;
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update({ amount_paid: amountPaid, is_fully_paid: isFullyPaid })
+    .eq("id", opts.bookingId);
+  if (error) throw error;
+  return { amountPaid, isFullyPaid };
+}
+
 export async function insertEventLedger(input: NewEventLedger): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
   const row: Record<string, unknown> = {
     event_id: input.eventId,
     transaction_date: input.transactionDate,
@@ -3404,6 +3624,50 @@ export async function insertEventLedger(input: NewEventLedger): Promise<void> {
   const { error } = await supabase.from("event_financial_ledger").insert(row);
   if (error) {
     console.error("[insertEventLedger] failed", error);
+    throw error;
+  }
+}
+
+export interface UpdateEventLedgerInput {
+  id: string;
+  eventId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  financialCode: string;
+  vendorName?: string | null;
+}
+
+export async function updateEventLedger(input: UpdateEventLedgerInput): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  const { error } = await supabase
+    .from("event_financial_ledger")
+    .update({
+      transaction_date: input.transactionDate,
+      description: formatEventLedgerDescription(input.description, input.vendorName),
+      amount: input.amount,
+      financial_code: input.financialCode,
+    })
+    .eq("id", input.id)
+    .eq("event_id", input.eventId);
+  if (error) {
+    console.error("[updateEventLedger] failed", error);
+    throw error;
+  }
+}
+
+export async function deleteEventLedger(opts: {
+  id: string;
+  eventId: string;
+}): Promise<void> {
+  await assertEventFinanceWritable(opts.eventId);
+  const { error } = await supabase
+    .from("event_financial_ledger")
+    .delete()
+    .eq("id", opts.id)
+    .eq("event_id", opts.eventId);
+  if (error) {
+    console.error("[deleteEventLedger] failed", error);
     throw error;
   }
 }

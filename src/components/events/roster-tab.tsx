@@ -1,6 +1,6 @@
 ﻿import { Fragment, useCallback, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
+import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -13,10 +13,15 @@ import {
   useLookupParameters,
 } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
-import { LOOKUP_CATEGORIES, manifestPickupForBooking } from "@/lib/data-store";
+import {
+  isEventFinanceLocked,
+  LOOKUP_CATEGORIES,
+  manifestPickupForBooking,
+} from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { AddGuestBookingModal } from "./add-guest-booking-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
+import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
@@ -42,10 +47,12 @@ function fmtMoney(n: number): string {
 
 export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
+  const financeWritable = !isEventFinanceLocked(event);
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
+  const [refundBooking, setRefundBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -157,7 +164,8 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     const baselineCost = b.customPrice ?? event.ticketPrice;
     const netLedgerSum = ledgerTotalsByParticipant.get(b.participantId) ?? 0;
     const trueBalance = b.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
-    const owes = b.bookingStatus !== "Cancelled" && trueBalance > 0;
+    const owes = financeWritable && b.bookingStatus !== "Cancelled" && trueBalance > 0;
+    const canRefund = financeWritable && netLedgerSum > 0;
     const isOpen = expanded.has(b.id);
     const pickupAddress = manifestPickupForBooking(b);
 
@@ -382,6 +390,22 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   <TooltipContent>Record Payment Milestone</TooltipContent>
                 </Tooltip>
               )}
+              {canRefund && (
+                <Tooltip>
+                  <TooltipTrigger asChild>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      onClick={() => setRefundBooking(b)}
+                      className="h-7 w-7 text-warning hover:text-warning"
+                      aria-label="Record refund"
+                    >
+                      <RotateCcw className="h-4 w-4" />
+                    </Button>
+                  </TooltipTrigger>
+                  <TooltipContent>Record Refund</TooltipContent>
+                </Tooltip>
+              )}
               <Tooltip>
                 <TooltipTrigger asChild>
                   <Button
@@ -417,7 +441,14 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           <tr className="border-t border-border/40 bg-muted/10">{[
             <td key="spacer" aria-hidden />,
             <td key="history" colSpan={7} className="p-0">
-              <BookingPaymentHistory participantId={b.participantId} eventId={event.id} />
+              <BookingPaymentHistory
+                participantId={b.participantId}
+                eventId={event.id}
+                eventTitle={event.title}
+                booking={b}
+                ticketBaseline={baselineCost}
+                financeWritable={financeWritable}
+              />
             </td>,
           ]}</tr>
         )}
@@ -441,8 +472,22 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     return { ...editBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
   }, [editBooking, event.ticketPrice, ledgerTotalsByParticipant]);
 
+  const refundBookingWithLedger = useMemo(() => {
+    if (!refundBooking) return null;
+    const netLedgerSum = ledgerTotalsByParticipant.get(refundBooking.participantId) ?? 0;
+    const baselineCost = refundBooking.customPrice ?? event.ticketPrice;
+    const trueBalance =
+      refundBooking.bookingStatus === "Cancelled" ? 0 : baselineCost - netLedgerSum;
+    return { ...refundBooking, amountPaid: netLedgerSum, isFullyPaid: trueBalance <= 0 };
+  }, [event.ticketPrice, ledgerTotalsByParticipant, refundBooking]);
+
   return (
     <div className="space-y-4">
+      {!financeWritable && (
+        <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Billing locked — this event is Closed. Payments and refunds are read-only.
+        </div>
+      )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold">Participant booking roster</h3>
@@ -570,6 +615,13 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         booking={milestoneBookingWithLedger}
       />
 
+      <RecordRefundMilestoneModal
+        open={refundBooking !== null}
+        onOpenChange={(o) => !o && setRefundBooking(null)}
+        event={event}
+        booking={refundBookingWithLedger}
+      />
+
       <EditRosterBookingModal
         open={editBooking !== null}
         onOpenChange={(o) => !o && setEditBooking(null)}
@@ -577,6 +629,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         eventTitle={event.title}
         eventTicketPrice={event.ticketPrice}
         eventKind={eventKind}
+        financeWritable={financeWritable}
       />
 
       {noShowFor && (

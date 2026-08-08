@@ -26,6 +26,7 @@ import {
   leftTripHubDescription,
   type LeftTripDisposition,
 } from "@/lib/trip-absent";
+import { compareBySurname } from "@/lib/ui/sort-participants";
 
 /** Hub attribution for automated roll sweeps (reported_by is text after migration). */
 export const SYSTEM_ISSUE_REPORTER = "System";
@@ -235,6 +236,10 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
   ];
 
   const nameById: Record<string, string> = {};
+  const surnameById = new Map<
+    string,
+    { firstName?: string; lastName?: string; id: string }
+  >();
   if (participantIds.length) {
     const { data: parts, error: pErr } = await supabase
       .from("participants")
@@ -244,18 +249,41 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
     for (const p of parts ?? []) {
       const row = p as { id: string; first_name?: string; last_name?: string };
       nameById[row.id] = `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim();
+      surnameById.set(row.id, {
+        id: row.id,
+        firstName: row.first_name,
+        lastName: row.last_name,
+      });
     }
   }
 
-  return data.map((r) => {
-    const row = r as EventBusManifestRow;
-    return {
-      ...row,
-      participant_name: row.participant_id
-        ? nameById[row.participant_id] || null
-        : null,
-    };
-  });
+  // Surname A–Z — on_bus / not_travelling must not reorder the boarding list.
+  return data
+    .map((r) => {
+      const row = r as EventBusManifestRow;
+      return {
+        ...row,
+        participant_name: row.participant_id
+          ? nameById[row.participant_id] || null
+          : null,
+      };
+    })
+    .sort((a, b) =>
+      compareBySurname(
+        {
+          ...(a.participant_id
+            ? surnameById.get(a.participant_id)
+            : undefined),
+          id: a.participant_id ?? a.id,
+        },
+        {
+          ...(b.participant_id
+            ? surnameById.get(b.participant_id)
+            : undefined),
+          id: b.participant_id ?? b.id,
+        },
+      ),
+    );
 }
 
 /** Seed bus manifest for a trip from the event roster (or arrival roll fallback). */
@@ -358,7 +386,7 @@ export async function seedBusManifest(opts: {
 
 export async function markOnBus(row: EventBusManifestRow): Promise<EventBusManifestRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const next: BusManifestStatus = row.status === "on_bus" ? "expected" : "on_bus";
 
   const { data, error } = await supabase
@@ -688,7 +716,7 @@ async function materializeVirtualRow(
       {
         event_day_session_id: row.event_day_session_id,
         participant_id: row.participant_id,
-        expected_accounted_at: row.expected_accounted_at || new Date().toISOString(),
+        expected_accounted_at: row.expected_accounted_at || operationalNowIso(),
         status: "expected" as AccountabilityStatus,
       },
       { onConflict: "event_day_session_id,participant_id" },
@@ -892,7 +920,7 @@ export async function deferAccountabilityRoll(
 
     const patch: Record<string, unknown> = {
       expected_accounted_at: nextIso,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     };
 
     // Individual only — group reason stays on the banner / session note.
@@ -933,7 +961,7 @@ export async function deferAccountabilityRoll(
           .from("site_issues_register")
           .update({
             status: "resolved",
-            resolved_at: new Date().toISOString(),
+            resolved_at: operationalNowIso(),
           })
           .eq("id", row.escalation_issue_id);
         await supabase
@@ -966,7 +994,7 @@ export async function deferAccountabilityRoll(
     const col = isCurfew ? "evening_group_defer_note" : "morning_group_defer_note";
     const { error: sessErr } = await supabase
       .from("event_day_sessions")
-      .update({ [col]: groupBannerNote, updated_at: new Date().toISOString() })
+      .update({ [col]: groupBannerNote, updated_at: operationalNowIso() })
       .eq("id", opts.sessionId);
     if (sessErr) {
       console.warn("[deferAccountabilityRoll] group banner note save failed:", sessErr.message);
@@ -1016,11 +1044,18 @@ export async function fetchRollGroupDeferNotes(sessionId: string): Promise<{
     .eq("id", sessionId)
     .maybeSingle();
   if (error) {
-    // Pre-migration: columns missing — treat as empty.
-    if (/morning_group_defer_note|evening_group_defer_note|column/i.test(error.message)) {
+    // Pre-migration / schema lag — never break Event Deliver for banner notes.
+    const code = String((error as { code?: string }).code ?? "");
+    const msg = error.message ?? "";
+    if (
+      code === "42703" ||
+      code === "PGRST204" ||
+      /morning_group_defer_note|evening_group_defer_note|column|schema cache/i.test(msg)
+    ) {
       return { morning: null, evening: null };
     }
-    throw error;
+    console.warn("[fetchRollGroupDeferNotes]", msg);
+    return { morning: null, evening: null };
   }
   const row = data as {
     morning_group_defer_note?: string | null;
@@ -1049,7 +1084,7 @@ export async function markAccounted(
   await assertEveningRollMarkingAllowed(table, row.event_day_session_id);
 
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
   // If this is a virtual row (not yet in the DB), upsert it first.
   const realId = row.isVirtual ? await materializeVirtualRow(table, row) : row.id;
@@ -1479,7 +1514,7 @@ export async function sweepAccountabilityRoll(
         .update({
           escalation_issue_id: (issue as { id: string }).id,
           escalation_severity: insertSeverity,
-          escalation_raised_at: new Date().toISOString(),
+          escalation_raised_at: operationalNowIso(),
         })
         .eq("id", r.id);
 
@@ -1607,7 +1642,7 @@ async function fireEventRedSms(
     }
     await supabase
       .from(table)
-      .update({ red_sms_dispatched_at: new Date().toISOString() })
+      .update({ red_sms_dispatched_at: operationalNowIso() })
       .eq("id", row.id);
   } catch (e) {
     console.error("[event-day-ops] SMS pipeline threw", e);

@@ -29,13 +29,13 @@ export function FloorAnnouncementStrip() {
   }
 
   return (
-    <div className="flex items-start gap-2 border-b border-sky-700/40 bg-sky-600/15 px-4 py-2 text-sky-950 dark:text-sky-100 md:px-6">
-      <Megaphone className="mt-0.5 h-4 w-4 shrink-0" />
+    <div className="flex items-start gap-2.5 border-b-2 border-sky-800 bg-sky-500 px-4 py-2.5 text-sky-950 shadow-sm md:px-6">
+      <Megaphone className="mt-0.5 h-5 w-5 shrink-0 text-sky-950" aria-hidden />
       <div className="min-w-0 flex-1">
-        <p className="text-[11px] font-black uppercase tracking-wider">
+        <p className="text-[11px] font-black uppercase tracking-wider text-sky-950/80">
           Message of the day
         </p>
-        <p className="text-sm font-semibold whitespace-pre-wrap">
+        <p className="text-sm font-bold whitespace-pre-wrap text-sky-950 sm:text-base">
           {announcement.message}
         </p>
       </div>

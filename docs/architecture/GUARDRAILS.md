@@ -938,7 +938,7 @@ Code: `src/lib/api/event-lifecycle-gates.ts`, `openEventLocation` / `closeEventL
 
 | Concept | Table / field | Meaning |
 | :-- | :-- | :-- |
-| **Planning / Confirm / Open / Closed** | `event_manifest.status` | **Office lifecycle** — roster ready, trip authorised, finance lock at end |
+| **Planning / Confirm / Open / Closed** | `event_manifest.status` | **Office lifecycle** — roster ready, trip authorised; **finance writable until Closed** (`billing_locked`) |
 | **Open / close location** | `event_day_sessions.phase` | **Operational floor** — trip leader has opened/closed the temporary centre that day |
 
 `event_manifest.status` → **Open** authorises transport and coordinator workflows; **the event floor starts** only when trip leader **opens location** (`active`). Do not conflate the two.
@@ -989,8 +989,10 @@ This § applies to `compliance_assets` tied to trip infrastructure where relevan
 | Existing asset | Trip use |
 | :-- | :-- |
 | `event_roster_bookings` | Attendee revenue, carer flags, transport modes |
-| `event_financial_ledger` + Finance tab | Vendor expenses (venue hire, tickets, meals, transport) |
-| `recordEventPaymentMilestone` | Payment tracking |
+| `event_financial_ledger` + Finance tab | Vendor expenses (venue hire, tickets, meals, transport) — create/edit/delete until Closed |
+| `recordEventPaymentMilestone` / refund / edit / delete | Payment tracking; booking `amount_paid` recomputed from event-tagged ledger lines |
+
+**Finance lock (office):** Writable while `event_manifest.status !== 'Closed'` and `billing_locked` is false. Promoting to **Closed** sets `billing_locked`; all expense and payment/refund write paths call `assertEventFinanceWritable` and throw a clear **Billing locked** error. UI hides/disables money actions; history stays read-only. Edit/delete is **in place** (no void-and-repost).
 
 NDIS claim generation is **out of scope** for these trips. Internal P&L only.
 
@@ -1145,14 +1147,18 @@ Specifically:
     • RED on open checks → cannot open (same gate as Day Centre)
     • Manager PIN → Trip status = "Active" → ledger EVENT_TRIP_OPENED
        ↓
-[4] Activity loop (one cycle per venue / activity)
-           ┌─ Open activity
-           ├─ Movement method: Bus | Walk | On-site (at same location)
-           │   ALL: individual check-in per person before activity starts
-           │   Bus: §11 Manifest boarding roll for this hop (driver handles)
-           │   Walk/on-site: activity check-in roll (same UI as arrival roll — tap each person)
+[4] Activity loop (one cycle per venue / activity) — leave-from-current
+           ┌─ On the **current** stop card: Leave for {next} / Close & leave…
+           │   Ask Bus | Walk | On-site **every hop** (Hotel→Joes bus, Joes→Park walk, …)
+           │   Bus: Release on current card → §11 Manifest → depart → arrive
+           │        (current completes on Release; destination stays Pending until finalize)
+           │   Walk/on-site: opens next + completes current in one step
+           ├─ Pending destination: waiting-only (no Release / movement picker there)
+           ├─ At destination (bus: after Manifest hop arrive / finalize):
+           │   Activity is open — individual accountability already done at boarding
+           │   (walk/on-site: tap check-in roll at activity start)
            ├─ Anomaly / INCIDENT button available throughout
-           └─ Close activity → group assumed (button; no per-person close-out needed)
+           └─ Final stop of day: plain Complete (evening roll / check-out)
                 └─ Unresolved incident blocks close until logged / workaround accepted
            (Repeat for each activity in the itinerary)
        ↓
@@ -1215,8 +1221,8 @@ Canonical status sequence for a **multi-day overnight** day (example: hotel base
 | :-- | :-- | :-- |
 | 1 | **Check in at {base}** / **All checked in at {base}** | `event_attendance_log` arrival roll (Check-In tab) |
 | 2 | **Morning roll call** / **Morning roll — all accounted** (or **Morning roll complete** if any Absent) | `event_morning_log` (§12.5) — **Day 2+ only** (not first day) |
-| 3 | **Board bus — depart {from} for {to}** | Individual boarding via **§11 Manifest** (driver); trip leader sees counts from `event_bus_manifest` and/or `trip_legs` |
-| 4 | **At {destination}** / **In transit to {destination}** | Active `event_venue_stops` phase + hop `transport_trips` leg state |
+| 3 | **Board bus — depart {from} for {to}** | Trip leader **Close & leave** on the **current** card (ask Bus each hop) → **Release** → individual boarding via **§11 Manifest**; destination stays `pending` until hop arrive |
+| 4 | **At {destination}** / **In transit to {destination}** | **In transit** = hop trip `active` + leg `en_route`. **At destination** = hop trip `completed` (finalize opens destination `active`) — never Open/Release on the destination Pending card |
 | 5 | **Board bus — return {from} → {base}** | Next itinerary hop (requires return stop in Itinerary — e.g. venue again as final stop) |
 | 6 | **Evening roll call** / **Evening roll — all accounted** (or **Evening roll complete** if any Absent) | `event_curfew_log` (§12.5) — **non-final nights only**; deadline from `curfew_time` |
 
@@ -1270,6 +1276,16 @@ Phases are **sequential** — do not start B before A ships to production.
 > **2026-07-13 — Project owner directive (Event Deliver):** Three-phase event model locked: Setup (office `/events`) → Deliver (field `/event-deliver`, mobile-first) → Report (office `/events` Trip Report tab). Each bus driver runs their own §11 Manifest — unchanged. **Extended Golden Rule:** individual check-in at every transport boarding point AND at the trip venue (arrival roll); group movement assumed between hops unless incident logged; individual checkout at end of trip. Event Deliver is a top-level menu entry AND launchable from inside the event card. End-of-trip checkout requires Trip Leader Manager PIN (same weight as Day Centre close). Return transport triggers standard §11 Manifest for each bus. Build sequence: Phase A (arrival roll + Trip open) → Phase B (activity loop) → Phase C (checkout + return trigger) → Phase D (multi-day night rolls) → Phase E (Trip Report link).
 
 > **2026-07-13 — Project owner directive (activity check-in amendment):** Every activity requires **individual check-in per person regardless of transport method** — both bus hops and walk/on-site activities. Time has passed since the last roll call; a person may be unwell or missing. Bus hops: individual boarding via §11 Manifest (existing). Walk/on-site: individual activity check-in roll (same tap-per-row UI as arrival roll). Group completion is *assumed* at activity close (no per-person close-out required) unless an incident is logged mid-activity. This supersedes the earlier "walk = group departure confirm" wording in §12.13.2.
+
+> **2026-08-06 — Project owner directive (hop custody gating):** Programme must not Open a bus destination before the hop arrives. Manifest must not prepare a hop without trip-leader Release. Group Status **Board bus** stays current until release/boarding/transit — destination `active` alone must not skip boarding.
+
+> **2026-08-07 — Project owner directive (leave-from-current handoffs):** Trip leader stays mentally on the **current** activity. **Close & leave…** / **Leave for {next}…** on the current card asks **Bus | Walk | Other | On-site every hop** (`movement_method` stays NULL until chosen — never default/reset to bus). **Other** = train/tram/public (activity check-in, no Manifest hop). Bus **Release** lives on that same card (not on the next Pending stop). Current completes on Release (or on walk/other start); destination opens on Manifest arrive. Pending destinations are waiting-only. SQL: `2026-08-07_venue_stop_movement_ask_other.sql`.
+
+> **2026-08-08 — Project owner directive (activity check-in before leave):** Walk / Other / on-site venue activities must finish **individual activity check-in** (zero `expected` on `event_activity_rolls`) before **Close & leave**, Release, or Complete. Premature complete shows **Resume activity check-in**. After walk/other leave, UI focuses the destination card for check-in.
+
+> **2026-08-09 — Project owner directive (reversible leave plan):** Choosing **Bus | Walk | Other | On-site** only plans movement on the next stop. Confirm is separate: **Release group to bus** (Manifest) or **Leave for {next}** (open check-in). Until confirm, embedded **Method** + **Undo** chips (Check-In parity) reverse or change the choice.
+
+> **2026-08-09 — Project owner directive (event finance until Closed):** Events Manage Finance + Roster money (expenses, payments, refunds) stay editable/deletable in place until **Closed** / `billing_locked`. Writes use `assertEventFinanceWritable`; booking `amount_paid` recomputed from event-tagged ledger.
 
 > **2026-07-14 — Project owner directive (group status panel):** Event Deliver shows a live **Group status** timeline (§12.13.8): all checked in at base → board bus via Manifest for each hop → at destination → return hop to base → off bus here until curfew. Counts refresh from attendance, venue stops, bus manifest, and transport legs.
 

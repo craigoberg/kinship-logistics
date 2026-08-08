@@ -428,7 +428,7 @@ export async function promoteEventStatus(
       throw new Error(`Billing lock ledger write failed — event NOT closed. Retry. (${(e as Error).message})`);
     }
     patch.billing_locked = true;
-    patch.closed_at = new Date().toISOString();
+    patch.closed_at = operationalNowIso();
     patch.closed_by_id = staffId;
   }
 

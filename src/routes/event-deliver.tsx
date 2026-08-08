@@ -890,6 +890,7 @@ function TripDayView({
             <TabsContent value="activities" className="mt-3">
               <ActivityLoopTab
                 eventId={event.id}
+                eventTitle={event.title}
                 eventDaySessionId={session.id}
                 sessionDate={session.session_date}
               />

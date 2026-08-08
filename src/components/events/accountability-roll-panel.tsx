@@ -49,6 +49,10 @@ import {
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { reinstateLeftTripEverywhere } from "@/lib/api/event-attendance";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 type Mode = "curfew" | "morning";
 type LogTable = "event_curfew_log" | "event_morning_log";
@@ -148,6 +152,16 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
   const nameMap = useMemo(
     () => Object.fromEntries(participants.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim()])),
     [participants],
+  );
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  /** Surname A–Z; accounted / left-trip status must not reorder the list. */
+  const sortedRoll = useMemo(
+    () =>
+      sortByParticipantSurname(roll, (r) => r.participant_id, surnameById),
+    [roll, surnameById],
   );
 
   // How many check-in entries are still "expected" (not yet arrived or reconciled)?
@@ -415,7 +429,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
         </p>
       ) : (
         <ul className="space-y-2">
-          {roll.map((row) => (
+          {sortedRoll.map((row) => (
             <AccountabilityRow
               key={row.id}
               row={row}
