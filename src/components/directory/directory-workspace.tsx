@@ -1,5 +1,18 @@
 import { useEffect, useMemo, useState } from "react";
-import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle, Lock } from "lucide-react";
+import { Link } from "@tanstack/react-router";
+import {
+  Pencil,
+  Search,
+  UserPlus,
+  Mail,
+  Phone,
+  BadgeCheck,
+  AlertTriangle,
+  Lock,
+  ClipboardList,
+  HeartHandshake,
+} from "lucide-react";
+import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -22,6 +35,12 @@ import { isActiveUserManager } from "@/lib/data-store";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
+import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import {
+  createOnboardingCase,
+  type OnboardingCase,
+} from "@/lib/api/onboarding";
+import type { OnboardingPackType } from "@/lib/onboarding/form-types";
 
 const EXPIRY_WARN_DAYS = 30;
 
@@ -59,7 +78,25 @@ export function DirectoryWorkspace() {
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
   const [editCarer, setEditCarer] = useState<Carer | null>(null);
   const [isManager, setIsManager] = useState(false);
+  const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
   useEffect(() => setIsManager(isActiveUserManager()), []);
+
+  const startOnboarding = async (pack: OnboardingPackType) => {
+    setOnboardingBusy(true);
+    try {
+      const created = await createOnboardingCase(pack);
+      setOnboardingCase(created);
+      setOnboardingOpen(true);
+    } catch (e) {
+      toast.error("Could not start onboarding", {
+        description: (e as Error).message,
+      });
+    } finally {
+      setOnboardingBusy(false);
+    }
+  };
 
   const { data: staff = [], isLoading: staffLoading, error: staffErr } = useStaffRegistry();
   const { data: carers = [], isLoading: carersLoading, error: carersErr } = useCarersRegistry();
@@ -104,16 +141,36 @@ export function DirectoryWorkspace() {
           </TabsList>
           {tab === "staff" ? (
             isManager ? (
-              <Button
-                onClick={() => {
-                  setEditStaff(null);
-                  setStaffOpen(true);
-                }}
-                className="gap-1.5"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add personnel
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditStaff(null);
+                    setStaffOpen(true);
+                  }}
+                  className="gap-1.5"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Quick add
+                </Button>
+                <Button
+                  variant="secondary"
+                  disabled={onboardingBusy}
+                  onClick={() => void startOnboarding("volunteer")}
+                  className="gap-1.5"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Volunteer onboarding
+                </Button>
+                <Button
+                  disabled={onboardingBusy}
+                  onClick={() => void startOnboarding("staff")}
+                  className="gap-1.5"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Staff onboarding
+                </Button>
+              </div>
             ) : (
               <Badge variant="outline" className="gap-1.5">
                 <Lock className="h-3 w-3" />
@@ -121,18 +178,36 @@ export function DirectoryWorkspace() {
               </Badge>
             )
           ) : (
-            <Button
-              onClick={() => {
-                setEditCarer(null);
-                setCarerOpen(true);
-              }}
-              className="gap-1.5"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add carer
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditCarer(null);
+                  setCarerOpen(true);
+                }}
+                className="gap-1.5"
+              >
+                <UserPlus className="h-4 w-4" />
+                Quick add carer
+              </Button>
+              <Button
+                disabled={onboardingBusy}
+                onClick={() => void startOnboarding("accompanying")}
+                className="gap-1.5"
+              >
+                <HeartHandshake className="h-4 w-4" />
+                Accompanying onboarding
+              </Button>
+            </div>
           )}
         </div>
+        <p className="text-xs text-muted-foreground">
+          Print / sign / file packs also live under{" "}
+          <Link to="/admin" className="underline underline-offset-2">
+            Admin → Onboarding
+          </Link>
+          .
+        </p>
 
         <TabsContent value="staff" className="mt-4 space-y-3">
           <SearchBar
@@ -300,6 +375,12 @@ export function DirectoryWorkspace() {
 
       <StaffFormSheet open={staffOpen} onOpenChange={setStaffOpen} staff={editStaff} />
       <CarerFormSheet open={carerOpen} onOpenChange={setCarerOpen} carer={editCarer} />
+      <OnboardingCaseDialog
+        open={onboardingOpen}
+        onOpenChange={setOnboardingOpen}
+        caseRow={onboardingCase}
+        onSaved={setOnboardingCase}
+      />
     </div>
   );
 }

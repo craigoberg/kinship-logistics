@@ -136,6 +136,10 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function isPublicSitePath(pathname: string): boolean {
+  return pathname === "/public" || pathname.startsWith("/public/");
+}
+
 function AuthGate() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -143,6 +147,8 @@ function AuthGate() {
 
   useEffect(() => {
     if (pathname === "/auth") return;
+    // BL-110: yada.org.au public site routes — no day-login / PIN.
+    if (isPublicSitePath(pathname)) return;
     // Wait for Supabase session hydrate before deciding.
     if (!isReady) return;
     // BL-099: day session (Auth) required, then PIN profile (role).
@@ -175,6 +181,7 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAuthRoute = pathname === "/auth";
+  const isPublicRoute = isPublicSitePath(pathname);
 
   // Unlock SIM TIME after paint so lazy routes (e.g. Event Deliver) finish
   // hydrating against the same "live" date the server rendered.
@@ -188,8 +195,8 @@ function RootComponent() {
       {/* Root provider so global overlays (Big Red Incident) work outside AppShell. */}
       <TooltipProvider delayDuration={300}>
         <AuthGate />
-        {isAuthRoute ? (
-          // Bare-shell terminal view — no AppShell chrome on the sign-in screen.
+        {isAuthRoute || isPublicRoute ? (
+          // Bare shell — auth login or public yada.org.au pages (BL-110).
           <Outlet />
         ) : (
           <>

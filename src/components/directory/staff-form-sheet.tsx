@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
@@ -255,6 +256,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         </SheetHeader>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {isEdit && staff ? (
+            <OnboardingSubjectPanel
+              subjectTable="staff_registry"
+              subjectId={staff.id}
+              defaultPack={
+                /volunteer/i.test(staff.personnelType ?? staff.role ?? "")
+                  ? "volunteer"
+                  : "staff"
+              }
+              seedName={staff.fullName}
+            />
+          ) : null}
           <section className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" required className="sm:col-span-2">
               <Input

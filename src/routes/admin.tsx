@@ -14,13 +14,25 @@ import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-worksp
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
 import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
+import { OnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
+import { PublicWebsiteWorkspace } from "@/components/admin/public-website-workspace";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "fleet" | "venues" | "vendors" | "parameters" | "hours" | "access" | "backup";
+type AdminTab =
+  | "lookups"
+  | "fleet"
+  | "venues"
+  | "vendors"
+  | "parameters"
+  | "hours"
+  | "onboarding"
+  | "website"
+  | "access"
+  | "backup";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
@@ -31,16 +43,18 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet vehicles, venues, vendors, lookup parameters, tunable system thresholds, role access, and database backups.
+          Manage fleet, venues, vendors, onboarding, public website (yada.org.au), lookups, thresholds, role access, and backups.
         </p>
       </header>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as AdminTab)} className="space-y-4">
-        <TabsList>
+        <TabsList className="flex h-auto flex-wrap justify-start">
           <TabsTrigger value="lookups">Lookups</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Register</TabsTrigger>
           <TabsTrigger value="venues">Venues</TabsTrigger>
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
+          <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
+          <TabsTrigger value="website">Public website</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
           <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
           <TabsTrigger value="access">Menu Access</TabsTrigger>
@@ -57,6 +71,12 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="vendors">
           <VendorsWorkspace />
+        </TabsContent>
+        <TabsContent value="onboarding">
+          <OnboardingWorkspace />
+        </TabsContent>
+        <TabsContent value="website">
+          <PublicWebsiteWorkspace />
         </TabsContent>
         <TabsContent value="parameters">
           <SystemParameterWorkspace />

@@ -2,6 +2,15 @@
 
 **Status:** Day login shipped on DEV. TEST Supabase (Australia) stood up. **App host = Vercel** (Hobby → Pro for commercial/PROD). Lovable abandoned as host.
 
+## Public vs Connect domains (BL-110 — Phase 2 cutover)
+
+| Hostname | App | Notes |
+|----------|-----|--------|
+| **yada.org.au** | Public site | Serves `/public/*` (CMS pages + forms). No day-login / PIN. Content published from Connect Admin → Public website. |
+| **connect.yada.org.au** | Yada Connect CRM/ops | Full AppShell, Hub, onboarding, floor. |
+
+Until DNS cutover: preview public pages at `https://<connect-host>/public`. Publish snapshots store the intended domain mapping in `cms_publish_snapshots.payload.domains`.
+
 ## Lane map
 
 | Lane | Purpose | Supabase | App flags |

@@ -12,6 +12,8 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransportRouteImport } from './routes/transport'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as StaffRouteImport } from './routes/staff'
+import { Route as RightsVoiceRouteImport } from './routes/rights-voice'
+import { Route as PublicRouteImport } from './routes/public'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as ManifestRouteImport } from './routes/manifest'
 import { Route as HelpRouteImport } from './routes/help'
@@ -22,6 +24,11 @@ import { Route as DayRouteImport } from './routes/day'
 import { Route as AuthRouteImport } from './routes/auth'
 import { Route as AdminRouteImport } from './routes/admin'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as PublicIndexRouteImport } from './routes/public.index'
+import { Route as PublicFormsRouteImport } from './routes/public.forms'
+import { Route as PublicSlugRouteImport } from './routes/public.$slug'
+import { Route as PublicFormsIndexRouteImport } from './routes/public.forms.index'
+import { Route as PublicFormsFormKeyRouteImport } from './routes/public.forms.$formKey'
 import { Route as ApiInternalTransportPickupSmsRouteImport } from './routes/api/internal/transport-pickup-sms'
 import { Route as ApiInternalDepartureSmsRouteImport } from './routes/api/internal/departure-sms'
 import { Route as ApiInternalAttendanceSmsRouteImport } from './routes/api/internal/attendance-sms'
@@ -39,6 +46,16 @@ const SyncRoute = SyncRouteImport.update({
 const StaffRoute = StaffRouteImport.update({
   id: '/staff',
   path: '/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RightsVoiceRoute = RightsVoiceRouteImport.update({
+  id: '/rights-voice',
+  path: '/rights-voice',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PublicRoute = PublicRouteImport.update({
+  id: '/public',
+  path: '/public',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ParticipantsRoute = ParticipantsRouteImport.update({
@@ -91,6 +108,31 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const PublicIndexRoute = PublicIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PublicRoute,
+} as any)
+const PublicFormsRoute = PublicFormsRouteImport.update({
+  id: '/forms',
+  path: '/forms',
+  getParentRoute: () => PublicRoute,
+} as any)
+const PublicSlugRoute = PublicSlugRouteImport.update({
+  id: '/$slug',
+  path: '/$slug',
+  getParentRoute: () => PublicRoute,
+} as any)
+const PublicFormsIndexRoute = PublicFormsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => PublicFormsRoute,
+} as any)
+const PublicFormsFormKeyRoute = PublicFormsFormKeyRouteImport.update({
+  id: '/$formKey',
+  path: '/$formKey',
+  getParentRoute: () => PublicFormsRoute,
+} as any)
 const ApiInternalTransportPickupSmsRoute =
   ApiInternalTransportPickupSmsRouteImport.update({
     id: '/api/internal/transport-pickup-sms',
@@ -120,12 +162,19 @@ export interface FileRoutesByFullPath {
   '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
+  '/public': typeof PublicRouteWithChildren
+  '/rights-voice': typeof RightsVoiceRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
+  '/public/$slug': typeof PublicSlugRoute
+  '/public/forms': typeof PublicFormsRouteWithChildren
+  '/public/': typeof PublicIndexRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
+  '/public/forms/$formKey': typeof PublicFormsFormKeyRoute
+  '/public/forms/': typeof PublicFormsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -138,12 +187,17 @@ export interface FileRoutesByTo {
   '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
+  '/rights-voice': typeof RightsVoiceRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
+  '/public/$slug': typeof PublicSlugRoute
+  '/public': typeof PublicIndexRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
+  '/public/forms/$formKey': typeof PublicFormsFormKeyRoute
+  '/public/forms': typeof PublicFormsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -157,12 +211,19 @@ export interface FileRoutesById {
   '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
+  '/public': typeof PublicRouteWithChildren
+  '/rights-voice': typeof RightsVoiceRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
+  '/public/$slug': typeof PublicSlugRoute
+  '/public/forms': typeof PublicFormsRouteWithChildren
+  '/public/': typeof PublicIndexRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
+  '/public/forms/$formKey': typeof PublicFormsFormKeyRoute
+  '/public/forms/': typeof PublicFormsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -177,12 +238,19 @@ export interface FileRouteTypes {
     | '/help'
     | '/manifest'
     | '/participants'
+    | '/public'
+    | '/rights-voice'
     | '/staff'
     | '/sync'
     | '/transport'
+    | '/public/$slug'
+    | '/public/forms'
+    | '/public/'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
+    | '/public/forms/$formKey'
+    | '/public/forms/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -195,12 +263,17 @@ export interface FileRouteTypes {
     | '/help'
     | '/manifest'
     | '/participants'
+    | '/rights-voice'
     | '/staff'
     | '/sync'
     | '/transport'
+    | '/public/$slug'
+    | '/public'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
+    | '/public/forms/$formKey'
+    | '/public/forms'
   id:
     | '__root__'
     | '/'
@@ -213,12 +286,19 @@ export interface FileRouteTypes {
     | '/help'
     | '/manifest'
     | '/participants'
+    | '/public'
+    | '/rights-voice'
     | '/staff'
     | '/sync'
     | '/transport'
+    | '/public/$slug'
+    | '/public/forms'
+    | '/public/'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
+    | '/public/forms/$formKey'
+    | '/public/forms/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -232,6 +312,8 @@ export interface RootRouteChildren {
   HelpRoute: typeof HelpRoute
   ManifestRoute: typeof ManifestRoute
   ParticipantsRoute: typeof ParticipantsRoute
+  PublicRoute: typeof PublicRouteWithChildren
+  RightsVoiceRoute: typeof RightsVoiceRoute
   StaffRoute: typeof StaffRoute
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
@@ -261,6 +343,20 @@ declare module '@tanstack/react-router' {
       path: '/staff'
       fullPath: '/staff'
       preLoaderRoute: typeof StaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/rights-voice': {
+      id: '/rights-voice'
+      path: '/rights-voice'
+      fullPath: '/rights-voice'
+      preLoaderRoute: typeof RightsVoiceRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/public': {
+      id: '/public'
+      path: '/public'
+      fullPath: '/public'
+      preLoaderRoute: typeof PublicRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/participants': {
@@ -333,6 +429,41 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/public/': {
+      id: '/public/'
+      path: '/'
+      fullPath: '/public/'
+      preLoaderRoute: typeof PublicIndexRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/public/forms': {
+      id: '/public/forms'
+      path: '/forms'
+      fullPath: '/public/forms'
+      preLoaderRoute: typeof PublicFormsRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/public/$slug': {
+      id: '/public/$slug'
+      path: '/$slug'
+      fullPath: '/public/$slug'
+      preLoaderRoute: typeof PublicSlugRouteImport
+      parentRoute: typeof PublicRoute
+    }
+    '/public/forms/': {
+      id: '/public/forms/'
+      path: '/'
+      fullPath: '/public/forms/'
+      preLoaderRoute: typeof PublicFormsIndexRouteImport
+      parentRoute: typeof PublicFormsRoute
+    }
+    '/public/forms/$formKey': {
+      id: '/public/forms/$formKey'
+      path: '/$formKey'
+      fullPath: '/public/forms/$formKey'
+      preLoaderRoute: typeof PublicFormsFormKeyRouteImport
+      parentRoute: typeof PublicFormsRoute
+    }
     '/api/internal/transport-pickup-sms': {
       id: '/api/internal/transport-pickup-sms'
       path: '/api/internal/transport-pickup-sms'
@@ -357,6 +488,35 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface PublicFormsRouteChildren {
+  PublicFormsFormKeyRoute: typeof PublicFormsFormKeyRoute
+  PublicFormsIndexRoute: typeof PublicFormsIndexRoute
+}
+
+const PublicFormsRouteChildren: PublicFormsRouteChildren = {
+  PublicFormsFormKeyRoute: PublicFormsFormKeyRoute,
+  PublicFormsIndexRoute: PublicFormsIndexRoute,
+}
+
+const PublicFormsRouteWithChildren = PublicFormsRoute._addFileChildren(
+  PublicFormsRouteChildren,
+)
+
+interface PublicRouteChildren {
+  PublicSlugRoute: typeof PublicSlugRoute
+  PublicFormsRoute: typeof PublicFormsRouteWithChildren
+  PublicIndexRoute: typeof PublicIndexRoute
+}
+
+const PublicRouteChildren: PublicRouteChildren = {
+  PublicSlugRoute: PublicSlugRoute,
+  PublicFormsRoute: PublicFormsRouteWithChildren,
+  PublicIndexRoute: PublicIndexRoute,
+}
+
+const PublicRouteWithChildren =
+  PublicRoute._addFileChildren(PublicRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   AdminRoute: AdminRoute,
@@ -368,6 +528,8 @@ const rootRouteChildren: RootRouteChildren = {
   HelpRoute: HelpRoute,
   ManifestRoute: ManifestRoute,
   ParticipantsRoute: ParticipantsRoute,
+  PublicRoute: PublicRouteWithChildren,
+  RightsVoiceRoute: RightsVoiceRoute,
   StaffRoute: StaffRoute,
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,

@@ -1,6 +1,7 @@
 import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { ShieldCheck, UserPlus, Search } from "lucide-react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,6 +15,8 @@ import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
+import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import { createOnboardingCase, type OnboardingCase } from "@/lib/api/onboarding";
 import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
@@ -58,8 +61,26 @@ function ParticipantsPage() {
   const [search, setSearch] = useState("");
   const [dayFilter, setDayFilter] = useState("all");
   const [transportFilter, setTransportFilter] = useState("all");
+  const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingBusy, setOnboardingBusy] = useState(false);
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+
+  const startClientOnboarding = async () => {
+    setOnboardingBusy(true);
+    try {
+      const created = await createOnboardingCase("client");
+      setOnboardingCase(created);
+      setOnboardingOpen(true);
+    } catch (e) {
+      toast.error("Could not start client onboarding", {
+        description: (e as Error).message,
+      });
+    } finally {
+      setOnboardingBusy(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -68,6 +89,12 @@ function ParticipantsPage() {
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Participants directory</h2>
           <p className="text-sm text-muted-foreground">
             {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
+            {" "}
+            Full intake pack (print / sign / file):{" "}
+            <Link to="/admin" className="underline underline-offset-2">
+              Admin → Onboarding
+            </Link>
+            .
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -75,9 +102,21 @@ function ParticipantsPage() {
             <ShieldCheck className="h-4 w-4" />
             Record medication admin
           </Button>
-          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+          <Button
+            variant="outline"
+            onClick={() => setAddOpen(true)}
+            className="gap-1.5"
+          >
             <UserPlus className="h-4 w-4" />
-            Add new participant
+            Quick add
+          </Button>
+          <Button
+            onClick={() => void startClientOnboarding()}
+            disabled={onboardingBusy}
+            className="gap-1.5"
+          >
+            <ClipboardList className="h-4 w-4" />
+            {onboardingBusy ? "Starting…" : "Client onboarding"}
           </Button>
         </div>
       </header>
@@ -155,6 +194,12 @@ function ParticipantsPage() {
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />
       <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
+      <OnboardingCaseDialog
+        open={onboardingOpen}
+        onOpenChange={setOnboardingOpen}
+        caseRow={onboardingCase}
+        onSaved={setOnboardingCase}
+      />
     </div>
   );
 }

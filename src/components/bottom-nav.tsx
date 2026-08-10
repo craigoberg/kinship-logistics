@@ -14,6 +14,7 @@ import {
   Sun,
   Menu,
   CircleHelp,
+  MessageCircleHeart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -24,6 +25,7 @@ export const NAV_ITEMS = [
   { to: "/event-deliver", label: "Event Deliver", icon: Compass, exact: false },
   { to: "/events", label: "Event Manage", icon: CalendarRange, exact: false },
   { to: "/governance", label: "Governance Hub", icon: Scale, exact: false },
+  { to: "/rights-voice", label: "Rights & voice", icon: MessageCircleHeart, exact: false },
   { to: "/participants", label: "Participants", icon: Users, exact: false },
   { to: "/staff", label: "Staff", icon: Contact2, exact: false },
   { to: "/transport", label: "Transport", icon: Truck, exact: false },

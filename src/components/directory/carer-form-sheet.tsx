@@ -34,6 +34,7 @@ import {
   useParticipants,
 } from "@/hooks/use-supabase-data";
 import type { Carer, CarerPayload } from "@/lib/data-store";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 
 interface Props {
   open: boolean;
@@ -193,6 +194,15 @@ export function CarerFormSheet({
             </Field>
           )}
 
+
+          {isEdit && carer ? (
+            <OnboardingSubjectPanel
+              subjectTable="carers_registry"
+              subjectId={carer.id}
+              defaultPack="accompanying"
+              seedName={carer.fullName}
+            />
+          ) : null}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" className="sm:col-span-2">

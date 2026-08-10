@@ -59,6 +59,7 @@ import {
 } from "@/components/medication/give-dose-modal";
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { FinanceTab } from "@/components/finance/finance-tab";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 import { toast } from "sonner";
 
 interface Props {
@@ -207,6 +208,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 <CarerNetworkPanel
                   participantId={participant.id}
                   participantName={participant.fullName}
+                />
+
+                <OnboardingSubjectPanel
+                  subjectTable="participants"
+                  subjectId={participant.id}
+                  defaultPack="client"
+                  seedName={participant.fullName}
                 />
 
                 <div

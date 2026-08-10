@@ -35,7 +35,10 @@ const MENUS: { key: string; label: string; description: string }[] = [
   { key: "staff", label: "Personnel Directory", description: "Staff, carers, certifications" },
   { key: "events", label: "Event Manage", description: "Office setup — roster, milestones, finance, Trip Report" },
   { key: "governance", label: "Governance Hub", description: "Unified issues, incident ledger, NDIS" },
-  { key: "admin", label: "Admin Configuration", description: "Lookups, parameters, access matrix" },
+  { key: "rights_voice", label: "Rights & voice", description: "Complaints / enquiry / feedback forms → Hub — BL-112" },
+  { key: "admin", label: "Admin Configuration", description: "Lookups, onboarding, public website, parameters, access matrix" },
+  { key: "onboarding", label: "Onboarding (Admin tab)", description: "Client / staff / volunteer / accompanying packs — BL-065" },
+  { key: "public_website", label: "Public website (Admin tab)", description: "yada.org.au CMS + forms — BL-110/111" },
   { key: "sync", label: "Sync Queue", description: "Offline reconciliation and replay" },
   { key: "help", label: "Help", description: "Searchable how-to guides (topic roles soft-filtered until BL-002)" },
 ];

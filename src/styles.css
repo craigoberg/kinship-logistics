@@ -168,6 +168,32 @@
   --iddsi-7: oklch(0.72 0.18 30);   --iddsi-7-fg: oklch(0.99 0.005 30);
 }
 
+/*
+ * Public yada.org.au shell (BL-110). Connect uses html.dark; PublicSiteShell
+ * swaps to html.yada-public so shadcn inputs keep dark text on white cards.
+ * Colours echo the Facebook / Registered Charity logo (sky, yellow, green).
+ */
+html.yada-public {
+  color-scheme: light;
+  --background: 199 60% 96%;
+  --foreground: 222 47% 11%;
+  --card: 0 0% 100%;
+  --card-foreground: 222 47% 11%;
+  --popover: 0 0% 100%;
+  --popover-foreground: 222 47% 11%;
+  --primary: 196 100% 44%; /* #00a3e0 */
+  --primary-foreground: 0 0% 100%;
+  --secondary: 215 24% 26%;
+  --secondary-foreground: 210 40% 98%;
+  --muted: 210 30% 92%;
+  --muted-foreground: 215 16% 35%;
+  --accent: 46 91% 63%; /* #f7c948 */
+  --accent-foreground: 222 47% 11%;
+  --border: 199 30% 80%;
+  --input: 199 30% 80%;
+  --ring: 196 100% 38%;
+}
+
 .dark {
   --background: 222 47% 11%;
   --foreground: 210 40% 98%;
