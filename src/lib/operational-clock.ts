@@ -196,7 +196,7 @@ export function formatOperationalClockLabel(o: OperationalClockOverride | null):
   if (!o) return "Live clock";
   // Format from Sydney wall strings — avoid UTC→local display drift.
   const [y, m, d] = o.date.split("-").map(Number);
-  const labelDate = dfFormat(new Date(y!, (m ?? 1) - 1, d ?? 1), "dd-MMM-yy");
+  const labelDate = dfFormat(new Date(y!, (m ?? 1) - 1, d ?? 1), "EEE dd-MMM-yy");
   return `${labelDate} · ${o.time} Syd`;
 }
 

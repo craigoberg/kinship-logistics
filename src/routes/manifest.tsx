@@ -63,7 +63,9 @@ import {
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
-import { cn, todayLocalIso, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
+import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type {
   TripLeg,
@@ -122,7 +124,6 @@ import { raiseUnsafeDropHubIssue } from "@/lib/api/transport-unsafe-drop";
 import { VerbalConsultationDialog, formatVerbalWorkaroundDescription } from "@/components/issue-engine/verbal-consultation-dialog";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
-import { dayCodeFromSydneyIndex } from "@/lib/api/centre-hours";
 import { getLastItineraryStopForDate } from "@/lib/api/event-outing";
 import {
   assessEventReturnTransport,
@@ -265,7 +266,7 @@ function staffName(staffId: string): string {
 }
 
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
-  const today = todayLocalIso();
+  const today = useOperationalTodayIso();
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
   const startVsLastWarnKm = useOdoStartVsLastWarnKm();
@@ -952,7 +953,7 @@ function EventPickAndStart({
   startOdometer: number;
   onBack: () => void;
 }) {
-  const today = todayLocalIso();
+  const today = useOperationalTodayIso();
   const { data: picker = { events: [], todaySessionEventIds: [] } } = useManifestPickerEvents(today);
   const events = picker.events;
   const todaySessionEventIds = useMemo(
@@ -962,14 +963,9 @@ function EventPickAndStart({
   const startTrip = useStartTrip();
   const startDayCentreRun = useStartDayCentreRun();
 
-  // Derive today's day-of-week code (DAY-MON … DAY-SUN) from Sydney local time.
-  const todayDayCode = useMemo(() => {
-    const sydneyOffset = 10; // AEST (+10), DST not considered here — offset handles display
-    const nowUtc = new Date();
-    const sydneyMs = nowUtc.getTime() + sydneyOffset * 60 * 60 * 1000;
-    const sydneyDate = new Date(sydneyMs);
-    return dayCodeFromSydneyIndex(sydneyDate.getUTCDay());
-  }, []);
+  // SIM-aware weekday (DAY-MON … DAY-SUN). Do not use wall-clock Date — TEST
+  // SIM TIME must drive which attendance schedules load.
+  const todayDayCode = useMemo(() => todaysSydneyDayCode(), [today]);
 
   // Load bus run definitions so we can map codes → labels.
   const { data: busRunDefs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
