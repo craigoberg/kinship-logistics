@@ -824,6 +824,45 @@ export function useReorderEventRosterPickupOrder() {
   });
 }
 
+export function useBusRunRouteRoster(
+  busRunCode: string,
+  direction: BusRunRouteDirection,
+) {
+  return useQuery({
+    queryKey: busRunRouteQueryKey(busRunCode, direction),
+    queryFn: () => listBusRunRouteRoster(busRunCode, direction),
+    enabled: busRunCode.length > 0,
+    staleTime: 15_000,
+  });
+}
+
+export function useReorderBusRunDefaultRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      busRunCode,
+      direction,
+      participantIds,
+    }: {
+      busRunCode: string;
+      direction: BusRunRouteDirection;
+      participantIds: string[];
+    }) => {
+      const staffId = await resolveStaffIdWithFallback();
+      return reorderBusRunDefaultRoute({
+        busRunCode,
+        direction,
+        participantIds,
+        staffId,
+      });
+    },
+    onSuccess: (_data, { busRunCode, direction }) => {
+      void qc.invalidateQueries({ queryKey: busRunRouteQueryKey(busRunCode, direction) });
+    },
+    onError: (err: Error) => showRedToast("Could not save run route", err),
+  });
+}
+
 export function useEventLedger(eventId: string | null | undefined) {
   return useQuery({
     queryKey: ["event_financial_ledger", eventId],
@@ -1136,6 +1175,7 @@ import {
   completeTrip as completeTripFn,
   cancelTrip as cancelTripFn,
   getStaffId,
+  resolveStaffIdWithFallback,
   getLastEndOdometer,
   getAssetCurrentOdometer,
   listBusRunRosterForDay,
@@ -1148,6 +1188,12 @@ import {
 } from "@/lib/data-store";
 import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
 import { reorderEventRosterPickupOrder } from "@/lib/api/event-outing";
+import {
+  busRunRouteQueryKey,
+  listBusRunRouteRoster,
+  reorderBusRunDefaultRoute,
+  type BusRunRouteDirection,
+} from "@/lib/api/bus-run-routes";
 import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches, invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;

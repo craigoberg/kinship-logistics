@@ -18,6 +18,11 @@ import {
   resolveOperationalNow,
 } from "@/lib/operational-time";
 import { todayLocalIso, eventSpansDate } from "@/lib/utils";
+import { writeToLedger } from "@/lib/api/ledger";
+import {
+  loadBusRunRouteOrderMap,
+  sortRosterByRouteOrder,
+} from "@/lib/api/bus-run-routes";
 
 export interface Participant {
   id: string;
@@ -4895,7 +4900,7 @@ export async function listBusRunRosterForDay(
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
 
-  return (schedRows ?? []).map((r) => {
+  const roster = (schedRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       participants:
@@ -4912,6 +4917,8 @@ export async function listBusRunRosterForDay(
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
     };
   });
+  const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
+  return sortRosterByRouteOrder(roster, orderMap);
 }
 
 export function isPassengerPickupLeg(leg: TripLeg): boolean {
@@ -5344,6 +5351,9 @@ export async function startDayCentreRun(
     roster.sort(
       (a, b) => (orderMap.get(a.id) ?? 9999) - (orderMap.get(b.id) ?? 9999),
     );
+  } else {
+    const routeMap = await loadBusRunRouteOrderMap(input.busRunCode, direction);
+    roster.sort((a, b) => (routeMap.get(a.id) ?? 9999) - (routeMap.get(b.id) ?? 9999));
   }
 
   // 2. Medication flags.

@@ -17,6 +17,7 @@ import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import {
   LOOKUP_CATEGORIES,
   type AttendanceSchedule,
+  type LookupParameter,
   type WeekDay,
 } from "@/lib/data-store";
 import {
@@ -25,9 +26,81 @@ import {
   useRemoveAttendanceSchedule,
   useLookupParameters,
   useBusRunMap,
+  type BusRunBadge,
 } from "@/hooks/use-supabase-data";
 import { listCentreHours } from "@/lib/api/centre-hours";
 import { useQuery } from "@tanstack/react-query";
+import { cn } from "@/lib/utils";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
+
+/** Canonical self-transport code (onboarding + floor treat anything with "self"). */
+const SELF_TRANSPORT_CODE = "TRN-SELF";
+const SELF_PILL_COLOR = "#64748b";
+
+function isSelfTransportCode(code: string): boolean {
+  const v = code.trim().toLowerCase();
+  return v.includes("self") || v.includes("private") || v.includes("family");
+}
+
+function isAssignedBusRun(code: string, runs: LookupParameter[]): boolean {
+  return runs.some((r) => r.code === code);
+}
+
+function ScheduleTransportPills({
+  value,
+  busRuns,
+  busRunMap,
+  invalid,
+  onSelect,
+}: {
+  value: string;
+  busRuns: LookupParameter[];
+  busRunMap: Map<string, BusRunBadge>;
+  invalid: boolean;
+  onSelect: (code: string) => void;
+}) {
+  const selfSelected = isSelfTransportCode(value);
+  return (
+    <div className={cn("flex flex-wrap gap-2 rounded-md p-1", requiredFieldOutline(invalid))}>
+      <button
+        type="button"
+        onClick={() => onSelect(SELF_TRANSPORT_CODE)}
+        style={
+          selfSelected
+            ? { backgroundColor: SELF_PILL_COLOR, borderColor: SELF_PILL_COLOR }
+            : { borderColor: SELF_PILL_COLOR, color: SELF_PILL_COLOR }
+        }
+        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
+          selfSelected ? "text-white" : "bg-card hover:opacity-80"
+        }`}
+      >
+        Self
+      </button>
+      {busRuns.map((run) => {
+        const selected = value === run.code;
+        const badge = busRunMap.get(run.code);
+        const color = badge?.color ?? "#7c3aed";
+        return (
+          <button
+            key={run.code}
+            type="button"
+            onClick={() => onSelect(run.code)}
+            style={
+              selected
+                ? { backgroundColor: color, borderColor: color }
+                : { borderColor: color, color }
+            }
+            className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
+              selected ? "text-white" : "bg-card hover:opacity-80"
+            }`}
+          >
+            {run.displayName}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
 
 interface Props {
   open: boolean;
@@ -36,11 +109,6 @@ interface Props {
   participantName: string;
   /** When present, the modal switches to edit mode. */
   editing?: AttendanceSchedule | null;
-}
-
-/** True when the inbound transport code is a Day Centre bus run. */
-function isBusRunCode(code: string): boolean {
-  return code.toUpperCase().startsWith("BUSRUN-");
 }
 
 export function AddAttendanceScheduleModal({
@@ -159,8 +227,7 @@ export function AddAttendanceScheduleModal({
     }
   };
 
-  // Derive the run label for the selected inbound transport (if it's a run).
-  const selectedRunLabel = isBusRunCode(inboundTransport)
+  const selectedRunLabel = isAssignedBusRun(inboundTransport, busRuns)
     ? (busRuns.find((r) => r.code === inboundTransport)?.displayName ?? inboundTransport)
     : null;
 
@@ -232,78 +299,19 @@ export function AddAttendanceScheduleModal({
               Transport IN (morning)
             </Label>
             <p className="text-[11px] text-muted-foreground">
-              Choose a <span className="font-medium text-foreground">Day Centre Bus Run</span> to
-              assign this client to a recurring bus manifest, or pick a general transport type.
+              Self-transport, or a Day Centre bus run for the morning manifest.
             </p>
-
-            {/* Day Centre Bus Run picker */}
-            {busRuns.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-400">
-                  Day Centre Bus Run
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {busRuns.map((run) => {
-                    const selected = inboundTransport === run.code;
-                    const badge = busRunMap.get(run.code);
-                    const color = badge?.color ?? "#7c3aed";
-                    return (
-                      <button
-                        key={run.code}
-                        type="button"
-                        onClick={() => {
-                          setInboundTransport(run.code);
-                          if (!outboundTransport) setOutboundTransport("self");
-                          setDirty(true);
-                        }}
-                        style={selected ? { backgroundColor: color, borderColor: color } : { borderColor: color, color }}
-                        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-                          selected ? "text-white" : "bg-card hover:opacity-80"
-                        }`}
-                      >
-                        {run.displayName}
-                      </button>
-                    );
-                  })}
-                  {/* Clear back to general transport */}
-                  {isBusRunCode(inboundTransport) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInboundTransport("");
-                        setDirty(true);
-                      }}
-                      className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Use general transport instead
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* General transport fallback (hidden when a run is selected) */}
-            {!isBusRunCode(inboundTransport) && (
-              <div className="space-y-1.5">
-                {busRuns.length > 0 && (
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Or general transport type
-                  </p>
-                )}
-                <LookupSelect
-                  category={LOOKUP_CATEGORIES.transportRule}
-                  value={inboundTransport}
-                  onChange={(code) => {
-                    setInboundTransport(code);
-                    if (!outboundTransport) setOutboundTransport(code);
-                    setDirty(true);
-                  }}
-                  placeholder="Morning trip"
-                />
-              </div>
-            )}
-
-            {/* Confirmation badge when a run is selected */}
+            <ScheduleTransportPills
+              value={inboundTransport}
+              busRuns={busRuns}
+              busRunMap={busRunMap}
+              invalid={inboundTransport.trim().length === 0}
+              onSelect={(code) => {
+                setInboundTransport(code);
+                if (!outboundTransport) setOutboundTransport(SELF_TRANSPORT_CODE);
+                setDirty(true);
+              }}
+            />
             {selectedRunLabel && (
               <div className="flex items-center gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
@@ -319,73 +327,18 @@ export function AddAttendanceScheduleModal({
               Transport OUT (afternoon)
             </Label>
             <p className="text-[11px] text-muted-foreground">
-              Assign to a <span className="font-medium text-foreground">Day Centre Bus Run</span>{" "}
-              for the return journey, or pick a general transport type.
+              Self-transport, or a Day Centre bus run for the return journey.
             </p>
-
-            {/* Day Centre Bus Run picker for outbound */}
-            {busRuns.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-400">
-                  Day Centre Bus Run
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {busRuns.map((run) => {
-                    const selected = outboundTransport === run.code;
-                    const badge = busRunMap.get(run.code);
-                    const color = badge?.color ?? "#7c3aed";
-                    return (
-                      <button
-                        key={run.code}
-                        type="button"
-                        onClick={() => {
-                          setOutboundTransport(run.code);
-                          setDirty(true);
-                        }}
-                        style={selected ? { backgroundColor: color, borderColor: color } : { borderColor: color, color }}
-                        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-                          selected ? "text-white" : "bg-card hover:opacity-80"
-                        }`}
-                      >
-                        {run.displayName}
-                      </button>
-                    );
-                  })}
-                  {isBusRunCode(outboundTransport) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOutboundTransport("");
-                        setDirty(true);
-                      }}
-                      className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Use general transport instead
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* General transport fallback (hidden when a run is selected) */}
-            {!isBusRunCode(outboundTransport) && (
-              <div className="space-y-1.5">
-                {busRuns.length > 0 && (
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Or general transport type
-                  </p>
-                )}
-                <LookupSelect
-                  category={LOOKUP_CATEGORIES.transportRule}
-                  value={outboundTransport}
-                  onChange={(code) => {
-                    setOutboundTransport(code);
-                    setDirty(true);
-                  }}
-                  placeholder="Afternoon trip"
-                />
-              </div>
-            )}
+            <ScheduleTransportPills
+              value={outboundTransport}
+              busRuns={busRuns}
+              busRunMap={busRunMap}
+              invalid={outboundTransport.trim().length === 0}
+              onSelect={(code) => {
+                setOutboundTransport(code);
+                setDirty(true);
+              }}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">

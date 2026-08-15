@@ -12,6 +12,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ParticipantTable } from "@/components/participants/participant-table";
+import { RunRoutePanel } from "@/components/participants/run-route-panel";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
@@ -51,7 +52,11 @@ function ParticipantsPage() {
   // another screen) immediately re-fetches the Bus/Self indicator grid.
   useRealtimeInvalidate({
     table: "participant_attendance_schedules",
-    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"]],
+    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"], ["bus-run-default-routes"]],
+  });
+  useRealtimeInvalidate({
+    table: "bus_run_default_routes",
+    queryKeys: [["bus-run-default-routes"]],
   });
 
   const [selected, setSelected] = useState<Participant | null>(null);
@@ -168,6 +173,8 @@ function ParticipantsPage() {
           </SelectContent>
         </Select>
       </div>
+
+      <RunRoutePanel />
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">

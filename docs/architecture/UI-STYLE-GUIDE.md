@@ -105,6 +105,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **DEV/TEST simulate offline** | **Defined** | `Switch` on same amber SIM row as clock (`DevOperationalClockBar`) | `IS_TEST_BUILD` only (DEV + TEST) | Forces `isAppOnline()` false for Manifest outbox QA — not a production control (BL-082) |
 | **DEV/TEST lane badge on SIM bar** | **Defined** | Centre label `DEV` / `TEST` from `getAppLaneBadge()` (`VITE_APP_LANE`) | Amber SIM row only | Distinguishes Cursor/DEV host vs Vercel TEST; not a security control |
 | **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. |
+| **Day Centre schedule transport (Self + runs)** | **Defined** | Pill tap row: **Self** first, then Admin `bus_runs` | Participant Directory → Schedules add/edit IN/OUT | Stores `TRN-SELF` or the run code. No general-transport dropdown. Existing self/private/family codes still light Self. |
+| **Day Centre default run route** | **Defined** | `PointerSortableList` + run/direction pills (`RunRoutePanel`) | Participants Directory | Office drag order per run + morning/afternoon. Seeds Manifest; driver may still reorder. Same grip as Event Roster. |
 | **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. **Checked-in = hi-vis** solid `bg-success text-success-foreground` (§4.5) — not pale emerald tint. |
 | **Event Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Event Deliver Check-In | Was BottomSheet-on-Check-In (BL-013). Picker still Bus (Rx) vs Self; finalize is the wide row. |
 | **Day Centre Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Day Centre attendance roll | Was BottomSheet-on-Check-In. Day Centre chips use Admin displayName (Run 1); Event uses R1/R2. |
@@ -502,6 +504,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-15 | Day Centre default run route | Participants Directory `RunRoutePanel` — drag order per run + IN/OUT; Manifest seeds from `bus_run_default_routes` |
+| 2026-08-15 | Day Centre schedule transport | Self + bus-run pills only (no Self-Drive / Bus-Pickup dropdown); Self stores `TRN-SELF` |
 | 2026-08-09 | Event Finance / Roster money | Expense Edit/Delete + payment history Edit/Delete + Record refund until Closed; `billing_locked` gates UI + `assertEventFinanceWritable` |
 | 2026-08-06 | Check-off list order | Surname A–Z via `sort-participants.ts`; status changes style only — no bounce to “Already checked in” / “Handed to transport” sections |
 | 2026-08-06 | Muster sheet severity copy | Red → Evacuate/muster-point title + callout; Yellow → standby light muster; empty-roll explains missing Day Centre/trip context — BL-084 |
