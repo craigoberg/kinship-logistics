@@ -58,6 +58,14 @@ function ParticipantsPage() {
     table: "bus_run_default_routes",
     queryKeys: [["bus-run-default-routes"]],
   });
+  useRealtimeInvalidate({
+    table: "trip_legs",
+    queryKeys: [["run-live-status"]],
+  });
+  useRealtimeInvalidate({
+    table: "attendance_roster_logs",
+    queryKeys: [["run-live-status"], ["attendance_logs"]],
+  });
 
   const [selected, setSelected] = useState<Participant | null>(null);
   const [open, setOpen] = useState(false);

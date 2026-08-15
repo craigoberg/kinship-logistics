@@ -5,10 +5,11 @@
  * can be tested without waiting for the wall clock.
  *
  * Gated by IS_TEST_BUILD. Production builds always use the live clock.
- * Ledger `created_at` stays real wall time. Operational stamps that operators
- * see on the floor (e.g. location `open_declared_at` / `close_declared_at`,
- * test overnight reset check-in / stop open) use `operationalNowIso()` so SIM
- * clock QA matches the day being tested.
+ * GUARDRAILS §5.3: any date/time work must honour this clock. Floor stamps
+ * operators see (depart/arrive/board, check-in, open/close, Off today) use
+ * `operationalNowIso()`. Ledger `created_at` and outbox `savedAt` may stay
+ * real wall time. Production builds always use the live clock via the same
+ * helpers.
  */
 import { useSyncExternalStore } from "react";
 import { IS_TEST_BUILD } from "@/lib/test-mode";

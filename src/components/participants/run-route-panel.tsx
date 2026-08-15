@@ -3,20 +3,29 @@
  * Same drag pattern as Event Manage → Roster. Driver can still reorder on Manifest.
  */
 import { useCallback, useMemo, useState } from "react";
-import { GripVertical, Route } from "lucide-react";
+import { CalendarOff, GripVertical, Route } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
+import { OffTodayExemptionDialog } from "@/components/attendance/off-today-exemption-dialog";
 import {
   useBusRunMap,
   useBusRunRouteRoster,
   useLookupParameters,
   useReorderBusRunDefaultRoute,
+  useTodaysRunLiveStatus,
 } from "@/hooks/use-supabase-data";
-import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { LOOKUP_CATEGORIES, type AttendanceSchedule } from "@/lib/data-store";
 import {
+  dayCodeIsToday,
   shortDayLabel,
   type BusRunRouteDirection,
+  type BusRunRouteStop,
 } from "@/lib/api/bus-run-routes";
+import { lookupRunLiveStatus } from "@/lib/api/run-live-status";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
+import { RunLiveStatusBadge } from "@/components/attendance/run-live-status-badge";
 import { cn } from "@/lib/utils";
 
 export function RunRoutePanel() {
@@ -28,6 +37,10 @@ export function RunRoutePanel() {
   const selectedRun = runCode || busRuns[0]?.code || "";
   const { data: stops = [], isLoading, error } = useBusRunRouteRoster(selectedRun, direction);
   const reorder = useReorderBusRunDefaultRoute();
+  useOperationalTodayIso();
+  const todayDayCode = todaysSydneyDayCode();
+  const { data: liveStatusMap } = useTodaysRunLiveStatus();
+  const [offTodayStop, setOffTodayStop] = useState<BusRunRouteStop | null>(null);
 
   const sortableIds = useMemo(() => stops.map((s) => s.participantId), [stops]);
   const stopById = useMemo(
@@ -143,6 +156,12 @@ export function RunRoutePanel() {
                   const stop = stopById.get(id);
                   if (!stop) return null;
                   const bind = bindRow(id);
+                  const liveStatus = lookupRunLiveStatus(
+                    liveStatusMap ?? new Map(),
+                    stop.participantId,
+                    selectedRun,
+                    direction,
+                  );
                   return (
                     <div
                       key={id}
@@ -155,7 +174,7 @@ export function RunRoutePanel() {
                       <button
                         type="button"
                         className={cn(
-                          "mt-0.5 flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
+                          "flex h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted-foreground",
                           reorder.isPending || sortableIds.length < 2
                             ? "cursor-not-allowed opacity-50"
                             : "cursor-grab touch-manipulation active:cursor-grabbing",
@@ -166,7 +185,7 @@ export function RunRoutePanel() {
                       >
                         <GripVertical className="h-4 w-4" />
                       </button>
-                      <span className="mt-1 w-6 shrink-0 text-xs font-mono tabular-nums text-muted-foreground">
+                      <span className="w-6 shrink-0 text-xs font-mono tabular-nums text-muted-foreground">
                         {idx + 1}
                       </span>
                       <div className="min-w-0 flex-1">
@@ -187,6 +206,26 @@ export function RunRoutePanel() {
                           ))}
                         </div>
                       </div>
+                      <div className="flex w-[7.5rem] shrink-0 justify-end pt-0.5">
+                        {stop.todaySchedule &&
+                          liveStatus?.kind !== "off_today" && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0 gap-1"
+                              onClick={() => setOffTodayStop(stop)}
+                              title="Mark this person off today's run"
+                            >
+                              <CalendarOff className="h-3.5 w-3.5" />
+                              Off today
+                            </Button>
+                          )}
+                      </div>
+                      <div className="flex w-[6.5rem] shrink-0 justify-end pt-0.5">
+                        {stop.dayCodes.some((d) => dayCodeIsToday(d, todayDayCode)) && (
+                          <RunLiveStatusBadge status={liveStatus} />
+                        )}
+                      </div>
                     </div>
                   );
                 })
@@ -195,6 +234,18 @@ export function RunRoutePanel() {
           </div>
         </>
       )}
+      <OffTodayExemptionDialog
+        open={offTodayStop != null}
+        onOpenChange={(o) => {
+          if (!o) setOffTodayStop(null);
+        }}
+        schedule={
+          offTodayStop?.todaySchedule
+            ? (offTodayStop.todaySchedule as AttendanceSchedule)
+            : null
+        }
+        participantName={offTodayStop?.name ?? ""}
+      />
     </Card>
   );
 }

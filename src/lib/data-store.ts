@@ -1703,6 +1703,7 @@ export async function insertAttendanceLog(
     expected_service: input.expectedService,
     actual_status: input.actualStatus,
     driver_notes: input.driverNotes ?? null,
+    created_at: resolveOperationalNow().toISOString(),
   };
   // Only include the NDIS reason column when set, so legacy installs without
   // the column still accept the insert.
@@ -4824,15 +4825,21 @@ export async function listTodaysBusRunSummaries(
 
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
-    .select("inbound_transport, outbound_transport")
+    .select("participant_id, inbound_transport, outbound_transport")
     .eq("day_of_week", dayCode)
     .eq("active", true);
   if (error) throw error;
 
+  const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
   const morningCounts: Record<string, number> = {};
   const afternoonCounts: Record<string, number> = {};
   for (const row of data ?? []) {
-    const r = row as { inbound_transport: string | null; outbound_transport: string | null };
+    const r = row as {
+      participant_id: string;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+    };
+    if (exemptIds.has(r.participant_id)) continue;
     const inb = r.inbound_transport ?? "";
     const outb = r.outbound_transport ?? "";
     if (inb && knownRunCodes.has(inb)) morningCounts[inb] = (morningCounts[inb] ?? 0) + 1;
@@ -4900,6 +4907,7 @@ export async function listBusRunRosterForDay(
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
 
+  const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
   const roster = (schedRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
@@ -4917,8 +4925,25 @@ export async function listBusRunRosterForDay(
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
     };
   });
+  const present = roster.filter((p) => !exemptIds.has(p.id));
   const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
-  return sortRosterByRouteOrder(roster, orderMap);
+  return sortRosterByRouteOrder(present, orderMap);
+}
+
+export async function loadExemptParticipantIdsForDate(dateIso: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .select("participant_id, actual_status")
+    .eq("roster_date", dateIso);
+  if (error) return new Set();
+  const out = new Set<string>();
+  for (const raw of data ?? []) {
+    const row = raw as { participant_id: string; actual_status: string };
+    if (NON_CHARGEABLE_STATUSES.includes(row.actual_status as AttendanceStatus)) {
+      out.add(row.participant_id);
+    }
+  }
+  return out;
 }
 
 export function isPassengerPickupLeg(leg: TripLeg): boolean {
@@ -5345,6 +5370,10 @@ export async function startDayCentreRun(
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
     };
   });
+  const exemptIds = await loadExemptParticipantIdsForDate(today);
+  for (let i = roster.length - 1; i >= 0; i--) {
+    if (exemptIds.has(roster[i]!.id)) roster.splice(i, 1);
+  }
 
   if (input.participantOrder?.length) {
     const orderMap = new Map(input.participantOrder.map((id, idx) => [id, idx]));
@@ -5581,7 +5610,7 @@ export async function patchTripLeg(legId: string, patch: LegPatch): Promise<Trip
   if (patch.unexpectedMedicationLogged !== undefined) map.unexpected_medication_logged = patch.unexpectedMedicationLogged;
   if (patch.unexpectedMedicationNotes !== undefined) map.unexpected_medication_notes = patch.unexpectedMedicationNotes;
   if (patch.completedAt !== undefined) map.completed_at = patch.completedAt;
-  map.updated_at = new Date().toISOString();
+  map.updated_at = resolveOperationalNow().toISOString();
   const { data, error } = await supabase
     .from("trip_legs")
     .update(map)
@@ -5598,8 +5627,8 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
     .update({
       end_odometer_km: endOdometerKm,
       status: "completed",
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      completed_at: resolveOperationalNow().toISOString(),
+      updated_at: resolveOperationalNow().toISOString(),
     })
     .eq("id", tripId)
     .select("*")
@@ -5652,7 +5681,7 @@ export async function pruneIneligibleReturnTripPassengers(
   });
   if (toPrune.length === 0) return 0;
 
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   for (const leg of toPrune) {
     await patchTripLeg(leg.id, {
       status: "completed",

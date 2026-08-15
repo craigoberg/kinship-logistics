@@ -2,6 +2,7 @@
 // After skip, rebuild remaining pickup from→to so cancelled stops never
 // teleport the bus (GUARDRAILS §11 chain rule).
 import { supabase } from "@/integrations/supabase/client";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { createIssue } from "@/lib/api/site-issues";
 import { getTodaySession } from "@/lib/api/site-day-sessions";
@@ -107,7 +108,7 @@ export async function cancelTripPickupLeg(
     passengerPresent: false,
     medicationHandoverStatus: "not_required",
     medicationHandoverConfirmed: false,
-    completedAt: new Date().toISOString(),
+    completedAt: operationalNowIso(),
   });
 
   try {

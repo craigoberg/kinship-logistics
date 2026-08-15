@@ -7,6 +7,20 @@ import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 
 export type BusRunRouteDirection = "morning" | "afternoon";
 
+export interface BusRunTodaySchedule {
+  id: string;
+  participantId: string;
+  dayOfWeek: string;
+  serviceType: string;
+  transportRule: string;
+  inboundTransport: string;
+  outboundTransport: string;
+  expectedArrivalTime: string;
+  expectedDepartureTime: string;
+  active: boolean;
+  createdAt: string;
+}
+
 export interface BusRunRouteStop {
   participantId: string;
   name: string;
@@ -14,6 +28,8 @@ export interface BusRunRouteStop {
   /** Day codes this person is on this run (e.g. DAY-TUE). */
   dayCodes: string[];
   stopOrder: number | null;
+  /** Today's matching schedule for Off today — null if not on this run today. */
+  todaySchedule: BusRunTodaySchedule | null;
 }
 
 const DAY_SHORT: Record<string, string> = {
@@ -37,11 +53,19 @@ export function shortDayLabel(dayCode: string): string {
   return DAY_SHORT[dayCode] ?? dayCode.replace(/^DAY-/, "").slice(0, 3);
 }
 
+export function dayCodeIsToday(dayCode: string, todayDayCode: string): boolean {
+  if (dayCode === todayDayCode) return true;
+  return shortDayLabel(dayCode) === shortDayLabel(todayDayCode);
+}
+
 export function busRunRouteQueryKey(
   busRunCode: string,
   direction: BusRunRouteDirection,
+  todayDayCode?: string,
 ) {
-  return ["bus-run-default-routes", busRunCode, direction] as const;
+  return todayDayCode
+    ? (["bus-run-default-routes", busRunCode, direction, todayDayCode] as const)
+    : (["bus-run-default-routes", busRunCode, direction] as const);
 }
 
 export function sortRosterByRouteOrder<T extends { id: string }>(
@@ -79,10 +103,17 @@ export async function loadBusRunRouteOrderMap(
 }
 
 type ScheduleJoinRow = {
+  id: string;
   participant_id: string;
   day_of_week: string;
+  service_type: string;
+  transport_required: string;
   inbound_transport: string | null;
   outbound_transport: string | null;
+  expected_arrival_time: string | null;
+  expected_departure_time: string | null;
+  active: boolean;
+  created_at: string;
   participants:
     | {
         first_name: string;
@@ -106,12 +137,13 @@ type ScheduleJoinRow = {
 export async function listBusRunRouteRoster(
   busRunCode: string,
   direction: BusRunRouteDirection,
+  todayDayCode?: string,
 ): Promise<BusRunRouteStop[]> {
   const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
     .select(
-      "participant_id, day_of_week, inbound_transport, outbound_transport, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "id, participant_id, day_of_week, service_type, transport_required, inbound_transport, outbound_transport, expected_arrival_time, expected_departure_time, active, created_at, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("active", true)
     .eq(transportCol, busRunCode);
@@ -123,10 +155,31 @@ export async function listBusRunRouteRoster(
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
+    const inbound = row.inbound_transport ?? row.transport_required;
+    const outbound = row.outbound_transport ?? row.transport_required;
+    const todaySchedule =
+      todayDayCode && dayCodeIsToday(row.day_of_week, todayDayCode)
+        ? {
+            id: row.id,
+            participantId: row.participant_id,
+            dayOfWeek: row.day_of_week,
+            serviceType: row.service_type,
+            transportRule: row.transport_required,
+            inboundTransport: inbound,
+            outboundTransport: outbound,
+            expectedArrivalTime: (row.expected_arrival_time ?? "09:00").slice(0, 5),
+            expectedDepartureTime: (row.expected_departure_time ?? "15:00").slice(0, 5),
+            active: row.active,
+            createdAt: row.created_at,
+          }
+        : null;
     const existing = byId.get(row.participant_id);
     if (existing) {
       if (!existing.dayCodes.includes(row.day_of_week)) {
         existing.dayCodes.push(row.day_of_week);
+      }
+      if (todaySchedule && !existing.todaySchedule) {
+        existing.todaySchedule = todaySchedule;
       }
       continue;
     }
@@ -136,6 +189,7 @@ export async function listBusRunRouteRoster(
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
       dayCodes: [row.day_of_week],
       stopOrder: null,
+      todaySchedule,
     });
   }
 

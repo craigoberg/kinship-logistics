@@ -147,7 +147,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85vh] max-w-3xl overflow-x-hidden flex flex-col border-border bg-card">
+        <DialogContent className="flex max-h-[85vh] w-[min(96vw,72rem)] max-w-6xl flex-col overflow-x-auto border-border bg-card">
           <DialogHeader className="shrink-0">
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">

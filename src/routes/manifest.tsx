@@ -64,7 +64,7 @@ import {
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, getCurrentPosition } from "@/lib/geo";
 import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
-import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type {
@@ -95,6 +95,7 @@ import {
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 import { CloseRunCard } from "@/components/manifest/close-run-card";
 import { ManifestOfflineBanner } from "@/components/manifest/manifest-offline-banner";
+import { OfficeRunNoticeBanner } from "@/components/manifest/office-run-notice-banner";
 import {
   EventTransportRunsStep3,
   type SelectedTransportRun,
@@ -1714,6 +1715,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   // BMS-style silent refresh:
   useRealtimeInvalidate({ table: "trip_legs", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
   useRealtimeInvalidate({ table: "transport_trips", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
+  useRealtimeInvalidate({ table: "trip_run_notices", queryKeys: [["trip-run-notices", trip.id]] });
 
   const activeRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
@@ -1803,6 +1805,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       </header>
 
       <ManifestOfflineBanner tripId={trip.id} className="mx-3 mt-3" />
+      <OfficeRunNoticeBanner tripId={trip.id} className="mx-3 mt-3" />
 
       <main
         data-manifest-scroll
@@ -2200,7 +2203,7 @@ function ActiveLegCard({
             status: "en_route",
             startLat: pos.lat,
             startLng: pos.lng,
-            startAt: new Date().toISOString(),
+            startAt: operationalNowIso(),
           },
         });
       } else {
@@ -2213,7 +2216,7 @@ function ActiveLegCard({
             status: "arrived",
             endLat: pos.lat,
             endLng: pos.lng,
-            endAt: new Date().toISOString(),
+            endAt: operationalNowIso(),
             gpsDistanceKm: Number(km.toFixed(2)),
             loggedDistanceKm: Number(km.toFixed(2)),
           },
@@ -2461,7 +2464,7 @@ function ArrivedChecklist({
             (medStatus === "collected_intact" || medStatus === "collected_damaged"),
           unexpectedMedicationLogged: extraMed,
           unexpectedMedicationNotes: extraMed ? extraNotes.trim() : null,
-          completedAt: new Date().toISOString(),
+          completedAt: operationalNowIso(),
         },
       });
       if (
@@ -2740,7 +2743,7 @@ function ArrivedChecklist({
                     patch.mutate({
                       legId: leg.id,
                       tripId,
-                      patch: { noShowTriggeredAt: new Date().toISOString() },
+                      patch: { noShowTriggeredAt: operationalNowIso() },
                     });
                   }
                 }}

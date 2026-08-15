@@ -276,14 +276,20 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 - **Instant timestamps:** Full ISO instants from Supabase (`created_at`, `checked_in_at`, …) are stored UTC. Render them through `<ClientTime />` or `formatDateTime()` so the user sees local wall-clock time.
 - **Never** render raw `toISOString()` strings to operators.
 
-#### DEV operational clock (test builds only)
+#### DEV operational clock (test builds only) — honour SIM on all date/time work
 
-- **Purpose:** Fake Sydney **date + time** so multi-day trips and YELLOW→RED sweeps can be tested without waiting for the wall clock.
-- **Gate:** `IS_TEST_BUILD` (`src/lib/test-mode.ts`) — never active in production builds.
-- **API:** `src/lib/operational-clock.ts` — `getOperationalNow()`, `operationalNowMs()`, `getOperationalTodayIso()`, `setOperationalClockOverride`, `clearOperationalClockOverride`.
-- **Wiring:** `todayLocalIso()`, `getSydneyIsoDate()` (no-arg), Day Centre / event curfew / morning / attendance sweeps, and Exception Hub roll-call breach timing all read the operational clock.
+**Locked 2026-08-15.** Any feature that reads or writes a date, time, “today”, duration, overdue check, or operator-visible timestamp **must** go through the operational clock. SIM TIME on the amber bar is the day being tested. Wall-clock `new Date()` in that path is a **blocking defect**.
+
+- **Purpose:** Fake Sydney **date + time** so multi-day trips, Manifest runs, attendance, and YELLOW→RED sweeps can be tested without waiting for the wall clock.
+- **Gate:** `IS_TEST_BUILD` (`src/lib/test-mode.ts`) — never active in production builds. Production always uses live time via the same helpers.
+- **API:** `src/lib/operational-clock.ts` — `operationalNowIso()`, `operationalNowMs()`, `getOperationalNow()`, `getOperationalTodayIso()`, `useOperationalTodayIso()`, `setOperationalClockOverride`, `clearOperationalClockOverride`. Calendar “today”: `todayLocalIso()` / `getSydneyIsoDate()` (no-arg). Weekday: `todaysSydneyDayCode()` after a SIM-aware today hook.
+- **Must use operational clock:**
+  - “What day is it?” / roster / schedule / Manifest seed / trip_date
+  - Floor stamps operators see: depart / arrive / board (`start_at`, `end_at`, `completed_at`), check-in/out, open/close location or activity, Off today / exceptions, run live-status chips
+  - Overdue, sweep, curfew, morning-roll, and “minutes since” comparisons (`operationalNowMs()`)
+- **Must not:** `new Date()`, `new Date().toISOString()`, or `new Date().toISOString().slice(0, 10)` for those paths.
 - **UI:** Sticky `DevOperationalClockBar` in `__root.tsx` — tap to open sheet; ±1 day / ±15–60 min shortcuts; Clear → live.
-- **Audit trail:** Ledger `created_at` / operator action timestamps still use **real** wall time. Only operational *decisions* (which day is today, overdue minutes) use the override.
+- **Audit-only exception (wall clock OK):** Postgres default `created_at` on `operational_ledger` rows, and sync-metadata fields such as outbox `savedAt` (when the device queued a write — not when the stop happened). If the **operator** will see the time on a screen, it is not this exception — stamp with `operationalNowIso()`.
 - **Frozen clock:** Override is a fixed Sydney wall instant until changed — it does not auto-tick.
 
 #### Display formats (mandatory)
@@ -300,8 +306,8 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 
 #### Storage layer (unchanged)
 
-- **Instants:** UTC ISO strings (`new Date().toISOString()`) for `timestamptz` columns and ledger metadata.
-- **Calendar dates:** Plain **`YYYY-MM-DD`** strings in the database (`event_manifest.start_date`, `end_date`, session dates, etc.). Only the **display layer** uses `dd-Mmm-yy`; parsing back from pickers uses `parseIsoDateLocal` / `toIsoDateString` without UTC day-shift.
+- **Instants:** UTC ISO strings for `timestamptz` columns. **Write** them with `operationalNowIso()` (or `resolveOperationalNow().toISOString()`) so DEV/TEST SIM TIME is stored. Do not use `new Date().toISOString()` for floor/operator stamps.
+- **Calendar dates:** Plain **`YYYY-MM-DD`** strings in the database (`event_manifest.start_date`, `end_date`, session dates, etc.). “Today” for writes = `todayLocalIso()` / `getOperationalTodayIso()`. Only the **display layer** uses `dd-Mmm-yy`; parsing back from pickers uses `parseIsoDateLocal` / `toIsoDateString` without UTC day-shift.
 
 ---
 

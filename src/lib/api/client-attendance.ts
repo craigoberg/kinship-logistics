@@ -9,13 +9,13 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { loadExemptParticipantIdsForDate, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
-import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
+import { getOperationalTodayIso, operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
@@ -287,9 +287,13 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
     (s: Record<string, unknown>) =>
       s.active === true && WEEKDAY_INDEX[String(s.day_of_week)] === dow,
   );
-  if (!todays.length) return 0;
+  const exemptIds = await loadExemptParticipantIdsForDate(getOperationalTodayIso());
+  const attending = todays.filter(
+    (s: Record<string, unknown>) => !exemptIds.has(String(s.participant_id)),
+  );
+  if (!attending.length) return 0;
 
-  const payload = todays.map((s: Record<string, unknown>) => {
+  const payload = attending.map((s: Record<string, unknown>) => {
     // 3-tier priority ladder.
     const arrivalOverride = readScheduleClock(s, SCHEDULE_ARRIVAL_FIELDS);
     const departureOverride = readScheduleClock(s, SCHEDULE_DEPARTURE_FIELDS);

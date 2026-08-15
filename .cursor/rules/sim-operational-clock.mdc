@@ -1,0 +1,26 @@
+---
+description: Honour SIM / operational clock on all date and time work
+alwaysApply: true
+---
+
+# SIM / operational clock (GUARDRAILS §5.3)
+
+Any work that uses a **date, time, “today”, duration, overdue check, or operator-visible timestamp** must honour the amber **SIM TIME** bar.
+
+## Use
+
+- Instant “now”: `operationalNowIso()` / `operationalNowMs()` / `resolveOperationalNow()` from `src/lib/operational-clock.ts` (or `operational-time.ts`)
+- Calendar today: `todayLocalIso()` / `getOperationalTodayIso()` / `useOperationalTodayIso()`
+- Weekday for schedules: `todaysSydneyDayCode()` only after a SIM-aware today hook so the UI re-renders when SIM changes
+
+## Do not
+
+- `new Date()`, `new Date().toISOString()`, or `.toISOString().slice(0, 10)` for floor stamps or “today”
+- Manifest depart / arrive / board, check-in/out, open/close, Off today, run live-status, roster dates, trip_date, sweeps, curfew
+
+## Wall-clock exception only
+
+- `operational_ledger.created_at` (DB default) and outbox `savedAt` (when the device queued a write)
+- If the **operator will see the time on a screen**, it is not this exception
+
+Production builds use the same helpers (live clock). Never special-case TEST with a second clock.

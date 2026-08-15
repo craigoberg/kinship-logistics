@@ -1,7 +1,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { getOperationalTodayIso, useOperationalTodayIso } from "@/lib/operational-clock";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
 import {
   listTransportRequests,
   upsertTransportRequest,
@@ -195,6 +196,36 @@ export function useBusRunMap(): Map<string, BusRunBadge> {
 }
 
 
+async function propagateTodayRunExemption(input: NewAttendanceLog) {
+  if (!NON_CHARGEABLE_STATUSES.includes(input.actualStatus)) return;
+  if (input.rosterDate !== getOperationalTodayIso()) return;
+  await skipActiveTripPickupsForExemption({
+    participantId: input.participantId,
+    participantName: "",
+    rosterDate: input.rosterDate,
+    status: input.actualStatus,
+    notes: input.driverNotes?.trim() || "Planned absence / suspension",
+  });
+}
+
+function invalidateAfterAttendanceExemption(
+  qc: ReturnType<typeof useQueryClient>,
+  participantId?: string,
+) {
+  if (participantId) {
+    void qc.invalidateQueries({ queryKey: ["attendance_logs", participantId] });
+    void qc.invalidateQueries({ queryKey: ["participant_financial_ledger", participantId] });
+  }
+  void qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+  void qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+  void qc.invalidateQueries({ queryKey: ["participants"] });
+  void qc.invalidateQueries({ queryKey: ["run-live-status"] });
+  void qc.invalidateQueries({ queryKey: ["today-bus-run-summaries"] });
+  void qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+  void qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+  void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+}
+
 export function useInsertAttendanceLog() {
   const qc = useQueryClient();
   return useMutation({
@@ -203,14 +234,11 @@ export function useInsertAttendanceLog() {
       if (NON_CHARGEABLE_STATUSES.includes(input.actualStatus)) {
         await cancelChargesForDate(input.participantId, input.rosterDate);
       }
+      await propagateTodayRunExemption(input);
       return log;
     },
     onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["attendance_logs", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      invalidateAfterAttendanceExemption(qc, vars.participantId);
     },
   });
 }
@@ -226,17 +254,14 @@ export function useInsertAttendanceLogsBulk() {
       await Promise.all(
         sweepable.map((i) => cancelChargesForDate(i.participantId, i.rosterDate)),
       );
+      const today = getOperationalTodayIso();
+      const todayRow = sweepable.find((i) => i.rosterDate === today);
+      if (todayRow) await propagateTodayRunExemption(todayRow);
       return logs;
     },
     onSuccess: (_, vars) => {
       const ids = new Set(vars.map((v) => v.participantId));
-      ids.forEach((id) => {
-        qc.invalidateQueries({ queryKey: ["attendance_logs", id] });
-        qc.invalidateQueries({ queryKey: ["participant_financial_ledger", id] });
-      });
-      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
+      ids.forEach((id) => invalidateAfterAttendanceExemption(qc, id));
     },
     onError: (err: Error) => {
       console.error("[useInsertAttendanceLogsBulk] insert failed", err);
@@ -828,9 +853,11 @@ export function useBusRunRouteRoster(
   busRunCode: string,
   direction: BusRunRouteDirection,
 ) {
+  useOperationalTodayIso();
+  const todayDayCode = todaysSydneyDayCode();
   return useQuery({
-    queryKey: busRunRouteQueryKey(busRunCode, direction),
-    queryFn: () => listBusRunRouteRoster(busRunCode, direction),
+    queryKey: busRunRouteQueryKey(busRunCode, direction, todayDayCode),
+    queryFn: () => listBusRunRouteRoster(busRunCode, direction, todayDayCode),
     enabled: busRunCode.length > 0,
     staleTime: 15_000,
   });
@@ -860,6 +887,53 @@ export function useReorderBusRunDefaultRoute() {
       void qc.invalidateQueries({ queryKey: busRunRouteQueryKey(busRunCode, direction) });
     },
     onError: (err: Error) => showRedToast("Could not save run route", err),
+  });
+}
+
+export function useTodaysRunLiveStatus() {
+  const today = useOperationalTodayIso();
+  return useQuery({
+    queryKey: ["run-live-status", today],
+    queryFn: () => listTodaysRunLiveStatus(today),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useApplyOfficeRunExemption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OfficeRunExemptionInput) => applyOfficeRunExemption(input),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ["attendance_logs", vars.schedule.participantId] });
+      void qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      void qc.invalidateQueries({ queryKey: ["run-live-status"] });
+      void qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+      void qc.invalidateQueries({ queryKey: ["today-bus-run-summaries"] });
+      void qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+      void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+    },
+    onError: (err: Error) => showRedToast("Could not mark Off today", err),
+  });
+}
+
+export function useOpenTripRunNotices(tripId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["trip-run-notices", tripId],
+    queryFn: () => listOpenTripRunNotices(tripId as string),
+    enabled: !!tripId,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useAcknowledgeTripRunNotice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (noticeId: string) => acknowledgeTripRunNotice(noticeId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+    },
   });
 }
 
@@ -1194,6 +1268,14 @@ import {
   reorderBusRunDefaultRoute,
   type BusRunRouteDirection,
 } from "@/lib/api/bus-run-routes";
+import { listTodaysRunLiveStatus } from "@/lib/api/run-live-status";
+import {
+  acknowledgeTripRunNotice,
+  applyOfficeRunExemption,
+  listOpenTripRunNotices,
+  skipActiveTripPickupsForExemption,
+  type OfficeRunExemptionInput,
+} from "@/lib/api/office-run-exemption";
 import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches, invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;

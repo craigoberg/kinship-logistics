@@ -72,7 +72,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Check-off list order** | **Defined** | `sort-participants.ts` — surname A–Z, then given name, then id | Day/Event check-in, roll call, bus boarding, activity, meal, muster tap lists | **Never** re-sort by status after tap — style/badge only. Do not move checked-off people into a second section mid-list. Exception: return boarding may stay route/`legIndex` order. Display name may stay `First Last`. |
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
-| **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds |
+| **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds. Stamps must be SIM-aware (`operationalNowIso`) — GUARDRAILS §5.3 |
+| **SIM / operational clock (all date-time work)** | **Defined** | `operationalNowIso()` / `todayLocalIso()` / `useOperationalTodayIso()` | Any feature that uses a date or time | Honour amber SIM TIME. Never `new Date()` for floor stamps or “today”. Ledger `created_at` + outbox `savedAt` may stay wall clock. |
 | **Time entry (half-hour + exact)** | Defined | `HalfHourTimeField` | Roll call times, tour defaults | Single `HH:mm` input + clock popup (24h half-hour slots). **Not** separate dropdown + second field |
 | **Occurred at (vs Logged at)** | **Defined** | `OccurredAtFields` (`DatePicker` + `HalfHourTimeField`) | Big Red Human/Asset, Log Anomaly, any late-filed issue | Operator when-it-happened; system `created_at` = logged. No future; Hub shows both |
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
@@ -107,6 +108,10 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. |
 | **Day Centre schedule transport (Self + runs)** | **Defined** | Pill tap row: **Self** first, then Admin `bus_runs` | Participant Directory → Schedules add/edit IN/OUT | Stores `TRN-SELF` or the run code. No general-transport dropdown. Existing self/private/family codes still light Self. |
 | **Day Centre default run route** | **Defined** | `PointerSortableList` + run/direction pills (`RunRoutePanel`) | Participants Directory | Office drag order per run + morning/afternoon. Seeds Manifest; driver may still reorder. Same grip as Event Roster. |
+| **Day Centre Off today** | **Defined** | `OffTodayExemptionDialog` + outline **Off today** | Participant → Schedules (today's row) **and** Default run routes (column left of live status) | Operational today only. Sick/Cancelled pills + `CharacterCountedTextarea` (20). Recurring schedule stays. Live Manifest skip + driver banner — not driver RED cancel. Route-list buttons share a fixed column so they align down the page. **Exception** stays on every active schedule row (any date). |
+| **Care Profile dialog width** | **Defined** | `CareProfileModal` `max-w-6xl` / `w-[min(96vw,72rem)]` | Participants Directory profile | Office-wide so Schedules (Run today + actions) fit. Do not clip with `overflow-x-hidden`. |
+| **Day Centre run live status** | **Defined** | `RunLiveStatusBadge` from `trip_legs` | Schedules **Run today** + Default run routes | Awaiting PU · Traveling-To · Stopped-At · On-Bus · Off today · Dropped. 24h `HH:mm` under the chip (`ClientTime`) = when that status was set. Office read-only. |
+| **Manifest office run notice** | **Defined** | `OfficeRunNoticeBanner` + caution callout | Active `/manifest` Day Centre run | Amber **Office update** + **Seen**. Written when office marks Off today on an open trip. |
 | **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. **Checked-in = hi-vis** solid `bg-success text-success-foreground` (§4.5) — not pale emerald tint. |
 | **Event Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Event Deliver Check-In | Was BottomSheet-on-Check-In (BL-013). Picker still Bus (Rx) vs Self; finalize is the wide row. |
 | **Day Centre Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Day Centre attendance roll | Was BottomSheet-on-Check-In. Day Centre chips use Admin displayName (Run 1); Event uses R1/R2. |
@@ -142,7 +147,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Departure vector / quick inline choice** | Defined | `BottomSheet` + `MobileFieldButton` rows | Check-out departure method, 2–4 quick options | Slide-up sheet, `tone="neutral"`, immediate action on tap — no persistent selected state needed. |
 | **Dialog dismiss during save** | Defined | Always allow Close — no `isPending` guard | All modals | Remove `if (isPending) return` from `onOpenChange`; do not `disabled={busy}` the Close button. |
 | **Loading states** | Partial | `Loader2` inline, `Skeleton` | Fetches | Prefer inline spinner on buttons; skeleton for tables TBD |
-| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). Not for production operator forms. |
+| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). Not for production operator forms. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
 
 ---
 
@@ -170,7 +175,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 
 **Do not use:** `<input type="date">`, `<input type="time">`, `toLocaleString()` defaults, 12-hour AM/PM.
 
-**Helpers:** `src/lib/utils.ts` (`formatDate`, `formatTime`, `formatDateTime`, `todayLocalIso`).
+**Helpers:** `src/lib/utils.ts` (`formatDate`, `formatTime`, `formatDateTime`, `todayLocalIso`).  
+**Write “now” / “today”:** `operationalNowIso()` / `useOperationalTodayIso()` — never `new Date()` on floor paths (GUARDRAILS §5.3).
 
 ---
 
@@ -504,6 +510,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-15 | SIM clock on all date/time work | GUARDRAILS §5.3 — floor stamps and “today” must use `operationalNowIso` / `todayLocalIso`; wall `new Date()` is a defect |
+| 2026-08-15 | Care Profile dialog width | Office modal `max-w-6xl` so Schedules Run today + Off today + Exception fit |
+| 2026-08-15 | Day Centre Off today + run live status | Schedule-row **Off today** (today only); `RunLiveStatusBadge`; Manifest `OfficeRunNoticeBanner` + `trip_run_notices` |
 | 2026-08-15 | Day Centre default run route | Participants Directory `RunRoutePanel` — drag order per run + IN/OUT; Manifest seeds from `bus_run_default_routes` |
 | 2026-08-15 | Day Centre schedule transport | Self + bus-run pills only (no Self-Drive / Bus-Pickup dropdown); Self stores `TRN-SELF` |
 | 2026-08-09 | Event Finance / Roster money | Expense Edit/Delete + payment history Edit/Delete + Record refund until Closed; `billing_locked` gates UI + `assertEventFinanceWritable` |
