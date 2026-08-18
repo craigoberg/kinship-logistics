@@ -1254,6 +1254,7 @@ import {
   getAssetCurrentOdometer,
   listBusRunRosterForDay,
   reorderTripPickupLegs,
+  type ActiveTripBundle,
   type StartTripInput,
   type StartDayCentreRunInput,
   type BusRunSummary,
@@ -1488,7 +1489,14 @@ export function useReorderTripPickupLegs() {
       tripId: string;
       orderedLegIds: string[];
     }) => reorderTripPickupLegs(tripId, orderedLegIds),
-    onSuccess: () => {
+    onSuccess: (legs, { tripId }) => {
+      qc.setQueriesData(
+        { queryKey: ACTIVE_TRIP_KEY },
+        (old: ActiveTripBundle | null | undefined) => {
+          if (!old?.trip || old.trip.id !== tripId) return old;
+          return { ...old, legs };
+        },
+      );
       invalidateTransportCaches(qc);
     },
     onError: (err: Error) => showRedToast("Could not reorder pickups", err),

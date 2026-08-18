@@ -1,6 +1,6 @@
 // Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -1681,9 +1681,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   }, [activeLeg, legs, pendingPickupIds]);
 
   const [localPickupOrder, setLocalPickupOrder] = useState<string[]>([]);
+  const pendingPickupKey = pendingPickupIds.join("|");
   useEffect(() => {
     setLocalPickupOrder([]);
-  }, [pendingPickupIds.join("|")]);
+  }, [pendingPickupKey]);
 
   const sortablePickupIds =
     localPickupOrder.length === pendingPickupIds.length ? localPickupOrder : pendingPickupIds;
@@ -1693,16 +1694,20 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     return ep ? { ...leg, ...ep } : leg;
   };
 
-  const applyPickupReorder = (nextIds: string[]) => {
-    setLocalPickupOrder(nextIds);
-    reorderPickups.mutate(
-      { tripId: trip.id, orderedLegIds: nextIds },
-      {
-        onSuccess: () => toast.success("Pickup order updated"),
-        onSettled: () => setLocalPickupOrder([]),
-      },
-    );
-  };
+  const applyPickupReorder = useCallback(
+    (nextIds: string[]) => {
+      if (nextIds.join("|") === pendingPickupKey) return;
+      setLocalPickupOrder(nextIds);
+      reorderPickups.mutate(
+        { tripId: trip.id, orderedLegIds: nextIds },
+        {
+          onSuccess: () => toast.success("Pickup order updated"),
+          onError: () => setLocalPickupOrder([]),
+        },
+      );
+    },
+    [pendingPickupKey, reorderPickups, trip.id],
+  );
 
   const startAddressForLeg = (leg: TripLeg) => {
     if (leg.legKind === "venue_to_venue" || (leg.legKind === "depot_to_client" && leg.toParticipantId == null && isVenueHop)) {
@@ -2005,9 +2010,18 @@ function LegRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="truncate font-medium">
-          {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
-        </div>
+        {isPassengerPickupLeg(leg) && !done ? (
+          <>
+            <div className="truncate font-medium">{leg.toLabel}</div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              after {leg.fromLabel}
+            </div>
+          </>
+        ) : (
+          <div className="truncate font-medium">
+            {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
+          </div>
+        )}
         {leg.targetAddress && (
           <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />

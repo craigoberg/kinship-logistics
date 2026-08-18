@@ -5253,10 +5253,13 @@ export async function reorderTripPickupLegs(
   const finalLegs = [...orderedPickups, ...updatedOtherLegs];
 
   // Two-phase leg_index update to satisfy UNIQUE (trip_id, leg_index).
+  // Use an ascending negative block so a mid-save read (realtime refetch)
+  // still returns the intended order — `-(i+1)` sorted ASC reverses the list.
+  const tempBase = -(finalLegs.length + 1);
   for (let i = 0; i < finalLegs.length; i++) {
     const { error } = await supabase
       .from("trip_legs")
-      .update({ leg_index: -(i + 1), updated_at: new Date().toISOString() })
+      .update({ leg_index: tempBase + i, updated_at: new Date().toISOString() })
       .eq("id", finalLegs[i].id);
     if (error) throwPg("[reorderTripPickupLegs:temp]", error);
   }
