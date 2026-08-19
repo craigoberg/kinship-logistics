@@ -3,9 +3,9 @@ import type { HelpTopic } from "../types";
 export const hubThreeStreamsTopic: HelpTopic = {
   id: "hub-three-streams",
   kind: "howto",
-  title: "Governance Hub — three streams (what goes where)",
+  title: "Governance Hub — streams (what goes where)",
   summary:
-    "Human Incidents, Maintenance & Repairs, and Compliance & Renewals — purpose of each stream and what information belongs there.",
+    "Human Incidents, Maintenance & Repairs, Compliance & Renewals, and App tickets — purpose of each stream and what information belongs there.",
   keywords: [
     "hub",
     "governance",
@@ -16,6 +16,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     "tabs",
     "renewals",
     "health and safety",
+    "app tickets",
   ],
   menus: ["governance"],
   roles: ["manager", "assistant_manager", "support_worker"],
@@ -25,11 +26,12 @@ export const hubThreeStreamsTopic: HelpTopic = {
     "deferral-across-ops",
     "governance-hub-issue",
     "red-verbal-consultation",
+    "app-tickets",
   ],
   steps: [
     {
-      heading: "Three streams, one RYGE language",
-      body: "Governance Hub organises work by what the issue is about — not by colour. Any stream can hold Green, Yellow, or Red items. Pick the tab that matches the subject; use RYGE for urgency.",
+      heading: "Streams by subject, not by colour",
+      body: "Governance Hub organises work by what the issue is about — not by colour. Human, Maintenance, and Compliance can each hold Green, Yellow, or Red items. App tickets are always GREEN notes about the software. Pick the tab that matches the subject.",
     },
     {
       heading: "Human Incidents — people",
@@ -44,7 +46,11 @@ export const hubThreeStreamsTopic: HelpTopic = {
       body: "Expiry-driven items: insurance, vehicle rego, staff certs (WWC, First Aid, SFH, licence), venue safety baseline renewals, formal audits. Severity is usually computed from dates (e.g. approaching expiry = Yellow, overdue = Red) — you do not manually “paint” compliance Green/Yellow/Red the same way as a walk-around.",
     },
     {
-      heading: "Health & Safety sits beside the three streams",
+      heading: "App tickets — the software, not the bus",
+      body: "GREEN notes about Connect itself (a form would not save, a button did the wrong thing). Raised from the green Raise ticket control. Lives in Hub → App tickets. Do not put these in Maintenance or Human Incidents.",
+    },
+    {
+      heading: "Health & Safety sits beside the streams",
       body: "Infectious exclusion, lockdown / do-not-open, programme suspend, and Drill/Live emergencies use the Big Red → Health & Safety lane and Hub Health & Safety / Emergency tiles. They are not free-text Human or Asset INCIDENT forms. Stand-down clears floor banners but does not auto-resolve the Hub Open ticket.",
     },
     {

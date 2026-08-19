@@ -864,6 +864,7 @@ export function IncidentIntakeDialog({
         <BottomSheet
           open={open}
           onOpenChange={onOpenChange}
+          hideTicket
           title="Incident & Fault Utility"
           description={`Context: ${contextLine}`}
           className="flex flex-col gap-0 overflow-hidden"
@@ -883,7 +884,7 @@ export function IncidentIntakeDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[92dvh] max-w-2xl flex-col overflow-hidden p-0 gap-0">
+        <DialogContent hideTicket className="flex max-h-[92dvh] max-w-2xl flex-col overflow-hidden p-0 gap-0">
           <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle>Incident &amp; Fault Utility</DialogTitle>
             <DialogDescription>Context: {contextLine}</DialogDescription>

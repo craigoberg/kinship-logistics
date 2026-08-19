@@ -2,6 +2,7 @@ import type { HelpTopic } from "../types";
 import { addParticipantsTopic } from "./add-participants";
 import { addStaffTopic } from "./add-staff";
 import { adminOverviewTopic } from "./admin-overview";
+import { appTicketsTopic } from "./app-tickets";
 import { adminVendorsTopic } from "./admin-vendors";
 import { adminVenuesTopic } from "./admin-venues";
 import { dayCentreHappyPathTopic } from "./day-centre-happy-path";
@@ -46,4 +47,5 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   manifestActiveRunTopic,
   redVerbalConsultationTopic,
   governanceHubIssueTopic,
+  appTicketsTopic,
 ];

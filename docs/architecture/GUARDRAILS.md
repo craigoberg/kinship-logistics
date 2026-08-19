@@ -1444,15 +1444,16 @@ Both utilities are exported from `src/lib/api/site-issues.ts`. **Never display a
 
 ## 14. Governance Hub Structure & Issue Routing
 
-### 14.1 Three-Tab Governance Hub
+### 14.1 Governance Hub tabs
 
-The Governance Hub (`/governance`) has three tabs. **RYGE severity applies equally across all three tabs** — any tab can have Red, Yellow, Green, or Escalation items. Tab membership is determined by *source/context*, not by severity.
+The Governance Hub (`/governance`) has four tabs. **RYGE severity applies equally across Human / Maintenance / Compliance** — any of those tabs can have Red, Yellow, Green, or Escalation items. Tab membership is determined by *source/context*, not by severity. **App tickets** are always GREEN-equivalent and never write to the three operational registers.
 
 | Tab | Backing table | Purpose |
 | :-- | :-- | :-- |
 | **Human Incidents** | `operational_incidents` (`incident_type = 'human_operational'`) + `site_issues_register` | Injuries, welfare concerns, disputes, near-misses — anything involving a **person** |
 | **Maintenance & Repairs** | `maintenance_items` | Physical faults requiring repair: venue defects, broken equipment, asset failures, dented panels, graffiti |
 | **Compliance & Renewals** | `compliance_assets` | Expiry-driven items: insurance, vehicle rego, staff certs, formal audits — populated programmatically |
+| **App tickets** | `app_tickets` + `app_ticket_notes` | In-app support notes (TEST + PROD). Software / form problems — **not** incidents or physical repairs. BL-116. |
 
 > **Human Incidents tab** filters `operational_incidents` to `incident_type = 'human_operational'` only. Asset/mechanical incidents from the Equipment & Asset lane are tracked exclusively in Maintenance & Repairs via `maintenance_items`. Health & Safety Hub cards (infectious, emergency, site hold) use Hub area `health_safety` — not Big Red Human/Asset writes.
 
@@ -1473,12 +1474,14 @@ The table below is the single source of truth for all write paths. **Source dete
 | **Day Centre Walk-around** (site-day LogAnomalyModal) | Day Centre session | ✓ ALL RYGE + Human Incidents via `session_id` | ✗ | ✓ ALL RYGE `centre_issue` | Maintenance & Repairs |
 | **Bus / Vehicle Pre-trip Walk-around** | Pre-trip clearance | ✓ via `asset_clearance_items` | ✗ | ✓ ALL RYGE `vehicle_issue` | Maintenance & Repairs |
 | **Compliance engine** | Programmatic | ✗ | ✗ | ✗ | Compliance & Renewals |
+| **Raise ticket** (green) | Any | ✗ | ✗ | ✗ | App tickets (`app_tickets`) |
 
 **Key rules:**
 - **GREEN issues are NOT informational-only.** A Green issue is a low-priority note (graffiti, dented panel) that still needs staff follow-up. Green issues appear in the appropriate tab based on source.
 - Walk-arounds (Venue, Day Centre, Bus) always write to **Maintenance & Repairs**.
 - The Big Red Button gate (Human vs Asset vs Health & Safety) determines the path — H&S never opens the free-text INCIDENT RYGE form.
 - `operational_incidents` always receives a record for Human/Asset audit purposes, but only `human_operational` rows display in the Human Incidents tab.
+- **App tickets never write** to `operational_incidents`, `site_issues_register`, or `maintenance_items`.
 
 ---
 
@@ -1497,6 +1500,12 @@ The table below is the single source of truth for all write paths. **Source dete
 Implementation anchors:
 - `src/components/global/incident-intake-dialog.tsx` → `commitWrite()` (Human/Asset)
 - `src/components/global/global-health-safety-flow.tsx` (Health & Safety)
+
+### 14.3.1 Raise ticket (BL-116)
+
+Green companion to Big Red — **not** a fourth Incident lane. Available globally and as a Ticket chip on Dialog / Sheet forms. Always GREEN-equivalent (description + auto context). Writes **only** to `app_tickets`. Hidden on PIN, Incident / Fault, and the Raise ticket dialog itself.
+
+Implementation: `GlobalRaiseTicketDrawer`, `RaiseTicketDialog`, `TicketSurfaceProvider`.
 
 ---
 

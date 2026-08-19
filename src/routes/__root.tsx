@@ -21,6 +21,8 @@ import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 // (GlobalEscalationInterceptor file preserved on disk as inactive fallback.)
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
+import { GlobalRaiseTicketDrawer } from "../components/global/global-raise-ticket-drawer";
+import { TicketSurfaceProvider } from "../lib/app-tickets/ticket-surface";
 import { Toaster } from "../components/ui/sonner";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
@@ -173,6 +175,7 @@ function RoleAwareGuardians() {
     <>
       {role === "driver" && <RouteRehydrationGuardian />}
       <GlobalIncidentIntakeDrawer />
+      <GlobalRaiseTicketDrawer />
     </>
   );
 }
@@ -194,6 +197,7 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       {/* Root provider so global overlays (Big Red Incident) work outside AppShell. */}
       <TooltipProvider delayDuration={300}>
+        <TicketSurfaceProvider>
         <AuthGate />
         {isAuthRoute || isPublicRoute ? (
           // Bare shell — auth login or public yada.org.au pages (BL-110).
@@ -210,6 +214,7 @@ function RootComponent() {
           </>
         )}
         <Toaster />
+        </TicketSurfaceProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

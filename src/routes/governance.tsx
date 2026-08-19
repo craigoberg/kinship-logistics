@@ -8,7 +8,7 @@ export const Route = createFileRoute("/governance")({
   head: () => ({
     meta: [
       { title: "Governance Hub — Yada Connect" },
-      { name: "description", content: "Review human incidents, track maintenance & repairs, and manage compliance renewals." },
+      { name: "description", content: "Review human incidents, maintenance, compliance, and app tickets." },
     ],
   }),
   component: GovernancePage,
@@ -23,7 +23,7 @@ function GovernancePage() {
           Governance Hub
         </h1>
         <p className="text-sm text-muted-foreground">
-          Review human incidents, track maintenance &amp; repairs, and manage compliance renewals across fleet, venues, and staff.
+          Review human incidents, track maintenance &amp; repairs, manage compliance renewals, and close app tickets.
         </p>
       </header>
       <GovernanceHubWorkspace openIssueId={issue} />

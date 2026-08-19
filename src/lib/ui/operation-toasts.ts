@@ -27,6 +27,10 @@ export const operationToasts = {
     toast.success("Item closed.", { description: "Archived in maintenance history." }),
   maintenanceAdded: () =>
     toast.success("Maintenance item added.", { description: "Visible on Active tab." }),
+  ticketResolved: () =>
+    toast.success("Ticket resolved.", { description: "Removed from Active App tickets." }),
+  ticketClosed: () =>
+    toast.success("Ticket closed.", { description: "Archived in App tickets history." }),
   reviewStarted: (waitLabel?: string) =>
     toast.success("Review started.", {
       description: waitLabel

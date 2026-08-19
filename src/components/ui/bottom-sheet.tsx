@@ -21,6 +21,8 @@ interface BottomSheetProps {
   children: ReactNode;
   /** Extra class on the content panel — e.g. to set a custom bg. */
   className?: string;
+  /** Hide the in-form Ticket chip (PIN, Incident, Raise ticket itself). */
+  hideTicket?: boolean;
 }
 
 export function BottomSheet({
@@ -30,11 +32,13 @@ export function BottomSheet({
   description,
   children,
   className,
+  hideTicket = false,
 }: BottomSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
+        hideTicket={hideTicket}
         className={cn(
           // Sizing: tall on mobile, capped on desktop
           "max-h-[92dvh] overflow-y-auto rounded-t-2xl",
@@ -43,7 +47,7 @@ export function BottomSheet({
           className,
         )}
       >
-        <SheetHeader className="mb-4 shrink-0 pr-8">
+        <SheetHeader className="mb-4 shrink-0 pr-24">
           <SheetTitle className="text-left text-lg">{title}</SheetTitle>
           {description && (
             <SheetDescription className="text-left text-sm">{description}</SheetDescription>
