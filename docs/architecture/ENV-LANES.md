@@ -21,6 +21,19 @@ Until DNS cutover: preview public pages at `https://<connect-host>/public`. Publ
 
 Renaming a Supabase **display name** does not change URL or keys.
 
+## TEST host protection (required while TEST holds real people)
+
+Thin day-login is a UI door. Put a **host password** on `crm-test.yada.org.au` so strangers never load the app (or the public key inside it).
+
+1. Vercel → the **TEST** project → **Settings → Deployment Protection**.
+2. Enable **Password Protection** (or Vercel Authentication) on **Production**.
+3. Share that host password only with the office planners. They still do email + PIN after that.
+4. If Hobby will not protect Production, use **Cloudflare Access** on the same hostname (email allow-list). Same idea.
+
+`/public` on TEST sits behind that password too — acceptable for Alpha. PROD later splits `yada.org.au` (public) from `connect.yada.org.au` (ops).
+
+Database lock (BL-117): run `docs/sql/2026-08-20_day_login_operational_rls.sql` on **DEV then TEST**. After that, the publishable key without a day-login JWT cannot read participants. Re-run this SQL after restoring infrastructure from an **old** backup.
+
 ## What never copies to TEST / PROD
 
 - Live client attendance you care about as “real” (use scrubbed / sample data for Alpha)
@@ -122,6 +135,7 @@ Auth users still created in TEST Supabase Authentication.
 3. Hub open issue + note  
 4. Infectious exclusion declare (optional)  
 5. Log out → confirms both Auth + PIN cleared  
+6. **Security:** without logging in, `/public` still loads published pages; a REST dump of `participants` with only the publishable key returns empty / permission denied.  
 
 ## Long-term promotion model (code vs DB)
 

@@ -93,26 +93,6 @@ export async function getPublicFormDefinition(
   return data ? mapDef(data as Record<string, unknown>) : null;
 }
 
-function makeReferenceCode(formKey: string): string {
-  const prefix = formKey.slice(0, 3).toUpperCase();
-  const n = Math.floor(Math.random() * 1_000_000)
-    .toString()
-    .padStart(6, "0");
-  const d = new Date();
-  const ymd = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-  return `YADA-${prefix}-${ymd}-${n}`;
-}
-
-function severityForType(hubType: string): "sev1" | "sev2" | "sev3" {
-  switch (hubType) {
-    case "complaint":
-    case "whistleblow":
-      return "sev2";
-    default:
-      return "sev3";
-  }
-}
-
 export interface SubmitPublicFormInput {
   formKey: string;
   channel: "public" | "connect";
@@ -150,76 +130,41 @@ export async function submitPublicForm(
     throw new Error("Name is required unless you submit anonymously.");
   }
 
-  const referenceCode = makeReferenceCode(input.formKey);
-  const tag = `[PUBLIC FORM · ${def.hubTicketType.toUpperCase()}]`;
-  const who = isAnonymous
-    ? "Anonymous"
-    : [
-        input.submitterName?.trim(),
-        input.submitterRole?.trim()
-          ? `(${input.submitterRole.trim()})`
-          : null,
-        input.submitterEmail?.trim(),
-        input.submitterPhone?.trim(),
-      ]
-        .filter(Boolean)
-        .join(" · ");
-
-  const description = [
-    `${tag} ${referenceCode}`,
-    `Channel: ${input.channel}`,
-    `From: ${who}`,
-    "",
-    message,
-  ].join("\n");
-
-  const { data: incident, error: incErr } = await supabase
-    .from("operational_incidents")
-    .insert({
-      incident_type: "human_operational",
-      severity: severityForType(def.hubTicketType),
-      description,
-      reported_by: isAnonymous
-        ? "Anonymous (public form)"
-        : input.submitterName?.trim() || "Public form",
-      status: "pending",
-      no_participant_involved: true,
-      occurred_at: new Date().toISOString(),
-    })
-    .select("id")
-    .single();
-  if (incErr) throwSchema(incErr);
-  const hubIncidentId = String((incident as { id: string }).id);
-
-  const payload = {
-    message,
-    ...(input.extra ?? {}),
-  };
-
-  const { data: sub, error: subErr } = await supabase
-    .from("public_form_submissions")
-    .insert({
-      form_key: input.formKey,
-      reference_code: referenceCode,
-      channel: input.channel,
-      is_anonymous: isAnonymous,
-      submitter_name: isAnonymous ? null : input.submitterName?.trim() || null,
-      submitter_email: isAnonymous ? null : input.submitterEmail?.trim() || null,
-      submitter_phone: isAnonymous ? null : input.submitterPhone?.trim() || null,
-      submitter_role: input.submitterRole?.trim() || null,
-      payload,
-      hub_incident_id: hubIncidentId,
-      linked_participant_id: input.linkedParticipantId || null,
-      linked_staff_id: input.linkedStaffId || null,
-    })
-    .select("id")
-    .single();
-  if (subErr) throwSchema(subErr);
+  const { data: rpcRows, error: rpcErr } = await supabase.rpc("submit_public_form", {
+    p_form_key: input.formKey,
+    p_channel: input.channel,
+    p_is_anonymous: isAnonymous,
+    p_submitter_name: isAnonymous ? null : input.submitterName?.trim() || null,
+    p_submitter_email: isAnonymous ? null : input.submitterEmail?.trim() || null,
+    p_submitter_phone: isAnonymous ? null : input.submitterPhone?.trim() || null,
+    p_submitter_role: input.submitterRole?.trim() || null,
+    p_message: message,
+    p_extra: input.extra ?? {},
+    p_linked_participant_id: input.linkedParticipantId || null,
+    p_linked_staff_id: input.linkedStaffId || null,
+  });
+  if (rpcErr) {
+    const msg = rpcErr.message || "";
+    if (/submit_public_form|Could not find the function/i.test(msg)) {
+      throw new Error(
+        "Public form RPC missing — run docs/sql/2026-08-20_day_login_operational_rls.sql then hard refresh.",
+      );
+    }
+    throwSchema(rpcErr);
+  }
+  const row = (Array.isArray(rpcRows) ? rpcRows[0] : rpcRows) as {
+    reference_code?: string;
+    submission_id?: string;
+    hub_incident_id?: string;
+  } | null;
+  if (!row?.reference_code || !row.submission_id || !row.hub_incident_id) {
+    throw new Error("Public form submit failed — empty RPC result.");
+  }
 
   return {
-    referenceCode,
-    submissionId: String((sub as { id: string }).id),
-    hubIncidentId,
+    referenceCode: String(row.reference_code),
+    submissionId: String(row.submission_id),
+    hubIncidentId: String(row.hub_incident_id),
   };
 }
 

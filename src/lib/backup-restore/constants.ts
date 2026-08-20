@@ -1,3 +1,30 @@
+/**
+ * Tables the anonymous (public) key may SELECT after the 2026-08-20
+ * day-login RLS lock. Everything else in public is authenticated / service_role.
+ * Keep in sync with docs/sql/2026-08-20_day_login_operational_rls.sql.
+ */
+export const PUBLIC_ANON_SELECT_TABLES = [
+  "cms_pages",
+  "cms_nav",
+  "cms_media",
+  "cms_publish_snapshots",
+  "public_form_definitions",
+] as const;
+
+/** RPCs the anonymous key may EXECUTE (public website forms). */
+export const PUBLIC_ANON_EXECUTE_FUNCTIONS = ["submit_public_form"] as const;
+
+/** Backup / DDL RPCs — service_role only (never anon or authenticated). */
+export const SERVICE_ROLE_ONLY_FUNCTIONS = [
+  "list_backup_tables",
+  "order_tables_for_restore",
+  "export_backup_schema_catalog",
+  "truncate_backup_tables",
+  "exec_backup_ddl",
+  "backup_drop_all_public_fks",
+  "backup_restore_all_public_fks",
+] as const;
+
 /** Tables whose rows must never be overwritten when restoring into DEV. */
 export const AUTH_PROTECTED_TABLES = ["staff_registry"] as const;
 

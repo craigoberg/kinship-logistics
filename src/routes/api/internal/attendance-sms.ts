@@ -7,7 +7,7 @@
 // staff_role = 'Manager'.
 
 import { createFileRoute } from "@tanstack/react-router";
-import { createClient } from "@supabase/supabase-js";
+import { createServiceServerClient } from "@/lib/supabase.server";
 import { formatTime } from "@/lib/utils";
 
 interface Body {
@@ -35,15 +35,21 @@ export const Route = createFileRoute("/api/internal/attendance-sms")({
           return Response.json({ ok: false, error: "Missing fields" }, { status: 400 });
         }
 
-        const SUPABASE_URL = process.env.SUPABASE_URL;
-        const SUPABASE_KEY = process.env.SUPABASE_PUBLISHABLE_KEY;
-        if (!SUPABASE_URL || !SUPABASE_KEY) {
-          return Response.json({ ok: false, error: "Supabase env missing" }, { status: 500 });
+        let supa;
+        try {
+          supa = createServiceServerClient();
+        } catch (e) {
+          return Response.json(
+            {
+              ok: false,
+              error:
+                e instanceof Error
+                  ? e.message
+                  : "Supabase service role missing (needed after day-login RLS lock).",
+            },
+            { status: 500 },
+          );
         }
-
-        const supa = createClient(SUPABASE_URL, SUPABASE_KEY, {
-          auth: { persistSession: false, autoRefreshToken: false, storage: undefined },
-        });
 
         // 1) Resolve recipients
         let recipients: string[] = [];

@@ -79,15 +79,15 @@ All operator and manager **authentication PIN capture** must use the canonical o
 4. **Verify once at entry** — PIN is verified when the pad completes; parent forms gate submit on `*PinVerified` flags (or refs if the API still needs the value). Do not re-prompt with a text field.
 5. **New PIN surfaces** — any new build requiring PIN auth must import from `src/components/auth/`; code review / agent rules treat raw PIN inputs as a blocking defect.
 
-### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — BL-002 deferred)
+### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — menus/roles still last)
 
-Full role-based access control is **deferred until last** (`docs/BACKLOG.md` **BL-002**). Until then, PIN terminal + permissive anon RLS remains the interim model. **No new build may introduce patterns that force a rewrite when BL-002 lands.**
+Full **menu / role** RBAC remains deferred (`docs/BACKLOG.md` **BL-002**). **Day-login JWT for operational data is in force** as of 2026-08-20 (`docs/sql/2026-08-20_day_login_operational_rls.sql`, BL-117). PIN is action step-up and floor identity, not the database role.
 
-#### Target two-tier session (product intent — not yet built)
+#### Target two-tier session
 
-1. **Day session** — staff signs in with **email + password** (Supabase Auth) at start of day. Session stays active for an Admin-configurable duration (e.g. full shift or N hours).
-2. **Screen lock** — after Admin-configurable **idle** minutes (e.g. 15), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active manifest run** may suppress idle lock (BL-002).
-3. **Action step-up** — high-impact operations continue to use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
+1. **Day session** — **built.** Staff signs in with **email + password** (Supabase Auth) at start of day. Session JWT is required for operational table access.
+2. **Screen lock** — **not yet built.** After Admin-configurable **idle** minutes (e.g. 15), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active manifest run** may suppress idle lock (BL-002 remainder).
+3. **Action step-up** — **built.** High-impact operations use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
 
 #### Build regulations (effective immediately)
 
@@ -99,7 +99,7 @@ Full role-based access control is **deferred until last** (`docs/BACKLOG.md` **B
 | Preserve `staff_registry.auth_user_id` link to `auth.users` | New parallel identity stores or browser service-role |
 | Route/menu placeholders → future `role_menu_access` | Hard-coded irreversible menu denial scattered in features |
 | Tunable timeouts → `system_parameters` (`auth_*` keys) | Hard-coded idle/session timeouts in components |
-| Operational table RLS: anon + permissive **or** `SECURITY DEFINER` RPC | `authenticated`-only policies on tables PIN terminals write today |
+| Operational tables: `GRANT` / RLS to **authenticated** (day-login JWT). Anon only for published CMS + `submit_public_form`. Server jobs use **service_role**. | Re-open `anon` ALL on participants / staff / incidents / attendance; PIN-only DB access without a JWT |
 
 **Agent rule:** `.cursor/rules/rbac-forward-compat.mdc` — checklist before shipping.
 

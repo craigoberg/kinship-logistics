@@ -1,21 +1,21 @@
 ---
-description: RBAC forward compatibility — do not build patterns that block BL-002 two-tier auth
+description: RBAC forward compatibility — day-login RLS in force; menu RBAC still last
 alwaysApply: true
 ---
 
-# RBAC forward compatibility (BL-002 — deferred, do not break)
+# RBAC forward compatibility (BL-002 menus last — day-login RLS in force)
 
 **Full spec:** `docs/BACKLOG.md` → **BL-002**. **Locked build rules:** `docs/architecture/GUARDRAILS.md` §2.4.
 
-RBAC is **intentionally last**. Until BL-002 ships, interim PIN + permissive anon RLS is correct. Every new build must remain compatible with the **target two-tier session** below.
+**Menus / role gates remain last.** Day-login JWT for operational tables shipped 2026-08-20 (BL-117, `docs/sql/2026-08-20_day_login_operational_rls.sql`). PIN is step-up + floor identity, not the database role.
 
-## Target session model (locked intent — not yet implemented)
+## Target session model
 
 | Layer | Mechanism | Purpose |
 |--------|-----------|---------|
-| **Day session** | Supabase Auth — email + password at start of day | Who is logged into the terminal; menu/role scope; long timeout (Admin-configurable, e.g. all day or N hours) |
-| **Screen lock** | Idle timeout → `PinReauthDialog` | Same staff re-unlocks with **their** PIN; resume where they were; exempt active manifest run |
-| **Action step-up** | `PinEntryDialog` / `verifyCoordinatorPin` | High-impact sign-off (may be trip leader or operator, not always day-session user) |
+| **Day session** | Supabase Auth — email + password at start of day (**built**) | JWT required for operational reads/writes |
+| **Screen lock** | Idle timeout → `PinReauthDialog` (**not built**) | Same staff re-unlocks with **their** PIN; resume where they were; exempt active manifest run |
+| **Action step-up** | `PinEntryDialog` / `verifyCoordinatorPin` (**built**) | High-impact sign-off (may be trip leader or operator, not always day-session user) |
 
 **Do not conflate** day login, screen unlock, and action PIN — three separate concerns.
 
@@ -29,13 +29,14 @@ RBAC is **intentionally last**. Until BL-002 ships, interim PIN + permissive ano
 - **Menu access:** extend `menu-access-matrix.tsx` + future `role_menu_access` — do not bake irreversible route hiding in random components.
 - **System parameters:** put tunable timeouts in `system_parameters` keys (prefix `auth_` when adding RBAC-related keys) — not magic numbers in components.
 - **Protected tables:** extend `AUTH_PROTECTED_TABLES` in `src/lib/backup-restore/constants.ts` when adding auth/RBAC tables — do not skip.
+- **Operational RLS:** new tables `GRANT` to `authenticated` (and `service_role`). Anon SELECT only for `PUBLIC_ANON_SELECT_TABLES`. Anon EXECUTE only for `PUBLIC_ANON_EXECUTE_FUNCTIONS` (`submit_public_form`). Server routes (SMS, backup, app-ticket notify) use `createServiceServerClient()`.
 
 ## Forbidden patterns (block BL-002)
 
 - **PIN-only as the only identity path** in new modules — must also work when `user` (Supabase Auth) is present.
 - **Replacing `getActiveUserProfile()`** with auth-only session state for operational attribution.
-- **New auth bypasses** — e.g. service-role client calls from browser, hard-coded admin UUIDs, `localStorage` role flags without staff_registry backing.
-- **authenticated-only RLS** on tables PIN terminals must write — breaks field sessions until BL-002 migrates JWT; use anon + permissive policies OR `SECURITY DEFINER` RPCs granted to anon (see `live-db-ship-gate.mdc`).
+- **New auth bypasses** — e.g. service-role client calls from **browser**, hard-coded admin UUIDs, `localStorage` role flags without staff_registry backing.
+- **Re-opening `anon` ALL** on participants, staff, incidents, attendance, or other PII/ops tables.
 - **Tight row-level RLS** keyed to a single interim hack (e.g. `current_setting('app.staff_id')`) without `auth.uid()` / `staff_registry.auth_user_id` path — will be rewritten at BL-002.
 - **Duplicate login/session stores** — do not add second profile blobs; extend `ActiveUserProfile` / `USER_PROFILE_KEY` or Supabase session, not both competing.
 - **Irreversible menu locks** in feature PRs — use placeholder gates that BL-002 can wire to `role_menu_access`.
@@ -44,7 +45,7 @@ RBAC is **intentionally last**. Until BL-002 ships, interim PIN + permissive ano
 ## SQL / migrations
 
 - New staff-linked tables: FK to `staff_registry(id)` for actor columns; optional `auth_user_id` only on `staff_registry`, not duplicated per row unless audit requires it.
-- RPCs: prefer `SECURITY DEFINER` + internal checks over `authenticated`-only policies when PIN and auth must both work.
+- New operational tables: `GRANT` to `authenticated` + `service_role`, not `anon`. If the public site must write, use a `SECURITY DEFINER` RPC in `PUBLIC_ANON_EXECUTE_FUNCTIONS`.
 - Document new tables in backup restore constants if they hold credentials, roles, or session config.
 
 ## Agent checklist (before shipping non-trivial work)
@@ -53,7 +54,8 @@ RBAC is **intentionally last**. Until BL-002 ships, interim PIN + permissive ano
 2. Does attribution use `reporterId` / `resolveStaffIdWithFallback`?
 3. Are PIN surfaces canonical (`src/components/auth/`)?
 4. Can this work when morning email login exists but PIN unlock is separate?
-5. Did we avoid authenticated-only RLS on operational tables?
+5. Did we **avoid anon GRANT** on operational/PII tables (keep `PUBLIC_ANON_*` exceptions only)?
 6. If adding Admin config, is it a `system_parameters` key?
+7. If adding a server route that reads ops data, does it use **service_role**, not the publishable key?
 
 If any answer is **no**, fix before handoff — do not defer to BL-002 cleanup.

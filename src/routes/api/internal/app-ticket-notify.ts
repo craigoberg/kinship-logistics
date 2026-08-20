@@ -11,7 +11,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { getServerConfig } from "@/lib/config.server";
-import { createPublishableServerClient } from "@/lib/supabase.server";
+import { createServiceServerClient } from "@/lib/supabase.server";
 import {
   jsonbParamString,
   parseNotifyEmailList,
@@ -128,7 +128,7 @@ async function handleNotify(request: Request): Promise<Response> {
 
   let supa;
   try {
-    supa = createPublishableServerClient();
+    supa = createServiceServerClient();
   } catch (e) {
     console.error("[app-ticket-notify] supabase client", e);
     return jsonOk({
