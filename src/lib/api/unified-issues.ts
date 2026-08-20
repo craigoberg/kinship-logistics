@@ -7,6 +7,7 @@ import {
 } from "@/lib/api/compliance-assets";
 import { resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
+import { publicFormHubDisplay } from "@/lib/governance/public-form-hub";
 
 export type UnifiedIssueSource =
   | "day_centre"
@@ -110,6 +111,20 @@ function occurredAtFromRow(
   const v = row.occurred_at;
   if (typeof v === "string" && v.trim()) return v;
   return createdAt;
+}
+
+function incidentListDisplay(
+  description: string,
+  opts?: { deferred?: boolean },
+): { title: string; sourceLabel: string } {
+  return (
+    publicFormHubDisplay(description, opts) ?? {
+      title: (description || "Operational incident").slice(0, 120),
+      sourceLabel: opts?.deferred
+        ? `${SOURCE_LABELS.incident} · Deferred`
+        : SOURCE_LABELS.incident,
+    }
+  );
 }
 
 export type UnifiedIssueTab = "active" | "deferred" | "resolved";
@@ -275,15 +290,17 @@ export async function listOpenUnifiedIssues(
       for (const r of (incRes.data ?? []) as Array<Record<string, unknown>>) {
         const sev = incidentSevToUnified(r.severity as string | null);
         const key = `incident:${String(r.id)}`;
+        const description = String(r.description ?? "");
+        const display = incidentListDisplay(description);
         out.push({
           key,
           source: "incident",
-          sourceLabel: SOURCE_LABELS.incident,
+          sourceLabel: display.sourceLabel,
           category: String(r.incident_type ?? "incident").replace("_", " "),
           subCategory: (r.event_id as string | null) ?? null,
           severity: sev,
-          title: String(r.description ?? "Operational incident").slice(0, 120),
-          description: String(r.description ?? ""),
+          title: display.title,
+          description,
           status: "resolved",
           createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
@@ -418,15 +435,17 @@ export async function listOpenUnifiedIssues(
       const sev = incidentSevToUnified(r.severity as string | null);
       const key = `incident:${String(r.id)}`;
       const deferEntry = deferState.get(key);
+      const description = String(r.description ?? "");
+      const display = incidentListDisplay(description);
       out.push({
         key,
         source: "incident",
-        sourceLabel: SOURCE_LABELS.incident,
+        sourceLabel: display.sourceLabel,
         category: String(r.incident_type ?? "incident").replace("_", " "),
         subCategory: (r.event_id as string | null) ?? null,
         severity: sev,
-        title: String(r.description ?? "Operational incident").slice(0, 120),
-        description: String(r.description ?? ""),
+        title: display.title,
+        description,
         status: String(r.status ?? "pending"),
         createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
@@ -646,15 +665,17 @@ async function fetchDeferredNonDayCentreIssues(
     const sev = incidentSevToUnified(r.severity as string | null);
     const key = `incident:${String(r.id)}`;
     const meta = deferState.get(key)!;
+    const description = String(r.description ?? "");
+    const display = incidentListDisplay(description, { deferred: true });
     out.push({
       key,
       source: "incident",
-      sourceLabel: `${SOURCE_LABELS.incident} · Deferred`,
+      sourceLabel: display.sourceLabel,
       category: String(r.incident_type ?? "incident").replace("_", " "),
       subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
       severity: sev,
-      title: String(r.description ?? "Operational incident").slice(0, 120),
-      description: String(r.description ?? ""),
+      title: display.title,
+      description,
       status: String(r.status ?? "pending"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),

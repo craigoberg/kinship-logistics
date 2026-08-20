@@ -29,6 +29,13 @@ import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
 import { hubIssueContextMeta } from "@/lib/governance/hub-issue-context";
 import {
+  formatPublicFormManageBody,
+  isPublicFormHubText,
+  parsePublicFormHubText,
+  publicFormIssuePreviewTitle,
+  PUBLIC_WEB_HUB_BADGE,
+} from "@/lib/governance/public-form-hub";
+import {
   findHubReviewStartedNote,
   formatHubWaitDuration,
   isHubReviewStarted,
@@ -370,15 +377,23 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
 
   // Parse event context suffix embedded by IncidentIntakeDialog
   const { cleanText } = parseContextSuffix(issue.description ?? "");
-  const cleanTitle = stripPrefixes(cleanText || issue.title);
+  const publicForm = parsePublicFormHubText(issue.description ?? "");
+  const isPublicWeb = !!publicForm || isPublicFormHubText(issue.description);
+  const cleanTitle = publicForm
+    ? publicFormIssuePreviewTitle(publicForm)
+    : stripPrefixes(cleanText || issue.title);
 
   // Only show the extended description when it's meaningfully longer (truncation occurred)
-  const extendedDesc =
-    cleanText.length > (issue.title.length + 10) ? cleanText : null;
+  const extendedDesc = publicForm
+    ? formatPublicFormManageBody(publicForm)
+    : cleanText.length > (issue.title.length + 10)
+      ? cleanText
+      : null;
 
   // Detect prefix tags for display badge
   const hasVerbalWorkaround = /^\[VERBAL WORKAROUND\]/i.test(issue.description ?? "");
-  const hasIncidentTag = /^\[INCIDENT\]/i.test(issue.description ?? "");
+  const hasIncidentTag =
+    !isPublicWeb && /^\[INCIDENT\]/i.test(issue.description ?? "");
   const isHealthSafety =
     issue.subCategory === "Health & Safety" ||
     /\[HEALTH & SAFETY\]/i.test(issue.description ?? "");
@@ -387,7 +402,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
     activeExclusion.status === "active" &&
     isActiveUserManager();
 
-  const { location, reporter } = hubIssueContextMeta(issue);
+  const { location, reporter, reference } = hubIssueContextMeta(issue);
   const notes = timelineQuery.data ?? [];
   const reviewStartedNote = findHubReviewStartedNote(notes);
   const reviewStarted = isHubReviewStarted(notes);
@@ -406,10 +421,15 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
             {issue.severity.toUpperCase()}
           </Badge>
         )}
-        <Badge variant="secondary">
+        <Badge
+          className={isPublicWeb ? PUBLIC_WEB_HUB_BADGE : undefined}
+          variant={isPublicWeb ? "default" : "secondary"}
+        >
           {isHealthSafety
             ? "Health & Safety"
-            : (SOURCE_LABEL_CLEAN[issue.source] ?? issue.sourceLabel)}
+            : isPublicWeb
+              ? issue.sourceLabel.replace(/\s·\sDeferred$/, "")
+              : (SOURCE_LABEL_CLEAN[issue.source] ?? issue.sourceLabel)}
         </Badge>
         <Badge className={HUB_WORKFLOW_STATUS_BADGE[workflow]}>
           {HUB_WORKFLOW_STATUS_LABEL[workflow]}
@@ -423,9 +443,11 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
         {activeExclusion?.status === "active" && (
           <Badge className="bg-amber-600 text-white text-[10px]">Infectious exclusion</Badge>
         )}
-        <span className="text-xs text-muted-foreground capitalize">
-          {issue.category?.replace(/_/g, " ")}
-        </span>
+        {!isPublicWeb && (
+          <span className="text-xs text-muted-foreground capitalize">
+            {issue.category?.replace(/_/g, " ")}
+          </span>
+        )}
       </div>
 
       <p className="font-medium leading-snug">{cleanTitle}</p>
@@ -436,6 +458,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
 
       <HubContextMetaGrid
         rows={[
+          ...(reference ? [{ label: "Ref", value: reference }] : []),
           { label: "Location", value: location },
           { label: "Reported by", value: reporter ?? "Unknown staff" },
           { label: "Occurred", value: <FormattedDateTime value={issue.occurredAt} /> },

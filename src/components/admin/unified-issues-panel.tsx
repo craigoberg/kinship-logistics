@@ -46,6 +46,12 @@ import type {
 } from "@/lib/api/unified-issues";
 import { ManageIssueDialog } from "./resolve-issue-dialog";
 import { sortUnifiedIssuesByRygeThenExpiry } from "@/lib/governance-sort";
+import {
+  isPublicFormHubText,
+  PUBLIC_WEB_HUB_BADGE,
+} from "@/lib/governance/public-form-hub";
+
+type CategoryFilter = UnifiedIssueSource | "all" | "public_web";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
@@ -53,11 +59,12 @@ interface Props {
   openIssueId?: string | null;
 }
 
-const CATEGORY_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }> = [
+const CATEGORY_OPTIONS: Array<{ value: CategoryFilter; label: string }> = [
   { value: "all", label: "All categories" },
   { value: "day_centre", label: "Day Centre" },
   { value: "event", label: "Trip Day" },
   { value: "incident", label: "Incident" },
+  { value: "public_web", label: "Public web" },
   { value: "escalation", label: "Escalation" },
 ];
 
@@ -114,9 +121,7 @@ function IssuesList({
     staleTime: 30_000,
   });
   const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
-  const [categoryFilter, setCategoryFilter] = useState<UnifiedIssueSource | "all">(
-    "all",
-  );
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [severityFilter, setSeverityFilter] = useState<
     "all" | "red" | "yellow" | "green"
   >("all");
@@ -126,7 +131,14 @@ function IssuesList({
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const filtered = all.filter((i) => {
-      if (categoryFilter !== "all" && i.source !== categoryFilter) return false;
+      const publicWeb = isPublicFormHubText(i.description);
+      if (categoryFilter === "public_web") {
+        if (!publicWeb) return false;
+      } else if (categoryFilter === "incident") {
+        if (i.source !== "incident" || publicWeb) return false;
+      } else if (categoryFilter !== "all" && i.source !== categoryFilter) {
+        return false;
+      }
       if (severityFilter !== "all" && i.severity !== severityFilter) return false;
       if (needle) {
         const hay = `${i.title} ${i.description} ${i.category} ${i.subCategory ?? ""}`.toLowerCase();
@@ -167,7 +179,7 @@ function IssuesList({
           <Label className="text-xs text-muted-foreground">Category</Label>
           <Select
             value={categoryFilter}
-            onValueChange={(v) => setCategoryFilter(v as UnifiedIssueSource | "all")}
+            onValueChange={(v) => setCategoryFilter(v as CategoryFilter)}
           >
             <SelectTrigger className="h-8 w-40">
               <SelectValue />
@@ -239,7 +251,7 @@ function IssuesList({
       ) : (
         <div className="space-y-2">
           {visible.map((i) => {
-            const { location, reporter } = hubIssueContextMeta(i);
+            const { location, reporter, reference } = hubIssueContextMeta(i);
             const updatedAt = issueUpdatedAt(i);
             const workflow = deriveIssueWorkflowStatus(i, reviewStartedKeys);
             const deferredUntil = issueDeferredUntil(i);
@@ -265,7 +277,13 @@ function IssuesList({
                 badges={
                   <>
                     {severityBadge(i.severity)}
-                    <Badge className={CATEGORY_BADGE[i.source]}>
+                    <Badge
+                      className={
+                        isPublicFormHubText(i.description)
+                          ? PUBLIC_WEB_HUB_BADGE
+                          : CATEGORY_BADGE[i.source]
+                      }
+                    >
                       {i.sourceLabel}
                     </Badge>
                   </>
@@ -282,6 +300,7 @@ function IssuesList({
                       ...(deferredUntil && workflow === "deferred"
                         ? [{ label: "Deferred to", value: deferredUntil }]
                         : []),
+                      ...(reference ? [{ label: "Ref", value: reference }] : []),
                       { label: "Location", value: location },
                       { label: "Reported by", value: reporter ?? "Unknown staff" },
                       {

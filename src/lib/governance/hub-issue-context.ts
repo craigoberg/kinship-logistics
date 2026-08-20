@@ -1,9 +1,14 @@
 import type { UnifiedIssue } from "@/lib/api/unified-issues";
 import { hubReporterDisplay } from "@/lib/governance/hub-reporter-display";
+import {
+  parsePublicFormHubText,
+  publicFormLocationLabel,
+} from "@/lib/governance/public-form-hub";
 
 export interface HubIssueContextMeta {
   location: string | null;
   reporter: string | null;
+  reference?: string | null;
 }
 
 /** Who / where for Human Incidents — shared by list cards and manage dialog. */
@@ -11,6 +16,15 @@ export function hubIssueContextMeta(issue: UnifiedIssue): HubIssueContextMeta {
   const raw = (issue.raw ?? {}) as Record<string, unknown>;
   const desc = String(raw.issue_description ?? issue.description ?? "");
   const reporter = hubReporterDisplay(String(raw.reported_by ?? ""), desc);
+
+  const publicForm = parsePublicFormHubText(desc);
+  if (publicForm) {
+    return {
+      location: publicFormLocationLabel(publicForm.channel),
+      reporter: publicForm.from || reporter,
+      reference: publicForm.referenceCode,
+    };
+  }
 
   if (issue.source === "incident") {
     const eventMatch = desc.match(/\[Event:\s*([^·\]]+)/);

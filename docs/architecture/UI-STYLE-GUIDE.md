@@ -128,6 +128,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Tables (dense data)** | Defined (office) | `Table` | Admin matrices, export views | Field routes + Governance Hub: use card rows |
 | **Governance Hub list row** | **Defined** | `HubListCard` + `HubListCardBody` | Human Incidents, Maintenance | Status badge + chevron **pinned top-right**; severity badges left; meta rows below |
 | **Hub list issue body** | **Defined** | `parseHubIssueBody` / `HubListCardBody` | Human + Maintenance cards | **Green:** `Issue:` only · **Yellow:** + `Workaround:` · **Red:** + `Authorising manager:` + `Plan:` (always 3 lines; empty → `—`) |
+| **Hub Public web voice** | **Defined** | Indigo `Public web` badge + Issue preview | `/public/forms` → Human Incidents | Not an Incident badge. Complaints stay **Yellow**; compliments/enquiries **Green**. Card = **Issue preview only** (~140 chars of the message) — no empty Workaround. Open Manage for full text + ref. |
 | **Office manage dialog (multi action)** | **Defined** | `ManageItemShell` | Hub resolve, compliance, maintenance | **Footer** = bottom button bar inside Manage dialog: **Close** (left, outline) + Log Note + Resolve (+ defer/council toggles in body) |
 | **RYGE severity chips** | **Defined** | `RYGE_SEVERITY_CHIPS` in `ryge-severity-chips.ts` | Log Anomaly, maintenance add | Green/yellow/red pill selectors — see §RYGE colours below |
 | **Trip left-trip / Not Attending** | **Defined** | `TripAbsentDispositionDialog` + `TripReinstateDialog` | Morning/Evening Absent, Check-In Not Attending | Disposition · safety plan ≥20 · Yellow/Red · Leader PIN. Floor → absent. |
@@ -512,6 +513,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-20 | Hub Public web voice | Public forms stay in Human Incidents; indigo **Public web** badge (not orange Incident); Issue line = form type + ~140 char message; Yellow complaints skip empty Workaround |
 | 2026-08-15 | SIM clock on all date/time work | GUARDRAILS §5.3 — floor stamps and “today” must use `operationalNowIso` / `todayLocalIso`; wall `new Date()` is a defect |
 | 2026-08-15 | Care Profile dialog width | Office modal `max-w-6xl` so Schedules Run today + Off today + Exception fit |
 | 2026-08-15 | Day Centre Off today + run live status | Schedule-row **Off today** (today only); `RunLiveStatusBadge`; Manifest `OfficeRunNoticeBanner` + `trip_run_notices` |

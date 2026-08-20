@@ -7,6 +7,11 @@ export interface HubIssueBodyLines {
   authorisingManager: string | null;
   plan: string | null;
   workaround: string | null;
+  /**
+   * Public web voice (and similar): Issue preview only — hide empty
+   * Workaround even when the Hub severity is Yellow.
+   */
+  issueOnly?: boolean;
 }
 
 const EMPTY = "—";
