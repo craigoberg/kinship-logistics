@@ -1,18 +1,30 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnifiedIssuesPanel } from "./unified-issues-panel";
 import { ComplianceAssetsPanel } from "./compliance-assets-panel";
 import { MaintenancePanel } from "./maintenance-panel";
 import { AppTicketsPanel } from "./app-tickets-panel";
 
-type HubTab = "issues" | "maintenance" | "assets" | "app_tickets";
+export type HubTab = "issues" | "maintenance" | "assets" | "app_tickets";
 
 export function GovernanceHubWorkspace(props: {
   openIssueId?: string | null;
+  initialTab?: HubTab;
 }) {
-  const { openIssueId } = props;
-  const [hubTab, setHubTab] = useState<HubTab>("issues");
+  const { openIssueId, initialTab } = props;
+  const [hubTab, setHubTab] = useState<HubTab>(() => {
+    if (openIssueId) return "issues";
+    return initialTab ?? "issues";
+  });
   const [manageAssetId, setManageAssetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openIssueId) {
+      setHubTab("issues");
+      return;
+    }
+    if (initialTab) setHubTab(initialTab);
+  }, [openIssueId, initialTab]);
 
   return (
     <Tabs

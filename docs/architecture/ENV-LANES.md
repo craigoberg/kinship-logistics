@@ -78,6 +78,10 @@ VITE_SHOW_TEST_TOOLS=true
 SUPABASE_URL=https://YOUR_TEST_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...   # host secrets only — never VITE_
+POSTMARK_SERVER_TOKEN=...       # App ticket notify (BL-116); never VITE_
+POSTMARK_FROM=...               # verified Postmark Sender Signature
+APP_PUBLIC_URL=https://crm-test.yada.org.au   # optional Hub link in ticket emails
+# APP_TICKET_NOTIFY_SECRET=...  # only if you add a Supabase Database Webhook to the same route
 ```
 
 Do **not** paste service_role into chat or commit it.

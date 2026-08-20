@@ -1505,7 +1505,9 @@ Implementation anchors:
 
 Green companion to Big Red — **not** a fourth Incident lane. Available globally and as a Ticket chip on Dialog / Sheet forms. Always GREEN-equivalent (description + auto context). Writes **only** to `app_tickets`. Hidden on PIN, Incident / Fault, and the Raise ticket dialog itself.
 
-Implementation: `GlobalRaiseTicketDrawer`, `RaiseTicketDialog`, `TicketSurfaceProvider`.
+Office inbox: Dashboard Exception Hub Band 3 **App tickets** tile (all open items; amber while any remain) plus optional **server email** (Postmark) to Admin `app_tickets.notify_to`. Filing succeeds if mail is skipped or fails. Not Council mailto (BL-062).
+
+Implementation: `GlobalRaiseTicketDrawer`, `RaiseTicketDialog`, `TicketSurfaceProvider`, `useAppTicketsTileFeed`, `/api/internal/app-ticket-notify`.
 
 ---
 

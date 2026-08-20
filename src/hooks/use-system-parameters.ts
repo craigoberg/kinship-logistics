@@ -240,6 +240,16 @@ export function useCouncilEmailFrom(): string {
   return useSystemParameter<string>("site_management.council_email_from", "");
 }
 
+/** Comma-separated office inbox for App ticket Postmark notify. */
+export function useAppTicketNotifyTo(): string {
+  return useSystemParameter<string>("app_tickets.notify_to", "");
+}
+
+/** Optional From for App ticket notify (blank = POSTMARK_FROM env). */
+export function useAppTicketNotifyFrom(): string {
+  return useSystemParameter<string>("app_tickets.notify_from", "");
+}
+
 /** Default bus depot street address (Admin → Day Centre Bus Runs). */
 export function useDepotAddress(): string {
   return useSystemParameter<string>("depot_address", "");

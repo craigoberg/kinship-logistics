@@ -30,7 +30,11 @@ export const appTicketsTopic: HelpTopic = {
     },
     {
       heading: "Find it in Hub → App tickets",
-      body: "Everyone can see the list. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. This tab is not Maintenance & Repairs and is not part of the Human Incidents register.",
+      body: "Everyone can see the list. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. This tab is not Maintenance & Repairs and is not part of the Human Incidents register. Open tickets also light the Dashboard **App tickets** tile (Band 3).",
+    },
+    {
+      heading: "Office email (optional)",
+      body: "Admin → System Parameters → App ticket notify sets the To inbox. When Postmark is configured on the host, a new ticket emails that address. Filing still works if email is skipped. This is not the Council mailto path.",
     },
   ],
 };

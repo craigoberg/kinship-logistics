@@ -14,7 +14,7 @@ import {
   type FailedClearanceReport,
   type TodayManifestSummary,
 } from "@/lib/data-store";
-import { formatDate } from "@/lib/utils";
+import { formatDate, formatDateTime } from "@/lib/utils";
 import {
   listComplianceAssets,
   computeRyge,
@@ -27,6 +27,7 @@ import {
   operationalNowMs,
   useOperationalTodayIso,
 } from "@/lib/operational-clock";
+import { listAppTickets } from "@/lib/api/app-tickets";
 
 /** PostgREST GET URLs blow up past ~100 UUIDs in an `in.()` filter. */
 const HUB_NOTE_ID_CHUNK = 80;
@@ -1066,6 +1067,34 @@ export function useOperationalEmergencyFeed() {
       }
 
       return out;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// BL-116 — open App tickets (inbox, not stale-only)
+// ---------------------------------------------------------------------------
+
+export interface AppTicketTileRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+export function useAppTicketsTileFeed() {
+  return useQuery<AppTicketTileRow[]>({
+    queryKey: ["app-tickets", "tile"],
+    queryFn: async () => {
+      const items = await listAppTickets("active");
+      return items.map((t) => ({
+        key: t.id,
+        title: t.title,
+        detail: `${t.reportedByName} · ${t.pathLabel} · ${formatDateTime(t.createdAt)}`,
+        severity: "warning" as const,
+      }));
     },
     staleTime: 30_000,
     refetchOnWindowFocus: true,

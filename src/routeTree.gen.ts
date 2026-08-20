@@ -32,6 +32,7 @@ import { Route as PublicFormsFormKeyRouteImport } from './routes/public.forms.$f
 import { Route as ApiInternalTransportPickupSmsRouteImport } from './routes/api/internal/transport-pickup-sms'
 import { Route as ApiInternalDepartureSmsRouteImport } from './routes/api/internal/departure-sms'
 import { Route as ApiInternalAttendanceSmsRouteImport } from './routes/api/internal/attendance-sms'
+import { Route as ApiInternalAppTicketNotifyRouteImport } from './routes/api/internal/app-ticket-notify'
 
 const TransportRoute = TransportRouteImport.update({
   id: '/transport',
@@ -150,6 +151,12 @@ const ApiInternalAttendanceSmsRoute =
     path: '/api/internal/attendance-sms',
     getParentRoute: () => rootRouteImport,
   } as any)
+const ApiInternalAppTicketNotifyRoute =
+  ApiInternalAppTicketNotifyRouteImport.update({
+    id: '/api/internal/app-ticket-notify',
+    path: '/api/internal/app-ticket-notify',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -170,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/public/$slug': typeof PublicSlugRoute
   '/public/forms': typeof PublicFormsRouteWithChildren
   '/public/': typeof PublicIndexRoute
+  '/api/internal/app-ticket-notify': typeof ApiInternalAppTicketNotifyRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
@@ -193,6 +201,7 @@ export interface FileRoutesByTo {
   '/transport': typeof TransportRoute
   '/public/$slug': typeof PublicSlugRoute
   '/public': typeof PublicIndexRoute
+  '/api/internal/app-ticket-notify': typeof ApiInternalAppTicketNotifyRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
@@ -219,6 +228,7 @@ export interface FileRoutesById {
   '/public/$slug': typeof PublicSlugRoute
   '/public/forms': typeof PublicFormsRouteWithChildren
   '/public/': typeof PublicIndexRoute
+  '/api/internal/app-ticket-notify': typeof ApiInternalAppTicketNotifyRoute
   '/api/internal/attendance-sms': typeof ApiInternalAttendanceSmsRoute
   '/api/internal/departure-sms': typeof ApiInternalDepartureSmsRoute
   '/api/internal/transport-pickup-sms': typeof ApiInternalTransportPickupSmsRoute
@@ -246,6 +256,7 @@ export interface FileRouteTypes {
     | '/public/$slug'
     | '/public/forms'
     | '/public/'
+    | '/api/internal/app-ticket-notify'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
@@ -269,6 +280,7 @@ export interface FileRouteTypes {
     | '/transport'
     | '/public/$slug'
     | '/public'
+    | '/api/internal/app-ticket-notify'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
@@ -294,6 +306,7 @@ export interface FileRouteTypes {
     | '/public/$slug'
     | '/public/forms'
     | '/public/'
+    | '/api/internal/app-ticket-notify'
     | '/api/internal/attendance-sms'
     | '/api/internal/departure-sms'
     | '/api/internal/transport-pickup-sms'
@@ -317,6 +330,7 @@ export interface RootRouteChildren {
   StaffRoute: typeof StaffRoute
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
+  ApiInternalAppTicketNotifyRoute: typeof ApiInternalAppTicketNotifyRoute
   ApiInternalAttendanceSmsRoute: typeof ApiInternalAttendanceSmsRoute
   ApiInternalDepartureSmsRoute: typeof ApiInternalDepartureSmsRoute
   ApiInternalTransportPickupSmsRoute: typeof ApiInternalTransportPickupSmsRoute
@@ -485,6 +499,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiInternalAttendanceSmsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/internal/app-ticket-notify': {
+      id: '/api/internal/app-ticket-notify'
+      path: '/api/internal/app-ticket-notify'
+      fullPath: '/api/internal/app-ticket-notify'
+      preLoaderRoute: typeof ApiInternalAppTicketNotifyRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -533,6 +554,7 @@ const rootRouteChildren: RootRouteChildren = {
   StaffRoute: StaffRoute,
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,
+  ApiInternalAppTicketNotifyRoute: ApiInternalAppTicketNotifyRoute,
   ApiInternalAttendanceSmsRoute: ApiInternalAttendanceSmsRoute,
   ApiInternalDepartureSmsRoute: ApiInternalDepartureSmsRoute,
   ApiInternalTransportPickupSmsRoute: ApiInternalTransportPickupSmsRoute,

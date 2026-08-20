@@ -22,6 +22,7 @@ import { FieldActionButton } from "@/components/ui/field-action-button";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { APP_TICKETS_KEY, createAppTicket } from "@/lib/api/app-tickets";
+import { notifyAppTicketCreated } from "@/lib/app-tickets/notify-client";
 import {
   buildAppTicketContext,
   useHarvestedOpsContext,
@@ -89,7 +90,7 @@ export function RaiseTicketDialog({ open, onOpenChange }: Props) {
       const titleBits = [ops.pathLabel, snapForm].filter(Boolean);
       const title = titleBits.join(" · ") || "App ticket";
 
-      await createAppTicket({
+      const ticket = await createAppTicket({
         title,
         description: description.trim(),
         reportedByStaffId: staffId,
@@ -101,8 +102,9 @@ export function RaiseTicketDialog({ open, onOpenChange }: Props) {
       });
 
       qc.invalidateQueries({ queryKey: APP_TICKETS_KEY });
+      void notifyAppTicketCreated(ticket);
       toast.success("GREEN ticket filed.", {
-        description: "Visible in Hub → App tickets.",
+        description: "Visible on the Dashboard tile and Hub → App tickets.",
       });
       onOpenChange(false);
     } catch (err) {

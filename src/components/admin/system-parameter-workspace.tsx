@@ -45,12 +45,17 @@ import {
   CouncilEmailAdminPanel,
   COUNCIL_EMAIL_PARAM_KEYS,
 } from "./council-email-admin-panel";
+import {
+  AppTicketNotifyAdminPanel,
+  APP_TICKET_NOTIFY_PARAM_KEYS,
+} from "./app-ticket-notify-admin-panel";
 import { TourRollCallDefaultsPanel } from "./tour-roll-call-defaults-panel";
 import { MotdAdminPanel, MOTD_PARAM_KEYS } from "./motd-admin-panel";
 
 const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...MANDATED_CHECK_PARAM_KEYS,
   ...COUNCIL_EMAIL_PARAM_KEYS,
+  ...APP_TICKET_NOTIFY_PARAM_KEYS,
   ...MOTD_PARAM_KEYS,
 ]);
 
@@ -104,11 +109,13 @@ export function SystemParameterWorkspace() {
 
       <CouncilEmailAdminPanel />
 
+      <AppTicketNotifyAdminPanel />
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Tunable operational thresholds. Every change is appended to the operational ledger with
-          the Managers justification. Walkthrough checklists and Council email are edited above
-          (not as JSON).
+          the Managers justification. Walkthrough checklists, Council email, and App ticket notify
+          are edited above (not as JSON).
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>

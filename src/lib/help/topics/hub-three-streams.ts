@@ -47,7 +47,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     },
     {
       heading: "App tickets — the software, not the bus",
-      body: "GREEN notes about Connect itself (a form would not save, a button did the wrong thing). Raised from the green Raise ticket control. Lives in Hub → App tickets. Do not put these in Maintenance or Human Incidents.",
+      body: "GREEN notes about Connect itself (a form would not save, a button did the wrong thing). Raised from the green Raise ticket control. Lives in Hub → App tickets and on the Dashboard App tickets tile. Do not put these in Maintenance or Human Incidents.",
     },
     {
       heading: "Health & Safety sits beside the streams",

@@ -15,6 +15,7 @@ import {
   Siren,
   Split,
   Stethoscope,
+  Ticket,
   Truck,
   UserCheck,
   UserX,
@@ -42,6 +43,7 @@ import {
   useHubHumanIncidentsFeed,
   useInfectiousExclusionsFeed,
   useOperationalEmergencyFeed,
+  useAppTicketsTileFeed,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
@@ -141,6 +143,7 @@ export function OperationsExceptionHub() {
   });
   const { data: infectiousRows = [] }     = useInfectiousExclusionsFeed();
   const { data: emergencyOpsRows = [] }   = useOperationalEmergencyFeed();
+  const { data: appTicketRows = [] }      = useAppTicketsTileFeed();
 
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
@@ -167,9 +170,13 @@ export function OperationsExceptionHub() {
   }));
 
 
-  const hubLink = (icon: React.ReactNode, label: string) => (
+  const hubLink = (
+    icon: React.ReactNode,
+    label: string,
+    search?: { tab?: "issues" | "maintenance" | "assets" | "app_tickets" },
+  ) => (
     <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
-      <Link to="/governance">{icon}{label}</Link>
+      <Link to="/governance" search={search ?? {}}>{icon}{label}</Link>
     </Button>
   );
 
@@ -296,6 +303,22 @@ export function OperationsExceptionHub() {
       })),
     },
     {
+      id: "app-tickets",
+      anchorId: "exception-section-app-tickets",
+      label: "App tickets",
+      icon: Ticket,
+      isLive: false,
+      rows: appTicketRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<Ticket className="mr-1 h-3.5 w-3.5" />, "Open in Hub", {
+          tab: "app_tickets",
+        }),
+      })),
+    },
+    {
       id: "maintenance",
       anchorId: "exception-section-maintenance",
       label: "Maintenance",
@@ -361,7 +384,7 @@ export function OperationsExceptionHub() {
     "medication",
     "on-road",
   ]);
-  const BAND3_IDS = new Set(["hub-human"]);
+  const BAND3_IDS = new Set(["hub-human", "app-tickets"]);
 
   const band1 = buckets.filter((b) => BAND1_IDS.has(b.id));
   const band2 = buckets.filter((b) => BAND2_IDS.has(b.id));
@@ -412,7 +435,7 @@ export function OperationsExceptionHub() {
       />
       <BandSection
         label="Band 3 — Support Quality"
-        description="Incident response and Hub follow-up"
+        description="Incident response, Hub follow-up, and open app tickets"
         dotCls="bg-sky-500"
         headerCls="bg-sky-50 dark:bg-sky-950/40"
         borderCls="border-sky-300 dark:border-sky-800"
