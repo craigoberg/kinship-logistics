@@ -19,7 +19,7 @@ Recommended: one SharePoint site, e.g. **YADA Corporate Records** (name flexible
 | `06_Governance_Incidents` | Optional export/archive of serious incident packs | Restricted |
 | `07_Audit_Packs` | Generated NDIS Audit Pack ZIPs kept for retention | Restricted |
 
-Public website images (logo, favicon, photos) are **not** in this tree — that is BL-113 (Blob / Supabase Storage).
+Public website page images/PDFs (BL-119): a **separate** public-web library (e.g. `08_Public_Website` or its own site), shared by DEV/TEST/PROD, anonymously readable. Do **not** put those files in `01`–`07`. Logo/favicon/brand colours remain BL-113.
 
 ## Person folders
 

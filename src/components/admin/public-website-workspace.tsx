@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+import { CmsRichTextEditor } from "@/components/admin/cms-rich-text-editor";
 import { Switch } from "@/components/ui/switch";
 import {
   Tabs,
@@ -36,6 +36,7 @@ import {
 } from "@/lib/api/public-forms";
 import { FormattedDate } from "@/components/ui/formatted-time";
 import { isActiveUserManager } from "@/lib/data-store";
+import { sanitizeCmsHtml } from "@/lib/cms/sanitize-html";
 
 /**
  * BL-110 / BL-111 — Admin CMS for yada.org.au + form enablement + submission log.
@@ -100,11 +101,12 @@ export function PublicWebsiteWorkspace() {
     if (!editSlug) return;
     const existing = pages.find((p) => p.slug === editSlug);
     try {
+      const html = sanitizeCmsHtml(editHtml);
       const blocks = (existing?.bodyBlocks ?? []).map((b) =>
-        b.type === "richtext" ? { ...b, html: editHtml } : b,
+        b.type === "richtext" ? { ...b, html } : b,
       );
       if (!blocks.some((b) => b.type === "richtext")) {
-        blocks.push({ type: "richtext", html: editHtml });
+        blocks.push({ type: "richtext", html });
       }
       await upsertCmsPage({
         slug: editSlug,
@@ -259,15 +261,13 @@ export function PublicWebsiteWorkspace() {
                     onChange={(e) => setEditTitle(e.target.value)}
                   />
                 </div>
-                <div className="space-y-1">
-                  <Label>Body HTML (rich text block)</Label>
-                  <Textarea
-                    value={editHtml}
-                    onChange={(e) => setEditHtml(e.target.value)}
-                    rows={8}
-                    className="font-mono text-xs"
-                  />
-                </div>
+                <CmsRichTextEditor
+                  key={editSlug}
+                  value={editHtml}
+                  onChange={setEditHtml}
+                  media={media}
+                  onMediaChange={() => reload({ quiet: true })}
+                />
                 <div className="flex justify-end gap-2">
                   <Button
                     type="button"

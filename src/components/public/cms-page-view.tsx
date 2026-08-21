@@ -1,6 +1,8 @@
 import type { CmsBlock, CmsPage } from "@/lib/api/public-cms";
 import { PublicFormPanel } from "@/components/public/public-form-panel";
 import type { PublicFormDefinition } from "@/lib/api/public-forms";
+import { CMS_PROSE_CLASS, sanitizeCmsHtml } from "@/lib/cms/sanitize-html";
+import { cn } from "@/lib/utils";
 
 interface Props {
   page: CmsPage;
@@ -52,8 +54,11 @@ function BlockView({
   if (block.type === "richtext") {
     return (
       <div
-        className="prose prose-slate mb-6 max-w-none prose-a:text-[#0077a8] prose-headings:text-slate-900"
-        dangerouslySetInnerHTML={{ __html: block.html }}
+        className={cn(
+          "mb-6 max-w-none text-slate-900 [&_a]:text-[#0077a8]",
+          CMS_PROSE_CLASS,
+        )}
+        dangerouslySetInnerHTML={{ __html: sanitizeCmsHtml(block.html) }}
       />
     );
   }
