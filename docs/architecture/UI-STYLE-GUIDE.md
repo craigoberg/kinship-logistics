@@ -78,6 +78,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Occurred at (vs Logged at)** | **Defined** | `OccurredAtFields` (`DatePicker` + `HalfHourTimeField`) | Big Red Human/Asset, Log Anomaly, any late-filed issue | Operator when-it-happened; system `created_at` = logged. No future; Hub shows both |
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
 | **PIN capture** | Defined | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` | Login, step-up auth | GUARDRAILS §2.3 — never OS keyboard PIN |
+| **Idle screen lock** | **Defined** | `IdleLockGate` + `PinReauthDialog` (`dismissible={false}`, `requiredStaffId`) | After Admin idle minutes on signed-in shell | Same staff PIN; no Cancel/Escape; skip active Manifest; minutes `auth_idle_lock_minutes` (default 15; 0 = off). Wall-clock idle, not SIM. Admin: `IdleLockAdminPanel` |
 | **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
 | **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
@@ -461,6 +462,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Event Deliver roll-call row** | Defined | `MobileFieldButton` + nested **Defer** + `UserX` (`trailing`) | Morning/Evening: whole name row = **Mark accounted**; **Defer** + **No show** inside. **Second tap undoes** accounted → awaiting (fat-finger / §4.4). Deferred until / Yellow / Red timing unchanged. Notes kept. |
 | **Event Deliver roll-call group alert** | Defined | `EventDeliverRollAlertBanner` + `RollCallDeferDialog` (no `participantId`) | Bands use **Deferred until** (`expected_accounted_at`). Grace (muted): no Yellow while before Deferred until. Yellow after Deferred until; Red at Deferred until + Admin `*_red_mins_after` (default 30). Primary **Defer everyone…**; `Group Deferred +Nm until HH:mm — reason` on banner only. |
 | **Itinerary overnight hotel cue** | Defined | Caution callout + `BedDouble` Overnight badge | Multi-day non-final nights; hard gate via Confirm/Open (BL-072) |
+| **Event Manage Live tab** | **Defined** | `EventLiveWatchTab` + `fetchEventWatchSnapshot` + reused `EventDeliverStatusPanel` | Office watch of a running outing | Read-only name + status chip + time (Trip Report density — not floor `MobileFieldButton`). Day chips when multi-day. No board / check-in / Open location / Resolve. BL-120. |
 | **Caution callout (banner/strip)** | Defined | `caution-callout.ts` classes | Non-blocking office warnings (overnight hotel, close-run notes) | **Must** include `dark:` text (`amber-100` / `amber-50`) — never `text-amber-950` / `text-amber-900` alone (unreadable on dark UI) |
 
 ### Component inventory (Defined in Events flow)
@@ -481,6 +483,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Manager PIN (location open/close) | `PinEntryTrigger` | Existing |
 | RED anomaly (trip day) | `EventDayVerbalAnomalyFlow` → `LogAnomalyModal` + `VerbalConsultationDialog` | §12.6 |
 | Empty states | Dashed border card + icon | `itinerary-tab`, `day-sessions-tab`, `booking-payment-history` |
+| Event Manage Live watch | `EventLiveWatchTab` | Office name + chip + time; reused Group Status; no write controls |
 
 ---
 
@@ -516,6 +519,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-22 | Event Manage Live tab | Office read-only field projection — `EventLiveWatchTab` + Group Status + named people (not floor taps) — BL-120 |
+| 2026-08-22 | Idle screen lock | `IdleLockGate` + non-dismissible `PinReauthDialog`; Admin `IdleLockAdminPanel` / `auth_idle_lock_minutes` (15 default; 0 = off); skip active Manifest |
 | 2026-08-22 | Admin CMS rich text editor | `CmsRichTextEditor` Visual + HTML; URL/library insert; DOMPurify allowlist; SharePoint upload later BL-119 |
 | 2026-08-21 | Admin lookup edit | Edit code + display name in Lookups (not delete/recreate); bus run code cascade keeps client/Manifest assignment |
 | 2026-08-21 | Care Profile Support & risk | BL-114 thin org support plan (goals/strengths/needs/comms/risk) on Client pack + Care Profile tab; Hub `client_support_plan` / `client_risk_assessment`; rights/handbook ack on consents |

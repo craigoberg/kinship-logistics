@@ -12,6 +12,7 @@ import { deferralAcrossOpsTopic } from "./deferral-across-ops";
 import { eventDeliverHappyPathTopic } from "./event-deliver-happy-path";
 import { eventOpenChecksTopic } from "./event-open-checks";
 import { eventOvernightHotelTopic } from "./event-overnight-hotel";
+import { eventLiveWatchTopic } from "./event-live-watch";
 import { eventsCreateConfirmOpenTopic } from "./events-create-confirm-open";
 import { governanceHubIssueTopic } from "./governance-hub-issue";
 import { hubThreeStreamsTopic } from "./hub-three-streams";
@@ -40,6 +41,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   adminVendorsTopic,
   eventOvernightHotelTopic,
   eventsCreateConfirmOpenTopic,
+  eventLiveWatchTopic,
   eventOpenChecksTopic,
   eventDeliverHappyPathTopic,
   dayCentreHappyPathTopic,

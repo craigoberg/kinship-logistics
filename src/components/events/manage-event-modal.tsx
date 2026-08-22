@@ -1,4 +1,4 @@
-import React, { useMemo, useState, useEffect } from "react";
+import React, { useCallback, useMemo, useState, useEffect } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
@@ -7,6 +7,7 @@ import {
   ChevronDown,
   ChevronUp,
   Compass,
+  Eye,
   FileText,
   Map,
   Users,
@@ -45,8 +46,18 @@ import { ItineraryTab } from "./itinerary-tab";
 import { DaySessionsTab } from "./day-sessions-tab";
 import { EventStatusPanel } from "./event-status-panel";
 import { TripReportTab } from "./trip-report-tab";
+import { EventLiveWatchTab } from "./event-live-watch-tab";
 
-type TabKey = "roster" | "finance" | "details" | "itinerary" | "days" | "report";
+export type ManageEventTabKey =
+  | "roster"
+  | "finance"
+  | "details"
+  | "itinerary"
+  | "days"
+  | "live"
+  | "report";
+
+type TabKey = ManageEventTabKey;
 
 interface Props {
   event: EventManifest | null;
@@ -105,6 +116,10 @@ export function ManageEventModal({
     setIncidentOpen(true);
   };
 
+  const onStatusChanged = useCallback(() => {
+    void qc.invalidateQueries({ queryKey: ["event-day-sessions", eventSnapshot?.id] });
+  }, [qc, eventSnapshot?.id]);
+
   // Store event context for GlobalIncidentIntakeDrawer (§13.6)
   useEffect(() => {
     if (!open || !event) return;
@@ -141,6 +156,7 @@ export function ManageEventModal({
     ...(isOuting ? [
       { key: "itinerary" as TabKey, label: "Itinerary", icon: Map },
       { key: "days" as TabKey, label: "Trip Days", icon: CalendarDays },
+      { key: "live" as TabKey, label: "Live", icon: Eye },
     ] : []),
     { key: "finance", label: "Finance & P&L", icon: Wallet },
     ...(isOuting ? [
@@ -199,7 +215,7 @@ export function ManageEventModal({
         <EventStatusPanel
           event={event}
           mobileCompact
-          onStatusChanged={() => {}}
+          onStatusChanged={onStatusChanged}
         />
         <div className="flex shrink-0 items-center gap-2">
           {runDeliverButton}
@@ -242,7 +258,7 @@ export function ManageEventModal({
           <EventStatusPanel
             event={event}
             mobileCompact={false}
-            onStatusChanged={() => {}}
+            onStatusChanged={onStatusChanged}
           />
         </div>
       )}
@@ -274,7 +290,7 @@ export function ManageEventModal({
       </DialogHeader>
 
       <div className="mt-3 flex items-start justify-between gap-3">
-        <EventStatusPanel event={event} onStatusChanged={() => {}} />
+        <EventStatusPanel event={event} onStatusChanged={onStatusChanged} />
         <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
           {runDeliverButton}
           {incidentButton}
@@ -329,8 +345,10 @@ export function ManageEventModal({
               active
                 ? "bg-tab-active text-tab-active-foreground"
                 : "text-muted-foreground hover:bg-muted/40 hover:text-foreground",
-              // 6-tab grid: row 1 (idx 0–2) gets a bottom border to separate from row 2
-              TABS.length > 3 && idx < 3 ? "border-b border-border" : "",
+              TABS.length > 3 &&
+                idx < TABS.length - (TABS.length % 3 || 3)
+                ? "border-b border-border"
+                : "",
             )}
             aria-current={active ? "page" : undefined}
           >
@@ -350,6 +368,8 @@ export function ManageEventModal({
         <ItineraryTab event={event} />
       ) : tab === "days" ? (
         <DaySessionsTab event={event} />
+      ) : tab === "live" ? (
+        <EventLiveWatchTab event={event} />
       ) : tab === "report" ? (
         <TripReportTab event={event} />
       ) : tab === "finance" ? (

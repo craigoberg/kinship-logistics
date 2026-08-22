@@ -21,6 +21,7 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
   roles: ["support_worker", "manager", "assistant_manager", "driver"],
   relatedIds: [
     "events-create-confirm-open",
+    "event-live-watch",
     "event-open-checks",
     "event-overnight-hotel",
     "checkin-roll-escalations",

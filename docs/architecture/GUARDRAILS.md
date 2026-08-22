@@ -86,7 +86,7 @@ Full **menu / role** RBAC remains deferred (`docs/BACKLOG.md` **BL-002**). **Day
 #### Target two-tier session
 
 1. **Day session** — **built.** Staff signs in with **email + password** (Supabase Auth) at start of day. Session JWT is required for operational table access.
-2. **Screen lock** — **not yet built.** After Admin-configurable **idle** minutes (e.g. 15), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active manifest run** may suppress idle lock (BL-002 remainder).
+2. **Screen lock** — **built 2026-08-22.** After Admin-configurable **idle** minutes (`system_parameters.auth_idle_lock_minutes`, default **15**; **0** = off), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active Manifest run** for this staff suppresses idle lock. Timer is wall-clock idle (not SIM).
 3. **Action step-up** — **built.** High-impact operations use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
 
 #### Build regulations (effective immediately)
@@ -1110,6 +1110,7 @@ Rules:
 - **Do not merge Setup and Deliver** — they have different rhythms, different primary users, and different UI density requirements.
 - **Event Deliver** must also be launchable **from inside an event card** in `/events` (a "Run this event" button when the event is confirmed and today is a valid trip day).
 - **Trip Report** remains in `/events` as a tab; it is **not** inside Event Deliver — closing the field session triggers a return to office review.
+- **Live watch (BL-120):** Event Manage **Live** tab is a **read-only office projection** of the same tables Deliver and Manifest write (group status, named pickups, attendance, programme, rolls, open issues). It is **not** a fourth write surface and must not expose board / check-in / open-location / Resolve controls. Hub remains issue close-out.
 
 #### 12.13.2 The Extended Golden Rule (locked)
 
