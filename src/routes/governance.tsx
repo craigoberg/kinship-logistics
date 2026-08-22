@@ -4,7 +4,7 @@ import {
   type HubTab,
 } from "@/components/admin/governance-hub-workspace";
 
-const HUB_TABS: HubTab[] = ["issues", "maintenance", "assets", "app_tickets"];
+const HUB_TABS: HubTab[] = ["issues", "maintenance", "assets", "onboarding", "app_tickets"];
 
 export const Route = createFileRoute("/governance")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -17,7 +17,7 @@ export const Route = createFileRoute("/governance")({
   head: () => ({
     meta: [
       { title: "Governance Hub — Yada Connect" },
-      { name: "description", content: "Review human incidents, maintenance, compliance, and app tickets." },
+      { name: "description", content: "Review human incidents, maintenance, compliance, onboarding, and app tickets." },
     ],
   }),
   component: GovernancePage,
@@ -32,7 +32,7 @@ function GovernancePage() {
           Governance Hub
         </h1>
         <p className="text-sm text-muted-foreground">
-          Review human incidents, track maintenance &amp; repairs, manage compliance renewals, and close app tickets.
+          Review human incidents, maintenance, compliance, onboarding packs, and app tickets.
         </p>
       </header>
       <GovernanceHubWorkspace openIssueId={issue} initialTab={tab} />

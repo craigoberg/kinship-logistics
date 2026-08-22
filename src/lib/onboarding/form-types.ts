@@ -73,7 +73,24 @@ export interface ClientConsentsDraft {
   photoScope: string;
   outingCommunity: boolean;
   emergencyMedical: boolean;
+  /** BL-114 — rights / complaints / handbook acknowledgement. */
+  rightsHandbook: boolean;
 }
+
+/** BL-114 — thin org support plan + comms + risk (0136/0125/0108). */
+export interface ClientSupportDraft {
+  goals: string;
+  strengths: string;
+  needs: string;
+  preferences: string;
+  communicationMode: string;
+  communicationStrategies: string;
+  riskHazards: string;
+  riskControls: string;
+}
+
+export const MIN_SUPPORT_PLAN_CHARS = 20;
+export const MIN_COMMUNICATION_MODE_CHARS = 6;
 
 export interface ClientFormPayload {
   pack: "client";
@@ -112,6 +129,7 @@ export interface ClientFormPayload {
   emergencySecondaryPhone: string;
   emergencySecondaryRelationship: string;
   attendance: AttendanceDayDraft[];
+  support: ClientSupportDraft;
   consents: ClientConsentsDraft;
   officeConfirmNote: string;
 }
@@ -235,6 +253,31 @@ function emptyGuardian(): GuardianDraft {
   };
 }
 
+export function emptyClientSupport(): ClientSupportDraft {
+  return {
+    goals: "",
+    strengths: "",
+    needs: "",
+    preferences: "",
+    communicationMode: "",
+    communicationStrategies: "",
+    riskHazards: "",
+    riskControls: "",
+  };
+}
+
+export function emptyClientConsents(): ClientConsentsDraft {
+  return {
+    privacyCollection: false,
+    thirdPartySpeak: false,
+    photoVideo: false,
+    photoScope: "educational_promotional",
+    outingCommunity: false,
+    emergencyMedical: false,
+    rightsHandbook: false,
+  };
+}
+
 function defaultAttendance(): AttendanceDayDraft[] {
   return ATTENDANCE_DAY_OPTIONS.map((d) => ({
     dayCode: d.code,
@@ -293,14 +336,8 @@ export function emptyClientPayload(): ClientFormPayload {
     emergencySecondaryPhone: "",
     emergencySecondaryRelationship: "",
     attendance: defaultAttendance(),
-    consents: {
-      privacyCollection: false,
-      thirdPartySpeak: false,
-      photoVideo: false,
-      photoScope: "educational_promotional",
-      outingCommunity: false,
-      emergencyMedical: false,
-    },
+    support: emptyClientSupport(),
+    consents: emptyClientConsents(),
     officeConfirmNote: "",
   };
 }
@@ -434,6 +471,40 @@ export function emptyPayloadForPack(
   }
 }
 
+/** Merge stored JSONB onto ALPHA defaults so older client drafts still open. */
+export function hydrateOnboardingPayload(
+  pack: OnboardingPackType,
+  raw: Partial<OnboardingFormPayload> | null | undefined,
+): OnboardingFormPayload {
+  const fallback = emptyPayloadForPack(pack);
+  const merged = {
+    ...fallback,
+    ...(raw ?? {}),
+    pack,
+  } as OnboardingFormPayload;
+  if (merged.pack === "client") {
+    const rawClient = (raw ?? {}) as Partial<ClientFormPayload>;
+    merged.consents = {
+      ...emptyClientConsents(),
+      ...(rawClient.consents ?? {}),
+    };
+    merged.support = {
+      ...emptyClientSupport(),
+      ...(rawClient.support ?? {}),
+    };
+    if (!merged.guardians?.length) {
+      merged.guardians = emptyClientPayload().guardians;
+    }
+    if (!merged.attendance?.length) {
+      merged.attendance = emptyClientPayload().attendance;
+    }
+    if (!merged.selfCare) {
+      merged.selfCare = emptyClientPayload().selfCare;
+    }
+  }
+  return merged;
+}
+
 export function displayNameFromPayload(payload: OnboardingFormPayload): string {
   switch (payload.pack) {
     case "client":
@@ -454,6 +525,7 @@ export function missingFieldsForPayload(
   if (payload.pack === "client") {
     if (!payload.firstName.trim()) missing.push("First name");
     if (!payload.lastName.trim()) missing.push("Surname");
+    if (phase === "draft_save") return missing;
     if (!payload.fundingType) missing.push("Funding type");
     if (payload.fundingType === "ndis" && !payload.ndisNumber.trim())
       missing.push("NDIS number");
@@ -464,15 +536,35 @@ export function missingFieldsForPayload(
     if (!payload.attendance.some((d) => d.enabled))
       missing.push("At least one attendance day");
     if (phase === "confirm" || phase === "file") {
-      const c = payload.consents;
+      const s = payload.support ?? emptyClientSupport();
+      if (s.goals.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Support plan — goals");
+      if (s.strengths.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Support plan — strengths");
+      if (s.needs.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Support plan — needs");
+      if (s.preferences.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Support plan — preferences / wishes");
+      if (s.communicationMode.trim().length < MIN_COMMUNICATION_MODE_CHARS)
+        missing.push("How they communicate");
+      if (s.communicationStrategies.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Communication strategies");
+      if (s.riskHazards.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Risk assessment — what to watch for");
+      if (s.riskControls.trim().length < MIN_SUPPORT_PLAN_CHARS)
+        missing.push("Risk assessment — staff controls");
+      const c = payload.consents ?? emptyClientConsents();
       if (!c.privacyCollection) missing.push("Privacy consent");
       if (!c.thirdPartySpeak) missing.push("Third-party authorisation");
       if (!c.outingCommunity) missing.push("Outing consent");
       if (!c.emergencyMedical) missing.push("Emergency medical consent");
+      if (!c.rightsHandbook)
+        missing.push("Rights, complaints and handbook acknowledgement");
       // photo can be false (declined) — no missing
     }
   } else if (payload.pack === "staff") {
     if (!payload.fullName.trim()) missing.push("Full name");
+    if (phase === "draft_save") return missing;
     if (!payload.jobTitle.trim()) missing.push("Job title");
     if (!payload.systemAccess.trim()) missing.push("System access level");
     if (!payload.phone.trim()) missing.push("Phone");
@@ -499,6 +591,7 @@ export function missingFieldsForPayload(
     }
   } else if (payload.pack === "volunteer") {
     if (!payload.fullName.trim()) missing.push("Full name");
+    if (phase === "draft_save") return missing;
     if (!payload.roleDescription.trim()) missing.push("Role description");
     if (!payload.phone.trim()) missing.push("Phone");
     if (!payload.wwccNumber.trim()) missing.push("WWCC number");
@@ -512,6 +605,7 @@ export function missingFieldsForPayload(
     }
   } else {
     if (!payload.fullName.trim()) missing.push("Full name");
+    if (phase === "draft_save") return missing;
     if (!payload.relationship.trim()) missing.push("Relationship to client");
     if (!payload.phone.trim()) missing.push("Phone");
     if (!payload.linkedParticipantId.trim()) missing.push("Linked client");

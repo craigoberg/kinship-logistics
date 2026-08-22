@@ -336,6 +336,19 @@ export function useRollCallGraceMinutes(): number {
   return useSystemParameter<number>("roll_call_grace_minutes", 30);
 }
 
+/** Annual onboarding review tile / Hub Review due windows. Red 0 = due date. */
+export function useOnboardingReviewParams(): {
+  yellowDays: number;
+  redDays: number;
+} {
+  const yellowDays = useSystemParameter<number>(
+    "onboarding_review_yellow_days",
+    30,
+  );
+  const redDays = useSystemParameter<number>("onboarding_review_red_days", 0);
+  return { yellowDays, redDays };
+}
+
 /** Urgency thresholds for the Compliance Assets tab. */
 export function useComplianceUrgencyParams(): UrgencyParams {
   const yellowD  = useSystemParameter<number>("compliance_active_yellow_days",   7);

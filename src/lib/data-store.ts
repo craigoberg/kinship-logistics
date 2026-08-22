@@ -37,6 +37,15 @@ export interface Participant {
   iddsi: { liquids: number; foods: number };
   /** BL-076 — free-text allergies / alerts (guests + clients). */
   allergiesNotes: string | null;
+  /** BL-114 — organisational support plan (day centre / community / transport). */
+  supportGoals: string | null;
+  supportStrengths: string | null;
+  supportNeeds: string | null;
+  supportPreferences: string | null;
+  communicationMode: string | null;
+  communicationStrategies: string | null;
+  riskHazards: string | null;
+  riskControls: string | null;
   dualWitnessPinHash: string | null;
   createdAt: string;
   updatedAt: string;
@@ -180,6 +189,14 @@ interface ParticipantRow {
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   allergies_notes?: string | null;
+  support_goals?: string | null;
+  support_strengths?: string | null;
+  support_needs?: string | null;
+  support_preferences?: string | null;
+  communication_mode?: string | null;
+  communication_strategies?: string | null;
+  risk_hazards?: string | null;
+  risk_controls?: string | null;
   dual_witness_pin_hash: string | null;
   created_at: string;
   updated_at: string;
@@ -199,6 +216,14 @@ function rowToParticipant(r: ParticipantRow): Participant {
       foods: r.iddsi_level_solids ?? 7,
     },
     allergiesNotes: r.allergies_notes ?? null,
+    supportGoals: r.support_goals ?? null,
+    supportStrengths: r.support_strengths ?? null,
+    supportNeeds: r.support_needs ?? null,
+    supportPreferences: r.support_preferences ?? null,
+    communicationMode: r.communication_mode ?? null,
+    communicationStrategies: r.communication_strategies ?? null,
+    riskHazards: r.risk_hazards ?? null,
+    riskControls: r.risk_controls ?? null,
     dualWitnessPinHash: r.dual_witness_pin_hash,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -249,6 +274,14 @@ export interface ParticipantPatch {
   regularPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
+  supportGoals?: string | null;
+  supportStrengths?: string | null;
+  supportNeeds?: string | null;
+  supportPreferences?: string | null;
+  communicationMode?: string | null;
+  communicationStrategies?: string | null;
+  riskHazards?: string | null;
+  riskControls?: string | null;
 }
 
 export interface NewParticipant {
@@ -313,6 +346,17 @@ export async function updateParticipant(
     row.iddsi_level_solids = patch.iddsi.foods;
   }
   if (patch.dualWitnessPinHash !== undefined) row.dual_witness_pin_hash = patch.dualWitnessPinHash;
+  if (patch.supportGoals !== undefined) row.support_goals = patch.supportGoals;
+  if (patch.supportStrengths !== undefined) row.support_strengths = patch.supportStrengths;
+  if (patch.supportNeeds !== undefined) row.support_needs = patch.supportNeeds;
+  if (patch.supportPreferences !== undefined)
+    row.support_preferences = patch.supportPreferences;
+  if (patch.communicationMode !== undefined)
+    row.communication_mode = patch.communicationMode;
+  if (patch.communicationStrategies !== undefined)
+    row.communication_strategies = patch.communicationStrategies;
+  if (patch.riskHazards !== undefined) row.risk_hazards = patch.riskHazards;
+  if (patch.riskControls !== undefined) row.risk_controls = patch.riskControls;
 
   const { data, error } = await supabase
     .from("participants")
@@ -320,7 +364,20 @@ export async function updateParticipant(
     .eq("id", id)
     .select("*")
     .single();
-  if (error) throw error;
+  if (error) {
+    const msg = error.message ?? "";
+    if (
+      isSchemaMismatchError(error) &&
+      /support_|communication_mode|communication_strategies|risk_hazards|risk_controls/i.test(
+        msg,
+      )
+    ) {
+      throw new Error(
+        "Support plan columns missing — run docs/sql/2026-08-21_client_support_plan.sql then hard refresh.",
+      );
+    }
+    throw error;
+  }
   return rowToParticipant(data as ParticipantRow);
 }
 
@@ -1482,6 +1539,8 @@ export interface LookupParameter {
   sortOrder: number | null;
   /** Optional hex badge color (e.g. "#7c3aed") — null means use the category default. */
   badgeColor: string | null;
+  /** Row insert time — used to keep default bus-run colours stable across renames. */
+  createdAt: string | null;
 }
 
 interface LookupRow {
@@ -1491,6 +1550,7 @@ interface LookupRow {
   display_name: string | null;
   sort_order: number | null;
   badge_color: string | null;
+  created_at?: string | null;
 }
 
 const DAY_ORDER: Record<string, number> = {
@@ -1513,7 +1573,7 @@ export async function listLookupParameters(
   const fetchWithColor = async () => {
     const base = supabase
       .from("system_lookup_parameters")
-      .select("id, category, code, display_name, sort_order, badge_color")
+      .select("id, category, code, display_name, sort_order, badge_color, created_at")
       .eq("category", category);
     return category === "operating_days"
       ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
@@ -1523,7 +1583,7 @@ export async function listLookupParameters(
   const fetchWithoutColor = async () => {
     const base = supabase
       .from("system_lookup_parameters")
-      .select("id, category, code, display_name, sort_order")
+      .select("id, category, code, display_name, sort_order, created_at")
       .eq("category", category);
     return category === "operating_days"
       ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
@@ -1554,6 +1614,7 @@ export async function listLookupParameters(
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
     badgeColor: (r as LookupRow).badge_color ?? null,
+    createdAt: r.created_at ?? null,
   }));
 
   if (category === "operating_days") {
@@ -1583,6 +1644,53 @@ export async function updateLookupParameterColor(
   }
 }
 
+function isMissingUpdateLookupRpc(
+  error: { code?: string | null; message?: string | null } | null,
+): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  return msg.includes("could not find the function public.update_lookup_parameter");
+}
+
+/**
+ * Update a lookup code and/or display name.
+ * Bus run code changes cascade to client schedules, Manifest trips, default
+ * routes, and event bookings so assignments are not lost.
+ */
+export async function updateLookupParameter(input: {
+  id: string;
+  code: string;
+  displayName: string;
+  previousCode: string;
+}): Promise<{ codeChanged: boolean }> {
+  const code = input.code.trim();
+  const displayName = input.displayName.trim() || code;
+  if (!code) throw new Error("Code is required.");
+  const codeChanged = code !== input.previousCode.trim();
+
+  const rpc = await supabase.rpc("update_lookup_parameter", {
+    p_id: input.id,
+    p_code: code,
+    p_display_name: displayName,
+  });
+  if (!rpc.error) return { codeChanged };
+  if (!isMissingUpdateLookupRpc(rpc.error)) throw rpc.error;
+
+  if (codeChanged) {
+    throw new Error(
+      "Run docs/sql/2026-08-21_update_lookup_parameter.sql in Supabase first to rename lookup codes (keeps clients on the same run).",
+    );
+  }
+
+  const { error } = await supabase
+    .from("system_lookup_parameters")
+    .update({ display_name: displayName })
+    .eq("id", input.id);
+  if (error) throw error;
+  return { codeChanged: false };
+}
+
 export async function insertLookupParameter(input: {
   category: string;
   code: string;
@@ -1595,7 +1703,7 @@ export async function insertLookupParameter(input: {
       code: input.code,
       display_name: input.displayName,
     })
-    .select("id, category, code, display_name, sort_order, badge_color")
+    .select("id, category, code, display_name, sort_order, badge_color, created_at")
     .single();
   if (error) throw error;
   const r = data as LookupRow;
@@ -1606,6 +1714,7 @@ export async function insertLookupParameter(input: {
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
     badgeColor: r.badge_color ?? null,
+    createdAt: r.created_at ?? null,
   };
 }
 
@@ -1672,7 +1781,7 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     category: LOOKUP_CATEGORIES.busRun,
     label: "Day Centre Bus Runs",
     description:
-      "Named recurring bus runs (e.g. Run 1, Run 2). Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
+      "Named recurring bus runs (e.g. Run 1, Run 2). Edit code or display name in place — clients stay assigned. Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
   },
 ];
 

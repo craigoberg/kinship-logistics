@@ -17,9 +17,11 @@ import {
   ATTENDANCE_DAY_OPTIONS,
   type ClientFormPayload,
   type TransportMode,
+  emptyClientSupport,
 } from "@/lib/onboarding/form-types";
 import { CLIENT_CONSENT_BLOCKS } from "@/lib/onboarding/consent-copy";
 import { getDobDatePickerProps } from "@/components/ui/date-picker";
+import { ClientSupportPlanFields } from "@/components/onboarding/forms/client-support-plan-fields";
 
 interface Props {
   value: ClientFormPayload;
@@ -357,6 +359,16 @@ export function ClientOnboardingForm({ value, onChange }: Props) {
             ))}
           </div>
         </div>
+      </section>
+
+      <section className="space-y-3">
+        <ClientSupportPlanFields
+          value={value.support ?? emptyClientSupport()}
+          onChange={(support) => set("support", support)}
+          required
+          languagesAtHome={value.languagesAtHome}
+          onLanguagesAtHomeChange={(v) => set("languagesAtHome", v)}
+        />
       </section>
 
       <section className="space-y-3">

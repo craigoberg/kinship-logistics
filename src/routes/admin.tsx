@@ -14,7 +14,6 @@ import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-worksp
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
 import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
-import { OnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
 import { PublicWebsiteWorkspace } from "@/components/admin/public-website-workspace";
 
 export const Route = createFileRoute("/admin")({
@@ -29,7 +28,6 @@ type AdminTab =
   | "vendors"
   | "parameters"
   | "hours"
-  | "onboarding"
   | "website"
   | "access"
   | "backup";
@@ -43,7 +41,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet, venues, vendors, onboarding, public website (yada.org.au), lookups, thresholds, role access, and backups.
+          Manage fleet, venues, vendors, public website (yada.org.au), lookups, thresholds, role access, and backups.
         </p>
       </header>
 
@@ -53,7 +51,6 @@ function AdminPage() {
           <TabsTrigger value="fleet">Fleet Register</TabsTrigger>
           <TabsTrigger value="venues">Venues</TabsTrigger>
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
-          <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
           <TabsTrigger value="website">Public website</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
           <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
@@ -71,9 +68,6 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="vendors">
           <VendorsWorkspace />
-        </TabsContent>
-        <TabsContent value="onboarding">
-          <OnboardingWorkspace />
         </TabsContent>
         <TabsContent value="website">
           <PublicWebsiteWorkspace />

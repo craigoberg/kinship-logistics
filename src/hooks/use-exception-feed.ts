@@ -28,6 +28,12 @@ import {
   useOperationalTodayIso,
 } from "@/lib/operational-clock";
 import { listAppTickets } from "@/lib/api/app-tickets";
+import { listOnboardingCases } from "@/lib/api/onboarding";
+import { ONBOARDING_PACK_LABELS } from "@/lib/onboarding/form-types";
+import {
+  daysUntilIsoDate,
+  onboardingReviewUrgency,
+} from "@/lib/onboarding/review-urgency";
 
 /** PostgREST GET URLs blow up past ~100 UUIDs in an `in.()` filter. */
 const HUB_NOTE_ID_CHUNK = 80;
@@ -1095,6 +1101,64 @@ export function useAppTicketsTileFeed() {
         detail: `${t.reportedByName} · ${t.pathLabel} · ${formatDateTime(t.createdAt)}`,
         severity: "warning" as const,
       }));
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+export interface OnboardingReviewTileRow {
+  key: string;
+  title: string;
+  detail: string;
+  severity: Severity;
+}
+
+/** Signed packs inside the Admin yellow/red review window. */
+export function useOnboardingReviewTileFeed(params: {
+  yellowDays: number;
+  redDays: number;
+}) {
+  const today = useOperationalTodayIso();
+  return useQuery<OnboardingReviewTileRow[]>({
+    queryKey: [
+      "onboarding-cases",
+      "review-tile",
+      today,
+      params.yellowDays,
+      params.redDays,
+    ],
+    queryFn: async () => {
+      const items = await listOnboardingCases({ status: "signed_filed" });
+      const rows: OnboardingReviewTileRow[] = [];
+      for (const c of items) {
+        if (!c.reviewDueAt) continue;
+        const days = daysUntilIsoDate(c.reviewDueAt, today);
+        if (days === null) continue;
+        const urgency = onboardingReviewUrgency(
+          days,
+          params.yellowDays,
+          params.redDays,
+        );
+        if (urgency === "ok") continue;
+        const dueLabel =
+          days < 0
+            ? `${Math.abs(days)} day${Math.abs(days) === 1 ? "" : "s"} overdue`
+            : days === 0
+              ? "due today"
+              : `${days} day${days === 1 ? "" : "s"} to review`;
+        rows.push({
+          key: c.id,
+          title: c.displayName ?? "Onboarding pack",
+          detail: `${ONBOARDING_PACK_LABELS[c.packType]} · ${dueLabel}`,
+          severity: urgency === "red" ? "critical" : "warning",
+        });
+      }
+      rows.sort((a, b) => {
+        if (a.severity === b.severity) return a.title.localeCompare(b.title);
+        return a.severity === "critical" ? -1 : 1;
+      });
+      return rows;
     },
     staleTime: 30_000,
     refetchOnWindowFocus: true,

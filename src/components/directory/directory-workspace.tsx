@@ -12,7 +12,6 @@ import {
   ClipboardList,
   HeartHandshake,
 } from "lucide-react";
-import { toast } from "sonner";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -36,10 +35,8 @@ import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
-import {
-  createOnboardingCase,
-  type OnboardingCase,
-} from "@/lib/api/onboarding";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
+import { type OnboardingCase } from "@/lib/api/onboarding";
 import type { OnboardingPackType } from "@/lib/onboarding/form-types";
 
 const EXPIRY_WARN_DAYS = 30;
@@ -80,22 +77,13 @@ export function DirectoryWorkspace() {
   const [isManager, setIsManager] = useState(false);
   const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [onboardingBusy, setOnboardingBusy] = useState(false);
+  const [onboardingPack, setOnboardingPack] = useState<OnboardingPackType>("staff");
   useEffect(() => setIsManager(isActiveUserManager()), []);
 
-  const startOnboarding = async (pack: OnboardingPackType) => {
-    setOnboardingBusy(true);
-    try {
-      const created = await createOnboardingCase(pack);
-      setOnboardingCase(created);
-      setOnboardingOpen(true);
-    } catch (e) {
-      toast.error("Could not start onboarding", {
-        description: (e as Error).message,
-      });
-    } finally {
-      setOnboardingBusy(false);
-    }
+  const startOnboarding = (pack: OnboardingPackType) => {
+    setOnboardingCase(null);
+    setOnboardingPack(pack);
+    setOnboardingOpen(true);
   };
 
   const { data: staff = [], isLoading: staffLoading, error: staffErr } = useStaffRegistry();
@@ -153,18 +141,18 @@ export function DirectoryWorkspace() {
                   <UserPlus className="h-4 w-4" />
                   Quick add
                 </Button>
+                <OnboardingBlankPrintButton pack="volunteer" size="default" />
+                <OnboardingBlankPrintButton pack="staff" size="default" />
                 <Button
                   variant="secondary"
-                  disabled={onboardingBusy}
-                  onClick={() => void startOnboarding("volunteer")}
+                  onClick={() => startOnboarding("volunteer")}
                   className="gap-1.5"
                 >
                   <ClipboardList className="h-4 w-4" />
                   Volunteer onboarding
                 </Button>
                 <Button
-                  disabled={onboardingBusy}
-                  onClick={() => void startOnboarding("staff")}
+                  onClick={() => startOnboarding("staff")}
                   className="gap-1.5"
                 >
                   <ClipboardList className="h-4 w-4" />
@@ -190,9 +178,9 @@ export function DirectoryWorkspace() {
                 <UserPlus className="h-4 w-4" />
                 Quick add carer
               </Button>
+              <OnboardingBlankPrintButton pack="accompanying" size="default" />
               <Button
-                disabled={onboardingBusy}
-                onClick={() => void startOnboarding("accompanying")}
+                onClick={() => startOnboarding("accompanying")}
                 className="gap-1.5"
               >
                 <HeartHandshake className="h-4 w-4" />
@@ -203,8 +191,8 @@ export function DirectoryWorkspace() {
         </div>
         <p className="text-xs text-muted-foreground">
           Print / sign / file packs also live under{" "}
-          <Link to="/admin" className="underline underline-offset-2">
-            Admin → Onboarding
+          <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+            Hub → Onboarding
           </Link>
           .
         </p>
@@ -377,8 +365,12 @@ export function DirectoryWorkspace() {
       <CarerFormSheet open={carerOpen} onOpenChange={setCarerOpen} carer={editCarer} />
       <OnboardingCaseDialog
         open={onboardingOpen}
-        onOpenChange={setOnboardingOpen}
+        onOpenChange={(o) => {
+          setOnboardingOpen(o);
+          if (!o) setOnboardingCase(null);
+        }}
         caseRow={onboardingCase}
+        packType={onboardingPack}
         onSaved={setOnboardingCase}
       />
     </div>

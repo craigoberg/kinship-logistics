@@ -9,16 +9,21 @@ import {
   insertParticipant,
   insertStaffMember,
   listAttendanceSchedules,
+  listCarersForParticipant,
   resolveStaffIdWithFallback,
+  updateCarer,
   updateParticipant,
   updateStaffMember,
+  upsertPrimaryCarer,
   type StaffCertification,
   type WeekDay,
 } from "@/lib/data-store";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
   displayNameFromPayload,
+  emptyClientSupport,
   emptyPayloadForPack,
+  hydrateOnboardingPayload,
   transportModeToScheduleCode,
   type AccompanyingFormPayload,
   type ClientFormPayload,
@@ -28,6 +33,15 @@ import {
   type StaffFormPayload,
   type VolunteerFormPayload,
 } from "@/lib/onboarding/form-types";
+import {
+  daysUntilIsoDate,
+  DEFAULT_ONBOARDING_REVIEW_RED_DAYS,
+  DEFAULT_ONBOARDING_REVIEW_YELLOW_DAYS,
+  ONBOARDING_REVIEW_RED_DAYS_KEY,
+  ONBOARDING_REVIEW_YELLOW_DAYS_KEY,
+  isUnnamedOnboardingDraft,
+} from "@/lib/onboarding/review-urgency";
+import { todayLocalIso } from "@/lib/utils";
 
 const SCHEMA_HINT =
   "Onboarding table missing — run docs/sql/2026-08-10_onboarding_cases.sql then hard refresh.";
@@ -72,12 +86,7 @@ interface OnboardingCaseRow {
 
 function rowToCase(r: OnboardingCaseRow): OnboardingCase {
   const pack = r.pack_type;
-  const fallback = emptyPayloadForPack(pack);
-  const payload = {
-    ...fallback,
-    ...(r.form_payload ?? {}),
-    pack,
-  } as OnboardingFormPayload;
+  const payload = hydrateOnboardingPayload(pack, r.form_payload);
   return {
     id: r.id,
     packType: pack,
@@ -103,6 +112,29 @@ function throwSchema(err: unknown): never {
     throw new Error(SCHEMA_HINT);
   }
   throw err;
+}
+
+async function readOnboardingReviewDays(): Promise<{
+  yellowDays: number;
+  redDays: number;
+}> {
+  const { data, error } = await supabase
+    .from("system_parameters")
+    .select("key, value")
+    .in("key", [ONBOARDING_REVIEW_YELLOW_DAYS_KEY, ONBOARDING_REVIEW_RED_DAYS_KEY]);
+  if (error) {
+    return {
+      yellowDays: DEFAULT_ONBOARDING_REVIEW_YELLOW_DAYS,
+      redDays: DEFAULT_ONBOARDING_REVIEW_RED_DAYS,
+    };
+  }
+  const map = new Map((data ?? []).map((r) => [String((r as { key: string }).key), (r as { value: unknown }).value]));
+  const y = Number(map.get(ONBOARDING_REVIEW_YELLOW_DAYS_KEY));
+  const r = Number(map.get(ONBOARDING_REVIEW_RED_DAYS_KEY));
+  return {
+    yellowDays: Number.isFinite(y) ? y : DEFAULT_ONBOARDING_REVIEW_YELLOW_DAYS,
+    redDays: Number.isFinite(r) ? r : DEFAULT_ONBOARDING_REVIEW_RED_DAYS,
+  };
 }
 
 export async function listOnboardingCases(args?: {
@@ -142,11 +174,11 @@ export async function createOnboardingCase(
     seedPayload?: Partial<OnboardingFormPayload>;
   },
 ): Promise<OnboardingCase> {
-  const payload = {
+  const payload = hydrateOnboardingPayload(packType, {
     ...emptyPayloadForPack(packType),
     ...(opts?.seedPayload ?? {}),
     pack: packType,
-  } as OnboardingFormPayload;
+  } as OnboardingFormPayload);
   const row = {
     pack_type: packType,
     status: "draft" as const,
@@ -179,6 +211,48 @@ export async function saveOnboardingDraft(
     .single();
   if (error) throwSchema(error);
   return rowToCase(data as OnboardingCaseRow);
+}
+
+/** Insert on first Save draft; update thereafter. No row until this is called. */
+export async function upsertOnboardingDraft(args: {
+  id?: string | null;
+  packType: OnboardingPackType;
+  payload: OnboardingFormPayload;
+  subjectTable?: string | null;
+  subjectId?: string | null;
+}): Promise<OnboardingCase> {
+  if (args.id) return saveOnboardingDraft(args.id, args.payload);
+  return createOnboardingCase(args.packType, {
+    subjectTable: args.subjectTable,
+    subjectId: args.subjectId,
+    seedPayload: args.payload,
+  });
+}
+
+export async function deleteOnboardingDraft(id: string): Promise<void> {
+  const existing = await getOnboardingCase(id);
+  if (!existing) throw new Error("Onboarding case not found.");
+  if (existing.status !== "draft") {
+    throw new Error("Only drafts can be deleted. Confirmed packs stay for audit.");
+  }
+  const { error } = await supabase
+    .from("onboarding_cases")
+    .delete()
+    .eq("id", id)
+    .eq("status", "draft");
+  if (error) throwSchema(error);
+}
+
+/** Remove leftover unnamed drafts created by the old open-insert path. */
+export async function deleteEmptyOnboardingDrafts(): Promise<number> {
+  const drafts = await listOnboardingCases({ status: "draft" });
+  const empty = drafts.filter((c) => isUnnamedOnboardingDraft(c.displayName));
+  let deleted = 0;
+  for (const row of empty) {
+    await deleteOnboardingDraft(row.id);
+    deleted += 1;
+  }
+  return deleted;
 }
 
 function addMonthsIso(from: Date, months: number): string {
@@ -228,11 +302,17 @@ async function upsertReviewAsset(input: {
     next_action_at: null,
     action_module: "generic_resolve" as const,
     config: {
-      yellow_days: 60,
-      red_days: 14,
       handshake: "single",
       onboarding_alpha: true,
       ...(input.configExtra ?? {}),
+      yellow_days:
+        typeof input.configExtra?.yellow_days === "number"
+          ? input.configExtra.yellow_days
+          : DEFAULT_ONBOARDING_REVIEW_YELLOW_DAYS,
+      red_days:
+        typeof input.configExtra?.red_days === "number"
+          ? input.configExtra.red_days
+          : DEFAULT_ONBOARDING_REVIEW_RED_DAYS,
     },
     status: "active" as const,
     created_by: actor,
@@ -329,6 +409,34 @@ async function patchParticipantClinical(
   if (error && !isSchemaMismatchError(error)) throw error;
 }
 
+const SUPPORT_PLAN_SQL_HINT =
+  "Support plan columns missing — run docs/sql/2026-08-21_client_support_plan.sql then hard refresh.";
+
+async function patchParticipantSupportPlan(
+  participantId: string,
+  support: ClientFormPayload["support"],
+): Promise<void> {
+  const row = {
+    support_goals: support.goals.trim() || null,
+    support_strengths: support.strengths.trim() || null,
+    support_needs: support.needs.trim() || null,
+    support_preferences: support.preferences.trim() || null,
+    communication_mode: support.communicationMode.trim() || null,
+    communication_strategies: support.communicationStrategies.trim() || null,
+    risk_hazards: support.riskHazards.trim() || null,
+    risk_controls: support.riskControls.trim() || null,
+  };
+  const { error } = await supabase
+    .from("participants")
+    .update(row)
+    .eq("id", participantId);
+  if (!error) return;
+  if (isSchemaMismatchError(error)) {
+    throw new Error(SUPPORT_PLAN_SQL_HINT);
+  }
+  throw error;
+}
+
 async function syncClientAttendance(
   participantId: string,
   payload: ClientFormPayload,
@@ -356,6 +464,38 @@ async function syncClientAttendance(
       expectedDepartureTime: day.expectedDeparture || "15:00",
     });
   }
+}
+
+async function upsertOnboardingGuardian(
+  participantId: string,
+  g: ClientFormPayload["guardians"][0],
+  emergencyName: string,
+): Promise<void> {
+  const name = g.name.trim();
+  if (!name) return;
+  if (name.toLowerCase() === emergencyName.trim().toLowerCase()) return;
+
+  const existing = await listCarersForParticipant(participantId);
+  const match = existing.find(
+    (c) =>
+      !c.isPrimaryContact &&
+      c.fullName.trim().toLowerCase() === name.toLowerCase(),
+  );
+  const payload = {
+    participantId,
+    fullName: name,
+    relationship: g.relationship.trim() || "Guardian",
+    phone: g.phone.trim() || null,
+    email: g.email.trim() || null,
+    streetAddress: null,
+    isPrimaryContact: false,
+    notes: "Guardian from client onboarding",
+  };
+  if (match) {
+    await updateCarer(match.id, payload);
+    return;
+  }
+  await insertCarer(payload);
 }
 
 async function applyClientToDb(
@@ -402,33 +542,25 @@ async function applyClientToDb(
     emergencyRelationship: payload.emergencyRelationship.trim(),
   });
 
+  await patchParticipantSupportPlan(
+    participantId!,
+    payload.support ?? emptyClientSupport(),
+  );
+
   if (payload.emergencyName.trim()) {
-    await insertCarer({
-      participantId: participantId!,
+    await upsertPrimaryCarer(participantId!, {
       fullName: payload.emergencyName.trim(),
       relationship: payload.emergencyRelationship.trim() || "Emergency contact",
       phone: payload.emergencyPhone.trim() || null,
       email: null,
       streetAddress: null,
-      isPrimaryContact: true,
       notes: "From client onboarding",
-    }).catch(() => {
-      /* may already exist as primary — non-fatal for ALPHA */
     });
   }
 
   const g0 = payload.guardians[0];
-  if (g0.name.trim()) {
-    await insertCarer({
-      participantId: participantId!,
-      fullName: g0.name.trim(),
-      relationship: g0.relationship.trim() || "Guardian",
-      phone: g0.phone.trim() || null,
-      email: g0.email.trim() || null,
-      streetAddress: null,
-      isPrimaryContact: false,
-      notes: "Guardian from client onboarding",
-    }).catch(() => undefined);
+  if (g0?.name.trim()) {
+    await upsertOnboardingGuardian(participantId!, g0, payload.emergencyName);
   }
 
   await syncClientAttendance(participantId!, payload);
@@ -602,6 +734,8 @@ async function syncHubAssetsForCase(
   reviewDueAt: string,
 ): Promise<void> {
   const label = displayNameFromPayload(payload);
+  const sla = await readOnboardingReviewDays();
+  const reviewSla = { yellow_days: sla.yellowDays, red_days: sla.redDays };
 
   if (payload.pack === "client") {
     await upsertReviewAsset({
@@ -613,16 +747,40 @@ async function syncHubAssetsForCase(
       subjectTable,
       subjectId,
       expiryDate: reviewDueAt,
+      configExtra: reviewSla,
     });
     await upsertReviewAsset({
       category: "PARTICIPANT",
       type: "client_consent_pack",
       name: `Client consent pack — ${label}`,
       description:
-        "Annual consent currency (privacy, third party, photo, outing, emergency medical).",
+        "Annual consent currency (privacy, third party, photo, outing, emergency medical, rights/handbook).",
       subjectTable,
       subjectId,
       expiryDate: reviewDueAt,
+      configExtra: reviewSla,
+    });
+    await upsertReviewAsset({
+      category: "PARTICIPANT",
+      type: "client_support_plan",
+      name: `Client support plan — ${label}`,
+      description:
+        "Annual organisational support plan review (goals, strengths, needs, communication). Reset on Review/Update re-file (BL-114).",
+      subjectTable,
+      subjectId,
+      expiryDate: reviewDueAt,
+      configExtra: reviewSla,
+    });
+    await upsertReviewAsset({
+      category: "PARTICIPANT",
+      type: "client_risk_assessment",
+      name: `Client risk assessment — ${label}`,
+      description:
+        "Annual participant risk profile review (centre / community / transport). Reset on Review/Update re-file (BL-114).",
+      subjectTable,
+      subjectId,
+      expiryDate: reviewDueAt,
+      configExtra: reviewSla,
     });
     return;
   }
@@ -636,6 +794,7 @@ async function syncHubAssetsForCase(
       subjectTable,
       subjectId,
       expiryDate: reviewDueAt,
+      configExtra: reviewSla,
     });
     const certs = buildCertList(payload);
     for (const c of certs) {
@@ -652,6 +811,7 @@ async function syncHubAssetsForCase(
     subjectTable,
     subjectId,
     expiryDate: reviewDueAt,
+    configExtra: reviewSla,
   });
   if (payload.wwccNumber.trim() && payload.wwccExpiry.trim()) {
     await upsertReviewAsset({
@@ -662,7 +822,12 @@ async function syncHubAssetsForCase(
       subjectTable,
       subjectId,
       expiryDate: payload.wwccExpiry.trim(),
-      configExtra: { cert_name: "WWCC", cert_number: payload.wwccNumber.trim() },
+      configExtra: {
+        cert_name: "WWCC",
+        cert_number: payload.wwccNumber.trim(),
+        yellow_days: 60,
+        red_days: 7,
+      },
     });
   }
 }
@@ -671,6 +836,7 @@ async function syncHubAssetsForCase(
 export async function confirmOnboardingCase(
   id: string,
   payload: OnboardingFormPayload,
+  args?: { confirmedByStaffId?: string | null },
 ): Promise<OnboardingCase> {
   const existing = await getOnboardingCase(id);
   if (!existing) throw new Error("Onboarding case not found.");
@@ -679,7 +845,12 @@ export async function confirmOnboardingCase(
   }
 
   const mapped = await applyOperationalMapping(existing, payload);
-  const actor = await resolveStaffIdWithFallback().catch(() => null);
+  const actor =
+    args?.confirmedByStaffId?.trim() ||
+    (await resolveStaffIdWithFallback().catch(() => null));
+  if (!actor) {
+    throw new Error("Office PIN is required to confirm these fields.");
+  }
 
   const { data, error } = await supabase
     .from("onboarding_cases")
@@ -698,6 +869,24 @@ export async function confirmOnboardingCase(
   return rowToCase(data as OnboardingCaseRow);
 }
 
+/** Latest Hub review due date on a prior pack for the same person (if any). */
+export async function priorOnboardingReviewDueAt(args: {
+  excludeId?: string | null;
+  subjectTable?: string | null;
+  subjectId?: string | null;
+}): Promise<string | null> {
+  if (!args.subjectTable || !args.subjectId) return null;
+  const rows = await listOnboardingCases({
+    subjectTable: args.subjectTable,
+    subjectId: args.subjectId,
+  });
+  const dues = rows
+    .filter((c) => c.id !== args.excludeId && c.reviewDueAt)
+    .map((c) => c.reviewDueAt!.slice(0, 10))
+    .sort();
+  return dues.length > 0 ? dues[dues.length - 1] : null;
+}
+
 /** Mark signed & filed — Filing location evidence + Hub review/cert assets. */
 export async function fileOnboardingCase(
   id: string,
@@ -707,6 +896,8 @@ export async function fileOnboardingCase(
     signedAt: string;
     signeeName: string;
     signeeRelationship: string;
+    lateReason?: string;
+    confirmedByStaffId?: string | null;
   },
 ): Promise<OnboardingCase> {
   const filing = args.filingLocation.trim();
@@ -719,13 +910,18 @@ export async function fileOnboardingCase(
   let current = await getOnboardingCase(id);
   if (!current) throw new Error("Onboarding case not found.");
 
-  // Ensure operational mapping exists (confirm may have been skipped).
+  // Confirm (PIN) must run before File so confirmed_by_staff_id is real.
   if (
     current.status === "draft" ||
     !current.subjectId ||
     !current.subjectTable
   ) {
-    current = await confirmOnboardingCase(id, args.payload);
+    if (!args.confirmedByStaffId?.trim()) {
+      throw new Error("Office must Confirm fields (PIN) before filing.");
+    }
+    current = await confirmOnboardingCase(id, args.payload, {
+      confirmedByStaffId: args.confirmedByStaffId,
+    });
   } else {
     await saveOnboardingDraft(id, args.payload);
     const mapped = await applyOperationalMapping(current, args.payload);
@@ -741,7 +937,29 @@ export async function fileOnboardingCase(
     current = (await getOnboardingCase(id))!;
   }
 
+  const priorDue = await priorOnboardingReviewDueAt({
+    excludeId: id,
+    subjectTable: current.subjectTable,
+    subjectId: current.subjectId,
+  });
+  const todayIso = todayLocalIso();
+  const daysLate =
+    priorDue != null ? daysUntilIsoDate(priorDue, todayIso) : null;
+  const overdue = daysLate !== null && daysLate < 0;
+  const lateReason = (args.lateReason ?? "").trim();
+  if (overdue && lateReason.length < 20) {
+    throw new Error(
+      "This annual review is overdue — record why it was late (at least 20 characters).",
+    );
+  }
+
   const reviewDueAt = addMonthsIso(new Date(args.signedAt), 12);
+  const lateNote = overdue
+    ? `[LATE REVIEW · due ${priorDue} · filed ${todayIso} · ${Math.abs(daysLate!)}d overdue] ${lateReason}`
+    : null;
+  const notes = lateNote
+    ? [current.notes, lateNote].filter(Boolean).join("\n")
+    : current.notes;
 
   await syncHubAssetsForCase(
     current,
@@ -762,6 +980,7 @@ export async function fileOnboardingCase(
       review_due_at: reviewDueAt,
       form_payload: args.payload,
       display_name: displayNameFromPayload(args.payload),
+      notes,
     })
     .eq("id", id)
     .select("*")

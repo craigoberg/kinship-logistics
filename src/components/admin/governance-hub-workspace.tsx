@@ -4,8 +4,9 @@ import { UnifiedIssuesPanel } from "./unified-issues-panel";
 import { ComplianceAssetsPanel } from "./compliance-assets-panel";
 import { MaintenancePanel } from "./maintenance-panel";
 import { AppTicketsPanel } from "./app-tickets-panel";
+import { OnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
 
-export type HubTab = "issues" | "maintenance" | "assets" | "app_tickets";
+export type HubTab = "issues" | "maintenance" | "assets" | "app_tickets" | "onboarding";
 
 export function GovernanceHubWorkspace(props: {
   openIssueId?: string | null;
@@ -36,6 +37,7 @@ export function GovernanceHubWorkspace(props: {
         <TabsTrigger value="issues">Human Incidents</TabsTrigger>
         <TabsTrigger value="maintenance">Maintenance &amp; Repairs</TabsTrigger>
         <TabsTrigger value="assets">Compliance &amp; Renewals</TabsTrigger>
+        <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
         <TabsTrigger value="app_tickets">App tickets</TabsTrigger>
       </TabsList>
 
@@ -58,6 +60,10 @@ export function GovernanceHubWorkspace(props: {
           externalManageAssetId={manageAssetId}
           onExternalManageHandled={() => setManageAssetId(null)}
         />
+      </TabsContent>
+
+      <TabsContent value="onboarding" className="space-y-4">
+        <OnboardingWorkspace />
       </TabsContent>
 
       <TabsContent value="app_tickets" className="space-y-4">

@@ -41,6 +41,10 @@ export const addStaffTopic: HelpTopic = {
       body: "Tap Add personnel. Have the person sign in on Auth with their PIN (after day email login when enabled). Managers can reopen a row later via Edit personnel / Save changes.",
     },
     {
+      heading: "Staff onboarding pack",
+      body: "Print a blank staff or volunteer pack first if you need paper — no draft is created. Then Staff onboarding or Volunteer onboarding to type it in. The form is local until Save draft. The inbox is Hub → Onboarding (not Admin).",
+    },
+    {
       heading: "Certifications later",
       body: "WWC, First Aid, SFH, licence and similar certs are tracked via compliance / Hub after intake — get identity and PIN correct first.",
     },

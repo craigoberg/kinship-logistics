@@ -3,6 +3,7 @@ import { addParticipantsTopic } from "./add-participants";
 import { addStaffTopic } from "./add-staff";
 import { adminOverviewTopic } from "./admin-overview";
 import { appTicketsTopic } from "./app-tickets";
+import { clientSupportPlanTopic } from "./client-support-plan";
 import { adminVendorsTopic } from "./admin-vendors";
 import { adminVenuesTopic } from "./admin-venues";
 import { dayCentreHappyPathTopic } from "./day-centre-happy-path";
@@ -33,6 +34,7 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   checkinRollEscalationsTopic,
   addStaffTopic,
   addParticipantsTopic,
+  clientSupportPlanTopic,
   adminOverviewTopic,
   adminVenuesTopic,
   adminVendorsTopic,

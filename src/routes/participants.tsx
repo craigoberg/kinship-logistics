@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
-import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -17,7 +16,8 @@ import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
-import { createOnboardingCase, type OnboardingCase } from "@/lib/api/onboarding";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
+import { type OnboardingCase } from "@/lib/api/onboarding";
 import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
@@ -76,24 +76,8 @@ function ParticipantsPage() {
   const [transportFilter, setTransportFilter] = useState("all");
   const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
-  const [onboardingBusy, setOnboardingBusy] = useState(false);
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
-
-  const startClientOnboarding = async () => {
-    setOnboardingBusy(true);
-    try {
-      const created = await createOnboardingCase("client");
-      setOnboardingCase(created);
-      setOnboardingOpen(true);
-    } catch (e) {
-      toast.error("Could not start client onboarding", {
-        description: (e as Error).message,
-      });
-    } finally {
-      setOnboardingBusy(false);
-    }
-  };
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -104,8 +88,8 @@ function ParticipantsPage() {
             {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
             {" "}
             Full intake pack (print / sign / file):{" "}
-            <Link to="/admin" className="underline underline-offset-2">
-              Admin → Onboarding
+            <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+              Hub → Onboarding
             </Link>
             .
           </p>
@@ -123,13 +107,16 @@ function ParticipantsPage() {
             <UserPlus className="h-4 w-4" />
             Quick add
           </Button>
+          <OnboardingBlankPrintButton pack="client" size="default" />
           <Button
-            onClick={() => void startClientOnboarding()}
-            disabled={onboardingBusy}
+            onClick={() => {
+              setOnboardingCase(null);
+              setOnboardingOpen(true);
+            }}
             className="gap-1.5"
           >
             <ClipboardList className="h-4 w-4" />
-            {onboardingBusy ? "Starting…" : "Client onboarding"}
+            Client onboarding
           </Button>
         </div>
       </header>
@@ -211,8 +198,12 @@ function ParticipantsPage() {
       <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
       <OnboardingCaseDialog
         open={onboardingOpen}
-        onOpenChange={setOnboardingOpen}
+        onOpenChange={(o) => {
+          setOnboardingOpen(o);
+          if (!o) setOnboardingCase(null);
+        }}
         caseRow={onboardingCase}
+        packType="client"
         onSaved={setOnboardingCase}
       />
     </div>

@@ -60,6 +60,7 @@ import {
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { FinanceTab } from "@/components/finance/finance-tab";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
+import { SupportPlanTab } from "@/components/participants/support-plan-tab";
 import { toast } from "sonner";
 
 interface Props {
@@ -144,6 +145,36 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   };
 
 
+  const saveSupportPatch = async (patch: ParticipantPatch) => {
+    if (!online) {
+      enqueue("participant_update", {
+        id: participant.id,
+        patch: patch as unknown as Record<string, unknown>,
+      });
+      toast.info("Queued offline", {
+        description: "Support plan changes will sync when back online.",
+      });
+      onOpenChange(false);
+      return;
+    }
+    try {
+      const updated = await updateMutation.mutateAsync({ id: participant.id, patch });
+      toast.success("Support plan updated", {
+        description: `${updated.fullName} saved.`,
+      });
+      onSaved?.(updated);
+      onOpenChange(false);
+    } catch (err) {
+      toast.error("Could not save support plan", {
+        description: (err as Error).message,
+        className: "!bg-red-600 !text-white !border-red-700",
+        duration: 12_000,
+      });
+      throw err;
+    }
+  };
+
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
@@ -178,6 +209,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
           <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
             <TabsList className="w-full justify-start h-auto flex-wrap gap-2 flex-shrink-0 min-h-[44px]">
               <TabsTrigger value="profile" className="h-10 py-2 px-3">Care Profile</TabsTrigger>
+              <TabsTrigger value="support" className="h-10 py-2 px-3">Support &amp; risk</TabsTrigger>
               <TabsTrigger value="contact" className="h-10 py-2 px-3">Contact Information</TabsTrigger>
               <TabsTrigger value="history" className="h-10 py-2 px-3">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance" className="h-10 py-2 px-3">Schedules &amp; Attendance</TabsTrigger>
@@ -279,6 +311,16 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
                 </Button>
               </DialogFooter>
+            </TabsContent>
+
+            <TabsContent value="support" className="flex flex-col overflow-hidden">
+              <SupportPlanTab
+                participant={participant}
+                online={online}
+                saving={updateMutation.isPending}
+                onSave={saveSupportPatch}
+                onClose={() => onOpenChange(false)}
+              />
             </TabsContent>
 
             {/* TAB — Contact Information */}

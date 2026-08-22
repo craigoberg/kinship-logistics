@@ -1,17 +1,18 @@
 /**
- * BL-076 — clinical flags for floor rolls (Allergy / Diet chips).
- * Interim source of truth: participants.allergies_notes + IDDSI levels.
- * Onboarding (BL-065) can later feed the same fields.
+ * BL-076 / BL-114 — clinical flags for floor rolls (Allergy / Diet / Comms chips).
+ * Source of truth: participants.allergies_notes, IDDSI, communication_*.
  */
 import { iddsiLevel } from "@/lib/iddsi";
 
 export type ClinicalFlagSource = {
   allergiesNotes?: string | null;
   iddsi?: { liquids: number; foods: number } | null;
+  communicationMode?: string | null;
+  communicationStrategies?: string | null;
 };
 
 export type ClinicalFlagChip = {
-  kind: "allergy" | "diet";
+  kind: "allergy" | "diet" | "comms";
   label: string;
   detail: string;
 };
@@ -19,6 +20,16 @@ export type ClinicalFlagChip = {
 function isNoneAllergies(raw: string): boolean {
   const t = raw.trim().toLowerCase();
   return t === "" || t === "none" || t === "n/a" || t === "nil" || t === "-";
+}
+
+function isTrivialComms(mode: string, strategies: string): boolean {
+  const m = mode.trim().toLowerCase();
+  const s = strategies.trim();
+  if (!m && !s) return true;
+  const trivialMode =
+    !m ||
+    ["speech", "verbal", "spoken", "talking", "none", "n/a", "nil", "-"].includes(m);
+  return trivialMode && !s;
 }
 
 /** Default IDDSI = thin liquids (0) + regular foods (7). */
@@ -56,6 +67,18 @@ export function clinicalFlagsFromParticipant(
       ]
         .filter(Boolean)
         .join(" · "),
+    });
+  }
+  const mode = (p.communicationMode ?? "").trim();
+  const strategies = (p.communicationStrategies ?? "").trim();
+  if (!isTrivialComms(mode, strategies)) {
+    const label = mode ? (mode.length > 18 ? "Comms" : `Comms ${mode}`) : "Comms";
+    chips.push({
+      kind: "comms",
+      label,
+      detail: [mode ? `Mode: ${mode}` : null, strategies || null]
+        .filter(Boolean)
+        .join("\n"),
     });
   }
   return chips;

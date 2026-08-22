@@ -1,3 +1,4 @@
+import { createPortal } from "react-dom";
 import {
   ATTENDANCE_DAY_OPTIONS,
   ONBOARDING_PACK_LABELS,
@@ -31,6 +32,17 @@ function Line({ label, value }: { label: string; value?: string }) {
   );
 }
 
+function Block({ label, value }: { label: string; value?: string }) {
+  return (
+    <div className="mb-2 break-inside-avoid text-sm">
+      <p className="font-semibold">{label}</p>
+      <p className="mt-1 min-h-[2.5rem] whitespace-pre-wrap border-b border-black/20 pb-1">
+        {value?.trim() ? value : "________________________________"}
+      </p>
+    </div>
+  );
+}
+
 function SigBlock({ title }: { title: string }) {
   return (
     <div className="mt-4 break-inside-avoid rounded border border-black/40 p-3 text-sm">
@@ -42,6 +54,36 @@ function SigBlock({ title }: { title: string }) {
         <p>Relationship: ___________________________</p>
       </div>
     </div>
+  );
+}
+
+/** Hide the rest of the app so dialog overflow/transform cannot clip print. */
+export const ONBOARDING_PRINT_PORTAL_STYLE = `
+  @media print {
+    @page { margin: 14mm; }
+    html, body {
+      height: auto !important;
+      overflow: visible !important;
+      background: white !important;
+    }
+    body > *:not([data-onboarding-print-root]) {
+      display: none !important;
+    }
+    [data-onboarding-print-root] {
+      display: block !important;
+      color: black !important;
+      background: white !important;
+    }
+  }
+`;
+
+export function OnboardingPrintPortal(props: Props) {
+  return createPortal(
+    <div data-onboarding-print-root className="hidden">
+      <style>{ONBOARDING_PRINT_PORTAL_STYLE}</style>
+      <OnboardingPrintView {...props} />
+    </div>,
+    document.body,
   );
 }
 
@@ -138,6 +180,47 @@ export function OnboardingPrintView({
               );
             })}
           </section>
+          {payload.pack === "client" ? (
+            <section>
+              <h2 className="mb-2 text-base font-bold">
+                Support plan, communication & risk
+              </h2>
+              <p className="mb-2 text-xs">
+                Organisational plan for day centre, community access and
+                transport (0136 / 0125 / 0108). Not a SIL care plan.
+              </p>
+              <Block label="Goals" value={v(payload.support?.goals ?? "")} />
+              <Block
+                label="Strengths"
+                value={v(payload.support?.strengths ?? "")}
+              />
+              <Block label="Support needs" value={v(payload.support?.needs ?? "")} />
+              <Block
+                label="Preferences / wishes"
+                value={v(payload.support?.preferences ?? "")}
+              />
+              <Line
+                label="Languages at home"
+                value={v(payload.languagesAtHome)}
+              />
+              <Line
+                label="How they communicate"
+                value={v(payload.support?.communicationMode ?? "")}
+              />
+              <Block
+                label="Communication strategies"
+                value={v(payload.support?.communicationStrategies ?? "")}
+              />
+              <Block
+                label="Risk — what to watch for"
+                value={v(payload.support?.riskHazards ?? "")}
+              />
+              <Block
+                label="Risk — what staff do"
+                value={v(payload.support?.riskControls ?? "")}
+              />
+            </section>
+          ) : null}
           <section>
             <h2 className="mb-2 text-base font-bold">Consents & terms</h2>
             {CLIENT_CONSENT_BLOCKS.map((b) => (

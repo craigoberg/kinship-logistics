@@ -1,19 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ClipboardList, Plus } from "lucide-react";
+import { ClipboardList, Plus, Trash2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import {
-  createOnboardingCase,
+  deleteOnboardingDraft,
   listOnboardingForSubject,
   startOnboardingReview,
   type OnboardingCase,
 } from "@/lib/api/onboarding";
 import {
   ONBOARDING_PACK_LABELS,
+  type OnboardingFormPayload,
   type OnboardingPackType,
 } from "@/lib/onboarding/form-types";
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
 import { FormattedDate } from "@/components/ui/formatted-time";
 
 interface Props {
@@ -36,8 +38,10 @@ export function OnboardingSubjectPanel({
 }: Props) {
   const [rows, setRows] = useState<OnboardingCase[]>([]);
   const [active, setActive] = useState<OnboardingCase | null>(null);
+  const [seedPayload, setSeedPayload] = useState<Partial<OnboardingFormPayload> | undefined>();
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
 
   const reload = useCallback(async () => {
     setLoading(true);
@@ -61,31 +65,20 @@ export function OnboardingSubjectPanel({
 
   const latest = rows[0] ?? null;
 
-  const startNew = async () => {
-    try {
-      const seed =
-        defaultPack === "client"
-          ? (() => {
-              const parts = (seedName ?? "").trim().split(/\s+/);
-              return {
-                firstName: parts[0] ?? "",
-                lastName: parts.slice(1).join(" "),
-              };
-            })()
-          : { fullName: seedName ?? "" };
-      const created = await createOnboardingCase(defaultPack, {
-        subjectTable,
-        subjectId,
-        seedPayload: seed as never,
-      });
-      setActive(created);
-      setOpen(true);
-      await reload();
-    } catch (e) {
-      toast.error("Could not start onboarding", {
-        description: (e as Error).message,
-      });
-    }
+  const startNew = () => {
+    const seed =
+      defaultPack === "client"
+        ? (() => {
+            const parts = (seedName ?? "").trim().split(/\s+/);
+            return {
+              firstName: parts[0] ?? "",
+              lastName: parts.slice(1).join(" "),
+            };
+          })()
+        : { fullName: seedName ?? "" };
+    setActive(null);
+    setSeedPayload(seed as Partial<OnboardingFormPayload>);
+    setOpen(true);
   };
 
   const review = async () => {
@@ -93,12 +86,31 @@ export function OnboardingSubjectPanel({
     try {
       const next = await startOnboardingReview(latest.id);
       setActive(next);
+      setSeedPayload(undefined);
       setOpen(true);
       await reload();
     } catch (e) {
       toast.error("Could not start review", {
         description: (e as Error).message,
       });
+    }
+  };
+
+  const removeDraft = async () => {
+    if (!latest || latest.status !== "draft") return;
+    setBusy(true);
+    try {
+      await deleteOnboardingDraft(latest.id);
+      setOpen(false);
+      setActive(null);
+      toast.success("Draft deleted");
+      await reload();
+    } catch (e) {
+      toast.error("Could not delete draft", {
+        description: (e as Error).message,
+      });
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -131,7 +143,7 @@ export function OnboardingSubjectPanel({
         </div>
       ) : (
         <p className="text-xs text-muted-foreground">
-          No onboarding pack linked yet.
+          No onboarding pack linked yet. Inbox lives in Hub → Onboarding.
         </p>
       )}
       <div className="flex flex-wrap gap-2">
@@ -142,10 +154,24 @@ export function OnboardingSubjectPanel({
             variant="outline"
             onClick={() => {
               setActive(latest);
+              setSeedPayload(undefined);
               setOpen(true);
             }}
           >
             Open
+          </Button>
+        ) : null}
+        {latest?.status === "draft" ? (
+          <Button
+            type="button"
+            size="sm"
+            variant="ghost"
+            className="gap-1 text-destructive"
+            disabled={busy}
+            onClick={() => void removeDraft()}
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Delete draft
           </Button>
         ) : null}
         {latest?.status === "signed_filed" ? (
@@ -161,23 +187,39 @@ export function OnboardingSubjectPanel({
           </Button>
         ) : null}
         {!latest ? (
-          <Button
-            type="button"
-            size="sm"
-            className="gap-1"
-            onClick={() => void startNew()}
-          >
-            <Plus className="h-3.5 w-3.5" />
-            Start {ONBOARDING_PACK_LABELS[defaultPack]}
-          </Button>
+          <>
+            <OnboardingBlankPrintButton pack={defaultPack} />
+            <Button
+              type="button"
+              size="sm"
+              className="gap-1"
+              onClick={startNew}
+            >
+              <Plus className="h-3.5 w-3.5" />
+              Start {ONBOARDING_PACK_LABELS[defaultPack]}
+            </Button>
+          </>
         ) : null}
       </div>
 
       <OnboardingCaseDialog
         open={open}
-        onOpenChange={setOpen}
+        onOpenChange={(o) => {
+          setOpen(o);
+          if (!o) {
+            setActive(null);
+            setSeedPayload(undefined);
+          }
+        }}
         caseRow={active}
-        onSaved={() => void reload()}
+        packType={active?.packType ?? defaultPack}
+        seedPayload={seedPayload}
+        subjectTable={subjectTable}
+        subjectId={subjectId}
+        onSaved={(c) => {
+          setActive(c);
+          void reload();
+        }}
       />
     </div>
   );

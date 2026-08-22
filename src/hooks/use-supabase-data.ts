@@ -18,6 +18,7 @@ import {
 } from "@/lib/api/fleet";
 import { createVendor, listVendors, type Vendor } from "@/lib/api/vendors";
 import { listTransportAssets } from "@/lib/data-store";
+import { busRunEffectiveColor } from "@/lib/bus-run-palette";
 
 import {
   listParticipants,
@@ -159,16 +160,6 @@ export function useLookupParameters(category: string | null | undefined) {
   });
 }
 
-/** Palette applied to bus runs without a configured badge_color — same order as the admin workspace. */
-const BUS_RUN_PALETTE = [
-  "#7c3aed", // violet  — run 1
-  "#d97706", // amber   — run 2
-  "#0891b2", // cyan    — run 3
-  "#e11d48", // rose    — run 4
-  "#059669", // emerald — run 5
-  "#7c2d12", // deep-orange — run 6
-];
-
 export interface BusRunBadge {
   label: string;
   color: string;
@@ -176,21 +167,19 @@ export interface BusRunBadge {
 
 /**
  * Returns a stable Map<code, {label, color}> for all configured Day Centre
- * bus runs. Runs without a badge_color get a palette color based on
- * alphabetical position (same logic as the indicator hook and admin workspace).
- * Use this wherever run badges need to match the Participants Directory colours.
+ * bus runs. Default colours follow creation order (not the current code/name)
+ * so a rename does not swap colours with another run.
  */
 export function useBusRunMap(): Map<string, BusRunBadge> {
   const { data: runs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   return useMemo(() => {
-    const sorted = [...runs].sort((a, b) => a.code.localeCompare(b.code));
     const map = new Map<string, BusRunBadge>();
-    sorted.forEach((r, idx) => {
+    for (const r of runs) {
       map.set(r.code, {
         label: r.displayName,
-        color: r.badgeColor ?? BUS_RUN_PALETTE[idx % BUS_RUN_PALETTE.length],
+        color: busRunEffectiveColor(runs, r),
       });
-    });
+    }
     return map;
   }, [runs]);
 }

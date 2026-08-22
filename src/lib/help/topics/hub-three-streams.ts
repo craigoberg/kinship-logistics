@@ -5,7 +5,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
   kind: "howto",
   title: "Governance Hub — streams (what goes where)",
   summary:
-    "Human Incidents, Maintenance & Repairs, Compliance & Renewals, and App tickets — purpose of each stream and what information belongs there.",
+    "Human Incidents, Maintenance & Repairs, Compliance & Renewals, Onboarding, and App tickets — purpose of each stream and what information belongs there.",
   keywords: [
     "hub",
     "governance",
@@ -17,6 +17,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     "renewals",
     "health and safety",
     "app tickets",
+    "onboarding",
   ],
   menus: ["governance"],
   roles: ["manager", "assistant_manager", "support_worker"],
@@ -44,6 +45,10 @@ export const hubThreeStreamsTopic: HelpTopic = {
     {
       heading: "Compliance & Renewals — dates and certificates",
       body: "Expiry-driven items: insurance, vehicle rego, staff certs (WWC, First Aid, SFH, licence), venue safety baseline renewals, formal audits. Severity is usually computed from dates (e.g. approaching expiry = Yellow, overdue = Red) — you do not manually “paint” compliance Green/Yellow/Red the same way as a walk-around.",
+    },
+    {
+      heading: "Onboarding — drafts and annual reviews",
+      body: "Hub → Onboarding is the office inbox for intake packs (drafts, waiting to file) and signed packs whose annual review is inside the yellow/red window. Start a pack from Participants or Staff; Admin is config only. The Dashboard Band 3 Onboarding review tile opens this tab.",
     },
     {
       heading: "App tickets — the software, not the bus",

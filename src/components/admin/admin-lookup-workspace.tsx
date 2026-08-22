@@ -1,10 +1,11 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Plus, Trash2, RefreshCw } from "lucide-react";
+import { Pencil, Plus, Trash2, RefreshCw } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -14,6 +15,14 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import {
   Tabs,
   TabsContent,
@@ -25,6 +34,7 @@ import {
   deleteLookupParameter,
   insertLookupParameter,
   LOOKUP_CATEGORIES,
+  updateLookupParameter,
   updateLookupParameterColor,
   type LookupParameter,
 } from "@/lib/data-store";
@@ -33,19 +43,15 @@ import {
   useLookupParameters,
 } from "@/hooks/use-supabase-data";
 import { TransportSiteAddressesPanel } from "@/components/admin/transport-site-addresses-panel";
+import {
+  CAUTION_CALLOUT_BODY_CLASS,
+  CAUTION_CALLOUT_CLASS,
+} from "@/lib/ui/caution-callout";
+import { busRunEffectiveColor } from "@/lib/bus-run-palette";
+import { cn } from "@/lib/utils";
 
 /** Categories where each entry can have a badge color configured. */
 const COLOR_ENABLED_CATEGORIES = new Set(["bus_runs", "transport_types"]);
-
-/** Fallback palette cycled when a run has no configured color. */
-const RUN_PALETTE = [
-  "#7c3aed", // violet
-  "#d97706", // amber
-  "#0891b2", // cyan
-  "#e11d48", // rose
-  "#059669", // emerald
-  "#7c2d12", // brown-orange
-];
 
 export function AdminLookupWorkspace() {
   const first = ADMIN_LOOKUP_CATEGORIES[0]?.category ?? "";
@@ -91,12 +97,19 @@ function CategoryPanel({
   const [displayName, setDisplayName] = useState("");
   const [newColor, setNewColor] = useState("#3b82f6");
   const [removeTarget, setRemoveTarget] = useState<LookupParameter | null>(null);
+  const [editTarget, setEditTarget] = useState<LookupParameter | null>(null);
 
   const invalidate = () => {
     clearLookupCacheCategory(category);
     qc.invalidateQueries({ queryKey: ["system_lookup_parameters", category], exact: true });
     // Also invalidate the directory indicators so badge colors refresh immediately.
     qc.invalidateQueries({ queryKey: ["participant-directory-indicators"] });
+    if (category === LOOKUP_CATEGORIES.busRun) {
+      qc.invalidateQueries({ queryKey: ["today-bus-run-summaries"] });
+      qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+      qc.invalidateQueries({ queryKey: ["bus-run-roster"] });
+      qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
+    }
   };
 
   const insert = useMutation({
@@ -119,6 +132,26 @@ function CategoryPanel({
     },
     onError: (e: Error) =>
       toast.error("Could not add entry", { description: e.message }),
+  });
+
+  const saveEdit = useMutation({
+    mutationFn: (input: {
+      id: string;
+      code: string;
+      displayName: string;
+      previousCode: string;
+    }) => updateLookupParameter(input),
+    onSuccess: (result) => {
+      invalidate();
+      setEditTarget(null);
+      toast.success(
+        result.codeChanged && category === LOOKUP_CATEGORIES.busRun
+          ? "Run updated — clients and Manifest kept their assignment"
+          : `${label} entry updated`,
+      );
+    },
+    onError: (e: Error) =>
+      toast.error("Could not save changes", { description: e.message }),
   });
 
   const remove = useMutation({
@@ -241,13 +274,11 @@ function CategoryPanel({
                 </td>
               </tr>
             ) : (
-              data.map((row: LookupParameter, idx: number) => {
-                // Effective color: stored color → palette fallback for runs → null
+              data.map((row: LookupParameter) => {
                 const effectiveColor =
-                  row.badgeColor ??
-                  (category === "bus_runs"
-                    ? RUN_PALETTE[idx % RUN_PALETTE.length]
-                    : null);
+                  category === LOOKUP_CATEGORIES.busRun
+                    ? busRunEffectiveColor(data, row)
+                    : row.badgeColor;
 
                 return (
                   <tr key={row.id} className="border-t border-border/60">
@@ -278,15 +309,26 @@ function CategoryPanel({
                       </td>
                     )}
                     <td className="px-3 py-2 text-right">
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        onClick={() => setRemoveTarget(row)}
-                        className="gap-1.5 text-destructive hover:text-destructive"
-                      >
-                        <Trash2 className="h-3.5 w-3.5" />
-                        Remove
-                      </Button>
+                      <div className="flex justify-end gap-1">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setEditTarget(row)}
+                          className="gap-1.5"
+                        >
+                          <Pencil className="h-3.5 w-3.5" />
+                          Edit
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setRemoveTarget(row)}
+                          className="gap-1.5 text-destructive hover:text-destructive"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                          Remove
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -295,6 +337,15 @@ function CategoryPanel({
           </tbody>
         </table>
       </div>
+
+      <EditLookupDialog
+        row={editTarget}
+        category={category}
+        open={!!editTarget}
+        onOpenChange={(open) => !open && setEditTarget(null)}
+        onSave={(input) => saveEdit.mutate(input)}
+        isSaving={saveEdit.isPending}
+      />
 
       <AlertDialog
         open={!!removeTarget}
@@ -306,7 +357,8 @@ function CategoryPanel({
             <AlertDialogDescription>
               This lookup entry will be deleted from {label}. Code{" "}
               <span className="font-mono">{removeTarget?.code}</span> will no longer appear in
-              pickers that use this list.
+              pickers that use this list. Clients still assigned to that code will need a new
+              run.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
@@ -322,6 +374,130 @@ function CategoryPanel({
         </AlertDialogContent>
       </AlertDialog>
     </div>
+  );
+}
+
+function EditLookupDialog({
+  row,
+  category,
+  open,
+  onOpenChange,
+  onSave,
+  isSaving,
+}: {
+  row: LookupParameter | null;
+  category: string;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSave: (input: {
+    id: string;
+    code: string;
+    displayName: string;
+    previousCode: string;
+  }) => void;
+  isSaving: boolean;
+}) {
+  const [code, setCode] = useState("");
+  const [displayName, setDisplayName] = useState("");
+
+  useEffect(() => {
+    if (open && row) {
+      setCode(row.code);
+      setDisplayName(row.displayName);
+    }
+  }, [open, row]);
+
+  const codeValid = code.trim().length >= 1;
+  const nameValid = displayName.trim().length >= 1;
+  const dirty =
+    !!row &&
+    (code.trim() !== row.code.trim() || displayName.trim() !== row.displayName.trim());
+  const codeChanged = !!row && code.trim() !== row.code.trim();
+  const missing = useMemo(() => {
+    const list: string[] = [];
+    if (!codeValid) list.push("Code");
+    if (!nameValid) list.push("Display name");
+    return list;
+  }, [codeValid, nameValid]);
+  const canSave = codeValid && nameValid && dirty && !isSaving && !!row;
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Edit lookup entry</DialogTitle>
+          <DialogDescription>
+            {category === LOOKUP_CATEGORIES.busRun
+              ? "Display name shows on Manifest and Clients. Changing the code keeps people on this run."
+              : "Code is the stored value; display name is what operators see."}
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          <CharacterCountedInput
+            label="Code (stored value)"
+            value={code}
+            onValueChange={setCode}
+            minChars={1}
+            maxChars={40}
+            placeholder="e.g. R3"
+            className="font-mono"
+            autoFocus
+          />
+          <CharacterCountedInput
+            label="Display name"
+            value={displayName}
+            onValueChange={setDisplayName}
+            minChars={1}
+            maxChars={80}
+            placeholder="Visible label"
+          />
+
+          {category === LOOKUP_CATEGORIES.busRun && codeChanged && (
+            <div className={cn("px-3 py-2.5 text-sm", CAUTION_CALLOUT_CLASS)}>
+              <p className={cn("text-xs leading-relaxed", CAUTION_CALLOUT_BODY_CLASS)}>
+                Changing the code from{" "}
+                <span className="font-mono">{row?.code}</span> to{" "}
+                <span className="font-mono">{code.trim()}</span> will update client
+                schedules, Manifest trips, default routes, and event bookings so nobody
+                has to be re-assigned.
+              </p>
+            </div>
+          )}
+
+          {!canSave && missing.length > 0 && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              <p className="font-semibold">Still needed:</p>
+              <ul className="mt-1 list-disc pl-4">
+                {missing.map((m) => (
+                  <li key={m}>{m}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+
+        <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+            Close
+          </Button>
+          <Button
+            onClick={() =>
+              row &&
+              onSave({
+                id: row.id,
+                code: code.trim(),
+                displayName: displayName.trim(),
+                previousCode: row.code,
+              })
+            }
+            disabled={!canSave}
+          >
+            {isSaving ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
 
@@ -341,8 +517,9 @@ function ColorCell({
   return (
     <div className="flex items-center gap-2">
       <input
+        key={row.id}
         type="color"
-        defaultValue={current}
+        value={current}
         onChange={(e) => onSave(e.target.value)}
         disabled={isSaving}
         className="h-8 w-10 cursor-pointer rounded border border-input bg-input p-0.5 disabled:opacity-50"

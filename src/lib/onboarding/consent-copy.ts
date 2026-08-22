@@ -26,6 +26,11 @@ export const CLIENT_CONSENT_BLOCKS = [
     title: "Emergency medical treatment",
     body: "In a medical emergency, I authorise YADA staff to seek urgent medical / ambulance assistance for the Client and to share necessary medical information with emergency services and treating clinicians.",
   },
+  {
+    key: "rightsHandbook",
+    title: "Rights, complaints and participant handbook",
+    body: "I have been given (or offered) the YADA Participant Handbook. I understand the Client's rights, how to raise a complaint or compliment (including anonymously), and that choosing an advocate will not affect access to supports. I know I can ask staff to help use Rights & voice in YADA Connect or yada.org.au.",
+  },
 ] as const;
 
 export const STAFF_DECLARATION_BLOCKS = [
