@@ -12,6 +12,7 @@ import {
 } from "@/lib/api/event-deliver-status";
 import {
   listEventTransportRuns,
+  pickTripForRun,
   type EventTransportRunCard,
   type EventTransportRunKind,
   type EventTransportRunStatus,
@@ -249,6 +250,71 @@ async function fetchTripLegs(tripId: string): Promise<TripLeg[]> {
   return (data ?? []).map((row) => mapTripLegFromDb(row));
 }
 
+async function fetchEventSessionTrips(
+  eventId: string,
+  sessionId: string,
+  sessionDate: string,
+): Promise<Record<string, unknown>[]> {
+  const [sessionRes, dateRes] = await Promise.all([
+    supabase.from("transport_trips").select("*").eq("event_day_session_id", sessionId),
+    supabase
+      .from("transport_trips")
+      .select("*")
+      .eq("event_id", eventId)
+      .eq("trip_date", sessionDate),
+  ]);
+  if (sessionRes.error) throw sessionRes.error;
+  if (dateRes.error) throw dateRes.error;
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const row of [...(sessionRes.data ?? []), ...(dateRes.data ?? [])]) {
+    byId.set((row as { id: string }).id, row as Record<string, unknown>);
+  }
+  return [...byId.values()];
+}
+
+function isWatchOutboundTrip(row: Record<string, unknown>): boolean {
+  if (row.trip_kind === "event_venue_hop" || row.hop_index != null) return false;
+  if (String(row.status ?? "").toLowerCase() === "cancelled") return false;
+  const ret = row.trip_return as string | null | undefined;
+  return ret === "none" || ret == null;
+}
+
+function pickupStateRank(state: EventWatchPersonState): number {
+  switch (state) {
+    case "on_bus":
+      return 4;
+    case "picked_up":
+      return 3;
+    case "cancelled":
+    case "not_travelling":
+      return 2;
+    default:
+      return 0;
+  }
+}
+
+function mergeWatchPeople(people: EventWatchPerson[]): EventWatchPerson[] {
+  const byId = new Map<string, EventWatchPerson>();
+  for (const person of people) {
+    const prev = byId.get(person.participantId);
+    if (!prev) {
+      byId.set(person.participantId, person);
+      continue;
+    }
+    const nextRank = pickupStateRank(person.state);
+    const prevRank = pickupStateRank(prev.state);
+    if (nextRank > prevRank) {
+      byId.set(person.participantId, {
+        ...person,
+        stamp: person.stamp ?? prev.stamp,
+      });
+    } else if (!prev.stamp && person.stamp) {
+      byId.set(person.participantId, { ...prev, stamp: person.stamp });
+    }
+  }
+  return [...byId.values()];
+}
+
 async function loadNameParts(ids: string[]): Promise<Map<string, SurnameSortable>> {
   const unique = [...new Set(ids.filter(Boolean))];
   const map = new Map<string, SurnameSortable>();
@@ -360,17 +426,24 @@ function peopleFromManifest(
 function buildInboundGroup(
   card: EventTransportRunCard,
   legs: TripLeg[],
+  manifest: Awaited<ReturnType<typeof listBusManifest>>,
   bookings: RosterBooking[],
   names: Map<string, SurnameSortable>,
 ): EventWatchTransportGroup {
   const fromLegs = peopleFromPickupLegs(legs, names);
-  const seen = new Set(fromLegs.map((p) => p.participantId));
+  const fromManifest = peopleFromManifest(manifest, names).map((p) => ({
+    ...p,
+    state:
+      p.state === "on_bus"
+        ? ("on_bus" as const)
+        : p.state === "not_travelling"
+          ? ("cancelled" as const)
+          : p.state,
+  }));
   const extras: EventWatchPerson[] = [];
   for (const b of bookings) {
     if ((b.outbound_transport_mode ?? "bus") !== "bus") continue;
     if (!matchesEventBusRun(b.outbound_bus_run_code, card.busRunCode)) continue;
-    if (seen.has(b.participant_id)) continue;
-    seen.add(b.participant_id);
     extras.push({
       participantId: b.participant_id,
       name: displayName(b.participant_id, names),
@@ -384,7 +457,7 @@ function buildInboundGroup(
     label: card.label,
     runStatus: card.status,
     busRunShortLabel: card.busRunShortLabel,
-    people: sortPeople([...fromLegs, ...extras], names),
+    people: sortPeople(mergeWatchPeople([...fromLegs, ...fromManifest, ...extras]), names),
   };
 }
 
@@ -440,10 +513,19 @@ export async function fetchEventWatchSnapshot(opts: {
   const session = sessions.find((s) => s.id === opts.sessionId);
   const sessionPhase = (session?.phase ?? "planning") as EventDayPhase;
 
+  const sessionTrips = await fetchEventSessionTrips(
+    opts.eventId,
+    opts.sessionId,
+    opts.sessionDate,
+  );
+
   const tripIds = [
-    ...new Set(
-      transportRuns.map((r) => r.tripId).filter((id): id is string => !!id),
-    ),
+    ...new Set([
+      ...transportRuns.map((r) => r.tripId).filter((id): id is string => !!id),
+      ...sessionTrips
+        .map((t) => String(t.id ?? ""))
+        .filter(Boolean),
+    ]),
   ];
 
   const [legsEntries, manifestEntries, morningRows, eveningRows] = await Promise.all([
@@ -471,14 +553,26 @@ export async function fetchEventWatchSnapshot(opts: {
   const names = await loadNameParts(nameIds);
 
   const inboundCards = transportRuns.filter((c) => c.kind === "outbound");
-  const inbound: EventWatchTransportGroup[] = inboundCards.map((card) =>
-    buildInboundGroup(
-      card,
-      card.tripId ? legsByTrip.get(card.tripId) ?? [] : [],
-      bookings,
-      names,
-    ),
-  );
+  const outboundTrips = sessionTrips.filter(isWatchOutboundTrip);
+  const inbound: EventWatchTransportGroup[] = inboundCards.map((card) => {
+    const matching = outboundTrips.filter((t) =>
+      matchesEventBusRun(
+        String(t.bus_run_code ?? "").trim() || null,
+        card.busRunCode,
+      ),
+    );
+    const preferred = pickTripForRun(matching, card.busRunCode ?? null);
+    const tripIdsForRun = [
+      ...new Set(
+        [preferred?.id, ...matching.map((t) => t.id), card.tripId]
+          .map((id) => (id ? String(id) : ""))
+          .filter(Boolean),
+      ),
+    ];
+    const legs = tripIdsForRun.flatMap((id) => legsByTrip.get(id) ?? []);
+    const manifest = tripIdsForRun.flatMap((id) => manifestByTrip.get(id) ?? []);
+    return buildInboundGroup(card, legs, manifest, bookings, names);
+  });
 
   const selfBookings = bookings.filter(
     (b) => (b.outbound_transport_mode ?? "bus") === "self",

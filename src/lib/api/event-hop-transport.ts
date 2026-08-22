@@ -101,22 +101,52 @@ async function fetchTripsForSession(sessionId: string, eventId: string, sessionD
 }
 
 function isHopTrip(row: Record<string, unknown>): boolean {
-  return row.trip_kind === "event_venue_hop";
+  return row.trip_kind === "event_venue_hop" || row.hop_index != null;
+}
+
+function isCancelledTrip(row: Record<string, unknown>): boolean {
+  return String(row.status ?? "").toLowerCase() === "cancelled";
 }
 
 function isOutboundTrip(row: Record<string, unknown>): boolean {
-  if (isHopTrip(row)) return false;
+  if (isHopTrip(row) || isCancelledTrip(row)) return false;
   const ret = row.trip_return as string | null | undefined;
   return ret === "none" || ret == null;
 }
 
 function isReturnTrip(row: Record<string, unknown>): boolean {
-  if (isHopTrip(row)) return false;
+  if (isHopTrip(row) || isCancelledTrip(row)) return false;
   return row.trip_return === "depot" || row.trip_return === "day_centre";
 }
 
 function tripStatus(row: Record<string, unknown>): string {
   return String(row.status ?? "").toLowerCase();
+}
+
+/** Prefer the Manifest run in progress over an older planned/released leftover. */
+export function pickTripForRun(
+  trips: Record<string, unknown>[],
+  runCode: string | null,
+): Record<string, unknown> | undefined {
+  const matches = trips.filter((t) => {
+    if (isCancelledTrip(t)) return false;
+    const code = String(t.bus_run_code ?? "").trim() || null;
+    return matchesEventBusRun(code, runCode);
+  });
+  if (matches.length === 0) return undefined;
+  const rank = (t: Record<string, unknown>) => {
+    const s = tripStatus(t);
+    if (s === "active") return 0;
+    if (s === "completed") return 1;
+    return 2;
+  };
+  return [...matches].sort((a, b) => {
+    const d = rank(a) - rank(b);
+    if (d !== 0) return d;
+    const at = String(a.started_at ?? a.created_at ?? "");
+    const bt = String(b.started_at ?? b.created_at ?? "");
+    return bt.localeCompare(at);
+  })[0];
 }
 
 export async function listEventTransportRuns(opts: {
@@ -196,13 +226,7 @@ export async function listEventTransportRuns(opts: {
   const findTripForRun = (
     trips: Record<string, unknown>[],
     runCode: string | null,
-  ): Record<string, unknown> | undefined => {
-    const match = trips.find((t) => {
-      const code = String(t.bus_run_code ?? "").trim() || null;
-      return matchesEventBusRun(code, runCode);
-    });
-    return match;
-  };
+  ): Record<string, unknown> | undefined => pickTripForRun(trips, runCode);
 
   const handoverStartedForRun = (runCode: string | null) =>
     attRows.some(
