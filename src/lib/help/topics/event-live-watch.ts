@@ -31,7 +31,7 @@ export const eventLiveWatchTopic: HelpTopic = {
     },
     {
       heading: "What you can see",
-      body: "Group status (same timeline as Event Deliver), who is waiting / picked up / on the bus, who is checked in at the venue, which programme stop is open, hops / HOME boarding, morning or evening roll, and open issues.",
+      body: "Group status (same timeline as Event Deliver) plus named people. Grey = not started, blue = happening (on bus / at event / open stop), green = that stage finished (handed over / arrived / done / delivered). Yellow and red stay for problems.",
     },
     {
       heading: "What you cannot do here",

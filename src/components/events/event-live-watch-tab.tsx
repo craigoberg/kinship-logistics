@@ -43,12 +43,15 @@ const STATE_LABEL: Record<EventWatchPersonState, string> = {
   waiting: "Waiting",
   picked_up: "Picked up",
   on_bus: "On bus",
+  handed_over: "Handed over",
   cancelled: "Cancelled",
   self_arriving: "Self-arriving",
+  arrived: "Arrived",
   expected: "Expected",
-  checked_in: "Checked in",
+  at_event: "At event",
+  finished: "Finished",
   absent: "Absent",
-  checked_out: "Checked out",
+  delivered: "Delivered",
   not_travelling: "Not travelling",
   accounted: "Accounted",
 };
@@ -65,20 +68,20 @@ const RUN_STATUS_LABEL: Record<string, string> = {
 
 function stateChipClass(state: EventWatchPersonState): string {
   switch (state) {
-    case "on_bus":
-    case "checked_in":
+    case "handed_over":
+    case "arrived":
+    case "delivered":
+    case "finished":
     case "accounted":
       return "bg-success text-success-foreground";
+    case "on_bus":
     case "picked_up":
+    case "at_event":
       return "bg-info text-info-foreground";
     case "cancelled":
     case "absent":
     case "not_travelling":
       return "bg-destructive text-destructive-foreground";
-    case "checked_out":
-      return "bg-zinc-600 text-white";
-    case "self_arriving":
-      return "border border-border bg-muted text-foreground";
     default:
       return "bg-muted text-muted-foreground";
   }
@@ -394,11 +397,11 @@ function ProgrammeList({ stops }: { stops: EventWatchProgrammeStop[] }) {
           <span
             className={cn(
               "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase",
-              stop.phase === "active" && "bg-success text-success-foreground",
-              stop.phase === "completed" && "bg-muted text-muted-foreground",
+              stop.phase === "active" && "bg-info text-info-foreground",
+              stop.phase === "completed" && "bg-success text-success-foreground",
               stop.phase !== "active" &&
                 stop.phase !== "completed" &&
-                "border border-border text-muted-foreground",
+                "bg-muted text-muted-foreground",
             )}
           >
             {phaseLabel(stop.phase)}

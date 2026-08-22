@@ -1110,7 +1110,7 @@ Rules:
 - **Do not merge Setup and Deliver** — they have different rhythms, different primary users, and different UI density requirements.
 - **Event Deliver** must also be launchable **from inside an event card** in `/events` (a "Run this event" button when the event is confirmed and today is a valid trip day).
 - **Trip Report** remains in `/events` as a tab; it is **not** inside Event Deliver — closing the field session triggers a return to office review.
-- **Live watch (BL-120):** Event Manage **Live** tab is a **read-only office projection** of the same tables Deliver and Manifest write (group status, named pickups, attendance, programme, rolls, open issues). It is **not** a fourth write surface and must not expose board / check-in / open-location / Resolve controls. Hub remains issue close-out.
+- **Live watch (BL-120):** Event Manage **Live** tab is a **read-only office projection** of the same tables Deliver and Manifest write (group status, named pickups, attendance, programme, rolls, open issues). It is **not** a fourth write surface and must not expose board / check-in / open-location / Resolve controls. Hub remains issue close-out. Stage chips: grey = not started; blue = happening; green = that stage finished.
 
 #### 12.13.2 The Extended Golden Rule (locked)
 

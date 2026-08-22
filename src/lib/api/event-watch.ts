@@ -48,12 +48,14 @@ export type EventWatchPickupState =
   | "waiting"
   | "picked_up"
   | "on_bus"
+  | "handed_over"
   | "cancelled"
-  | "self_arriving";
+  | "self_arriving"
+  | "arrived";
 
-export type EventWatchAttendanceState = "expected" | "checked_in" | "absent" | "checked_out";
+export type EventWatchAttendanceState = "expected" | "at_event" | "finished" | "absent";
 
-export type EventWatchBoardState = "expected" | "on_bus" | "not_travelling";
+export type EventWatchBoardState = "expected" | "on_bus" | "delivered" | "not_travelling";
 
 export type EventWatchRollState = "expected" | "accounted" | "absent";
 
@@ -281,12 +283,19 @@ function isWatchOutboundTrip(row: Record<string, unknown>): boolean {
 
 function pickupStateRank(state: EventWatchPersonState): number {
   switch (state) {
+    case "handed_over":
+    case "arrived":
+    case "delivered":
+    case "finished":
+    case "accounted":
+      return 5;
     case "on_bus":
-      return 4;
     case "picked_up":
-      return 3;
+    case "at_event":
+      return 4;
     case "cancelled":
     case "not_travelling":
+    case "absent":
       return 2;
     default:
       return 0;
@@ -387,9 +396,24 @@ async function listRollReadOnly(
   return out;
 }
 
+function dropoffStateFromLeg(
+  leg: TripLeg,
+  tripStatus: string,
+): EventWatchPersonState {
+  if (isCancelledPickupLeg(leg)) return "cancelled";
+  if (leg.status === "completed") return "delivered";
+  if (leg.status === "en_route" || leg.status === "arrived") return "on_bus";
+  if (leg.status === "pending" && (tripStatus === "active" || tripStatus === "completed")) {
+    return "on_bus";
+  }
+  return "expected";
+}
+
 function peopleFromPickupLegs(
   legs: TripLeg[],
   names: Map<string, SurnameSortable>,
+  mode: "inbound" | "dropoff" = "inbound",
+  tripStatus = "",
 ): EventWatchPerson[] {
   const people: EventWatchPerson[] = [];
   for (const leg of legs.filter(isPassengerPickupLeg)) {
@@ -398,7 +422,7 @@ function peopleFromPickupLegs(
     people.push({
       participantId: pid,
       name: displayName(pid, names),
-      state: pickupStateFromLeg(leg),
+      state: mode === "dropoff" ? dropoffStateFromLeg(leg, tripStatus) : pickupStateFromLeg(leg),
       stamp: pickupStamp(leg),
     });
   }
@@ -423,13 +447,28 @@ function peopleFromManifest(
   return people;
 }
 
+function applyStageComplete(
+  people: EventWatchPerson[],
+  done: boolean,
+  doneAt: string | null,
+): EventWatchPerson[] {
+  if (!done) return people;
+  return people.map((p) =>
+    p.state === "on_bus" || p.state === "picked_up"
+      ? { ...p, state: "delivered" as const, stamp: doneAt ?? p.stamp }
+      : p,
+  );
+}
+
 function buildInboundGroup(
   card: EventTransportRunCard,
   legs: TripLeg[],
   manifest: Awaited<ReturnType<typeof listBusManifest>>,
   bookings: RosterBooking[],
+  attendance: EventAttendanceRow[],
   names: Map<string, SurnameSortable>,
 ): EventWatchTransportGroup {
+  const attById = new Map(attendance.map((a) => [a.participantId, a]));
   const fromLegs = peopleFromPickupLegs(legs, names);
   const fromManifest = peopleFromManifest(manifest, names).map((p) => ({
     ...p,
@@ -451,13 +490,24 @@ function buildInboundGroup(
       stamp: null,
     });
   }
+  const merged = mergeWatchPeople([...fromLegs, ...fromManifest, ...extras]).map((p) => {
+    const att = attById.get(p.participantId);
+    if (att?.status === "checked_in" || att?.status === "checked_out") {
+      return {
+        ...p,
+        state: "handed_over" as const,
+        stamp: att.checkedInAt ?? p.stamp,
+      };
+    }
+    return p;
+  });
   return {
     key: card.key,
     kind: "outbound",
     label: card.label,
     runStatus: card.status,
     busRunShortLabel: card.busRunShortLabel,
-    people: sortPeople(mergeWatchPeople([...fromLegs, ...fromManifest, ...extras]), names),
+    people: sortPeople(merged, names),
   };
 }
 
@@ -467,14 +517,17 @@ function buildBoardedGroup(
   legs: TripLeg[],
   fallbackPeople: EventWatchPerson[],
   names: Map<string, SurnameSortable>,
+  tripStatus: string,
+  tripCompletedAt: string | null,
 ): EventWatchTransportGroup {
-  let people = peopleFromManifest(manifest, names);
-  if (people.length === 0 && legs.length > 0) {
-    people = peopleFromPickupLegs(legs, names);
-  }
-  if (people.length === 0) {
-    people = fallbackPeople;
-  }
+  const fromManifest = peopleFromManifest(manifest, names);
+  const fromLegs = peopleFromPickupLegs(legs, names, "dropoff", tripStatus);
+  const tripDone = tripStatus === "completed" || card.status === "completed";
+  const people = applyStageComplete(
+    mergeWatchPeople([...fallbackPeople, ...fromManifest, ...fromLegs]),
+    tripDone,
+    tripCompletedAt,
+  );
   return {
     key: card.key,
     kind: card.kind,
@@ -571,14 +624,14 @@ export async function fetchEventWatchSnapshot(opts: {
     ];
     const legs = tripIdsForRun.flatMap((id) => legsByTrip.get(id) ?? []);
     const manifest = tripIdsForRun.flatMap((id) => manifestByTrip.get(id) ?? []);
-    return buildInboundGroup(card, legs, manifest, bookings, names);
+    return buildInboundGroup(card, legs, manifest, bookings, attendance, names);
   });
 
+  const attById = new Map(attendance.map((a) => [a.participantId, a]));
   const selfBookings = bookings.filter(
     (b) => (b.outbound_transport_mode ?? "bus") === "self",
   );
   if (selfBookings.length > 0) {
-    const attById = new Map(attendance.map((a) => [a.participantId, a]));
     inbound.push({
       key: "outbound:self",
       kind: "self",
@@ -587,12 +640,13 @@ export async function fetchEventWatchSnapshot(opts: {
       people: sortPeople(
         selfBookings.map((b) => {
           const att = attById.get(b.participant_id);
+          const arrived =
+            att?.status === "checked_in" || att?.status === "checked_out";
           return {
             participantId: b.participant_id,
             name: displayName(b.participant_id, names),
-            state: "self_arriving" as const,
-            stamp: att?.checkedInAt ?? null,
-            detail: att?.status === "checked_in" ? "At venue" : undefined,
+            state: arrived ? ("arrived" as const) : ("self_arriving" as const),
+            stamp: arrived ? att?.checkedInAt ?? null : null,
           };
         }),
         names,
@@ -600,17 +654,33 @@ export async function fetchEventWatchSnapshot(opts: {
     });
   }
 
+  const tripMeta = (tripId: string | null | undefined) => {
+    const row = tripId
+      ? sessionTrips.find((t) => String(t.id ?? "") === tripId)
+      : undefined;
+    return {
+      status: String(row?.status ?? "").toLowerCase(),
+      completedAt:
+        (row?.completed_at as string | null | undefined) ??
+        (row?.completedAt as string | null | undefined) ??
+        null,
+    };
+  };
+
   const hops = transportRuns
     .filter((c) => c.kind === "venue_hop")
-    .map((card) =>
-      buildBoardedGroup(
+    .map((card) => {
+      const meta = tripMeta(card.tripId);
+      return buildBoardedGroup(
         card,
         card.tripId ? manifestByTrip.get(card.tripId) ?? [] : [],
         card.tripId ? legsByTrip.get(card.tripId) ?? [] : [],
         [],
         names,
-      ),
-    );
+        meta.status,
+        meta.completedAt,
+      );
+    });
 
   const home = transportRuns
     .filter((c) => c.kind === "return")
@@ -624,7 +694,7 @@ export async function fetchEventWatchSnapshot(opts: {
           state: "expected" as const,
           stamp: null,
         }));
-      const boarded = attendance
+      const handedToBus = attendance
         .filter(
           (a) =>
             a.status === "checked_out" &&
@@ -635,38 +705,85 @@ export async function fetchEventWatchSnapshot(opts: {
           participantId: a.participantId,
           name: displayName(a.participantId, names),
           state: "expected" as const,
-          stamp: a.checkedOutAt,
+          stamp: null,
           detail: "Handed to bus",
         }));
-      const fallbackPeople =
-        (card.tripId ? manifestByTrip.get(card.tripId)?.length : 0) ||
-        (card.tripId ? (legsByTrip.get(card.tripId) ?? []).some(isPassengerPickupLeg) : false)
-          ? []
-          : boarded.length > 0
-            ? boarded
-            : fallback;
+      const meta = tripMeta(card.tripId);
       return buildBoardedGroup(
         card,
         card.tripId ? manifestByTrip.get(card.tripId) ?? [] : [],
         card.tripId ? legsByTrip.get(card.tripId) ?? [] : [],
-        fallbackPeople,
+        [...fallback, ...handedToBus],
         names,
+        meta.status,
+        meta.completedAt,
       );
     });
 
+  const selfHomeIds = new Set<string>([
+    ...bookings
+      .filter((b) => (b.return_transport_mode ?? "bus") === "self")
+      .map((b) => b.participant_id),
+    ...attendance
+      .filter((a) => a.status === "checked_out" && a.returnTransport === "self")
+      .map((a) => a.participantId),
+  ]);
+  if (selfHomeIds.size > 0) {
+    home.push({
+      key: "return:self",
+      kind: "self",
+      label: "Self-transport HOME",
+      runStatus: "n_a",
+      people: sortPeople(
+        [...selfHomeIds].map((id) => {
+          const att = attById.get(id);
+          const handed =
+            att?.status === "checked_out" && att.returnTransport === "self";
+          return {
+            participantId: id,
+            name: displayName(id, names),
+            state: handed ? ("handed_over" as const) : ("expected" as const),
+            stamp: handed ? att?.checkedOutAt ?? null : null,
+            detail: "Self",
+          };
+        }),
+        names,
+      ),
+    });
+  }
+
   const attendancePeople = sortPeople(
-    attendance.map((a: EventAttendanceRow) => ({
-      participantId: a.participantId,
-      name: a.participantName?.trim() || displayName(a.participantId, names),
-      state: a.status,
-      stamp:
-        a.status === "checked_out"
-          ? a.checkedOutAt
-          : a.status === "checked_in"
-            ? a.checkedInAt
-            : null,
-      detail: arrivalMethodLabel(a.arrivalMethod, a.arrivalBusRunCode),
-    })),
+    attendance.map((a: EventAttendanceRow) => {
+      const state: EventWatchAttendanceState =
+        a.status === "checked_in"
+          ? "at_event"
+          : a.status === "checked_out"
+            ? "finished"
+            : a.status === "absent"
+              ? "absent"
+              : "expected";
+      const returnLabel =
+        a.returnTransport === "self"
+          ? "Self"
+          : a.returnTransport === "bus"
+            ? arrivalMethodLabel("bus", a.returnBusRunCode)
+            : "";
+      return {
+        participantId: a.participantId,
+        name: a.participantName?.trim() || displayName(a.participantId, names),
+        state,
+        stamp:
+          state === "finished"
+            ? a.checkedOutAt
+            : state === "at_event"
+              ? a.checkedInAt
+              : null,
+        detail:
+          state === "finished" && returnLabel
+            ? `Handed to ${returnLabel}`
+            : arrivalMethodLabel(a.arrivalMethod, a.arrivalBusRunCode) || undefined,
+      };
+    }),
     names,
   );
 

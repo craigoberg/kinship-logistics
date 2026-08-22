@@ -462,7 +462,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Event Deliver roll-call row** | Defined | `MobileFieldButton` + nested **Defer** + `UserX` (`trailing`) | Morning/Evening: whole name row = **Mark accounted**; **Defer** + **No show** inside. **Second tap undoes** accounted → awaiting (fat-finger / §4.4). Deferred until / Yellow / Red timing unchanged. Notes kept. |
 | **Event Deliver roll-call group alert** | Defined | `EventDeliverRollAlertBanner` + `RollCallDeferDialog` (no `participantId`) | Bands use **Deferred until** (`expected_accounted_at`). Grace (muted): no Yellow while before Deferred until. Yellow after Deferred until; Red at Deferred until + Admin `*_red_mins_after` (default 30). Primary **Defer everyone…**; `Group Deferred +Nm until HH:mm — reason` on banner only. |
 | **Itinerary overnight hotel cue** | Defined | Caution callout + `BedDouble` Overnight badge | Multi-day non-final nights; hard gate via Confirm/Open (BL-072) |
-| **Event Manage Live tab** | **Defined** | `EventLiveWatchTab` + `fetchEventWatchSnapshot` + reused `EventDeliverStatusPanel` | Office watch of a running outing | Read-only name + status chip + time (Trip Report density — not floor `MobileFieldButton`). Day chips when multi-day. No board / check-in / Open location / Resolve. BL-120. |
+| **Event Manage Live tab** | **Defined** | `EventLiveWatchTab` + `fetchEventWatchSnapshot` + reused `EventDeliverStatusPanel` | Office watch of a running outing | Read-only name + status chip + time (Trip Report density — not floor `MobileFieldButton`). Day chips when multi-day. No board / check-in / Open location / Resolve. **Stage chips:** muted grey = not started; solid `info` (blue) = happening (on bus / at event / open programme); solid `success` (green) = that stage finished (handed over / arrived / done / delivered / finished). Amber/red = problems only. BL-120. |
 | **Caution callout (banner/strip)** | Defined | `caution-callout.ts` classes | Non-blocking office warnings (overnight hotel, close-run notes) | **Must** include `dark:` text (`amber-100` / `amber-50`) — never `text-amber-950` / `text-amber-900` alone (unreadable on dark UI) |
 
 ### Component inventory (Defined in Events flow)
@@ -519,6 +519,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-23 | Event Manage Live stage chips | Grey = not started; blue `info` = happening; green `success` = stage complete (handed over / arrived / at-event finished / delivered). On-bus and at-event are blue, not green. |
 | 2026-08-22 | Event Manage Live tab | Office read-only field projection — `EventLiveWatchTab` + Group Status + named people (not floor taps) — BL-120 |
 | 2026-08-22 | Idle screen lock | `IdleLockGate` + non-dismissible `PinReauthDialog`; Admin `IdleLockAdminPanel` / `auth_idle_lock_minutes` (15 default; 0 = off); skip active Manifest |
 | 2026-08-22 | Admin CMS rich text editor | `CmsRichTextEditor` Visual + HTML; URL/library insert; DOMPurify allowlist; SharePoint upload later BL-119 |
