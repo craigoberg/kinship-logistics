@@ -42,7 +42,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "System Parameters — structured panels",
-      body: "Prefer named panels over raw JSON: Multi-day tour roll calls (default times + Green/Yellow/Red alert minutes + max deferral); Onboarding review windows (Band 3 yellow/red days); Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack. Hub Update Due / Stale thresholds and attendance no-show / roll-call grace keys also live here as System Parameters.",
+      body: "Prefer named panels over raw JSON: Idle screen lock (minutes after last tap; 0 = off; default 15); Multi-day tour roll calls (default times + Green/Yellow/Red alert minutes + max deferral); Onboarding review windows (Band 3 yellow/red days); Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack. Hub Update Due / Stale thresholds and attendance no-show / roll-call grace keys also live here as System Parameters.",
     },
     {
       heading: "System Parameters — JSON table",

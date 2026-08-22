@@ -14,7 +14,7 @@ alwaysApply: true
 | Layer | Mechanism | Purpose |
 |--------|-----------|---------|
 | **Day session** | Supabase Auth — email + password at start of day (**built**) | JWT required for operational reads/writes |
-| **Screen lock** | Idle timeout → `PinReauthDialog` (**not built**) | Same staff re-unlocks with **their** PIN; resume where they were; exempt active manifest run |
+| **Screen lock** | Idle timeout → `PinReauthDialog` (**built 2026-08-22**) | Same staff re-unlocks with **their** PIN; resume where they were; exempt active Manifest. Minutes: `auth_idle_lock_minutes` (default 15; 0 = off) |
 | **Action step-up** | `PinEntryDialog` / `verifyCoordinatorPin` (**built**) | High-impact sign-off (may be trip leader or operator, not always day-session user) |
 
 **Do not conflate** day login, screen unlock, and action PIN — three separate concerns.

@@ -10,6 +10,11 @@ import {
   listCheckpointsForAsset,
   type AssetCheckpoint,
 } from "@/lib/data-store";
+import {
+  AUTH_IDLE_LOCK_MINUTES_KEY,
+  DEFAULT_AUTH_IDLE_LOCK_MINUTES,
+  clampIdleLockMinutes,
+} from "@/lib/auth/idle-lock";
 
 export const SYSTEM_PARAMETERS_QUERY_KEY = ["system-parameters"] as const;
 
@@ -273,6 +278,16 @@ export function useDefaultMorningRollCallTime(): string {
   return useSystemParameter<string>(
     "default_morning_roll_call_time",
     "07:00",
+  );
+}
+
+/** Idle PIN lock minutes after last tap/key. 0 = off. Default 15. */
+export function useAuthIdleLockMinutes(): number {
+  return clampIdleLockMinutes(
+    useSystemParameter<number>(
+      AUTH_IDLE_LOCK_MINUTES_KEY,
+      DEFAULT_AUTH_IDLE_LOCK_MINUTES,
+    ),
   );
 }
 

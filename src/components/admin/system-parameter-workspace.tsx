@@ -55,6 +55,10 @@ import {
   OnboardingReviewSlaPanel,
   ONBOARDING_REVIEW_PARAM_KEYS,
 } from "./onboarding-review-sla-panel";
+import {
+  IdleLockAdminPanel,
+  IDLE_LOCK_PARAM_KEYS,
+} from "./idle-lock-admin-panel";
 
 const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...MANDATED_CHECK_PARAM_KEYS,
@@ -62,6 +66,7 @@ const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...APP_TICKET_NOTIFY_PARAM_KEYS,
   ...MOTD_PARAM_KEYS,
   ...ONBOARDING_REVIEW_PARAM_KEYS,
+  ...IDLE_LOCK_PARAM_KEYS,
 ]);
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
@@ -112,6 +117,8 @@ export function SystemParameterWorkspace() {
 
       <OnboardingReviewSlaPanel />
 
+      <IdleLockAdminPanel />
+
       <MandatedChecksAdminPanel />
 
       <CouncilEmailAdminPanel />
@@ -121,8 +128,8 @@ export function SystemParameterWorkspace() {
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Tunable operational thresholds. Every change is appended to the operational ledger with
-          the Managers justification. Walkthrough checklists, onboarding review windows, Council
-          email, and App ticket notify are edited above (not as JSON).
+          the Managers justification. Walkthrough checklists, idle lock, onboarding review windows,
+          Council email, and App ticket notify are edited above (not as JSON).
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
