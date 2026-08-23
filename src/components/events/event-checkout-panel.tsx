@@ -27,6 +27,7 @@ import {
   type EventAttendanceRow,
   type ReturnTransport,
 } from "@/lib/api/event-attendance";
+import { busHomeHandoverGapsKey } from "@/lib/api/event-transport";
 import { type EventDaySession } from "@/lib/api/event-outing";
 import { EventTransportBadge } from "@/components/events/event-transport-badge";
 import { EventCloseDayPanel } from "@/components/events/event-close-day-panel";
@@ -84,6 +85,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-actual-transport" });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "trip-report" });
     qc.invalidateQueries({ queryKey: eventDeliverStatusKey(session.id) });
+    qc.invalidateQueries({ queryKey: busHomeHandoverGapsKey(session.id) });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-accountability-roll" });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-issues" });
   };
@@ -263,7 +265,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
             <p className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
               {stillWithGroup === 0 && assignedCount > 0
                 ? "Everyone still with the group has return transport"
-                : "No one left with the group — trip can be closed"}
+                : "No one left with the group"}
             </p>
           )}
           <EventCloseDayPanel
@@ -367,6 +369,10 @@ function CheckOutCard({
   );
 
   const isOut = row.status === "checked_out";
+  const needsRunChoice =
+    selection.kind === "bus" &&
+    !selection.busRunCode &&
+    busRunOpts.length > 1;
   const assignedLabel =
     row.returnTransport === "self"
       ? "Self"
@@ -447,7 +453,7 @@ function CheckOutCard({
         <div className="flex items-start gap-2">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || needsRunChoice}
             onClick={() =>
               onCheckout(
                 selection.kind === "self" ? "self" : "bus",
@@ -471,7 +477,9 @@ function CheckOutCard({
               </Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Tap to hand to {selection.label}
+              {needsRunChoice
+                ? "Choose R1 or R2 first"
+                : `Tap to hand to ${selection.label}`}
             </p>
           </button>
           <EmbeddedMethodButton

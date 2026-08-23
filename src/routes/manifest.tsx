@@ -130,6 +130,12 @@ import {
   assessEventReturnTransport,
   eventReturnTransportKey,
 } from "@/lib/api/event-transport";
+import {
+  dayCentreRunSlotKey,
+  inspectTransportRunSlot,
+  transportRunSlotClosedMessage,
+  transportRunSlotHeldMessage,
+} from "@/lib/api/transport-run-exclusivity";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import {
   canCancelPickupLeg,
@@ -140,6 +146,11 @@ import {
   usePickupCancelDialog,
   type PickupDragBind,
 } from "@/components/manifest/manage-pickups-panel";
+import {
+  WalkOnCompanionsLine,
+  WalkOnPersonModal,
+  WalkOnStopIconButton,
+} from "@/components/events/walk-on-person-modal";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -996,6 +1007,10 @@ function EventPickAndStart({
     table: "participant_attendance_schedules",
     queryKeys: [["today-bus-run-summaries", todayDayCode]],
   });
+  useRealtimeInvalidate({
+    table: "transport_trips",
+    queryKeys: [["transport-run-slot"]],
+  });
 
   const todaysEvents = useMemo(
     () =>
@@ -1013,6 +1028,26 @@ function EventPickAndStart({
   const [selectedRun, setSelectedRun] = useState("");
   const [selectedDirection, setSelectedDirection] = useState<"morning" | "afternoon">("morning");
   const dcInFlightRef = useRef(false);
+
+  const { data: dayCentreSlot } = useQuery({
+    queryKey: dayCentreRunSlotKey(today, selectedRun, selectedDirection),
+    queryFn: () =>
+      inspectTransportRunSlot({
+        kind: "day_centre",
+        tripDate: today,
+        busRunCode: selectedRun,
+        direction: selectedDirection,
+      }),
+    enabled: tab === "daycentre" && !!selectedRun,
+    staleTime: 10_000,
+  });
+  const dayCentreActorId = getStaffId();
+  const dayCentreClosed = !!dayCentreSlot?.completed;
+  const dayCentreHeldByOther =
+    !!dayCentreSlot?.active &&
+    !!dayCentreSlot.active.driverStaffId &&
+    dayCentreSlot.active.driverStaffId !== dayCentreActorId;
+  const dayCentreStartBlocked = dayCentreClosed || dayCentreHeldByOther;
 
   // Event state.
   const [eventId, setEventId] = useState("");
@@ -1106,6 +1141,14 @@ function EventPickAndStart({
   // ── Day Centre Run submit ──────────────────────────────────────────────────
   const submitDayCentreRun = () => {
     if (!selectedRun || startDayCentreRun.isPending || dcInFlightRef.current) return;
+    if (dayCentreClosed && dayCentreSlot) {
+      toast.error(transportRunSlotClosedMessage(dayCentreSlot));
+      return;
+    }
+    if (dayCentreHeldByOther && dayCentreSlot) {
+      toast.error(transportRunSlotHeldMessage(dayCentreSlot));
+      return;
+    }
     if (runStartChoice === "alternate" && !runAlternateAddress.trim()) {
       toast.error("Enter an alternate starting address first.");
       return;
@@ -1159,7 +1202,8 @@ function EventPickAndStart({
   const showOutingOutboundStart =
     isOuting &&
     !!tripDaySession &&
-    selectedTransportRun?.kind === "outbound";
+    selectedTransportRun?.kind === "outbound" &&
+    selectedTransportRun.card.status !== "completed";
   const showDirectionPicker =
     !!selectedEvent && !(isOuting && tripDaySession);
   const eventTransportBlocked =
@@ -1337,13 +1381,21 @@ function EventPickAndStart({
             onAlternateAddressChange={setRunAlternateAddress}
           />
 
+          {dayCentreStartBlocked && dayCentreSlot && (
+            <p className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {dayCentreClosed
+                ? transportRunSlotClosedMessage(dayCentreSlot)
+                : transportRunSlotHeldMessage(dayCentreSlot)}
+            </p>
+          )}
+
           <button
             type="button"
-            disabled={!selectedRun || startDayCentreRun.isPending}
+            disabled={!selectedRun || startDayCentreRun.isPending || dayCentreStartBlocked}
             onClick={submitDayCentreRun}
             className={cn(
               "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              !selectedRun || startDayCentreRun.isPending
+              !selectedRun || startDayCentreRun.isPending || dayCentreStartBlocked
                 ? "bg-blue-600 opacity-60 cursor-not-allowed"
                 : "bg-blue-600 hover:bg-blue-700",
             )}
@@ -1587,9 +1639,12 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const reorderPickups = useReorderTripPickupLegs();
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
+  const [walkOnOpen, setWalkOnOpen] = useState(false);
 
   const isVenueHop = trip.tripKind === "event_venue_hop";
   const hopBoardingReady = useHopBoardingGate(isVenueHop ? trip.id : "");
+  const showWalkOn =
+    !!trip.eventId && !isVenueHop && activeLeg != null && activeLeg.status !== "en_route";
 
   // Return-run context ──────────────────────────────────────────────────────
   const isReturnRun = !isVenueHop && trip.tripReturn !== "none";
@@ -1759,6 +1814,11 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           legs={legs}
           startAddress={startAddressForLeg(shown)}
           onCancelPickup={canCancelPickupLeg(leg) ? () => requestCancel(leg) : undefined}
+          onWalkOn={
+            showWalkOn && leg.id === activeLeg?.id
+              ? () => setWalkOnOpen(true)
+              : undefined
+          }
           cancelDisabled={isCancelling}
           drag={drag}
           isReturnRun={isReturnRun}
@@ -1769,6 +1829,13 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           tripId={trip.id}
           eventId={trip.eventId}
         />
+        {trip.eventId && (
+          <WalkOnCompanionsLine
+            eventId={trip.eventId}
+            boardedLegId={leg.id}
+            hostParticipantId={shown.toParticipantId}
+          />
+        )}
       </div>
     );
   };
@@ -1942,6 +2009,20 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       </main>
 
       {pickupCancelDialog}
+
+      {trip.eventId && (
+        <WalkOnPersonModal
+          open={walkOnOpen}
+          onOpenChange={setWalkOnOpen}
+          eventId={trip.eventId}
+          source="manifest"
+          eventDaySessionId={trip.eventDaySessionId ?? null}
+          hostParticipantId={activeLeg?.toParticipantId ?? null}
+          pickupAddress={activeLeg?.targetAddress ?? null}
+          boardedLegId={activeLeg?.id ?? null}
+          busRunCode={trip.busRunCode}
+        />
+      )}
 
       <footer className="sticky bottom-0 z-20 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         {allLegsComplete ? (
@@ -2183,6 +2264,7 @@ function ActiveLegCard({
   legs,
   startAddress,
   onCancelPickup,
+  onWalkOn,
   cancelDisabled,
   drag,
   isReturnRun,
@@ -2195,6 +2277,7 @@ function ActiveLegCard({
   legs: TripLeg[];
   startAddress?: string | null;
   onCancelPickup?: () => void;
+  onWalkOn?: () => void;
   cancelDisabled?: boolean;
   drag?: PickupDragBind;
   isReturnRun?: boolean;
@@ -2274,8 +2357,15 @@ function ActiveLegCard({
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
               <Navigation className="h-3.5 w-3.5 shrink-0" /> Active leg {leg.legIndex}
             </div>
-            {onCancelPickup && leg.status !== "en_route" && (
-              <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+            {(onWalkOn || onCancelPickup) && leg.status !== "en_route" && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                {onWalkOn && (
+                  <WalkOnStopIconButton onClick={onWalkOn} disabled={cancelDisabled} />
+                )}
+                {onCancelPickup && (
+                  <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+                )}
+              </div>
             )}
           </div>
 

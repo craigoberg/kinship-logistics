@@ -17,6 +17,15 @@ import {
   Users,
   UserX,
 } from "lucide-react";
+import {
+  WalkOnBadge,
+  WalkOnFloorButton,
+  WalkOnPersonModal,
+} from "@/components/events/walk-on-person-modal";
+import {
+  listWalkOnBookings,
+  walkOnParticipantIds,
+} from "@/lib/api/event-walk-on";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
@@ -142,6 +151,17 @@ export function EventArrivalRollPanel({
     queryFn: listParticipants,
     staleTime: 60_000,
   });
+
+  const { data: walkOnFlags = [] } = useQuery({
+    queryKey: ["event-walk-ons", eventId],
+    queryFn: () => listWalkOnBookings(eventId),
+    staleTime: 15_000,
+  });
+  const walkOnIds = useMemo(
+    () => walkOnParticipantIds(walkOnFlags),
+    [walkOnFlags],
+  );
+  const [walkOnOpen, setWalkOnOpen] = useState(false);
 
   const priorSessionIds = priorSessions.map((s) => s.id);
   const { data: priorAbsenceMap = {} } = useQuery({
@@ -452,6 +472,7 @@ export function EventArrivalRollPanel({
                 plannedOutbound={
                   plannedOutboundByParticipant.get(row.participantId) ?? null
                 }
+                isWalkOn={walkOnIds.has(row.participantId)}
                 clinicalChips={clinicalFlagsFromParticipant(
                   participants.find((p) => p.id === row.participantId) ?? {},
                 )}
@@ -493,6 +514,18 @@ export function EventArrivalRollPanel({
           })}
         </ul>
       )}
+
+      <WalkOnFloorButton
+        label="Someone extra arrived"
+        onClick={() => setWalkOnOpen(true)}
+      />
+      <WalkOnPersonModal
+        open={walkOnOpen}
+        onOpenChange={setWalkOnOpen}
+        eventId={eventId}
+        source="venue"
+        eventDaySessionId={sessionId}
+      />
     </div>
   );
 }
@@ -512,6 +545,7 @@ function RollCard({
   arrivalUrgency = null,
   busRunOpts,
   plannedOutbound,
+  isWalkOn = false,
   clinicalChips = [],
   onUndoCheckIn,
   onCheckout,
@@ -531,6 +565,7 @@ function RollCard({
   arrivalUrgency?: ArrivalUrgency;
   busRunOpts: ReturnType<typeof eventBusRunOptions>;
   plannedOutbound: { mode: "bus" | "self"; busRunCode: string | null } | null;
+  isWalkOn?: boolean;
   clinicalChips?: import("@/lib/clinical-flags").ClinicalFlagChip[];
   onUndoCheckIn: () => void;
   onCheckout: (t: ReturnTransport, busRunCode?: string | null) => void;
@@ -657,6 +692,7 @@ function RollCard({
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{name}</span>
+              {isWalkOn && <WalkOnBadge />}
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Planned{" "}
                 {plannedIsBus
@@ -671,14 +707,14 @@ function RollCard({
                   Absent {absentDayLabel}
                 </Badge>
               )}
-              {clinicalChips.length > 0 && (
-                <ClinicalFlagChips chips={clinicalChips} personName={name} />
-              )}
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               Tap to check in via {arrivalSel.label}
             </p>
           </button>
+          {clinicalChips.length > 0 && (
+            <ClinicalFlagChips chips={clinicalChips} personName={name} />
+          )}
           <EmbeddedMethodButton
             label={arrivalSel.label}
             disabled={busy}
@@ -704,6 +740,7 @@ function RollCard({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1">
                 <span className="font-medium text-sm leading-tight">{name}</span>
+                {isWalkOn && <WalkOnBadge />}
                 {absentDayLabel && (
                   <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
                     Absent {absentDayLabel}

@@ -136,8 +136,9 @@ export function pickTripForRun(
   if (matches.length === 0) return undefined;
   const rank = (t: Record<string, unknown>) => {
     const s = tripStatus(t);
-    if (s === "active") return 0;
-    if (s === "completed") return 1;
+    // A leftover draft must not hide the run that was actually closed.
+    if (s === "completed") return 0;
+    if (s === "active") return 1;
     return 2;
   };
   return [...matches].sort((a, b) => {
@@ -793,7 +794,17 @@ export async function startEventVenueHop(
     };
   }
   if (st === "active") {
-    throw new Error("Another driver already has this hop active.");
+    const otherId = row.driver_staff_id as string | null;
+    let who = "Someone";
+    if (otherId) {
+      const { data: staff } = await supabase
+        .from("staff_registry")
+        .select("full_name")
+        .eq("id", otherId)
+        .maybeSingle();
+      who = ((staff as { full_name?: string | null } | null)?.full_name ?? "").trim() || "Someone";
+    }
+    throw new Error(`${who} already has this hop open. Join that run, or a manager must cancel it first.`);
   }
 
   const { data: activeOther } = await supabase

@@ -96,6 +96,10 @@ export function EventLocationPanel({
   };
 
   const managerStaffId = session.manager_staff_id ?? getActiveUserProfile()?.staffId ?? "";
+  const tripLeaderName = (session.manager_name ?? "").trim() || null;
+  const tripLeaderPinHint = tripLeaderName
+    ? `${tripLeaderName} (trip leader) — their PIN, not another manager’s.`
+    : "The assigned trip leader’s PIN — not another manager’s.";
 
   const { data: hasRed = false } = useQuery({
     queryKey: ["event-day-issues-red-check", session.id],
@@ -336,7 +340,8 @@ export function EventLocationPanel({
           <DialogHeader>
             <DialogTitle>Open location?</DialogTitle>
             <DialogDescription>
-              Complete the venue walkthrough, then enter trip leader PIN. That sign-off opens the
+              Complete the venue walkthrough, then enter the trip leader’s PIN
+              {tripLeaderName ? ` (${tripLeaderName})` : ""}. That sign-off opens the
               event floor and starts arrival check-in.
             </DialogDescription>
           </DialogHeader>
@@ -390,18 +395,22 @@ export function EventLocationPanel({
               />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Trip leader PIN</Label>
+              <Label className="text-xs">
+                Trip leader PIN{tripLeaderName ? ` — ${tripLeaderName}` : ""}
+              </Label>
               <PinEntryTrigger
                 label={
                   venueWalkthroughReady
-                    ? "Tap to enter PIN and open"
+                    ? tripLeaderName
+                      ? `Tap to enter ${tripLeaderName}'s PIN and open`
+                      : "Tap to enter trip leader PIN and open"
                     : "Complete walkthrough checks first"
                 }
                 verified={managerPinVerified || openMut.isPending}
                 verifiedLabel={openMut.isPending ? "Opening…" : "Trip leader PIN verified"}
                 length={4}
                 title="Open event location"
-                description="PIN confirms and opens the event floor."
+                description={tripLeaderPinHint}
                 disabled={
                   !managerStaffId || openMut.isPending || !venueWalkthroughReady || hasRed
                 }
@@ -462,14 +471,20 @@ export function EventLocationPanel({
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
             </div>
             <div className="space-y-1.5">
-              <Label className="text-xs">Manager PIN</Label>
+              <Label className="text-xs">
+                Trip leader PIN{tripLeaderName ? ` — ${tripLeaderName}` : ""}
+              </Label>
               <PinEntryTrigger
-                label="Tap to enter manager PIN"
+                label={
+                  tripLeaderName
+                    ? `Tap to enter ${tripLeaderName}'s PIN`
+                    : "Tap to enter trip leader PIN"
+                }
                 verified={managerPinVerified}
-                verifiedLabel="Manager PIN verified"
+                verifiedLabel="Trip leader PIN verified"
                 length={4}
                 title="Close event location"
-                description="Trip leader PIN required to close the event floor."
+                description={tripLeaderPinHint}
                 disabled={!managerStaffId}
                 onVerify={async (pin) => {
                   await verifyManagerPin(managerStaffId, pin);

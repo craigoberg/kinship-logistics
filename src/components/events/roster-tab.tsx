@@ -20,6 +20,7 @@ import {
 } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { AddGuestBookingModal } from "./add-guest-booking-modal";
+import { WalkOnBadge } from "./walk-on-person-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
@@ -222,6 +223,12 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                 >
                   Guest
                 </Badge>
+              )}
+              {b.isWalkOn && (
+                <WalkOnBadge className="ml-1.5 align-middle" />
+              )}
+              {b.carerIsWalkOn && !b.isWalkOn && (
+                <WalkOnBadge className="ml-1.5 align-middle" carer />
               )}
               {b.notes && (
                 <Tooltip>

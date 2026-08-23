@@ -68,6 +68,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Date of birth** | Defined | `DatePicker` + `getDobDatePickerProps()` | Guest DOB and any DOB field | Month + year dropdowns (`captionLayout="dropdown"`), years newest-first, last 120 years through today, future days disabled. Do not chevron-step decades. |
 | **Close event guest archive** | Defined | `archiveGuestParticipantsForEvent` via `promoteEventStatus` | Event Manage → Closed | Silent; toast archived/skipped counts; skip guests still on Open/Confirmed |
 | **Day Centre visitor → event guest** | Defined | `PromoteVisitorToEventDialog` + `AddGuestBookingModal` prefill | Visitor card **Add to event…** | Command event pick (Planning/Confirmed/Open, end ≥ today) → Add guest with name/host/note seeded; DOB/emergency/allergies still required |
+| **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` + driver `PinEntryDialog` | Manifest active-stop header (`WalkOnStopIconButton`, same chrome as pickup Cancel/Absent) and Event Deliver Check-In list footer (`WalkOnFloorButton` compact outline) | Guest / client / carer pick-lists or new; minimal fields; canned YELLOW office issue. Not a floor CTA. Not on each roll row. Not Day Centre visitors. BL-122. |
 | **Day Centre Active Day tabs** | Defined | `ActiveDayPanel` Tabs | `/day` active session | Check-In · Activities · Check-Out · Issues — same IA as Event Deliver; `site_day_*` data |
 | **Check-off list order** | **Defined** | `sort-participants.ts` — surname A–Z, then given name, then id | Day/Event check-in, roll call, bus boarding, activity, meal, muster tap lists | **Never** re-sort by status after tap — style/badge only. Do not move checked-off people into a second section mid-list. Exception: return boarding may stay route/`legIndex` order. Display name may stay `First Last`. |
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
@@ -106,7 +107,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Manifest offline / pending sync banner** | **Defined** | `ManifestOfflineBanner` | Active `/manifest` run | Amber when offline; blue while syncing; Retry via `FieldActionButton`; Close Run blocked until outbox empty (BL-082) |
 | **DEV/TEST simulate offline** | **Defined** | `Switch` on same amber SIM row as clock (`DevOperationalClockBar`) | `IS_TEST_BUILD` only (DEV + TEST) | Forces `isAppOnline()` false for Manifest outbox QA — not a production control (BL-082) |
 | **DEV/TEST lane badge on SIM bar** | **Defined** | Centre label `DEV` / `TEST` from `getAppLaneBadge()` (`VITE_APP_LANE`) | Amber SIM row only | Distinguishes Cursor/DEV host vs Vercel TEST; not a security control |
-| **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. |
+| **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. Generic **Bus** tap is not confirmable when 2+ Admin runs exist and no run is set — operator must pick R1/R2. |
 | **Day Centre schedule transport (Self + runs)** | **Defined** | Pill tap row: **Self** first, then Admin `bus_runs` | Participant Directory → Schedules add/edit IN/OUT | Stores `TRN-SELF` or the run code. No general-transport dropdown. Existing self/private/family codes still light Self. |
 | **Day Centre default run route** | **Defined** | `PointerSortableList` + run/direction pills (`RunRoutePanel`) | Participants Directory | Office drag order per run + morning/afternoon. Seeds Manifest; driver may still reorder. Same grip as Event Roster. |
 | **Day Centre Off today** | **Defined** | `OffTodayExemptionDialog` + outline **Off today** | Participant → Schedules (today's row) **and** Default run routes (column left of live status) | Operational today only. Sick/Cancelled pills + `CharacterCountedTextarea` (20). Recurring schedule stays. Live Manifest skip + driver banner — not driver RED cancel. Route-list buttons share a fixed column so they align down the page. **Exception** stays on every active schedule row (any date). |
@@ -464,6 +465,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Itinerary overnight hotel cue** | Defined | Caution callout + `BedDouble` Overnight badge | Multi-day non-final nights; hard gate via Confirm/Open (BL-072) |
 | **Event Manage Live tab** | **Defined** | `EventLiveWatchTab` + `fetchEventWatchSnapshot` + reused `EventDeliverStatusPanel` | Office watch of a running outing | Read-only name + status chip + time (Trip Report density — not floor `MobileFieldButton`). Day chips when multi-day. No board / check-in / Open location / Resolve. **Stage chips:** muted grey = not started; solid `info` (blue) = happening (on bus / at event / open programme); solid `success` (green) = that stage finished (handed over / arrived / done / delivered / finished). Amber/red = problems only. BL-120. |
 | **Caution callout (banner/strip)** | Defined | `caution-callout.ts` classes | Non-blocking office warnings (overnight hotel, close-run notes) | **Must** include `dark:` text (`amber-100` / `amber-50`) — never `text-amber-950` / `text-amber-900` alone (unreadable on dark UI) |
+| **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` | Manifest pickup + Event Deliver Check-In | Manifest: `WalkOnStopIconButton` in active-stop header (icon, Absent-sized). Event Deliver: compact outline `WalkOnFloorButton` under the check-in list — not on each row, not a full-width CTA. Kind tap list (`MobileOptionButton`); Command pickers; `CharacterCounted*` + missing list; Accept → `PinEntryDialog` (`verifyOperatorPin`). Badge **Walk-on · Intake incomplete**. |
 
 ### Component inventory (Defined in Events flow)
 
@@ -474,7 +476,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Trip leader | `MobileFieldButton` tap list | Field floor, ≤8 managers |
 | Close outcome | `MobileFieldButton` tap list | `closed_orderly` / `closed_incident` |
 | Arrival check-in button | `Button h-12` full-width | §4.4 pattern |
-| Departure handover | `BottomSheet` + `MobileFieldButton` | Slide-up picker; assigned row tap = undo (§4.4) until Close trip |
+| Departure handover | `BottomSheet` + `MobileFieldButton` | Slide-up picker; assigned row tap = undo (§4.4) until Close trip. Bus + no run + 2+ Admin runs: wide row disabled until R1/R2. |
 | Bus boarding row | `MobileFieldButton` selected | On-bus / expected state |
 | Activity check-in row | `MobileFieldButton` + `trailing` `UserX` | Confirm = whole row; Not attending nested inside |
 | Not travelling | Icon `<button> h-14 w-14` + `BottomSheet` reason | Secondary destructive action (bus hops — sheet for reason) |
@@ -519,6 +521,10 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-23 | Event unplanned walk-on placement | Manifest: `WalkOnStopIconButton` beside Cancel/Absent on the active stop card. Event Deliver: compact outline footer under the check-in list. Not a full-width CTA; not on each row. |
+| 2026-08-23 | Event unplanned walk-on | `WalkOnPersonModal` — same Defined add-person Dialog as Add guest; field doors on Manifest + Event Deliver; driver PIN; YELLOW canned workaround. BL-122. |
+| 2026-08-23 | Manifest one-run-slot block | Existing Start button + dashed callout (no new dialog). Named “already open / already closed” toast. Manager second-bus override not built. |
+| 2026-08-23 | Event Check-Out run + Close trip | Wide-row hand-over disabled until R1/R2 when multiple `bus_runs` exist. Close trip / Day Close waits for HOME Manifest (driver has the name) — not the last drop-off. Self = venue checkout only. |
 | 2026-08-23 | Event Manage Live stage chips | Grey = not started; blue `info` = happening; green `success` = stage complete (handed over / arrived / at-event finished / delivered). On-bus and at-event are blue, not green. |
 | 2026-08-22 | Event Manage Live tab | Office read-only field projection — `EventLiveWatchTab` + Group Status + named people (not floor taps) — BL-120 |
 | 2026-08-22 | Idle screen lock | `IdleLockGate` + non-dismissible `PinReauthDialog`; Admin `IdleLockAdminPanel` / `auth_idle_lock_minutes` (15 default; 0 = off); skip active Manifest |

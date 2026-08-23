@@ -12,7 +12,8 @@
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { assessEventReturnTransport, resolveReturnHomeBusEligibleIds } from "@/lib/api/event-transport";
-import { matchesEventBusRun } from "@/lib/event-bus-runs";
+import { assertTransportRunSlotStartable } from "@/lib/api/transport-run-exclusivity";
+import { effectiveReturnBusRun, matchesEventBusRun } from "@/lib/event-bus-runs";
 import {
   getSydneyTimeTodayIso,
   resolveOperationalNow,
@@ -2655,6 +2656,16 @@ export interface EventRosterBooking {
   hostParticipantId: string | null;
   /** BL-098 — ticket / room / capacity note. */
   guestOpsNote: string | null;
+  /** BL-122 — accepted on the night, not a planned office add. */
+  isWalkOn: boolean;
+  /** BL-122 — `manifest` (pickup stop) or `venue` (self at Event Deliver). */
+  walkOnSource: "manifest" | "venue" | null;
+  /** BL-122 — trip_legs.id they boarded at (companion; no new stop). */
+  walkOnBoardedLegId: string | null;
+  /** BL-122 — YELLOW Hub issue for office follow-up. */
+  walkOnIssueId: string | null;
+  /** BL-122 — carer attached on the night to a planned host booking. */
+  carerIsWalkOn: boolean;
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: string;
   updatedAt: string;
@@ -2686,6 +2697,11 @@ interface BookingRow {
   is_guest_booking?: boolean | null;
   host_participant_id?: string | null;
   guest_ops_note?: string | null;
+  is_walk_on?: boolean | null;
+  walk_on_source?: string | null;
+  walk_on_boarded_leg_id?: string | null;
+  walk_on_issue_id?: string | null;
+  carer_is_walk_on?: boolean | null;
   // NDIS billing pipeline
   funding_claim_type: string | null;
   charge_code_id: string | null;
@@ -2748,6 +2764,14 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     isGuestBooking: r.is_guest_booking === true,
     hostParticipantId: r.host_participant_id ?? null,
     guestOpsNote: r.guest_ops_note ?? null,
+    isWalkOn: r.is_walk_on === true,
+    walkOnSource:
+      r.walk_on_source === "manifest" || r.walk_on_source === "venue"
+        ? r.walk_on_source
+        : null,
+    walkOnBoardedLegId: r.walk_on_boarded_leg_id ?? null,
+    walkOnIssueId: r.walk_on_issue_id ?? null,
+    carerIsWalkOn: r.carer_is_walk_on === true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -2856,6 +2880,12 @@ export interface NewEventBooking {
   hostParticipantId?: string | null;
   guestOpsNote?: string | null;
   fundingClaimType?: string | null;
+  /** BL-122 */
+  isWalkOn?: boolean;
+  walkOnSource?: "manifest" | "venue" | null;
+  walkOnBoardedLegId?: string | null;
+  walkOnIssueId?: string | null;
+  carerIsWalkOn?: boolean;
 }
 
 export async function insertEventBooking(
@@ -2916,6 +2946,17 @@ export async function insertEventBooking(
       input.fundingClaimType?.trim() || "Private";
   } else if (input.fundingClaimType) {
     insertPayload.funding_claim_type = input.fundingClaimType;
+  } else if (input.hostParticipantId) {
+    insertPayload.host_participant_id = input.hostParticipantId.trim();
+  }
+  if (input.isWalkOn) {
+    insertPayload.is_walk_on = true;
+    insertPayload.walk_on_source = input.walkOnSource ?? null;
+    insertPayload.walk_on_boarded_leg_id = input.walkOnBoardedLegId ?? null;
+    insertPayload.walk_on_issue_id = input.walkOnIssueId ?? null;
+  }
+  if (input.carerIsWalkOn) {
+    insertPayload.carer_is_walk_on = true;
   }
   // pickup_order starts at 0; coordinator drag reorders via reorderEventRosterPickupOrder.
 
@@ -2931,6 +2972,11 @@ export async function insertEventBooking(
     delete legacy.is_guest_booking;
     delete legacy.host_participant_id;
     delete legacy.guest_ops_note;
+    delete legacy.is_walk_on;
+    delete legacy.walk_on_source;
+    delete legacy.walk_on_boarded_leg_id;
+    delete legacy.walk_on_issue_id;
+    delete legacy.carer_is_walk_on;
     delete legacy.outbound_bus_run_code;
     delete legacy.return_bus_run_code;
     delete legacy.transport_med_bag_required;
@@ -4387,31 +4433,35 @@ async function fetchLastItineraryStopForReturn(
 }
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
-  // 0. Defensive guard: if an active (not completed/cancelled) trip already
-  //    exists for this driver + event, return it instead of inserting again.
-  //    Prevents unique-key violations from double-clicks or double-mounts.
-  const { data: existingTrip, error: existingErr } = await supabase
-    .from("transport_trips")
-    .select("*")
-    .eq("event_id", input.eventId)
-    .eq("driver_staff_id", input.driverStaffId)
-    .not("status", "in", "(completed,cancelled)")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throwPg("[startTrip:existingLookup]", existingErr);
-  if (existingTrip) {
-    const existingKind = (existingTrip as { trip_kind?: string | null }).trip_kind;
-    // Venue hops use startEventVenueHop — never reuse via startTrip.
-    if (existingKind !== "event_venue_hop") {
+  const slotDate =
+    input.tripDirection === "return"
+      ? input.returnSessionDate?.slice(0, 10) ?? todayLocalIso()
+      : todayLocalIso();
+  const slotDirection =
+    input.tripDirection === "return"
+      ? "return"
+      : input.tripDirection === "outbound"
+        ? "outbound"
+        : "legacy";
+  const slotGate = await assertTransportRunSlotStartable({
+    slot: {
+      kind: "event",
+      eventId: input.eventId,
+      tripDate: slotDate,
+      busRunCode: (input.busRunCode ?? "").trim() || null,
+      direction: slotDirection,
+    },
+    actorStaffId: input.driverStaffId,
+  });
+  if (slotGate.reuseTripId) {
+    const { data: existingTrip, error: existingErr } = await supabase
+      .from("transport_trips")
+      .select("*")
+      .eq("id", slotGate.reuseTripId)
+      .maybeSingle();
+    if (existingErr) throwPg("[startTrip:reuseLookup]", existingErr);
+    if (existingTrip) {
       const existing = rowToTrip(existingTrip as TripRow);
-      const wantRun = (input.busRunCode ?? "").trim() || null;
-      const haveRun = (existing.busRunCode ?? "").trim() || null;
-      // Different multi-bus run → do not reuse this driver's other active trip.
-      if (wantRun !== haveRun && (wantRun != null || haveRun != null)) {
-        // fall through to create
-      } else {
-      // Heal stale return rosters (e.g. Left-trip still on booking bus mode).
       if (existing.tripReturn !== "none") {
         try {
           await pruneIneligibleReturnTripPassengers(existing);
@@ -4424,14 +4474,13 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         .select("*")
         .eq("trip_id", existing.id)
         .order("leg_index", { ascending: true });
-      if (legErr) throwPg("[startTrip:existingLegs]", legErr);
+      if (legErr) throwPg("[startTrip:reuseLegs]", legErr);
       const eventTitle = await fetchEventTitle(existing.eventId);
       return {
         trip: existing,
         legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
         eventTitle,
       };
-      }
     }
   }
 
@@ -4547,12 +4596,11 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         eligible.ids.has(r.participant_id),
       );
     }
-    // Prefer floor return_bus_run_code when present (eligible map values).
+    // Floor run when handed over; fall back to roster if floor bus has no run.
     const floorRunByPid = eligible?.runs ?? null;
     resolvedBookingRows = resolvedBookingRows.filter((r) => {
       const floorRun = floorRunByPid?.get(r.participant_id);
-      const personRun =
-        floorRun !== undefined ? floorRun : r.return_bus_run_code;
+      const personRun = effectiveReturnBusRun(floorRun, r.return_bus_run_code);
       return matchesEventBusRun(personRun, tripBusRunCode);
     });
   }
@@ -5415,39 +5463,43 @@ export async function startDayCentreRun(
 ): Promise<ActiveTripBundle> {
   const centreLabel = input.centreLabel ?? "Day Centre";
   const direction = input.direction ?? "morning";
-
-  // 0. Guard: reuse any existing active run for this driver + run code today.
   const today = todayLocalIso();
-  const { data: existingTrip, error: existingErr } = await supabase
-    .from("transport_trips")
-    .select("*")
-    .eq("bus_run_code", input.busRunCode)
-    .eq("driver_staff_id", input.driverStaffId)
-    .not("status", "in", "(completed,cancelled)")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throwPg("[startDayCentreRun:existingLookup]", existingErr);
-  if (existingTrip) {
-    const existing = rowToTrip(existingTrip as TripRow);
-    const { data: legRows, error: legErr } = await supabase
-      .from("trip_legs")
-      .select("*")
-      .eq("trip_id", existing.id)
-      .order("leg_index", { ascending: true });
-    if (legErr) throwPg("[startDayCentreRun:existingLegs]", legErr);
-    if ((legRows ?? []).length > 0) {
-      return {
-        trip: existing,
-        legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-        eventTitle: `${centreLabel} — ${input.busRunLabel}`,
-      };
-    }
-    // Orphan trip from a failed leg insert (e.g. NOT NULL booleans) — cancel and recreate.
-    await supabase
+  const slotGate = await assertTransportRunSlotStartable({
+    slot: {
+      kind: "day_centre",
+      tripDate: today,
+      busRunCode: input.busRunCode,
+      direction,
+    },
+    actorStaffId: input.driverStaffId,
+  });
+  if (slotGate.reuseTripId) {
+    const { data: existingTrip, error: existingErr } = await supabase
       .from("transport_trips")
-      .update({ status: "cancelled", updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
+      .select("*")
+      .eq("id", slotGate.reuseTripId)
+      .maybeSingle();
+    if (existingErr) throwPg("[startDayCentreRun:reuseLookup]", existingErr);
+    if (existingTrip) {
+      const existing = rowToTrip(existingTrip as TripRow);
+      const { data: legRows, error: legErr } = await supabase
+        .from("trip_legs")
+        .select("*")
+        .eq("trip_id", existing.id)
+        .order("leg_index", { ascending: true });
+      if (legErr) throwPg("[startDayCentreRun:reuseLegs]", legErr);
+      if ((legRows ?? []).length > 0) {
+        return {
+          trip: existing,
+          legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+          eventTitle: `${centreLabel} — ${input.busRunLabel}`,
+        };
+      }
+      await supabase
+        .from("transport_trips")
+        .update({ status: "cancelled", updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+    }
   }
 
   // 1. Build roster from participant_attendance_schedules.
@@ -5780,16 +5832,34 @@ export async function pruneIneligibleReturnTripPassengers(
 
   const legs = (legRows ?? []).map((r) => rowToLeg(r as LegRow));
   const tripRun = (trip.busRunCode ?? "").trim() || null;
+  const rosterRuns = new Map<string, string | null>();
+  {
+    const { data: bookings, error: bookErr } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, return_bus_run_code")
+      .eq("event_id", trip.eventId)
+      .neq("booking_status", "Cancelled");
+    if (bookErr && !isSchemaMismatchError(bookErr)) {
+      throwPg("[pruneIneligibleReturnTripPassengers:roster]", bookErr);
+    }
+    for (const row of bookings ?? []) {
+      const r = row as { participant_id: string; return_bus_run_code?: string | null };
+      rosterRuns.set(r.participant_id, (r.return_bus_run_code ?? "").trim() || null);
+    }
+  }
   const toPrune = legs.filter((l) => {
     if (!isPassengerPickupLeg(l) || l.status !== "pending" || !l.toParticipantId) {
       return false;
     }
     if (!eligible.ids.has(l.toParticipantId)) return true;
     const floorRun = eligible.runs.get(l.toParticipantId);
-    // checked_in (no floor run yet) — keep unless we know they're wrong run via roster only;
-    // floor map omit means use roster; we only prune known floor mismatches + absents.
+    // checked_in (no floor run yet) — keep; floor omit means still with the group.
     if (floorRun === undefined) return false;
-    return !matchesEventBusRun(floorRun, tripRun);
+    const personRun = effectiveReturnBusRun(
+      floorRun,
+      rosterRuns.get(l.toParticipantId),
+    );
+    return !matchesEventBusRun(personRun, tripRun);
   });
   if (toPrune.length === 0) return 0;
 
@@ -6328,7 +6398,14 @@ export async function verifyCoordinatorPin(
     Array.isArray(data) ? data : data ? [data] : []
   ) as Array<{ id: string; role: string | null; personnel_type?: string | null }>;
   const row = rows.find((r) => r.id === staffId);
-  if (!row) return false;
+  if (!row) {
+    if (rows.length > 0) {
+      throw new Error(
+        "That PIN belongs to a different staff member. This action needs the assigned trip leader’s PIN.",
+      );
+    }
+    return false;
+  }
   const role =
     classifyRole(row.personnel_type ?? null) ?? classifyRole(row.role ?? null);
   if (role !== "coordinator") {

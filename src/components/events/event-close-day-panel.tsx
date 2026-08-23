@@ -20,6 +20,10 @@ import { closeEventLocation, isEventLocationClosed } from "@/lib/api/event-locat
 import { getAccountabilityProgress } from "@/lib/api/event-deliver-status";
 import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
 import type { EventDaySession } from "@/lib/api/event-outing";
+import {
+  busHomeHandoverGapsKey,
+  listBusHomeHandoverGaps,
+} from "@/lib/api/event-transport";
 import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
@@ -63,6 +67,19 @@ export function EventCloseDayPanel({
     staleTime: 15_000,
   });
 
+  const { data: busHomeGaps, isLoading: gapsLoading } = useQuery({
+    queryKey: busHomeHandoverGapsKey(session.id),
+    queryFn: () =>
+      listBusHomeHandoverGaps({
+        eventId: session.event_id,
+        sessionId: session.id,
+        sessionDate: session.session_date,
+      }),
+    enabled: !requireEveningRoll && !isClosed,
+    staleTime: 10_000,
+    refetchInterval: !requireEveningRoll && !isClosed ? 15_000 : false,
+  });
+
   const vacuousEveningOk =
     !!eveningProgress &&
     eveningProgress.total === 0 &&
@@ -72,9 +89,11 @@ export function EventCloseDayPanel({
   const eveningReady =
     !!eveningProgress && (eveningProgress.complete || vacuousEveningOk);
 
-  const checkoutReady =
+  const floorHandoverReady =
     attendance.length > 0 &&
     !attendance.some((r) => r.status === "checked_in" || r.status === "expected");
+  const busHomeReady = busHomeGaps != null && busHomeGaps.names.length === 0;
+  const checkoutReady = floorHandoverReady && busHomeReady;
 
   const canClose = requireEveningRoll ? eveningReady : checkoutReady;
   const pendingEvening = eveningProgress?.pending ?? 0;
@@ -113,7 +132,10 @@ export function EventCloseDayPanel({
     );
   }
 
-  const loading = (requireEveningRoll && eveningLoading) || attLoading;
+  const loading =
+    (requireEveningRoll && eveningLoading) ||
+    attLoading ||
+    (!requireEveningRoll && gapsLoading);
 
   return (
     <div className="space-y-3">
@@ -122,6 +144,14 @@ export function EventCloseDayPanel({
           Complete Evening Roll
           {pendingEvening > 0 ? ` — ${pendingEvening} still to account` : ""} before closing
           this day.
+        </p>
+      )}
+
+      {!requireEveningRoll && floorHandoverReady && !busHomeReady && !loading && (
+        <p className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+          {busHomeGaps && !busHomeGaps.homeStarted
+            ? `Start the return run in Manifest first — handed to the bus but not on a HOME list: ${busHomeGaps.names.join(", ")}.`
+            : `Cannot close until the driver has them on HOME Manifest: ${busHomeGaps?.names.join(", ") ?? "bus passengers"}.`}
         </p>
       )}
 

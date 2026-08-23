@@ -658,8 +658,23 @@ Differences that are **violations**:
 | Drag reorder + cancel dialog | `src/components/manifest/manage-pickups-panel.tsx` |
 | Trip start (events) | `startTrip()` — `src/lib/data-store.ts` |
 | Trip start (Day Centre) | `startDayCentreRun()` — `src/lib/data-store.ts` |
+| One run slot | `assertTransportRunSlotStartable` — `src/lib/api/transport-run-exclusivity.ts` |
 | Chain recompute + persist | `computePickupChainEndpoints`, `rebuildTripPickupChain`, `reorderTripPickupLegs` — `src/lib/data-store.ts` |
 | Site address defaults | `src/components/admin/transport-site-addresses-panel.tsx` |
+
+#### 11.9 One Manifest per run slot (locked 2026-08-23)
+
+**One live trip** per slot. A second person cannot open the same run. A **closed** slot cannot be started again.
+
+| Slot | Identity |
+| :-- | :-- |
+| Event Transport IN / HOME | `event_id` + trip date + bus run + direction (`trip_return`) |
+| Day Centre morning / afternoon | Operational today + bus run + direction |
+| Venue hop | Existing hop trip — already named-block if another driver has it active |
+
+Same staff + still `active` → resume that trip (do not insert another). Anyone else → error naming who has it. Slot `completed` → error; second bus is an **incident** (manager override later). Cancel the abandoned trip first if the holder walked away.
+
+SQL: `docs/sql/2026-08-23_transport_run_slot_exclusivity.sql` (cancel leftover active drafts + unique indexes).
 
 ### Amendment Process (§11)
 
@@ -667,7 +682,7 @@ Differences that are **violations**:
 
 ---
 
-## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended same day — Day Centre parity)
+## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended 2026-07-04 Day Centre parity; amended 2026-08-23 bus HOME close gate)
 
 > Status: Permanent Build Requirement. Applies to **out-of-centre single-day outings**, **multi-day tours**, and the **Venue Management** registry. Extends §11 (driver manifest) and Day Centre patterns (`client_attendance_log`, `site_day_sessions`) — **same cadence, temporary centre at the venue**. Does **not** replace Day Centre modules.
 
@@ -682,7 +697,7 @@ These trips are **not NDIS-funded**. Safety, auditability, and internal P&L repo
 | **Centre parity** | Single-day and multi-day outings use the **same separation** as Day Centre: **transport** (bus runs, manifests) vs **site** (leader open, arrival roll, program, departure handover, close). Events are **not** a different operational model. |
 | **Two accountability layers** | **Transport layer:** `event_bus_manifest` + §11 driver manifest — who is on **this bus for this leg**. **Event-floor layer:** `event_attendance_log` (planned; mirrors `client_attendance_log`) — who has **arrived at / departed from** the temporary centre. **Neither layer substitutes for the other.** |
 | **Hard open = event starts** | Trip leader **opens the location** (Manager PIN + on-the-day venue checks, parallel to Day Centre open). **RED blocks open** — buses may be turned around; self-transport contacted. Kinship transport may start **hours before** open; that does **not** start the event. |
-| **Hard close = handover done** | Trip leader **closes the location** after **departure handover** — every participant on assigned return transport (bus / self). Leader **does not** wait for the last home drop-off. |
+| **Hard close = handover done** | Trip leader **closes the location** after **departure handover**. **Self:** venue checkout is enough. **Bus:** checkout **and** the person is on the HOME Manifest (driver has the name — pending or completed drop-off leg). Leader **does not** wait for the last home drop-off. *(Amended 2026-08-23 — close the gap between the venue wave-goodbye and the driver asking where everyone is.)* |
 | **Transport home** | Return legs completed and reconciled via §11 manifest (parallel to Day Centre going-home logging). **`event_manifest` → Closed** is not blocked on the last drop-off completing. |
 | **Venue safety (planning) ≠ live roll** | Registry baseline sign-off (§12.2) is **planning/compliance**. Live rolls are §12.4 event-floor + bus boarding + curfew/morning (multi-day). |
 | **One hop = one trip** | Each venue leg (Hotel → Park → Cinema → Hotel) is exactly **one** `transport_trip` with its own manifest lifecycle per §11. |
@@ -933,7 +948,7 @@ Do **not** keep executable Arrival / Bus boarding / Morning / Evening rolls in M
 
 | Gate | Rule |
 | :-- | :-- |
-| **Day close** | Intermediate nights: once **evening roll is complete** (everyone accounted/absent). Final / single day: **Check-Out handover** complete (nobody still checked in). May close **before** the scheduled curfew clock (high-trust; `close_declared_at` + ledger are the audit). Open Yellow OK; open RED still blocks where existing open/close rules say so. Day close does **not** wait for Manifest home drops. |
+| **Day close** | Intermediate nights: once **evening roll is complete** (everyone accounted/absent). Final / single day: **Check-Out handover** complete (nobody still checked in) **and** every bus handover is on the HOME Manifest (self-transport needs venue checkout only). May close **before** the scheduled curfew clock (high-trust; `close_declared_at` + ledger are the audit). Open Yellow OK; open RED still blocks where existing open/close rules say so. Day close does **not** wait for the last Manifest home drop — only that the driver has them on the return run. |
 | **Sequential open** | Cannot **Open location** on Day N+1 while Day N is not `closed_orderly` / `closed_incident`. |
 | **Event → Closed** | All day sessions closed + no open RED + final-day departure cleared + return transport home complete when bus passengers exist (`guardOpenToClosed` + `event-lifecycle-gates.ts`). |
 | **Status integrity** | UI must not show Closed while trip days remain open; repair reopens `event_manifest.status` to Open if that inconsistency is found. |

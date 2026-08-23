@@ -157,6 +157,11 @@ export async function seedEventAttendanceRoll(
 
   if (payload.length === 0) return 0;
 
+  const finishSeed = async (count: number): Promise<number> => {
+    await backfillMissingAttendanceBusRuns(eventDaySessionId, bookings);
+    return count;
+  };
+
   const isMissingOnConflictTarget = (err: {
     code?: string;
     message?: string;
@@ -199,7 +204,7 @@ export async function seedEventAttendanceRoll(
     const existing = await listEventAttendanceRoll(eventDaySessionId);
     const have = new Set(existing.map((r) => r.participantId));
     const missing = payload.filter((r) => !have.has(r.participant_id));
-    if (missing.length === 0) return 0;
+    if (missing.length === 0) return finishSeed(0);
     const { data: plain, error: plainErr } = await supabase
       .from("event_attendance_log")
       .insert(missing)
@@ -218,14 +223,49 @@ export async function seedEventAttendanceRoll(
         .insert(legacy)
         .select("id");
       if (retry.error) throw retry.error;
-      return retry.data?.length ?? 0;
+      return finishSeed(retry.data?.length ?? 0);
     }
     if (plainErr) throw plainErr;
-    return plain?.length ?? 0;
+    return finishSeed(plain?.length ?? 0);
   }
 
   if (insErr) throw insErr;
-  return inserted?.length ?? 0;
+  return finishSeed(inserted?.length ?? 0);
+}
+
+/** Fill expected/checked-in rows that were seeded before roster had a run code. */
+async function backfillMissingAttendanceBusRuns(
+  eventDaySessionId: string,
+  bookings: Array<Record<string, unknown>>,
+): Promise<void> {
+  const rosterRun = new Map<string, string>();
+  for (const b of bookings) {
+    const row = b as {
+      participant_id: string;
+      return_transport_mode?: string | null;
+      return_bus_run_code?: string | null;
+    };
+    const mode = row.return_transport_mode ?? "bus";
+    const code = (row.return_bus_run_code ?? "").trim();
+    if (mode === "bus" && code) rosterRun.set(row.participant_id, code);
+  }
+  if (rosterRun.size === 0) return;
+
+  const roll = await listEventAttendanceRoll(eventDaySessionId);
+  for (const row of roll) {
+    if (row.status === "checked_out" || row.status === "absent") continue;
+    if (row.returnBusRunCode) continue;
+    if (row.returnTransport && row.returnTransport !== "bus") continue;
+    const code = rosterRun.get(row.participantId);
+    if (!code) continue;
+    const { error } = await supabase
+      .from("event_attendance_log")
+      .update({ return_bus_run_code: code, return_transport: "bus" })
+      .eq("id", row.id);
+    if (error && !isSchemaMismatchError(error)) {
+      console.warn("[seedEventAttendanceRoll:backfillRun]", error.message);
+    }
+  }
 }
 
 /**
@@ -408,7 +448,9 @@ export async function checkoutEventParticipant(
   const staffId = await resolveStaffIdWithFallback();
   const nowIso = operationalNowIso();
   const runCode =
-    returnTransport === "bus" ? (returnBusRunCode ?? "").trim() || null : null;
+    returnTransport === "bus"
+      ? await resolveCheckoutReturnBusRun(row, returnBusRunCode)
+      : null;
 
   const patch: Record<string, unknown> = {
     status: "checked_out",
@@ -454,6 +496,46 @@ export async function checkoutEventParticipant(
   });
 
   return toRow(data as DbRow);
+}
+
+/** Floor code, else roster return run, else sole Admin bus_runs row. */
+async function resolveCheckoutReturnBusRun(
+  row: EventAttendanceRow,
+  requested: string | null | undefined,
+): Promise<string | null> {
+  let run = (requested ?? "").trim() || null;
+  if (run) return run;
+
+  const { data: sess, error: sessErr } = await supabase
+    .from("event_day_sessions")
+    .select("event_id")
+    .eq("id", row.eventDaySessionId)
+    .maybeSingle();
+  if (sessErr) throw sessErr;
+  const eventId = (sess as { event_id?: string } | null)?.event_id;
+  if (eventId && row.participantId) {
+    const { data: booking, error: bookErr } = await supabase
+      .from("event_roster_bookings")
+      .select("return_bus_run_code")
+      .eq("event_id", eventId)
+      .eq("participant_id", row.participantId)
+      .maybeSingle();
+    if (bookErr && !isSchemaMismatchError(bookErr)) throw bookErr;
+    run =
+      ((booking as { return_bus_run_code?: string | null } | null)
+        ?.return_bus_run_code ?? "").trim() || null;
+    if (run) return run;
+  }
+
+  const { listLookupParameters, LOOKUP_CATEGORIES } = await import(
+    "@/lib/data-store"
+  );
+  const { eventBusRunOptions } = await import("@/lib/event-bus-runs");
+  const lookups = await listLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const opts = eventBusRunOptions(lookups);
+  if (opts.length === 1) return opts[0].code;
+  if (opts.length === 0) return null;
+  throw new Error("Choose which bus (R1 / R2) before handing over.");
 }
 
 /**

@@ -103,6 +103,70 @@ export async function listGuestParticipants(): Promise<GuestParticipant[]> {
   return (data ?? []).map((r) => mapGuest(r as Record<string, unknown>));
 }
 
+/** BL-122 — roadside guest: name + allergies only. DOB / emergency later (office). */
+export async function createWalkOnGuestParticipant(input: {
+  firstName: string;
+  lastName: string;
+  allergiesNotes: string;
+  phone?: string | null;
+}): Promise<GuestParticipant> {
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  if (!firstName || !lastName) throw new Error("First and last name are required.");
+  const allergies = input.allergiesNotes.trim();
+  if (!allergies) {
+    throw new Error('Allergies / alerts required (enter "None" if none known).');
+  }
+  const phone = input.phone?.trim() || null;
+
+  const row = {
+    first_name: firstName,
+    last_name: lastName,
+    ndis_number: guestNdisPlaceholder(),
+    dual_witness_pin_hash: "GUEST",
+    iddsi_level_liquids: 0,
+    iddsi_level_solids: 7,
+    participant_kind: "guest",
+    archived_at: null,
+    date_of_birth: null,
+    emergency_contact_name: null,
+    emergency_contact_phone: phone,
+    emergency_contact_relationship: phone ? "Walk-on phone" : null,
+    allergies_notes: allergies,
+    street_address: null,
+    regular_pickup_address: null,
+  };
+
+  const { data, error } = await supabase
+    .from("participants")
+    .insert(row)
+    .select(
+      "id, first_name, last_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship, allergies_notes, regular_pickup_address, street_address, archived_at, participant_kind",
+    )
+    .single();
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      throw new Error(
+        "Guest participant columns missing — run docs/sql/2026-07-26_event_guest_participants.sql",
+      );
+    }
+    throw error;
+  }
+
+  const guest = mapGuest(data as Record<string, unknown>);
+  const staffId = await resolveStaffIdWithFallback();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "EVENT_WALK_ON_GUEST_CREATED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: { participant_id: guest.id, display_name: guest.fullName },
+  });
+  return guest;
+}
+
 export async function createGuestParticipant(input: {
   firstName: string;
   lastName: string;
@@ -398,6 +462,7 @@ export async function listIncompleteGuestBookings(
     .select(
       `id, participant_id, outbound_transport_mode, return_transport_mode,
        trip_pickup_address_override, transport_med_bag_required, is_guest_booking, booking_status,
+       is_walk_on,
        participants!event_roster_bookings_participant_id_fkey!inner(
          first_name, last_name, date_of_birth, emergency_contact_name,
          emergency_contact_phone, allergies_notes, regular_pickup_address, street_address,
@@ -408,12 +473,38 @@ export async function listIncompleteGuestBookings(
     .neq("booking_status", "Cancelled");
 
   if (error) {
-    if (isSchemaMismatchError(error)) return [];
+    if (isSchemaMismatchError(error)) {
+      // Pre-BL-122 DBs: retry without is_walk_on (do not skip the hard-block).
+      const retry = await supabase
+        .from("event_roster_bookings")
+        .select(
+          `id, participant_id, outbound_transport_mode, return_transport_mode,
+           trip_pickup_address_override, transport_med_bag_required, is_guest_booking, booking_status,
+           participants!event_roster_bookings_participant_id_fkey!inner(
+             first_name, last_name, date_of_birth, emergency_contact_name,
+             emergency_contact_phone, allergies_notes, regular_pickup_address, street_address,
+             participant_kind
+           )`,
+        )
+        .eq("event_id", eventId)
+        .neq("booking_status", "Cancelled");
+      if (retry.error) {
+        if (isSchemaMismatchError(retry.error)) return [];
+        throw retry.error;
+      }
+      return collectIncompleteGuestBookings(retry.data ?? []);
+    }
     throw error;
   }
 
+  return collectIncompleteGuestBookings(data ?? []);
+}
+
+function collectIncompleteGuestBookings(
+  rows: unknown[],
+): GuestBookingIncomplete[] {
   const out: GuestBookingIncomplete[] = [];
-  for (const raw of data ?? []) {
+  for (const raw of rows) {
     const r = raw as {
       id: string;
       participant_id: string;
@@ -422,6 +513,7 @@ export async function listIncompleteGuestBookings(
       trip_pickup_address_override?: string | null;
       transport_med_bag_required?: string | null;
       is_guest_booking?: boolean | null;
+      is_walk_on?: boolean | null;
       participants?: {
         first_name?: string;
         last_name?: string;
@@ -434,6 +526,8 @@ export async function listIncompleteGuestBookings(
         participant_kind?: string | null;
       } | null;
     };
+    // BL-122 — walk-ons are accepted incomplete; YELLOW issue is the office work.
+    if (r.is_walk_on === true) continue;
     const p = r.participants;
     const isGuest =
       r.is_guest_booking === true || p?.participant_kind === "guest";
