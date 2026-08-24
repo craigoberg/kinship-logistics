@@ -1720,11 +1720,18 @@ export async function insertLookupParameter(input: {
 }
 
 export async function deleteLookupParameter(id: string): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("system_lookup_parameters")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id");
   if (error) throw error;
+  // RLS with no DELETE policy returns 204 and 0 rows — not an error.
+  if (!data?.length) {
+    throw new Error(
+      "Lookup entry was not deleted. Run docs/sql/2026-08-23_lookup_parameters_delete_policy.sql in Supabase, then hard refresh.",
+    );
+  }
 }
 
 /**
