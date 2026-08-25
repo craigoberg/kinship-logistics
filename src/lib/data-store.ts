@@ -655,10 +655,16 @@ const STAFF_COLS =
 export async function listStaffRegistry(): Promise<StaffMember[]> {
   const { data, error } = await supabase
     .from("staff_registry")
-    .select(STAFF_COLS)
+    .select(`${STAFF_COLS}, auth_user_id`)
     .order("full_name", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r) => rowToStaff(r as StaffRow));
+  const rows = data ?? [];
+  for (const raw of rows) {
+    const r = raw as StaffRow & { auth_user_id?: string | null };
+    rememberStaffDisplayName(r.id, r.full_name);
+    rememberStaffDisplayName(r.auth_user_id, r.full_name);
+  }
+  return rows.map((r) => rowToStaff(r as StaffRow));
 }
 
 export interface StaffPayload {
@@ -743,6 +749,8 @@ export interface ActiveUserProfile {
   staffRole: string | null;
   vehicleId?: string | null;
   vehicleName?: string | null;
+  /** Day-login auth.users.id when linked — used to resolve reported_by UUIDs. */
+  authUserId?: string | null;
 }
 
 /**
@@ -856,6 +864,7 @@ export async function loginWithPin(
     }
   }
 
+  const authUserId = (await supabase.auth.getUser()).data.user?.id ?? null;
   const profile: ActiveUserProfile = {
     staffId: record.id,
     fullName: record.full_name || "Staff Member",
@@ -863,6 +872,7 @@ export async function loginWithPin(
     staffRole: record.role,
     vehicleId,
     vehicleName,
+    authUserId,
   };
 
   if (typeof localStorage !== "undefined") {
@@ -892,21 +902,66 @@ export function getActiveUserProfile(): ActiveUserProfile | null {
   }
 }
 
+const staffDisplayNameById = new Map<string, string>();
+let staffDisplayNamesPrimedAt = 0;
+const STAFF_DISPLAY_NAME_TTL_MS = 60_000;
+
+/** Cache a staff id or auth.users.id → display name (Hub "Reported by"). */
+export function rememberStaffDisplayName(
+  id: string | null | undefined,
+  name: string | null | undefined,
+): void {
+  const key = String(id ?? "").trim();
+  const label = String(name ?? "").trim();
+  if (key && label) staffDisplayNameById.set(key, label);
+}
+
+/** Load staff_registry names so Hub cards do not fall back to the viewer. */
+export async function primeStaffDisplayNames(): Promise<void> {
+  if (
+    staffDisplayNameById.size > 0 &&
+    Date.now() - staffDisplayNamesPrimedAt < STAFF_DISPLAY_NAME_TTL_MS
+  ) {
+    return;
+  }
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id, full_name, auth_user_id");
+  if (error) {
+    console.warn("[staff] display-name prime failed", error);
+    return;
+  }
+  for (const raw of data ?? []) {
+    const r = raw as { id: string; full_name?: string | null; auth_user_id?: string | null };
+    rememberStaffDisplayName(r.id, r.full_name);
+    rememberStaffDisplayName(r.auth_user_id, r.full_name);
+  }
+  staffDisplayNamesPrimedAt = Date.now();
+}
+
 /**
- * Resolve a staff member's display name for HUB / audit fields.
- * Prefers the PIN-login profile (staff_registry), then the static dev directory.
+ * Resolve a staff member's display name for Hub / audit fields.
+ * Only returns the signed-in profile when the id is that person (or omitted).
+ * Other UUIDs come from staff_registry (id or auth_user_id), never the viewer.
  */
 export function resolveStaffDisplayName(staffId?: string | null): string {
-  const id = staffId ?? getStaffId();
+  const requested = String(staffId ?? "").trim();
+  const id = requested || getStaffId();
   const profile = getActiveUserProfile();
   if (profile?.fullName) {
-    if (!id || id === DEFAULT_STAFF_UUID || profile.staffId === id) {
-      return profile.fullName;
-    }
+    const isSelf =
+      !requested ||
+      !id ||
+      id === DEFAULT_STAFF_UUID ||
+      profile.staffId === id ||
+      profile.authUserId === id;
+    if (isSelf) return profile.fullName;
   }
+  const cached = staffDisplayNameById.get(id);
+  if (cached) return cached;
   const fromDir = STAFF_DIRECTORY.find((s) => s.id === id)?.name;
   if (fromDir) return fromDir;
-  return profile?.fullName ?? "Unknown staff";
+  return "Unknown staff";
 }
 
 export function clearActiveUserSession(): void {

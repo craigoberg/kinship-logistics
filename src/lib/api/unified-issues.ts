@@ -5,7 +5,11 @@ import {
   listComplianceAssets,
   type ComplianceAsset,
 } from "@/lib/api/compliance-assets";
-import { resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
+import {
+  resolveStaffIdWithFallback,
+  resolveStaffDisplayName,
+  primeStaffDisplayNames,
+} from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
 import { publicFormHubDisplay } from "@/lib/governance/public-form-hub";
 
@@ -148,6 +152,9 @@ export async function listOpenUnifiedIssues(
   // Prefer ms; fall back to legacy days param if caller hasn't migrated yet.
   const deferRewarnMs =
     (options.deferRewarnMs ?? ((options.deferRewarnDays ?? 0) * 86_400_000)) || 3_600_000;
+
+  // Resolve reported_by UUIDs (staff id or auth user id) before cards render.
+  await primeStaffDisplayNames();
 
   // Combined note-state: latest defer + latest activity per issue.
   const { deferState, activityAt } = await fetchNoteStateMaps();

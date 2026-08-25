@@ -4,6 +4,7 @@ import {
   type JsonValue,
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import type { UrgencyParams } from "@/lib/governance/hub-workflow-status";
 import { DEFAULT_COUNCIL_EMAIL_TEMPLATE } from "@/lib/governance/council-email";
 import {
@@ -19,11 +20,15 @@ import {
 export const SYSTEM_PARAMETERS_QUERY_KEY = ["system-parameters"] as const;
 
 export function useSystemParameters() {
+  const { user, isReady } = useAuthReady();
   return useQuery<SystemParameterRow[]>({
     queryKey: SYSTEM_PARAMETERS_QUERY_KEY,
     queryFn: listSystemParameters,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    // system_parameters is authenticated-only after day-login RLS. Fire only
+    // once the publishable client has a JWT, or the first paint 401s.
+    enabled: isReady && !!user,
   });
 }
 
