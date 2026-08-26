@@ -15,6 +15,8 @@ export const dayCentreHappyPathTopic: HelpTopic = {
     "attendance",
     "activities",
     "meals",
+    "end of day report",
+    "end-of-day",
     "meds",
   ],
   menus: ["day"],
@@ -46,6 +48,10 @@ export const dayCentreHappyPathTopic: HelpTopic = {
     {
       heading: "Check-Out and Close",
       body: "Check participants out as they leave. Visitors must not remain present at Close. Initiate Day Centre Closure, complete close checks, and re-auth with PIN.",
+    },
+    {
+      heading: "End of Day Report",
+      body: "Scroll to End of Day Report on Day Centre. The calendar defaults to operational today (honours SIM TIME). Pick another day to see who came in (how and when), meal dispositions (Served / Modified / Own order / Declined / N/A), who went home, visitors, and issues raised.",
     },
   ],
 };

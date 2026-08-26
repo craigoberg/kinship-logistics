@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { createFileRoute } from "@tanstack/react-router";
 import { DayCentrePage } from "@/components/site-day/day-centre-page";
+import { DayCentreEndOfDayReport } from "@/components/site-day/day-centre-end-of-day-report";
 import { OperationalTodayLabel } from "@/components/dev/operational-today-label";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 
@@ -50,7 +51,7 @@ function DayPage() {
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">Day Centre</h1>
           <OperationalTodayLabel
-            suffix="Start of Day · issues · dual-PIN escalation · end-of-day billing"
+            suffix="Start of Day · issues · dual-PIN escalation · End of Day Report"
             className="text-sm text-muted-foreground"
           />
         </div>
@@ -66,6 +67,7 @@ function DayPage() {
         )}
       </header>
       <DayCentrePage showDiagnostic={showDiagnostic} />
+      <DayCentreEndOfDayReport />
     </div>
   );
 }

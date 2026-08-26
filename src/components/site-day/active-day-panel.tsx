@@ -203,6 +203,19 @@ export function ActiveDayPanel({ session }: Props) {
           <ManagerOpsChip tone="neutral" onClick={() => setAnomalyOpen(true)}>
             <PlusCircle className="h-4 w-4" /> Log anomaly
           </ManagerOpsChip>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11"
+            onClick={() => {
+              document
+                .getElementById("day-centre-end-of-day-report")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            End of Day Report
+          </Button>
           <FieldActionButton
             variant="primary"
             size="sm"

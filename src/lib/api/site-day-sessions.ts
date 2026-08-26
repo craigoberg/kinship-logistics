@@ -183,6 +183,22 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
 }
 
 /**
+ * Fetch a Day Centre session for any calendar date (YYYY-MM-DD).
+ * Read-only — does not provision a row. Used by the End of Day Report.
+ */
+export async function getSessionByDate(
+  date: string,
+): Promise<SiteDaySession | null> {
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .select("*")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToSession(data as SiteDaySessionRow) : null;
+}
+
+/**
  * Return today's session row if it exists, otherwise insert a fresh row in
  * `open_pending` phase. Written from the browser client under RLS — same
  * path the dual-PIN handshake updates use.

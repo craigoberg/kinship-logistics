@@ -70,6 +70,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Day Centre visitor → event guest** | Defined | `PromoteVisitorToEventDialog` + `AddGuestBookingModal` prefill | Visitor card **Add to event…** | Command event pick (Planning/Confirmed/Open, end ≥ today) → Add guest with name/host/note seeded; DOB/emergency/allergies still required |
 | **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` + driver `PinEntryDialog` | Manifest active-stop header (`WalkOnStopIconButton`, same chrome as pickup Cancel/Absent) and Event Deliver Check-In list footer (`WalkOnFloorButton` compact outline) | Guest / client / carer pick-lists or new; minimal fields; canned YELLOW office issue. Not a floor CTA. Not on each roll row. Not Day Centre visitors. BL-122. |
 | **Day Centre Active Day tabs** | Defined | `ActiveDayPanel` Tabs | `/day` active session | Check-In · Activities · Check-Out · Issues — same IA as Event Deliver; `site_day_*` data |
+| **Day Centre End of Day Report** | **Defined** | `DayCentreEndOfDayReport` + `DatePicker` | `/day` below the live session | Who came in (how/when), meal variations, checkout / went home, visitors, issues. Calendar defaults to operational today (SIM). Historical days read-only. BL-123. |
 | **Check-off list order** | **Defined** | `sort-participants.ts` — surname A–Z, then given name, then id | Day/Event check-in, roll call, bus boarding, activity, meal, muster tap lists | **Never** re-sort by status after tap — style/badge only. Do not move checked-off people into a second section mid-list. Exception: return boarding may stay route/`legIndex` order. Display name may stay `First Last`. |
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
@@ -348,6 +349,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
 | **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
 | **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each blocker with **Resolve** (Hub manage in place). Deferred + resolved + accepted workaround unlock Open Centre. Outline Hub link secondary. |
+| **Day Centre End of Day Report** | Defined | `DayCentreEndOfDayReport` | `/day` always (below session) | Canonical `DatePicker`; default operational today; future dates disabled; sections match Trip Report cards |
 
 ### Component inventory (Defined in Day Centre flow)
 
@@ -357,6 +359,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Open Day PIN | `PinEntryTrigger` + `verifyOperatorPin` | Check Leader sign-off; PIN success opens centre |
 | Close Centre CTA | `FieldActionButton variant="success"` in closure dialog | Big green “Finalise & sign with PIN”; footer **Close** only (no small blue primary) |
 | Close Centre mandated checks | `MandatedChecksList` + `useMandatedCloseChecks` | Same big green ticks as Open; Admin key `site_management.mandated_close_checks`; empty = high-trust close |
+| End of Day Report | `DayCentreEndOfDayReport` | Calendar + arrivals / meals / checkout / issues; SIM today |
 | Log Anomalies CTA | `FieldActionButton variant="caution" size="sm"` | Amber — secondary field action |
 | Severity badges (lists) | `RYGE_SEVERITY_CHIPS.activeClass` lookup | `issues-register-card`, `start-of-day-panel` |
 | Severity chips (modal) | `chip.activeClass` / `chip.idleClass` from `RYGE_SEVERITY_CHIPS` | `log-anomaly-modal` |
@@ -521,6 +524,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-26 | Day Centre End of Day Report | Read-only report on `/day`: `DatePicker` (SIM today default, no future), arrivals how/when, meal variations, checkout, visitors, issues. Same section chrome as Trip Report. BL-123. |
 | 2026-08-23 | Event unplanned walk-on placement | Manifest: `WalkOnStopIconButton` beside Cancel/Absent on the active stop card. Event Deliver: compact outline footer under the check-in list. Not a full-width CTA; not on each row. |
 | 2026-08-23 | Event unplanned walk-on | `WalkOnPersonModal` — same Defined add-person Dialog as Add guest; field doors on Manifest + Event Deliver; driver PIN; YELLOW canned workaround. BL-122. |
 | 2026-08-23 | Manifest one-run-slot block | Existing Start button + dashed callout (no new dialog). Named “already open / already closed” toast. Manager second-bus override not built. |
