@@ -22,11 +22,17 @@ import {
   updateExpectedArrival,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
+import {
+  markSupportAbsent,
+  updateSupportExpectedArrival,
+  type SupportAttendanceRow,
+} from "@/lib/api/support-attendance";
 import { isoToSydneyClock } from "@/lib/operational-time";
 import { getActiveUserProfile } from "@/lib/data-store";
 
 interface Props {
   row: ClientAttendanceRow | null;
+  supportRow?: SupportAttendanceRow | null;
   participantName: string;
   yellowThresholdMins: number;
   onClose: (changed: boolean) => void;
@@ -45,10 +51,14 @@ const ABSENCE_REASONS: { code: string; label: string }[] = [
 
 export function AdjustExpectedTimeModal({
   row,
+  supportRow = null,
   participantName,
   yellowThresholdMins,
   onClose,
 }: Props) {
+  const activeId = supportRow?.id ?? row?.id ?? null;
+  const expectedAt = supportRow?.expectedArrivalAt ?? row?.expectedArrivalAt ?? null;
+  const status = supportRow?.status ?? row?.status ?? null;
   const [hhmm, setHhmm] = useState("09:00");
   const [reasonCode, setReasonCode] = useState<string>("");
   const [detail, setDetail] = useState("");
@@ -60,21 +70,23 @@ export function AdjustExpectedTimeModal({
   // with the same id must NOT wipe the operator's typed PIN / notes / time.
   const openedForRef = useRef<string | null>(null);
   useEffect(() => {
-    const rowId = row?.id ?? null;
-    if (rowId && openedForRef.current !== rowId) {
-      openedForRef.current = rowId;
-      setHhmm(isoToSydneyClock(row!.expectedArrivalAt));
+    if (activeId && openedForRef.current !== activeId) {
+      openedForRef.current = activeId;
+      setHhmm(expectedAt ? isoToSydneyClock(expectedAt) : "09:00");
       setReasonCode("");
       setDetail("");
       setOperatorPinVerified(false);
       setPinError(null);
-    } else if (!rowId) {
+    } else if (!activeId) {
       openedForRef.current = null;
     }
-  }, [row]);
+  }, [activeId, expectedAt]);
 
   const updateMut = useMutation({
     mutationFn: async () => {
+      if (supportRow) {
+        return updateSupportExpectedArrival(supportRow, hhmm, yellowThresholdMins);
+      }
       if (!row) throw new Error("No row");
       return updateExpectedArrival(row, hhmm, yellowThresholdMins);
     },
@@ -91,11 +103,17 @@ export function AdjustExpectedTimeModal({
 
   const absentMut = useMutation({
     mutationFn: async () => {
-      if (!row) throw new Error("No row");
       const reason = ABSENCE_REASONS.find((r) => r.code === reasonCode);
       if (!reason) throw new Error("Select an absence reason.");
       if (!operatorPinVerified) throw new Error("Operator PIN required.");
-
+      if (supportRow) {
+        return markSupportAbsent(supportRow, {
+          reasonCode: reason.code,
+          reasonLabel: reason.label,
+          detail: detail.trim() || undefined,
+        });
+      }
+      if (!row) throw new Error("No row");
       return markAttendanceAbsent(row, {
         reasonCode: reason.code,
         reasonLabel: reason.label,
@@ -108,7 +126,7 @@ export function AdjustExpectedTimeModal({
         ? ` Closed ${res.prevSeverity?.toUpperCase() ?? "active"} anomaly.`
         : "";
       toast.success(`${participantName} marked absent for today.`, {
-        description: `Stays visible on the roll, flagged as absent.${closed}`,
+        description: `Not on morning or afternoon Manifest. Late arrival: tap their Check-In row.${closed}`,
       });
       onClose(true);
     },
@@ -122,7 +140,7 @@ export function AdjustExpectedTimeModal({
   const canMarkAbsent = !!reasonCode && operatorPinVerified && !busy;
 
   return (
-    <Dialog open={!!row} onOpenChange={(o) => !o && onClose(false)}>
+    <Dialog open={!!row || !!supportRow} onOpenChange={(o) => !o && onClose(false)}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Adjust Expected Time</DialogTitle>
@@ -141,16 +159,24 @@ export function AdjustExpectedTimeModal({
           />
         </div>
 
+        {status === "absent" ? (
+          <div className="mt-2 rounded-lg border border-slate-400/50 bg-slate-100 p-3 text-sm text-slate-800">
+            Already marked absent for today. Close this, set arrival method
+            (usually Self / family), then tap the wide row to record a late
+            arrival. They go onto Check-Out and, if going by bus, the afternoon
+            Manifest.
+          </div>
+        ) : (
         <div className="mt-2 rounded-lg border border-destructive/40 bg-destructive/5 p-3 space-y-3">
           <div>
             <div className="mb-1 text-xs font-semibold uppercase tracking-wide text-destructive">
-              Or record this client as absent
+              Or record this person as absent
             </div>
             <p className="text-xs text-muted-foreground">
-              Stays on the visible roll in a neutral “Absent” colour so staff
-              can still confirm they were expected, and auto-closes any active
-              YELLOW or RED anomaly. Requires a reason code and your PIN —
-              both are written to the permanent ledger.
+              They stay on the roll as Absent, come off morning and afternoon
+              Manifest, and any active YELLOW or RED arrival anomaly is
+              auto-closed. Late arrival: tap their Check-In row. Requires a
+              reason and your PIN.
             </p>
           </div>
 
@@ -225,6 +251,7 @@ export function AdjustExpectedTimeModal({
             Mark Absent for Today
           </Button>
         </div>
+        )}
 
         <DialogFooter className="flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
           <Button

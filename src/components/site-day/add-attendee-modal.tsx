@@ -20,14 +20,27 @@ import {
 } from "@/components/ui/command";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Label } from "@/components/ui/label";
+import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
+import { cn } from "@/lib/utils";
 
 import {
   addWalkInAttendee,
   listEligibleAddAttendees,
+  type DepartureVector,
   type EligibleAttendee,
 } from "@/lib/api/client-attendance";
 import { useParticipantDirectoryIndicators } from "@/hooks/use-participant-indicators";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
+import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { eventBusRunOptions } from "@/lib/event-bus-runs";
+import {
+  buildBusSelfPickerOptions,
+  floorSelectionKey,
+  type FloorTransportSelection,
+} from "@/lib/ui/floor-transport-method";
 
 interface Props {
   open: boolean;
@@ -40,6 +53,27 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
   const [selected, setSelected] = useState<EligibleAttendee | null>(null);
   const [plannedConfirmed, setPlannedConfirmed] = useState(false);
   const [unexpectedFlagged, setUnexpectedFlagged] = useState(false);
+  const [home, setHome] = useState<FloorTransportSelection | null>(null);
+
+  const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const homeOptions = useMemo(() => {
+    const busOpts = eventBusRunOptions(busRunLookups);
+    return [
+      ...buildBusSelfPickerOptions(busOpts, "dayCentre", {
+        busTitlePrefix: "Home on",
+        selfTitle: "Family / carer",
+        selfSubtitle: "Collected — not on the centre bus",
+      }),
+      {
+        id: "independent",
+        kind: "independent" as const,
+        busRunCode: null,
+        title: "Independent",
+        subtitle: "Left under own arrangement",
+        label: "Indep",
+      },
+    ];
+  }, [busRunLookups]);
 
   const eligibleQ = useQuery({
     queryKey: ["attendance-eligible-walkin", sessionId],
@@ -54,12 +88,25 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
   const addMut = useMutation({
     mutationFn: async () => {
       if (!selected) throw new Error("Pick a participant first.");
+      if (!home) throw new Error("Pick how they go home.");
+      if (home.kind === "bus" && !home.busRunCode) {
+        throw new Error("Pick which bus they go home on.");
+      }
       if (expectsMeds && !plannedConfirmed) {
         throw new Error(
           "Confirm the medication bag handover before adding to roll.",
         );
       }
-      const row = await addWalkInAttendee(sessionId, selected.id);
+      const vector: DepartureVector =
+        home.kind === "bus"
+          ? "bus"
+          : home.kind === "independent"
+            ? "independent"
+            : "family";
+      const result = await addWalkInAttendee(sessionId, selected.id, {
+        vector,
+        busRunCode: home.kind === "bus" ? home.busRunCode : null,
+      });
       // Parallel RED escalation — runs after check-in completes.
       // GUARDRAILS §1.1: failure surfaced to operator, not swallowed.
       if (unexpectedFlagged) {
@@ -75,13 +122,23 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
           });
         });
       }
-      return row;
+      return result;
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
+      const homeHint =
+        result.lateArrivalHome?.kind === "added_to_live_run"
+          ? "Added to the afternoon home run — confirm boarding on Manifest."
+          : result.lateArrivalHome?.kind === "will_seed"
+            ? "They will appear on the afternoon Manifest when that run starts."
+            : result.lateArrivalHome?.kind === "run_already_underway"
+              ? "Afternoon bus already left. Check out via family, or call the driver."
+              : result.lateArrivalHome?.kind === "not_needed"
+                ? "Going home with family / self — not on the afternoon bus."
+                : undefined;
       toast.success(`${selected?.fullName} added as walk-in.`, {
         description: unexpectedFlagged
           ? "Checked in. RED unexpected-medication escalation routed to Governance Hub."
-          : "Checked in at current time.",
+          : homeHint ?? "Checked in at current time.",
       });
       qc.invalidateQueries({ queryKey: ["attendance-eligible-walkin", sessionId] });
       qc.invalidateQueries({ queryKey: ["client-attendance-roll", sessionId] });
@@ -92,6 +149,7 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
       setSelected(null);
       setPlannedConfirmed(false);
       setUnexpectedFlagged(false);
+      setHome(null);
       onClose(true);
     },
     onError: (e: Error) => {
@@ -107,14 +165,22 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
       setSelected(null);
       setPlannedConfirmed(false);
       setUnexpectedFlagged(false);
+      setHome(null);
       onClose(false);
     }
   };
 
-  const submitDisabled =
-    !selected ||
-    addMut.isPending ||
-    (expectsMeds && !plannedConfirmed);
+  const missing: string[] = [];
+  if (!selected) missing.push("Participant");
+  if (selected && !home) missing.push("How they go home");
+  if (selected && home?.kind === "bus" && !home.busRunCode) {
+    missing.push("Which bus home");
+  }
+  if (selected && expectsMeds && !plannedConfirmed) {
+    missing.push("Medication bag handover");
+  }
+
+  const submitDisabled = missing.length > 0 || addMut.isPending;
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -122,9 +188,9 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
         <DialogHeader>
           <DialogTitle>Add Attendee (Walk-In)</DialogTitle>
           <DialogDescription>
-            Active participants not already on today’s roll. Selecting one
-            injects a fresh card marked walk-in and checked in at the current
-            time.
+            Active participants not already on today’s roll (including someone
+            marked Off today who then turns up). Selecting one checks them in
+            as a walk-in. You must pick how they go home.
           </DialogDescription>
         </DialogHeader>
 
@@ -147,6 +213,7 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
                       onSelect={() => {
                         setSelected(p);
                         setPlannedConfirmed(false);
+                        setHome(null);
                       }}
                       className={
                         selected?.id === p.id
@@ -167,6 +234,43 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
           <div className="space-y-3 rounded-md border border-primary/40 bg-primary/5 p-3 text-sm">
             <div>
               Selected: <span className="font-semibold">{selected.fullName}</span>
+            </div>
+
+            <div className="space-y-1.5">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                How they go home
+              </Label>
+              <div
+                className={cn(
+                  "space-y-1.5 rounded-md p-1",
+                  requiredFieldOutline(!home),
+                )}
+              >
+                {homeOptions.map((opt) => {
+                  const key = floorSelectionKey({
+                    kind: opt.kind,
+                    busRunCode: opt.busRunCode,
+                    label: opt.label,
+                  });
+                  const selectedKey = home ? floorSelectionKey(home) : "";
+                  return (
+                    <MobileFieldButton
+                      key={opt.id}
+                      title={opt.title}
+                      subtitle={opt.subtitle}
+                      active={key === selectedKey}
+                      disabled={addMut.isPending}
+                      onClick={() =>
+                        setHome({
+                          kind: opt.kind,
+                          busRunCode: opt.busRunCode,
+                          label: opt.label,
+                        })
+                      }
+                    />
+                  );
+                })}
+              </div>
             </div>
 
             {expectsMeds && (
@@ -206,6 +310,12 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
                 </span>
               </div>
             )}
+          </div>
+        )}
+
+        {missing.length > 0 && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/5 px-3 py-2 text-xs text-destructive">
+            Still needed: {missing.join(" · ")}
           </div>
         )}
 

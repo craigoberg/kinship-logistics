@@ -10,6 +10,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { loadExemptParticipantIdsForDate, resolveStaffIdWithFallback } from "@/lib/data-store";
+import {
+  applyFloorDayAbsenceExemption,
+  clearFloorDayAbsenceExemption,
+  findTodaysAttendanceSchedule,
+  placeOnAfternoonHomeRun,
+  type AfternoonHomePlacement,
+} from "@/lib/api/office-run-exemption";
 import { writeToLedger, writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import {
   getSydneyDayIndex,
@@ -38,6 +45,10 @@ export interface ClientAttendanceRow {
   arrivalMethod: ArrivalMethod;
   /** Floor Check-In: bus_runs.code when arrival_method=bus (BL-013 Day Centre parity). */
   arrivalBusRunCode: string | null;
+  /** Floor home method. NULL = use today's outbound schedule. */
+  departureVector: DepartureVector | null;
+  /** Floor home bus_runs.code when departureVector=bus. */
+  departureBusRunCode: string | null;
   checkedInAt: string | null;
   checkedInBy: string | null;
   checkedOutAt: string | null;
@@ -64,6 +75,8 @@ interface DbRow {
   expected_departure_at: string | null;
   arrival_method: ArrivalMethod;
   arrival_bus_run_code?: string | null;
+  departure_vector?: string | null;
+  departure_bus_run_code?: string | null;
   checked_in_at: string | null;
   checked_in_by: string | null;
   checked_out_at: string | null;
@@ -91,6 +104,13 @@ function toRow(r: DbRow): ClientAttendanceRow {
     expectedDepartureAt: r.expected_departure_at ?? null,
     arrivalMethod: r.arrival_method,
     arrivalBusRunCode: r.arrival_bus_run_code ?? null,
+    departureVector:
+      r.departure_vector === "bus" ||
+      r.departure_vector === "family" ||
+      r.departure_vector === "independent"
+        ? r.departure_vector
+        : null,
+    departureBusRunCode: r.departure_bus_run_code ?? null,
     checkedInAt: r.checked_in_at,
     checkedInBy: r.checked_in_by,
     checkedOutAt: r.checked_out_at,
@@ -259,9 +279,9 @@ function readScheduleClock(
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
   const dow = getSydneyDayIndex();
 
-  // Tier 2 — facility-wide master defaults for today's weekday. Returns
-  // null when the centre_operating_hours table has not been provisioned yet,
-  // in which case the seeder falls through to the Tier 3 system baseline
+  // Tier 2 — facility-wide master defaults when today is an Operating Day.
+  // Returns null when today is not in Lookups → Operating days, in which
+  // case the seeder falls through to the Tier 3 system baseline
   // (09:00 / 15:00) via sydneyTimeTodayFromClock(null).
   let masterOpen: string | null = null;
   let masterClose: string | null = null;
@@ -536,12 +556,12 @@ export async function recordClientArrival(
     busRunCode?: string | null;
     alsoCheckIn?: boolean;
   },
-): Promise<ClientAttendanceRow> {
+): Promise<{ row: ClientAttendanceRow; lateArrivalHome?: AfternoonHomePlacement }> {
   if (row.status === "checked_out" || row.checkedOutAt) {
     throw new Error("Already checked out — cannot change arrival.");
   }
   if (row.status === "absent") {
-    throw new Error("Marked absent — reinstate before recording arrival.");
+    return reinstateLateArrival(row, input);
   }
 
   const staffId = await resolveStaffIdWithFallback();
@@ -640,7 +660,7 @@ export async function recordClientArrival(
       if (refreshed) finalRow = toRow(refreshed as DbRow);
     }
   }
-  return finalRow;
+  return { row: finalRow };
 }
 
 /** True when a schedule inbound label means self / family (not bus). */
@@ -653,6 +673,180 @@ export function scheduleLabelIsSelf(label: string | null | undefined): boolean {
     v.includes("family") ||
     v.includes("walk")
   );
+}
+
+function departureColumnsMissingMessage(): string {
+  return "Home-transport columns are not on the database yet. Run docs/sql/2026-08-28_day_centre_floor_absence_home_transport.sql first.";
+}
+
+export async function persistDepartureMethod(
+  row: ClientAttendanceRow,
+  selection: {
+    kind: "bus" | "self" | "independent";
+    busRunCode?: string | null;
+  },
+): Promise<ClientAttendanceRow> {
+  const vector: DepartureVector =
+    selection.kind === "bus"
+      ? "bus"
+      : selection.kind === "independent"
+        ? "independent"
+        : "family";
+  const runCode =
+    vector === "bus" ? (selection.busRunCode ?? "").trim() || null : null;
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      departure_vector: vector,
+      departure_bus_run_code: runCode,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error && isSchemaMismatchError(error)) {
+    throw new Error(departureColumnsMissingMessage());
+  }
+  if (error) throw error;
+  return toRow(data as DbRow);
+}
+
+async function defaultHomeFromSchedule(participantId: string): Promise<{
+  vector: DepartureVector;
+  busRunCode: string | null;
+}> {
+  const schedule = await findTodaysAttendanceSchedule(participantId);
+  const outbound = (schedule?.outboundTransport ?? "").trim();
+  if (outbound && !scheduleLabelIsSelf(outbound)) {
+    return { vector: "bus", busRunCode: outbound };
+  }
+  return { vector: "family", busRunCode: null };
+}
+
+/**
+ * Floor late arrival: person was Mark Absent for Today, then turned up.
+ * Checks them in, clears the Off-today skip, and puts them on home transport.
+ */
+export async function reinstateLateArrival(
+  row: ClientAttendanceRow,
+  input: {
+    arrival: ClientArrivalChoice;
+    busRunCode?: string | null;
+  },
+): Promise<{ row: ClientAttendanceRow; lateArrivalHome?: AfternoonHomePlacement }> {
+  if (row.status !== "absent") {
+    throw new Error("Late arrival only applies to people marked absent today.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = operationalNowIso();
+  if (row.participantId) {
+    const { assertNotInfectiousExcluded } = await import(
+      "@/lib/api/infectious-exclusion"
+    );
+    await assertNotInfectiousExcluded(row.participantId, "centre");
+    const { assertCentreNotLockedDown } = await import(
+      "@/lib/api/operational-emergency"
+    );
+    await assertCentreNotLockedDown(row.sessionId);
+  }
+
+  await clearFloorDayAbsenceExemption(row.participantId);
+
+  const isSelf = input.arrival === "self";
+  const runCode = isSelf ? null : (input.busRunCode ?? "").trim() || null;
+  const home =
+    row.departureVector != null
+      ? {
+          vector: row.departureVector,
+          busRunCode: row.departureBusRunCode,
+        }
+      : await defaultHomeFromSchedule(row.participantId);
+
+  const noteLine =
+    `${row.notes?.trim() ? `${row.notes.trim()}\n` : ""}` +
+    `[LATE ARRIVAL] Checked in ${nowIso}. Home: ${home.vector}` +
+    (home.busRunCode ? ` ${home.busRunCode}` : "") +
+    ".";
+
+  let { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      status: "checked_in" as AttendanceStatus,
+      checked_in_at: nowIso,
+      checked_in_by: staffId,
+      arrival_method: (isSelf ? "private" : "bus") as ArrivalMethod,
+      arrival_bus_run_code: runCode,
+      departure_vector: home.vector,
+      departure_bus_run_code: home.busRunCode,
+      notes: noteLine,
+      escalation_severity: null,
+      escalation_raised_at: null,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error && isSchemaMismatchError(error)) {
+    const retry = await supabase
+      .from("client_attendance_log")
+      .update({
+        status: "checked_in" as AttendanceStatus,
+        checked_in_at: nowIso,
+        checked_in_by: staffId,
+        arrival_method: (isSelf ? "private" : "bus") as ArrivalMethod,
+        arrival_bus_run_code: runCode,
+        notes: noteLine,
+        escalation_severity: null,
+        escalation_raised_at: null,
+      })
+      .eq("id", row.id)
+      .select("*")
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw error;
+
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_LATE_ARRIVAL",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      arrival: isSelf ? "self" : "bus",
+      arrival_bus_run_code: runCode,
+      home_vector: home.vector,
+      home_bus_run_code: home.busRunCode,
+      reason: "Late arrival after marked absent for today.",
+    },
+  });
+
+  let finalRow = toRow(data as DbRow);
+  const outcome = await autoCloseYellowIssue(
+    row,
+    "System Auto-Close: Client arrived late (previously marked absent).",
+    staffId,
+  );
+  if (outcome.kind === "yellow_closed" || outcome.kind === "already_closed") {
+    const { data: refreshed } = await supabase
+      .from("client_attendance_log")
+      .select("*")
+      .eq("id", row.id)
+      .single();
+    if (refreshed) finalRow = toRow(refreshed as DbRow);
+  }
+
+  const lateArrivalHome = await placeOnAfternoonHomeRun({
+    participantId: row.participantId,
+    participantName: "",
+    busRunCode: home.vector === "bus" ? home.busRunCode : null,
+  });
+
+  return { row: finalRow, lateArrivalHome };
 }
 
 // ---------------------------------------------------------------------------
@@ -790,7 +984,16 @@ export async function bulkDeferGroup(
     },
   });
 
-  return { deferredCount: updates.length, yellowsAutoCleared };
+  let supportDeferred = 0;
+  try {
+    const { bulkDeferSupportGroup } = await import("@/lib/api/support-attendance");
+    const extra = await bulkDeferSupportGroup(sessionId, method, minutes, yellowThresholdMins);
+    supportDeferred = extra.deferredCount;
+  } catch {
+    /* support table not migrated yet */
+  }
+
+  return { deferredCount: updates.length + supportDeferred, yellowsAutoCleared };
 }
 
 
@@ -848,7 +1051,7 @@ export async function markAttendanceAbsent(
 ): Promise<MarkAbsentResult> {
   const verifiedStaffId =
     input.operatorStaffId ?? (await resolveStaffIdWithFallback());
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
   const detail = (input.detail ?? "").trim();
   const noteLine =
@@ -917,6 +1120,14 @@ export async function markAttendanceAbsent(
     },
   });
 
+  await applyFloorDayAbsenceExemption({
+    participantId: row.participantId,
+    participantName: "",
+    reasonCode: input.reasonCode,
+    reasonLabel: input.reasonLabel,
+    detail,
+  });
+
   return { row: toRow(data as DbRow), closedIssueId, prevSeverity };
 }
 
@@ -961,23 +1172,51 @@ export async function listEligibleAddAttendees(
 export async function addWalkInAttendee(
   sessionId: string,
   participantId: string,
-): Promise<ClientAttendanceRow> {
+  home: {
+    vector: DepartureVector;
+    busRunCode?: string | null;
+  },
+): Promise<{ row: ClientAttendanceRow; lateArrivalHome?: AfternoonHomePlacement }> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
+  const runCode =
+    home.vector === "bus" ? (home.busRunCode ?? "").trim() || null : null;
+  if (home.vector === "bus" && !runCode) {
+    throw new Error("Pick which bus they go home on.");
+  }
 
-  const { data, error } = await supabase
+  await clearFloorDayAbsenceExemption(participantId);
+
+  let expectedDeparture: string | null = null;
+  try {
+    const dow = getSydneyDayIndex();
+    const hours = await getTodayCentreHours(dow);
+    expectedDeparture = sydneyTimeTodayFromClock(hours?.closeTime || "15:00");
+  } catch {
+    expectedDeparture = sydneyTimeTodayFromClock("15:00");
+  }
+
+  const insertPayload: Record<string, unknown> = {
+    session_id: sessionId,
+    participant_id: participantId,
+    expected_arrival_at: nowIso,
+    expected_departure_at: expectedDeparture,
+    arrival_method: "walk_in" as ArrivalMethod,
+    status: "checked_in" as AttendanceStatus,
+    checked_in_at: nowIso,
+    checked_in_by: staffId,
+    departure_vector: home.vector,
+    departure_bus_run_code: runCode,
+  };
+
+  let { data, error } = await supabase
     .from("client_attendance_log")
-    .insert({
-      session_id: sessionId,
-      participant_id: participantId,
-      expected_arrival_at: nowIso,
-      arrival_method: "walk_in" as ArrivalMethod,
-      status: "checked_in" as AttendanceStatus,
-      checked_in_at: nowIso,
-      checked_in_by: staffId,
-    })
+    .insert(insertPayload)
     .select("*")
     .single();
+  if (error && isSchemaMismatchError(error)) {
+    throw new Error(departureColumnsMissingMessage());
+  }
   if (error) throw error;
 
   await writeToLedger({
@@ -991,11 +1230,19 @@ export async function addWalkInAttendee(
       attendance_id: (data as DbRow).id,
       session_id: sessionId,
       participant_id: participantId,
+      home_vector: home.vector,
+      home_bus_run_code: runCode,
       reason: "Unscheduled walk-in added to today's roll.",
     },
   });
 
-  return toRow(data as DbRow);
+  const lateArrivalHome = await placeOnAfternoonHomeRun({
+    participantId,
+    participantName: "",
+    busRunCode: runCode,
+  });
+
+  return { row: toRow(data as DbRow), lateArrivalHome };
 }
 
 

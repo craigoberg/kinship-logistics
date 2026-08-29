@@ -1345,7 +1345,7 @@ Phases are **sequential** — do not start B before A ships to production.
 
 ### 13.1 The Global Button
 
-A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else.
+A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Default position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else. Operators may **drag** either this pill or the green Raise ticket pill; the spot is remembered on that device (`localStorage`). Floating pills sit above Dialog/Sheet chrome so they do not cover Close / Save in form headers.
 
 The button is **never context-specific** — available at all times so staff can report anything immediately without navigating first. Label remains **Incident / Fault**; the chooser includes Health & Safety as a third lane.
 
@@ -1519,7 +1519,7 @@ Implementation anchors:
 
 ### 14.3.1 Raise ticket (BL-116)
 
-Green companion to Big Red — **not** a fourth Incident lane. Available globally and as a Ticket chip on Dialog / Sheet forms. Always GREEN-equivalent (description + auto context). Writes **only** to `app_tickets`. Hidden on PIN, Incident / Fault, and the Raise ticket dialog itself.
+Green companion to Big Red — **not** a fourth Incident lane. Available globally as a **draggable** pill (same device-sticky behaviour as Incident / Fault). Open forms still stamp the ticket with the dialog/sheet title. Always GREEN-equivalent (description + auto context). Writes **only** to `app_tickets`. Hidden on PIN, Incident / Fault, and the Raise ticket dialog itself. Not a header chip inside Dialog / Sheet (that covered Close on iPhone/iPad). Hub **Log Note / Resolve** prefills a mailto To the opener (`staff_registry.email`) with the latest update and notes so far — operator edits or sends (same stance as Council mailto). New-ticket Postmark notify to Admin To remains a separate office-inbox path.
 
 Office inbox: Dashboard Exception Hub Band 3 **App tickets** tile (all open items; amber while any remain) plus optional **server email** (Postmark) to Admin `app_tickets.notify_to`. Filing succeeds if mail is skipped or fails. Not Council mailto (BL-062).
 

@@ -31,6 +31,7 @@ import { busHomeHandoverGapsKey } from "@/lib/api/event-transport";
 import { type EventDaySession } from "@/lib/api/event-outing";
 import { EventTransportBadge } from "@/components/events/event-transport-badge";
 import { EventCloseDayPanel } from "@/components/events/event-close-day-panel";
+import { EventSupportRoll } from "@/components/events/event-support-roll";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { eventDeliverStatusKey } from "@/lib/api/event-deliver-status";
@@ -258,6 +259,8 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
           )}
         </ul>
       )}
+
+      <EventSupportRoll sessionId={session.id} eventId={session.event_id} mode="check_out" />
 
       {allDone && (
         <div className="space-y-2">

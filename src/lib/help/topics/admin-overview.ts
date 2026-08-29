@@ -30,7 +30,7 @@ export const adminOverviewTopic: HelpTopic = {
   steps: [
     {
       heading: "Lookups",
-      body: "Editable code lists (event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Named runs (R1, R2, …) feed multi-bus events and directory filters.",
+      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days drive the calendar Centre chips, staff Centre run, and attendance seeder defaults.",
     },
     {
       heading: "Fleet Register",
@@ -47,10 +47,6 @@ export const adminOverviewTopic: HelpTopic = {
     {
       heading: "System Parameters — JSON table",
       body: "Other tunable keys live in the parameter table. Managers edit with justification; changes are ledgered. Do not put secrets (alarm codes) in checklist text — that belongs in the secrets backlog item.",
-    },
-    {
-      heading: "Centre Operating Hours",
-      body: "Expected centre open/close hours for the site calendar — not the same as Declare Site Safe & Open Day Centre PIN.",
     },
     {
       heading: "Menu Access",

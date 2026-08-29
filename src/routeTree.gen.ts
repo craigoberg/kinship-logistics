@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as TransportRouteImport } from './routes/transport'
 import { Route as SyncRouteImport } from './routes/sync'
 import { Route as StaffRouteImport } from './routes/staff'
+import { Route as RunPlanningRouteImport } from './routes/run-planning'
 import { Route as RightsVoiceRouteImport } from './routes/rights-voice'
 import { Route as PublicRouteImport } from './routes/public'
 import { Route as ParticipantsRouteImport } from './routes/participants'
@@ -47,6 +48,11 @@ const SyncRoute = SyncRouteImport.update({
 const StaffRoute = StaffRouteImport.update({
   id: '/staff',
   path: '/staff',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const RunPlanningRoute = RunPlanningRouteImport.update({
+  id: '/run-planning',
+  path: '/run-planning',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RightsVoiceRoute = RightsVoiceRouteImport.update({
@@ -171,6 +177,7 @@ export interface FileRoutesByFullPath {
   '/participants': typeof ParticipantsRoute
   '/public': typeof PublicRouteWithChildren
   '/rights-voice': typeof RightsVoiceRoute
+  '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
@@ -196,6 +203,7 @@ export interface FileRoutesByTo {
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/rights-voice': typeof RightsVoiceRoute
+  '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
@@ -222,6 +230,7 @@ export interface FileRoutesById {
   '/participants': typeof ParticipantsRoute
   '/public': typeof PublicRouteWithChildren
   '/rights-voice': typeof RightsVoiceRoute
+  '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
   '/sync': typeof SyncRoute
   '/transport': typeof TransportRoute
@@ -250,6 +259,7 @@ export interface FileRouteTypes {
     | '/participants'
     | '/public'
     | '/rights-voice'
+    | '/run-planning'
     | '/staff'
     | '/sync'
     | '/transport'
@@ -275,6 +285,7 @@ export interface FileRouteTypes {
     | '/manifest'
     | '/participants'
     | '/rights-voice'
+    | '/run-planning'
     | '/staff'
     | '/sync'
     | '/transport'
@@ -300,6 +311,7 @@ export interface FileRouteTypes {
     | '/participants'
     | '/public'
     | '/rights-voice'
+    | '/run-planning'
     | '/staff'
     | '/sync'
     | '/transport'
@@ -327,6 +339,7 @@ export interface RootRouteChildren {
   ParticipantsRoute: typeof ParticipantsRoute
   PublicRoute: typeof PublicRouteWithChildren
   RightsVoiceRoute: typeof RightsVoiceRoute
+  RunPlanningRoute: typeof RunPlanningRoute
   StaffRoute: typeof StaffRoute
   SyncRoute: typeof SyncRoute
   TransportRoute: typeof TransportRoute
@@ -357,6 +370,13 @@ declare module '@tanstack/react-router' {
       path: '/staff'
       fullPath: '/staff'
       preLoaderRoute: typeof StaffRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/run-planning': {
+      id: '/run-planning'
+      path: '/run-planning'
+      fullPath: '/run-planning'
+      preLoaderRoute: typeof RunPlanningRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/rights-voice': {
@@ -551,6 +571,7 @@ const rootRouteChildren: RootRouteChildren = {
   ParticipantsRoute: ParticipantsRoute,
   PublicRoute: PublicRouteWithChildren,
   RightsVoiceRoute: RightsVoiceRoute,
+  RunPlanningRoute: RunPlanningRoute,
   StaffRoute: StaffRoute,
   SyncRoute: SyncRoute,
   TransportRoute: TransportRoute,

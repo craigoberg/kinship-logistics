@@ -47,6 +47,7 @@ import {
   type AppTicketNote,
   type AppTicketTabFilter,
 } from "@/lib/api/app-tickets";
+import { openAppTicketOpenerUpdateMailto } from "@/lib/app-tickets/opener-update-mailto";
 
 function staffName(id: string): string {
   return resolveStaffDisplayName(id);
@@ -112,20 +113,35 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
   const logMut = useMutation({
     mutationFn: async () => {
       const author = await getAuthor();
+      const text = note.trim();
       if (deferOn) {
         const dateOnly = deferAt.split("T")[0];
-        await deferAppTicket(ticket.id, dateOnly, note.trim(), author);
-        return "defer" as const;
+        await deferAppTicket(ticket.id, dateOnly, text, author);
+        return {
+          kind: "defer" as const,
+          latestText: `Deferred to ${formatDate(dateOnly)}. Reason: ${text}`,
+        };
       }
-      await addAppTicketNote(ticket.id, note.trim(), author);
-      return "note" as const;
+      await addAppTicketNote(ticket.id, text, author);
+      return { kind: "note" as const, latestText: text };
     },
-    onSuccess: (kind) => {
+    onSuccess: async ({ kind, latestText }) => {
       invalidate();
+      const mail = await openAppTicketOpenerUpdateMailto({
+        ticket,
+        kind,
+        latestText,
+        priorTimelineLines: timelineLines,
+      });
       setNote("");
       setDeferOn(false);
-      if (kind === "defer") operationToasts.issueDeferred();
-      else operationToasts.noteLogged();
+      if (mail.opened) {
+        operationToasts.ticketOpenerMailto("note");
+      } else {
+        if (kind === "defer") operationToasts.issueDeferred();
+        else operationToasts.noteLogged();
+        operationToasts.ticketOpenerMailtoMissing(ticket.reportedByName);
+      }
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),
   });
@@ -145,18 +161,32 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
   const resolveMut = useMutation({
     mutationFn: async () => {
       const author = await getAuthor();
+      const text = note.trim();
       await updateAppTicketStatus(ticket.id, "resolved", {
-        resolutionNotes: note.trim() || undefined,
+        resolutionNotes: text || undefined,
         resolvedByName: author,
       });
-      if (note.trim()) {
-        await addAppTicketNote(ticket.id, `Resolved. ${note.trim()}`, author);
+      const latestText = text ? `Resolved. ${text}` : "Resolved.";
+      if (text) {
+        await addAppTicketNote(ticket.id, latestText, author);
       }
+      return { latestText };
     },
-    onSuccess: () => {
+    onSuccess: async ({ latestText }) => {
       invalidate();
+      const mail = await openAppTicketOpenerUpdateMailto({
+        ticket,
+        kind: "resolve",
+        latestText,
+        priorTimelineLines: timelineLines,
+      });
       setNote("");
-      operationToasts.ticketResolved();
+      if (mail.opened) {
+        operationToasts.ticketOpenerMailto("resolve");
+      } else {
+        operationToasts.ticketResolved();
+        operationToasts.ticketOpenerMailtoMissing(ticket.reportedByName);
+      }
       onOpenChange(false);
     },
     onError: (e: Error) => operationToasts.resolutionFailed(e.message),
@@ -242,7 +272,7 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
         }}
         busy={busy}
         title="Manage App Ticket"
-        description="Log a note, defer, or mark resolved. Same GREEN-note close-off as Hub issues."
+        description="Log a note, defer, or mark resolved. Log Note and Resolve open a draft email to the person who raised the ticket."
         contextCard={contextCard}
         timelineLines={timelineLines}
         timelineLoading={notesQuery.isFetching && !notesQuery.data}

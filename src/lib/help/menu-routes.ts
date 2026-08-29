@@ -10,6 +10,7 @@ export type HelpDeepLinkTo =
   | "/transport"
   | "/participants"
   | "/staff"
+  | "/run-planning"
   | "/events"
   | "/event-deliver"
   | "/governance"
@@ -27,6 +28,7 @@ export const HELP_MENU_ROUTES: Record<
   transport: { to: "/transport", label: "Open Transport" },
   participants: { to: "/participants", label: "Open Participants" },
   staff: { to: "/staff", label: "Open Staff" },
+  run_planning: { to: "/run-planning", label: "Open Run Planning" },
   events: { to: "/events", label: "Open Event Manage" },
   "event-deliver": { to: "/event-deliver", label: "Open Event Deliver" },
   governance: { to: "/governance", label: "Open Governance Hub" },
@@ -45,6 +47,7 @@ const MENU_DEEP_LINK_PRIORITY = [
   "transport",
   "participants",
   "staff",
+  "run_planning",
   "admin",
   "sync",
   "dashboard",

@@ -22,7 +22,7 @@ export const appTicketsTopic: HelpTopic = {
   steps: [
     {
       heading: "Use the green Raise ticket button — not the red Incident / Fault",
-      body: "Raise ticket is the green / teal pill (and a Ticket chip on open forms). Use it for “this screen looks wrong”, “save did not work”, or “I am stuck”. Injuries, welfare, and broken buses still go through Incident / Fault.",
+      body: "Raise ticket is the green / teal pill. Drag it if it sits on a button — this device remembers the spot. Use it for “this screen looks wrong”, “save did not work”, or “I am stuck”. Injuries, welfare, and broken buses still go through Incident / Fault.",
     },
     {
       heading: "Write what happened",
@@ -30,7 +30,7 @@ export const appTicketsTopic: HelpTopic = {
     },
     {
       heading: "Find it in Hub → App tickets",
-      body: "Everyone can see the list. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. This tab is not Maintenance & Repairs and is not part of the Human Incidents register. Open tickets also light the Dashboard **App tickets** tile (Band 3).",
+      body: "Everyone can see the list. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. Log Note and Resolve open a draft email To the person who raised the ticket, with this update and the notes so far — edit or send. This tab is not Maintenance & Repairs and is not part of the Human Incidents register. Open tickets also light the Dashboard **App tickets** tile (Band 3).",
     },
     {
       heading: "Office email (optional)",

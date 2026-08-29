@@ -68,9 +68,17 @@ interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: (p: Participant) => void;
+  /** Open on this tab (e.g. Schedules from Run Planning). */
+  initialTab?: "profile" | "support" | "contact" | "history" | "attendance" | "finance";
 }
 
-export function CareProfileModal({ participant, open, onOpenChange, onSaved }: Props) {
+export function CareProfileModal({
+  participant,
+  open,
+  onOpenChange,
+  onSaved,
+  initialTab = "profile",
+}: Props) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
@@ -206,7 +214,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
             </div>
           </DialogHeader>
 
-          <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+          <Tabs
+            key={`${participant?.id ?? "none"}-${initialTab}`}
+            defaultValue={initialTab}
+            className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
             <TabsList className="w-full justify-start h-auto flex-wrap gap-2 flex-shrink-0 min-h-[44px]">
               <TabsTrigger value="profile" className="h-10 py-2 px-3">Care Profile</TabsTrigger>
               <TabsTrigger value="support" className="h-10 py-2 px-3">Support &amp; risk</TabsTrigger>

@@ -43,6 +43,7 @@ import {
   useLookupParameters,
 } from "@/hooks/use-supabase-data";
 import { TransportSiteAddressesPanel } from "@/components/admin/transport-site-addresses-panel";
+import { OperatingDaysPanel } from "@/components/admin/operating-days-panel";
 import {
   CAUTION_CALLOUT_BODY_CLASS,
   CAUTION_CALLOUT_CLASS,
@@ -71,11 +72,15 @@ export function AdminLookupWorkspace() {
         <TabsContent key={c.category} value={c.category} className="space-y-4">
           <p className="text-sm text-muted-foreground">{c.description}</p>
           {c.category === LOOKUP_CATEGORIES.busRun && <TransportSiteAddressesPanel />}
-          <CategoryPanel
-            category={c.category}
-            label={c.label}
-            showColor={COLOR_ENABLED_CATEGORIES.has(c.category)}
-          />
+          {c.category === LOOKUP_CATEGORIES.operatingDay ? (
+            <OperatingDaysPanel />
+          ) : (
+            <CategoryPanel
+              category={c.category}
+              label={c.label}
+              showColor={COLOR_ENABLED_CATEGORIES.has(c.category)}
+            />
+          )}
         </TabsContent>
       ))}
     </Tabs>

@@ -1688,6 +1688,23 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     () => localStorage.getItem(boardingKey) === "true" || returnPassengers.length === 0,
   );
 
+  useEffect(() => {
+    if (!isReturnRun || returnPassengers.length === 0) return;
+    try {
+      const tappedRaw = localStorage.getItem(`return_boarding_${trip.id}`);
+      const tapped = new Set(
+        tappedRaw ? (JSON.parse(tappedRaw) as string[]) : [],
+      );
+      const missing = returnPassengers.some((p) => !tapped.has(p.id));
+      if (missing) {
+        localStorage.removeItem(boardingKey);
+        setBoardingConfirmed(false);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isReturnRun, returnPassengers, trip.id, boardingKey]);
+
   const handleAllBoarded = () => {
     localStorage.setItem(boardingKey, "true");
     setBoardingConfirmed(true);

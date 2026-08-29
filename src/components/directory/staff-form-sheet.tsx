@@ -37,6 +37,8 @@ import { getActiveUserProfile, hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 import { ACCESS_ROLES } from "@/lib/access-roles";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
+import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
+import { classifyWorkforceKind } from "@/lib/support-person";
 
 
 
@@ -268,6 +270,17 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               seedName={staff.fullName}
             />
           ) : null}
+          {isEdit && staff ? (
+            <SupportTransportDefaults
+              personKind={classifyWorkforceKind(personnelType, role)}
+              staffId={staff.id}
+              personName={fullName.trim() || staff.fullName}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              Save this person first, then set their Centre run (how they get in and out).
+            </p>
+          )}
           <section className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" required className="sm:col-span-2">
               <Input

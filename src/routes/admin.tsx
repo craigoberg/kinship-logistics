@@ -9,7 +9,6 @@ import {
 import { AdminLookupWorkspace } from "@/components/admin/admin-lookup-workspace";
 import { SystemParameterWorkspace } from "@/components/admin/system-parameter-workspace";
 import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
-import { CentreOperatingHoursWorkspace } from "@/components/admin/centre-operating-hours-workspace";
 import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-workspace";
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
 import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
@@ -27,7 +26,6 @@ type AdminTab =
   | "venues"
   | "vendors"
   | "parameters"
-  | "hours"
   | "website"
   | "access"
   | "backup";
@@ -53,7 +51,6 @@ function AdminPage() {
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
           <TabsTrigger value="website">Public website</TabsTrigger>
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
-          <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
           <TabsTrigger value="access">Menu Access</TabsTrigger>
           <TabsTrigger value="backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
@@ -74,9 +71,6 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
-        </TabsContent>
-        <TabsContent value="hours">
-          <CentreOperatingHoursWorkspace />
         </TabsContent>
         <TabsContent value="access">
           <MenuAccessMatrix />

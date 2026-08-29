@@ -22,6 +22,7 @@ import {
   WalkOnFloorButton,
   WalkOnPersonModal,
 } from "@/components/events/walk-on-person-modal";
+import { EventSupportRoll } from "@/components/events/event-support-roll";
 import {
   listWalkOnBookings,
   walkOnParticipantIds,
@@ -514,6 +515,8 @@ export function EventArrivalRollPanel({
           })}
         </ul>
       )}
+
+      <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
 
       <WalkOnFloorButton
         label="Someone extra arrived"

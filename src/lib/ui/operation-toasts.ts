@@ -31,6 +31,17 @@ export const operationToasts = {
     toast.success("Ticket resolved.", { description: "Removed from Active App tickets." }),
   ticketClosed: () =>
     toast.success("Ticket closed.", { description: "Archived in App tickets history." }),
+  ticketOpenerMailto: (kind: "note" | "resolve" = "note") =>
+    toast.success(
+      kind === "resolve"
+        ? "Ticket resolved — opening email to the opener…"
+        : "Note logged — opening email to the opener…",
+      { description: "Edit if you need to, then send." },
+    ),
+  ticketOpenerMailtoMissing: (openerName: string) =>
+    toast.message("Saved in Hub — no email to open.", {
+      description: `Add an email on ${openerName}'s staff record to send them updates from here.`,
+    }),
   reviewStarted: (waitLabel?: string) =>
     toast.success("Review started.", {
       description: waitLabel

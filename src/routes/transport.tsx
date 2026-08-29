@@ -62,8 +62,12 @@ function TransportPage() {
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Ad-hoc Transport</h1>
         <p className="text-sm text-muted-foreground">
-          One-off runs — doctors, vaccinations, special drop points. Day Centre bus runs and event
-          trips use{" "}
+          One-off runs — doctors, vaccinations, special drop points. Day Centre who-rides-which-bus
+          lives in{" "}
+          <Link to="/run-planning" className="font-medium text-primary underline-offset-2 hover:underline">
+            Run Planning
+          </Link>
+          . Live pickup order is{" "}
           <Link to="/manifest" className="font-medium text-primary underline-offset-2 hover:underline">
             Bus Manifest
           </Link>

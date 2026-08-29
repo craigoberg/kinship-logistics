@@ -36,6 +36,8 @@ export function pathLabelFromPathname(pathname: string, eventTitle?: string): st
   if (pathname.startsWith("/admin")) return "Admin";
   if (pathname.startsWith("/help")) return "Help";
   if (pathname.startsWith("/participants")) return "Participants";
+  if (pathname.startsWith("/run-planning")) return "Run Planning";
+  if (pathname.startsWith("/staff")) return "Staff";
   if (pathname === "/" || pathname.startsWith("/dashboard")) return "Dashboard";
   return pathname.replace(/^\//, "") || "App";
 }

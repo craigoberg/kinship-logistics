@@ -30,6 +30,10 @@ export interface BusRunRouteStop {
   stopOrder: number | null;
   /** Today's matching schedule for Off today — null if not on this run today. */
   todaySchedule: BusRunTodaySchedule | null;
+  personKind?: "participant" | "staff" | "volunteer" | "carer";
+  staffId?: string | null;
+  carerId?: string | null;
+  roleLabel?: string | null;
 }
 
 const DAY_SHORT: Record<string, string> = {
@@ -87,17 +91,41 @@ export async function loadBusRunRouteOrderMap(
 ): Promise<Map<string, number>> {
   const { data, error } = await supabase
     .from("bus_run_default_routes")
-    .select("participant_id, stop_order")
+    .select("participant_id, staff_id, carer_id, person_kind, stop_order")
     .eq("bus_run_code", busRunCode)
     .eq("direction", direction);
   if (error) {
-    if (isSchemaMismatchError(error)) return new Map();
+    if (isSchemaMismatchError(error)) {
+      const fallback = await supabase
+        .from("bus_run_default_routes")
+        .select("participant_id, stop_order")
+        .eq("bus_run_code", busRunCode)
+        .eq("direction", direction);
+      if (fallback.error) return new Map();
+      const map = new Map<string, number>();
+      for (const row of fallback.data ?? []) {
+        const r = row as { participant_id: string; stop_order: number };
+        map.set(r.participant_id, Number(r.stop_order));
+      }
+      return map;
+    }
     throw new Error(error.message);
   }
   const map = new Map<string, number>();
   for (const row of data ?? []) {
-    const r = row as { participant_id: string; stop_order: number };
-    map.set(r.participant_id, Number(r.stop_order));
+    const r = row as {
+      participant_id: string | null;
+      staff_id: string | null;
+      carer_id: string | null;
+      person_kind?: string | null;
+      stop_order: number;
+    };
+    const key = r.carer_id
+      ? `c:${r.carer_id}`
+      : r.staff_id
+        ? `s:${r.staff_id}`
+        : r.participant_id;
+    if (key) map.set(key, Number(r.stop_order));
   }
   return map;
 }
@@ -193,6 +221,52 @@ export async function listBusRunRouteRoster(
     });
   }
 
+  try {
+    const { listSupportSchedules } = await import("@/lib/api/support-attendance");
+    const support = await listSupportSchedules();
+    for (const s of support) {
+      const transport = direction === "morning" ? s.inboundTransport : s.outboundTransport;
+      if (transport !== busRunCode) continue;
+      const key = s.carerId ? `c:${s.carerId}` : `s:${s.staffId}`;
+      const todaySchedule =
+        todayDayCode && dayCodeIsToday(s.dayOfWeek, todayDayCode)
+          ? {
+              id: s.id,
+              participantId: key,
+              dayOfWeek: s.dayOfWeek,
+              serviceType: s.personKind,
+              transportRule: transport ?? "",
+              inboundTransport: s.inboundTransport ?? "",
+              outboundTransport: s.outboundTransport ?? "",
+              expectedArrivalTime: s.expectedArrivalTime,
+              expectedDepartureTime: s.expectedDepartureTime,
+              active: s.active,
+              createdAt: "",
+            }
+          : null;
+      const existing = byId.get(key);
+      if (existing) {
+        if (!existing.dayCodes.includes(s.dayOfWeek)) existing.dayCodes.push(s.dayOfWeek);
+        if (todaySchedule && !existing.todaySchedule) existing.todaySchedule = todaySchedule;
+        continue;
+      }
+      byId.set(key, {
+        participantId: key,
+        name: s.displayName,
+        address: s.pickupAddressOverride,
+        dayCodes: [s.dayOfWeek],
+        stopOrder: null,
+        todaySchedule,
+        personKind: s.personKind,
+        staffId: s.staffId,
+        carerId: s.carerId,
+        roleLabel: s.personKind === "volunteer" ? "Volunteer" : s.personKind === "carer" ? "Carer" : "Staff",
+      });
+    }
+  } catch {
+    /* table not migrated yet */
+  }
+
   const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
   const stops = [...byId.values()].map((s) => ({
     ...s,
@@ -230,13 +304,20 @@ export async function reorderBusRunDefaultRoute(input: {
   if (input.participantIds.length === 0) return;
 
   const staffId = input.staffId?.trim() || null;
-  const rows = input.participantIds.map((participantId, idx) => ({
-    bus_run_code: input.busRunCode,
-    direction: input.direction,
-    participant_id: participantId,
-    stop_order: (idx + 1) * 10,
-    updated_by_staff_id: staffId,
-  }));
+  const rows = input.participantIds.map((personKey, idx) => {
+    const carer = personKey.startsWith("c:");
+    const staff = personKey.startsWith("s:");
+    return {
+      bus_run_code: input.busRunCode,
+      direction: input.direction,
+      person_kind: carer ? "carer" : staff ? "staff" : "participant",
+      participant_id: carer || staff ? null : personKey,
+      staff_id: staff ? personKey.slice(2) : null,
+      carer_id: carer ? personKey.slice(2) : null,
+      stop_order: (idx + 1) * 10,
+      updated_by_staff_id: staffId,
+    };
+  });
 
   const { error: insErr } = await supabase.from("bus_run_default_routes").insert(rows);
   if (insErr) throw new Error(insErr.message);

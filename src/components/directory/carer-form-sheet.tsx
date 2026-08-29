@@ -35,6 +35,7 @@ import {
 } from "@/hooks/use-supabase-data";
 import type { Carer, CarerPayload } from "@/lib/data-store";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
+import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
 
 interface Props {
   open: boolean;
@@ -203,6 +204,17 @@ export function CarerFormSheet({
               seedName={carer.fullName}
             />
           ) : null}
+          {isEdit && carer ? (
+            <SupportTransportDefaults
+              personKind="carer"
+              carerId={carer.id}
+              personName={fullName.trim() || carer.fullName}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              Save this carer first, then set their Centre run (how they get in and out).
+            </p>
+          )}
 
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" className="sm:col-span-2">

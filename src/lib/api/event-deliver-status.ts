@@ -7,6 +7,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
+import { listEventSupportAttendance } from "@/lib/api/event-support";
 import {
   listAccountabilityRoll,
   listBusManifest,
@@ -432,9 +433,16 @@ export async function assertMorningRollCompleteBeforeProgramme(opts: {
   if (progress.complete) return;
 
   if (progress.total === 0) {
-    const attendance = await listEventAttendanceRoll(opts.sessionId);
-    const pendingArrival = attendance.filter((r) => r.status === "expected").length;
-    const checkedIn = attendance.filter((r) => r.status === "checked_in").length;
+    const [attendance, support] = await Promise.all([
+      listEventAttendanceRoll(opts.sessionId),
+      listEventSupportAttendance(opts.sessionId).catch(() => []),
+    ]);
+    const pendingArrival =
+      attendance.filter((r) => r.status === "expected").length +
+      support.filter((r) => r.status === "expected").length;
+    const checkedIn =
+      attendance.filter((r) => r.status === "checked_in").length +
+      support.filter((r) => r.status === "checked_in").length;
     if (pendingArrival === 0 && checkedIn === 0) return;
     throw new Error(
       "Complete Morning Roll Call before starting the programme (Morning Roll tab).",
@@ -470,7 +478,12 @@ async function fetchActiveTripLegSummary(tripId: string) {
     .order("leg_index", { ascending: true });
   if (error) throw error;
   const legs = data ?? [];
-  const pickupLegs = legs.filter((l) => l.to_participant_id != null);
+  const pickupLegs = legs.filter(
+    (l) =>
+      l.to_participant_id != null ||
+      (l as { to_staff_id?: string | null }).to_staff_id != null ||
+      (l as { to_carer_id?: string | null }).to_carer_id != null,
+  );
   const onBoard = pickupLegs.filter(
     (l) =>
       l.status === "en_route" ||
@@ -546,12 +559,17 @@ export async function fetchEventDeliverGroupStatus(opts: {
     todayVenues[todayVenues.length - 1] ?? baseStop;
   const overnightEndName = stopLabel(overnightEndStop, baseName);
 
-  const totalOnTrip = attendance.length;
-  const checkedInCount = attendance.filter((r) => r.status === "checked_in").length;
-  const checkedInOrOut = attendance.filter(
-    (r) => r.status === "checked_in" || r.status === "checked_out",
-  ).length;
-  const pendingArrival = attendance.filter((r) => r.status === "expected").length;
+  const support = await listEventSupportAttendance(opts.sessionId).catch(() => []);
+  const totalOnTrip = attendance.length + support.length;
+  const checkedInCount =
+    attendance.filter((r) => r.status === "checked_in").length +
+    support.filter((r) => r.status === "checked_in").length;
+  const checkedInOrOut =
+    attendance.filter((r) => r.status === "checked_in" || r.status === "checked_out").length +
+    support.filter((r) => r.status === "checked_in" || r.status === "checked_out").length;
+  const pendingArrival =
+    attendance.filter((r) => r.status === "expected").length +
+    support.filter((r) => r.status === "expected").length;
   const allCheckedIn = totalOnTrip > 0 && pendingArrival === 0;
 
   const [morning, evening] = await Promise.all([

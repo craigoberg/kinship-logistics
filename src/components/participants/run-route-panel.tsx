@@ -8,6 +8,7 @@ import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
 import { OffTodayExemptionDialog } from "@/components/attendance/off-today-exemption-dialog";
+import { SupportOffTodayDialog } from "@/components/attendance/support-off-today-dialog";
 import {
   useBusRunMap,
   useBusRunRouteRoster,
@@ -26,6 +27,7 @@ import { lookupRunLiveStatus } from "@/lib/api/run-live-status";
 import { useOperationalTodayIso } from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { RunLiveStatusBadge } from "@/components/attendance/run-live-status-badge";
+import { AddSupportToRunDialog } from "@/components/participants/add-support-to-run-dialog";
 import { cn } from "@/lib/utils";
 
 export function RunRoutePanel() {
@@ -41,6 +43,7 @@ export function RunRoutePanel() {
   const todayDayCode = todaysSydneyDayCode();
   const { data: liveStatusMap } = useTodaysRunLiveStatus();
   const [offTodayStop, setOffTodayStop] = useState<BusRunRouteStop | null>(null);
+  const [addSupportOpen, setAddSupportOpen] = useState(false);
 
   const sortableIds = useMemo(() => stops.map((s) => s.participantId), [stops]);
   const stopById = useMemo(
@@ -73,6 +76,15 @@ export function RunRoutePanel() {
           Drag to set Manifest pickup order for each run. People not attending that
           day are skipped. The driver can still reorder on the active run.
         </p>
+        <Button
+          type="button"
+          variant="secondary"
+          size="sm"
+          className="mt-2"
+          onClick={() => setAddSupportOpen(true)}
+        >
+          Add support person
+        </Button>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -189,7 +201,14 @@ export function RunRoutePanel() {
                         {idx + 1}
                       </span>
                       <div className="min-w-0 flex-1">
-                        <div className="font-medium">{stop.name}</div>
+                        <div className="font-medium">
+                          {stop.name}
+                          {stop.roleLabel ? (
+                            <span className="ml-2 text-xs font-normal text-muted-foreground">
+                              {stop.roleLabel}
+                            </span>
+                          ) : null}
+                        </div>
                         {stop.address ? (
                           <div className="text-xs text-muted-foreground">{stop.address}</div>
                         ) : (
@@ -234,17 +253,47 @@ export function RunRoutePanel() {
           </div>
         </>
       )}
+      <AddSupportToRunDialog
+        open={addSupportOpen}
+        onClose={() => setAddSupportOpen(false)}
+        busRunCode={selectedRun}
+        direction={direction}
+      />
       <OffTodayExemptionDialog
-        open={offTodayStop != null}
+        open={offTodayStop != null && !offTodayStop.personKind}
         onOpenChange={(o) => {
           if (!o) setOffTodayStop(null);
         }}
         schedule={
-          offTodayStop?.todaySchedule
+          offTodayStop?.todaySchedule && !offTodayStop.personKind
             ? (offTodayStop.todaySchedule as AttendanceSchedule)
             : null
         }
         participantName={offTodayStop?.name ?? ""}
+      />
+      <SupportOffTodayDialog
+        open={offTodayStop != null && !!offTodayStop.personKind}
+        onOpenChange={(o) => {
+          if (!o) setOffTodayStop(null);
+        }}
+        personKind={
+          offTodayStop?.personKind === "volunteer"
+            ? "volunteer"
+            : offTodayStop?.personKind === "carer"
+              ? "carer"
+              : "staff"
+        }
+        staffId={offTodayStop?.staffId}
+        carerId={offTodayStop?.carerId}
+        personName={offTodayStop?.name ?? ""}
+        runCodes={
+          offTodayStop?.todaySchedule
+            ? [
+                offTodayStop.todaySchedule.inboundTransport,
+                offTodayStop.todaySchedule.outboundTransport,
+              ].filter(Boolean)
+            : undefined
+        }
       />
     </Card>
   );

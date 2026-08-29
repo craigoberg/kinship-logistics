@@ -21,7 +21,7 @@ interface BottomSheetProps {
   children: ReactNode;
   /** Extra class on the content panel — e.g. to set a custom bg. */
   className?: string;
-  /** Hide the in-form Ticket chip (PIN, Incident, Raise ticket itself). */
+  /** Do not register this overlay as the Raise-ticket form surface (PIN, Incident, ticket itself). */
   hideTicket?: boolean;
 }
 
@@ -47,7 +47,7 @@ export function BottomSheet({
           className,
         )}
       >
-        <SheetHeader className="mb-4 shrink-0 pr-24">
+        <SheetHeader className="mb-4 shrink-0 pr-10">
           <SheetTitle className="text-left text-lg">{title}</SheetTitle>
           {description && (
             <SheetDescription className="text-left text-sm">{description}</SheetDescription>

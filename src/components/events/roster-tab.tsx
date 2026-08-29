@@ -1,5 +1,5 @@
 ﻿import { Fragment, useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -20,6 +20,9 @@ import {
 } from "@/lib/data-store";
 import { AddRosterBookingModal } from "./add-roster-booking-modal";
 import { AddGuestBookingModal } from "./add-guest-booking-modal";
+import { AddEventSupportModal } from "./add-event-support-modal";
+import { EVENT_SUPPORT_KEY, listEventSupportBookings, removeEventSupportBooking } from "@/lib/api/event-support";
+import { supportPersonKindLabel } from "@/lib/support-person";
 import { WalkOnBadge } from "./walk-on-person-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
@@ -52,12 +55,19 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const [query, setQuery] = useState("");
   const [addOpen, setAddOpen] = useState(false);
   const [guestOpen, setGuestOpen] = useState(false);
+  const [supportOpen, setSupportOpen] = useState(false);
   const [milestoneBooking, setMilestoneBooking] = useState<EventRosterBooking | null>(null);
   const [refundBooking, setRefundBooking] = useState<EventRosterBooking | null>(null);
   const [editBooking, setEditBooking] = useState<EventRosterBooking | null>(null);
   const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
+  const { data: supportBookings = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_KEY(event.id),
+    queryFn: () => listEventSupportBookings(event.id),
+    staleTime: 15_000,
+  });
+  const qc = useQueryClient();
   const reorderPickup = useReorderEventRosterPickupOrder();
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
   const { data: carersAll = [] } = useCarersRegistry();
@@ -91,9 +101,17 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     () => bookings.filter((b) => b.bookingStatus !== "Cancelled"),
     [bookings],
   );
+  const activeSupport = useMemo(
+    () => supportBookings.filter((s) => s.bookingStatus !== "Cancelled"),
+    [supportBookings],
+  );
+  const supportBusSeats = activeSupport.filter(
+    (s) => s.outboundTransportMode === "bus" || s.returnTransportMode === "bus",
+  ).length;
   const totalSeatsOccupied =
     activeBookings.length +
-    activeBookings.filter((b) => b.carerTransportRequired).length;
+    activeBookings.filter((b) => b.carerTransportRequired).length +
+    supportBusSeats;
   const carerSeats = activeBookings.filter((b) => b.carerTransportRequired).length;
 
   const ledgerTotalsByParticipant = useMemo(() => {
@@ -497,9 +515,11 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
       )}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <h3 className="text-sm font-semibold">Participant booking roster</h3>
+          <h3 className="text-sm font-semibold">Trip roster</h3>
           <p className="text-xs text-muted-foreground">
-            {isLoading ? "Loading…" : `${bookings.length} participants on roster.`}
+            {isLoading
+              ? "Loading…"
+              : `${bookings.length} participants · ${activeSupport.length} staff / volunteer / carer.`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -507,9 +527,21 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
             <Bus className="h-3.5 w-3.5 text-info" />
             Bus seats: <span className="tabular-nums text-info">{totalSeatsOccupied}</span>
             <span className="text-muted-foreground">
-              ({activeBookings.length} pax + {carerSeats} carer{carerSeats === 1 ? "" : "s"})
+              ({activeBookings.length} pax
+              {carerSeats > 0 ? ` + ${carerSeats} booking carer${carerSeats === 1 ? "" : "s"}` : ""}
+              {supportBusSeats > 0
+                ? ` + ${supportBusSeats} support`
+                : ""})
             </span>
           </div>
+          <Button
+            type="button"
+            variant="secondary"
+            onClick={() => setSupportOpen(true)}
+            className="gap-1.5"
+          >
+            Add support person
+          </Button>
           {isOuting && (
             <Button
               type="button"
@@ -601,6 +633,54 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           </TooltipProvider>
         </div>
       )}
+
+      <div className="space-y-2">
+        <h3 className="text-sm font-semibold">Staff, volunteers and carers</h3>
+        <p className="text-xs text-muted-foreground">
+          Add them here for their own pickup / drop-off. They are not billed as guests.
+        </p>
+        {activeSupport.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-border py-6 text-center text-sm text-muted-foreground">
+            No staff, volunteers or carers on this trip yet.
+          </div>
+        ) : (
+          <ul className="overflow-hidden rounded-lg border border-border">
+            {activeSupport.map((s) => (
+              <li
+                key={s.id}
+                className="flex items-center justify-between gap-2 border-t border-border px-3 py-2 first:border-t-0"
+              >
+                <div>
+                  <div className="font-medium">{s.displayName}</div>
+                  <div className="text-xs text-muted-foreground">
+                    {supportPersonKindLabel(s.personKind)} · IN {s.outboundTransportMode}
+                    {s.outboundBusRunCode ? ` ${s.outboundBusRunCode}` : ""} · HOME{" "}
+                    {s.returnTransportMode}
+                  </div>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    void removeEventSupportBooking(s.id).then(() =>
+                      qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(event.id) }),
+                    );
+                  }}
+                >
+                  Remove
+                </Button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </div>
+
+      <AddEventSupportModal
+        open={supportOpen}
+        eventId={event.id}
+        onClose={() => setSupportOpen(false)}
+      />
 
       <AddRosterBookingModal
         open={addOpen}

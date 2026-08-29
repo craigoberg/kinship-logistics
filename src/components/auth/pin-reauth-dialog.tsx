@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/auth/pin-pad";
 import { verifyLoginPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
 import { cn } from "@/lib/utils";
+import { useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
 
 interface Props {
   open: boolean;
@@ -42,6 +43,7 @@ export function PinReauthDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  useHideGlobalFabs(open);
 
   useEffect(() => {
     if (open) {

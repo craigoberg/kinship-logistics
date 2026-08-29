@@ -43,6 +43,7 @@ import {
   listAttendanceRoll,
   loadInboundTransportLabelsForToday,
   loadOutboundTransportLabelsForToday,
+  persistDepartureMethod,
   recordClientArrival,
   scheduleLabelIsSelf,
   seedRollFromSchedules,
@@ -74,6 +75,8 @@ import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
 import { AddVisitorModal } from "./add-visitor-modal";
+import { SupportAttendanceSection } from "./support-attendance-section";
+import { sweepOverdueSupportArrivals } from "@/lib/api/support-attendance";
 import { PromoteVisitorToEventDialog } from "./promote-visitor-to-event-dialog";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
@@ -127,7 +130,7 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
   useQuery({
     queryKey: ["attendance-overdue-sweep", sessionId, clockSnap],
     queryFn: async () => {
-      if (Object.keys(nameMap).length === 0) return { swept: false };
+      if (Object.keys(nameMap).length > 0) {
       await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
         (e) => {
           const msg = e instanceof Error ? e.message : String(e);
@@ -145,14 +148,21 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
         console.error("[AttendanceOverdueSweepHost] departure sweep failed", e);
         toast.error("Departure overdue sweep failed", { description: msg });
       });
+      }
+      await sweepOverdueSupportArrivals(sessionId, yellowMins, redMins).catch((e) => {
+        const msg = e instanceof Error ? e.message : String(e);
+        console.error("[AttendanceOverdueSweepHost] support sweep failed", e);
+        toast.error("Support overdue sweep failed", { description: msg });
+      });
       await qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+      await qc.invalidateQueries({ queryKey: ["support-attendance-roll", sessionId] });
       return { swept: true };
     },
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     staleTime: 0,
-    enabled: !!sessionId && participantsQ.isSuccess,
+    enabled: !!sessionId,
   });
 
   return null;
@@ -357,11 +367,26 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         busRunCode: selection.kind === "bus" ? selection.busRunCode : null,
         alsoCheckIn: true,
       }),
-    onSuccess: (_data, vars) => {
+    onSuccess: (result, vars) => {
+      const wasAbsent = vars.row.status === "absent";
+      const home = result.lateArrivalHome;
+      const homeHint =
+        home?.kind === "added_to_live_run"
+          ? "Added to the afternoon home run — confirm boarding on Manifest."
+          : home?.kind === "will_seed"
+            ? "They will appear on the afternoon Manifest when that run starts."
+            : home?.kind === "run_already_underway"
+              ? "Afternoon bus already left. Check out via family, or call the driver."
+              : home?.kind === "not_needed"
+                ? "Going home with family / self — not on the afternoon bus."
+                : undefined;
       toast.success(
-        vars.selection.kind === "self"
-          ? "Checked in — self / family."
-          : "Checked in — arrived by bus.",
+        wasAbsent
+          ? "Late arrival — checked in."
+          : vars.selection.kind === "self"
+            ? "Checked in — self / family."
+            : "Checked in — arrived by bus.",
+        { description: homeHint },
       );
       qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
     },
@@ -403,6 +428,9 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   function arrivalSelectionFor(row: ClientAttendanceRow): FloorTransportSelection {
     const key = methodKey("arrival", row.id);
     if (methodByKey[key]) return methodByKey[key];
+    if (row.status === "absent") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
     return selectionFromScheduleLabel(
       transportLabelMap[row.participantId],
       busRunOpts,
@@ -414,6 +442,20 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   function departureSelectionFor(row: ClientAttendanceRow): FloorTransportSelection {
     const key = methodKey("departure", row.id);
     if (methodByKey[key]) return methodByKey[key];
+    if (row.departureVector === "independent") {
+      return { kind: "independent", busRunCode: null, label: "Indep" };
+    }
+    if (row.departureVector === "family") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
+    if (row.departureVector === "bus") {
+      return selectionFromScheduleLabel(
+        row.departureBusRunCode,
+        busRunOpts,
+        "dayCentre",
+        scheduleLabelIsSelf,
+      );
+    }
     return selectionFromScheduleLabel(
       outboundLabelMap[row.participantId] ||
         transportLabelMap[row.participantId],
@@ -470,12 +512,17 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   const pickerRow = picker
     ? allRows.find((r) => r.id === picker.rowId) ?? null
     : null;
-  const pickerSelection = pickerRow
+  const pickerSelection = picker && pickerRow
     ? picker.phase === "arrival"
       ? arrivalSelectionFor(pickerRow)
       : departureSelectionFor(pickerRow)
     : null;
-  const checkedIn = allRows.filter((r) => r.status === "checked_in").length;
+  const booked = allRows.length;
+  const arrived = allRows.filter((r) => r.status === "checked_in").length;
+  const absentCount = allRows.filter((r) => r.status === "absent").length;
+  const stillExpected = allRows.filter((r) => r.status === "expected").length;
+  const leftCount = allRows.filter((r) => r.status === "checked_out").length;
+  const accountedCount = allRows.filter((r) => r.status === "accounted").length;
   // Arrival overdue only — exclude departed / absent; ignore stale severity
   // left on rows that already have an Out stamp.
   const overdue = allRows.filter(
@@ -486,9 +533,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       r.status !== "checked_out" &&
       r.status !== "absent",
   );
-  const hasUnarrived = allRows.some(
-    (r) => r.status !== "checked_in" && r.status !== "accounted",
-  );
+  const hasUnarrived = stillExpected > 0;
   const title =
     mode === "check_in"
       ? "Check-In"
@@ -498,10 +543,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="min-w-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           {title}{" "}
-          <span className="ml-1 font-mono normal-case text-muted-foreground/70">
+          <span className="ml-1 font-mono font-medium normal-case text-muted-foreground/70">
             {mode === "check_out" ? (
               <>
                 ({rows.length} on site
@@ -515,7 +560,17 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
               </>
             ) : (
               <>
-                ({checkedIn}/{allRows.length} in
+                (Booked: {booked} / Arrived: {arrived} / Absent: {absentCount}
+                {leftCount > 0 && <> / Left: {leftCount}</>}
+                {accountedCount > 0 && <> / Accounted: {accountedCount}</>}
+                {" / "}
+                <span
+                  className={
+                    stillExpected > 0 ? "text-warning" : undefined
+                  }
+                >
+                  Still expected: {stillExpected}
+                </span>
                 {visitorsPresent.length > 0 && showVisitors && (
                   <>
                     {" "}· {visitorsPresent.length} visitor
@@ -663,7 +718,6 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
           const canConfirmArrival =
             mode !== "check_out" &&
             !busy &&
-            !isAbsent &&
             !isOut &&
             !isIn &&
             !r.checkedOutAt;
@@ -739,7 +793,9 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     canConfirmDeparture
                       ? `Check out ${displayName} via ${departureSel.label}`
                       : canConfirmArrival
-                        ? `Check in ${displayName} via ${arrivalSel.label}`
+                        ? isAbsent
+                          ? `Late arrival check-in for ${displayName} via ${arrivalSel.label}`
+                          : `Check in ${displayName} via ${arrivalSel.label}`
                         : `${displayName}`
                   }
                   className={cn(
@@ -849,8 +905,8 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                         />
                       </>
                     )}
-                    {isAbsent && absentMatch && (
-                      <> · Not attending today (PIN verified)</>
+                    {isAbsent && (
+                      <> · Tap row to record a late arrival (PIN already on file)</>
                     )}
                     {isAbsent && !absentMatch && r.notes?.trim() && (
                       <> · {r.notes.trim()}</>
@@ -858,7 +914,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   </div>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
-                  {!isAbsent && !isOut && (canConfirmArrival || canConfirmDeparture) && (
+                  {!isOut && (canConfirmArrival || canConfirmDeparture) && (
                     <EmbeddedMethodButton
                       label={
                         canConfirmDeparture
@@ -1159,8 +1215,22 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
             ...prev,
             [methodKey(picker.phase, picker.rowId)]: next,
           }));
+          if (picker.phase === "departure" && pickerRow) {
+            void persistDepartureMethod(pickerRow, next).then(
+              () => {
+                qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+              },
+              (e: Error) => {
+                toast.error("Could not save home transport", {
+                  description: e.message,
+                });
+              },
+            );
+          }
         }}
       />
+
+      <SupportAttendanceSection sessionId={sessionId} mode={mode} />
 
       <AlertDialog
         open={!!undoTarget}

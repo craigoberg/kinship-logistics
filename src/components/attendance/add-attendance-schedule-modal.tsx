@@ -17,7 +17,6 @@ import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import {
   LOOKUP_CATEGORIES,
   type AttendanceSchedule,
-  type LookupParameter,
   type WeekDay,
 } from "@/lib/data-store";
 import {
@@ -26,81 +25,14 @@ import {
   useRemoveAttendanceSchedule,
   useLookupParameters,
   useBusRunMap,
-  type BusRunBadge,
 } from "@/hooks/use-supabase-data";
-import { listCentreHours } from "@/lib/api/centre-hours";
+import { CENTRE_HOURS_QUERY_KEY, listCentreHours } from "@/lib/api/centre-hours";
 import { useQuery } from "@tanstack/react-query";
-import { cn } from "@/lib/utils";
-import { requiredFieldOutline } from "@/lib/ui/required-field";
-
-/** Canonical self-transport code (onboarding + floor treat anything with "self"). */
-const SELF_TRANSPORT_CODE = "TRN-SELF";
-const SELF_PILL_COLOR = "#64748b";
-
-function isSelfTransportCode(code: string): boolean {
-  const v = code.trim().toLowerCase();
-  return v.includes("self") || v.includes("private") || v.includes("family");
-}
-
-function isAssignedBusRun(code: string, runs: LookupParameter[]): boolean {
-  return runs.some((r) => r.code === code);
-}
-
-function ScheduleTransportPills({
-  value,
-  busRuns,
-  busRunMap,
-  invalid,
-  onSelect,
-}: {
-  value: string;
-  busRuns: LookupParameter[];
-  busRunMap: Map<string, BusRunBadge>;
-  invalid: boolean;
-  onSelect: (code: string) => void;
-}) {
-  const selfSelected = isSelfTransportCode(value);
-  return (
-    <div className={cn("flex flex-wrap gap-2 rounded-md p-1", requiredFieldOutline(invalid))}>
-      <button
-        type="button"
-        onClick={() => onSelect(SELF_TRANSPORT_CODE)}
-        style={
-          selfSelected
-            ? { backgroundColor: SELF_PILL_COLOR, borderColor: SELF_PILL_COLOR }
-            : { borderColor: SELF_PILL_COLOR, color: SELF_PILL_COLOR }
-        }
-        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-          selfSelected ? "text-white" : "bg-card hover:opacity-80"
-        }`}
-      >
-        Self
-      </button>
-      {busRuns.map((run) => {
-        const selected = value === run.code;
-        const badge = busRunMap.get(run.code);
-        const color = badge?.color ?? "#7c3aed";
-        return (
-          <button
-            key={run.code}
-            type="button"
-            onClick={() => onSelect(run.code)}
-            style={
-              selected
-                ? { backgroundColor: color, borderColor: color }
-                : { borderColor: color, color }
-            }
-            className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-              selected ? "text-white" : "bg-card hover:opacity-80"
-            }`}
-          >
-            {run.displayName}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
+import {
+  SELF_TRANSPORT_CODE,
+  ScheduleTransportPills,
+  isAssignedBusRun,
+} from "@/components/transport/schedule-transport-pills";
 
 interface Props {
   open: boolean;
@@ -136,22 +68,22 @@ export function AddAttendanceScheduleModal({
 
   // Bus run lookup — used in the inbound/outbound transport sections.
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [] } = useLookupParameters(LOOKUP_CATEGORIES.operatingDay);
   // Stable badge color map — same palette as the Participants Directory.
   const busRunMap = useBusRunMap();
 
-  // Centre operating hours — used for the stretch-goal day validation.
+  // Open/close defaults for the selected operating day (prefill on add).
   const { data: centreHours = [] } = useQuery({
-    queryKey: ["centre-operating-hours"],
+    queryKey: CENTRE_HOURS_QUERY_KEY,
     queryFn: listCentreHours,
     staleTime: 5 * 60_000,
     enabled: open,
   });
 
-  // Whether the selected day has a configured centre hours row.
   const centreClosedWarning =
     dayOfWeek.length > 0 &&
-    centreHours.length > 0 &&
-    !centreHours.some((h) => h.dayOfWeek === dayOfWeek);
+    operatingDays.length > 0 &&
+    !operatingDays.some((d) => d.code === dayOfWeek);
 
   useEffect(() => {
     if (open && editing) {
@@ -262,6 +194,13 @@ export function AddAttendanceScheduleModal({
               onChange={(code, displayName) => {
                 setDayOfWeek(code);
                 setDayLabel(displayName);
+                if (!isEdit) {
+                  const h = centreHours.find((row) => row.dayOfWeek === code);
+                  if (h) {
+                    setArrivalTime(h.openTime);
+                    setDepartureTime(h.closeTime);
+                  }
+                }
                 setDirty(true);
               }}
               placeholder="Select day"

@@ -11,7 +11,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { ParticipantTable } from "@/components/participants/participant-table";
-import { RunRoutePanel } from "@/components/participants/run-route-panel";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
@@ -91,6 +90,10 @@ function ParticipantsPage() {
             <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
               Hub → Onboarding
             </Link>
+            . Bus run order for everyone is in{" "}
+            <Link to="/run-planning" className="underline underline-offset-2">
+              Run Planning
+            </Link>
             .
           </p>
         </div>
@@ -168,8 +171,6 @@ function ParticipantsPage() {
           </SelectContent>
         </Select>
       </div>
-
-      <RunRoutePanel />
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-destructive">

@@ -34,6 +34,7 @@ export function RouteRehydrationGuardian() {
       "/events",
       "/participants",
       "/staff",
+      "/run-planning",
       "/transport",
       "/finance",
       "/sync",

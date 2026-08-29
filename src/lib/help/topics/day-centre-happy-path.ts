@@ -39,7 +39,7 @@ export const dayCentreHappyPathTopic: HelpTopic = {
     },
     {
       heading: "Check-In",
-      body: "On Active Day → Check-In, mark expected participants present (or absent with reason). Clinical chips (allergy / diet) are informational — tap for the short sheet.",
+      body: "On Active Day → Check-In, mark expected participants present (or absent with reason + PIN). Absent people stay on the roll but are off morning and afternoon Manifest. If they turn up later, set arrival method (usually Self / family) and tap the wide row — that is a late arrival: they check in, go onto Check-Out, and onto the afternoon bus if that is how they go home. + Add Attendee is for a registered client who was not on today’s roll (or was Off today and then arrived); you must pick how they go home. + Add visitor is for non-clients (family, trades, site visitors).",
     },
     {
       heading: "Activities (meals & meds)",

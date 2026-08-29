@@ -89,6 +89,7 @@ export interface EventBusManifestRow {
   event_day_session_id: string;
   transport_trip_id: string;
   participant_id: string | null;
+  staff_id?: string | null;
   carer_id: string | null;
   expected_on_bus: boolean;
   status: BusManifestStatus;
@@ -207,6 +208,7 @@ async function fetchBusSeedBookings(eventId: string): Promise<BusSeedBooking[]> 
 async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<void> {
   const participantRows = rows.filter((r) => r.participant_id != null);
   const carerRows = rows.filter((r) => r.carer_id != null && r.participant_id == null);
+  const staffRows = rows.filter((r) => r.staff_id != null && r.participant_id == null && r.carer_id == null);
 
   if (participantRows.length) {
     const { error } = await supabase.from("event_bus_manifest").insert(participantRows);
@@ -214,6 +216,10 @@ async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<v
   }
   if (carerRows.length) {
     const { error } = await supabase.from("event_bus_manifest").insert(carerRows);
+    if (error && !isDuplicateKeyError(error)) throw error;
+  }
+  if (staffRows.length) {
+    const { error } = await supabase.from("event_bus_manifest").insert(staffRows);
     if (error && !isDuplicateKeyError(error)) throw error;
   }
 }
@@ -231,6 +237,20 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
     ...new Set(
       data
         .map((r) => (r as { participant_id?: string | null }).participant_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const carerIds = [
+    ...new Set(
+      data
+        .map((r) => (r as { carer_id?: string | null }).carer_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const staffIds = [
+    ...new Set(
+      data
+        .map((r) => (r as { staff_id?: string | null }).staff_id)
         .filter((id): id is string => !!id),
     ),
   ];
@@ -256,6 +276,26 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
       });
     }
   }
+  if (carerIds.length) {
+    const { data: carers } = await supabase
+      .from("carers_registry")
+      .select("id, full_name")
+      .in("id", carerIds);
+    for (const c of carers ?? []) {
+      const row = c as { id: string; full_name: string };
+      nameById[`c:${row.id}`] = row.full_name;
+    }
+  }
+  if (staffIds.length) {
+    const { data: staff } = await supabase
+      .from("staff_registry")
+      .select("id, full_name")
+      .in("id", staffIds);
+    for (const s of staff ?? []) {
+      const row = s as { id: string; full_name: string };
+      nameById[`s:${row.id}`] = row.full_name;
+    }
+  }
 
   // Surname A–Z — on_bus / not_travelling must not reorder the boarding list.
   return data
@@ -265,7 +305,11 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
         ...row,
         participant_name: row.participant_id
           ? nameById[row.participant_id] || null
-          : null,
+          : row.carer_id
+            ? nameById[`c:${row.carer_id}`] || null
+            : row.staff_id
+              ? nameById[`s:${row.staff_id}`] || null
+              : null,
       };
     })
     .sort((a, b) =>
@@ -376,6 +420,28 @@ export async function seedBusManifest(opts: {
       });
     }
   }
+  try {
+    const { listEventSupportBookings } = await import("@/lib/api/event-support");
+    const support = await listEventSupportBookings(opts.eventId);
+    for (const s of support.filter((b) => b.bookingStatus !== "Cancelled")) {
+      const onBus =
+        opts.direction === "outbound"
+          ? s.outboundTransportMode === "bus"
+          : s.returnTransportMode === "bus";
+      if (!onBus) continue;
+      rows.push({
+        event_day_session_id: opts.eventDaySessionId,
+        transport_trip_id: opts.tripId,
+        participant_id: null,
+        staff_id: s.staffId,
+        carer_id: s.carerId,
+        expected_on_bus: true,
+        status: "expected",
+      });
+    }
+  } catch {
+    /* BL-125 table not migrated yet */
+  }
   if (!rows.length) return 0;
 
   await insertBusManifestRows(rows);
@@ -458,6 +524,8 @@ export interface EventAccountabilityRow {
   id: string;
   event_day_session_id: string;
   participant_id: string;
+  staff_id?: string | null;
+  carer_id?: string | null;
   expected_accounted_at: string;
   accounted_at: string | null;
   accounted_by: string | null;
@@ -479,12 +547,31 @@ export interface EventAccountabilityRow {
   isVirtual?: boolean;
 }
 
+function accPersonKey(r: {
+  participant_id?: string | null;
+  staff_id?: string | null;
+  carer_id?: string | null;
+}): string {
+  if (r.staff_id) return `s:${r.staff_id}`;
+  if (r.carer_id) return `c:${r.carer_id}`;
+  return r.participant_id ?? "";
+}
+
 function mapAccRow(r: Record<string, unknown>): EventAccountabilityRow {
   const p = r.participants as { first_name?: string; last_name?: string } | null | undefined;
+  const staffId = (r.staff_id as string | null) ?? null;
+  const carerId = (r.carer_id as string | null) ?? null;
+  const participantId = (r.participant_id as string | null) ?? accPersonKey({
+    participant_id: r.participant_id as string | null,
+    staff_id: staffId,
+    carer_id: carerId,
+  });
   return {
     id: r.id as string,
     event_day_session_id: r.event_day_session_id as string,
-    participant_id: r.participant_id as string,
+    participant_id: participantId,
+    staff_id: staffId,
+    carer_id: carerId,
     expected_accounted_at: r.expected_accounted_at as string,
     accounted_at: (r.accounted_at as string | null) ?? null,
     accounted_by: (r.accounted_by as string | null) ?? null,
@@ -606,7 +693,7 @@ export async function listAccountabilityRoll(
 
   const logMap = new Map(
     (logRows ?? []).map((r) => [
-      (r as Record<string, unknown>).participant_id as string,
+      accPersonKey(r as Record<string, unknown>),
       r,
     ]),
   );
@@ -614,10 +701,33 @@ export async function listAccountabilityRoll(
   const checkedInIds: string[] = (attendees ?? []).map(
     (a) => a.participant_id as string,
   );
-  const checkedInSet = new Set(checkedInIds);
+
+  let supportCheckedIn: Array<{
+    key: string;
+    staffId: string | null;
+    carerId: string | null;
+    name: string;
+  }> = [];
+  try {
+    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
+    const support = await listEventSupportAttendance(sessionId);
+    supportCheckedIn = support
+      .filter((s) => s.status === "checked_in")
+      .map((s) => ({
+        key: accPersonKey({ staff_id: s.staffId, carer_id: s.carerId }),
+        staffId: s.staffId,
+        carerId: s.carerId,
+        name: s.displayName,
+      }));
+  } catch {
+    /* BL-125 table not migrated yet */
+  }
+
+  const checkedInSet = new Set([...checkedInIds, ...supportCheckedIn.map((s) => s.key)]);
+  const supportByKey = new Map(supportCheckedIn.map((s) => [s.key, s]));
 
   // Checked-in first (still with group — can mark Safe), then left-trip placeholders.
-  const orderedIds: string[] = [...checkedInIds];
+  const orderedIds: string[] = [...checkedInIds, ...supportCheckedIn.map((s) => s.key)];
   for (const pid of logMap.keys()) {
     if (!checkedInSet.has(pid)) orderedIds.push(pid);
   }
@@ -626,12 +736,20 @@ export async function listAccountabilityRoll(
   const stamp = operationalNowIso();
   return orderedIds.map((pid) => {
     const existing = logMap.get(pid);
-    if (existing) return mapAccRow(existing as Record<string, unknown>);
+    if (existing) {
+      const mapped = mapAccRow(existing as Record<string, unknown>);
+      const support = supportByKey.get(pid);
+      if (support && !mapped.participant_name) mapped.participant_name = support.name;
+      return mapped;
+    }
+    const support = supportByKey.get(pid);
     // Virtual row — not yet in the log table. Name resolved in panel via nameMap.
     return {
       id: `virtual:${pid}`,
       event_day_session_id: sessionId,
       participant_id: pid,
+      staff_id: support?.staffId ?? null,
+      carer_id: support?.carerId ?? null,
       expected_accounted_at: virtualExpectedAt,
       accounted_at: null,
       accounted_by: null,
@@ -643,7 +761,7 @@ export async function listAccountabilityRoll(
       notes: null,
       created_at: stamp,
       updated_at: stamp,
-      participant_name: null,
+      participant_name: support?.name ?? null,
       isVirtual: true,
     };
   });
@@ -657,7 +775,14 @@ export async function countUnreconciledCheckins(sessionId: string): Promise<numb
     .eq("event_day_session_id", sessionId)
     .eq("status", "expected");
   if (error) throw error;
-  return count ?? 0;
+  let extra = 0;
+  try {
+    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
+    extra = (await listEventSupportAttendance(sessionId)).filter((s) => s.status === "expected").length;
+  } catch {
+    /* ignore */
+  }
+  return (count ?? 0) + extra;
 }
 
 /** Seed accountability rows from the event roster for this session. Idempotent. */
@@ -702,7 +827,30 @@ export async function seedAccountabilityRoll(
     .upsert(rows, { onConflict: "event_day_session_id,participant_id", ignoreDuplicates: true })
     .select("id");
   if (insErr) throw insErr;
-  return inserted?.length ?? 0;
+
+  let supportInserted = 0;
+  try {
+    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
+    const support = (await listEventSupportAttendance(opts.sessionId)).filter(
+      (s) => s.status === "checked_in",
+    );
+    const supportRows = support.map((s) => ({
+      event_day_session_id: opts.sessionId,
+      participant_id: null,
+      staff_id: s.staffId,
+      carer_id: s.carerId,
+      expected_accounted_at: expectedIso,
+      status: "expected" as AccountabilityStatus,
+    }));
+    if (supportRows.length) {
+      const { data: sIns, error: sErr } = await supabase.from(table).insert(supportRows).select("id");
+      if (!sErr) supportInserted = sIns?.length ?? 0;
+    }
+  } catch {
+    /* support columns / table not migrated yet */
+  }
+
+  return (inserted?.length ?? 0) + supportInserted;
 }
 
 /** Ensure a virtual row is persisted before updating it; returns the real DB id. */
@@ -710,17 +858,28 @@ async function materializeVirtualRow(
   table: LogTable,
   row: EventAccountabilityRow,
 ): Promise<string> {
+  const payload: Record<string, unknown> = {
+    event_day_session_id: row.event_day_session_id,
+    expected_accounted_at: row.expected_accounted_at || operationalNowIso(),
+    status: "expected" as AccountabilityStatus,
+  };
+  if (row.staff_id) {
+    payload.staff_id = row.staff_id;
+    payload.participant_id = null;
+  } else if (row.carer_id) {
+    payload.carer_id = row.carer_id;
+    payload.participant_id = null;
+  } else {
+    payload.participant_id = row.participant_id;
+  }
+  const onConflict = row.staff_id
+    ? "event_day_session_id,staff_id"
+    : row.carer_id
+      ? "event_day_session_id,carer_id"
+      : "event_day_session_id,participant_id";
   const { data, error } = await supabase
     .from(table)
-    .upsert(
-      {
-        event_day_session_id: row.event_day_session_id,
-        participant_id: row.participant_id,
-        expected_accounted_at: row.expected_accounted_at || operationalNowIso(),
-        status: "expected" as AccountabilityStatus,
-      },
-      { onConflict: "event_day_session_id,participant_id" },
-    )
+    .upsert(payload, { onConflict })
     .select("id")
     .single();
   if (error) throw error;
@@ -1286,11 +1445,28 @@ export async function markAbsent(
     .single();
   if (error) throw error;
 
-  await syncFloorAttendanceLeftTrip({
-    eventDaySessionId: row.event_day_session_id,
-    participantId: row.participant_id,
-    notes: leftNotes,
-  });
+  if (row.staff_id || row.carer_id) {
+    try {
+      const { listEventSupportAttendance, markEventSupportAbsent } = await import(
+        "@/lib/api/event-support"
+      );
+      const support = await listEventSupportAttendance(row.event_day_session_id);
+      const match = support.find(
+        (s) =>
+          (row.staff_id && s.staffId === row.staff_id) ||
+          (row.carer_id && s.carerId === row.carer_id),
+      );
+      if (match) await markEventSupportAbsent(match.id);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    await syncFloorAttendanceLeftTrip({
+      eventDaySessionId: row.event_day_session_id,
+      participantId: row.participant_id,
+      notes: leftNotes,
+    });
+  }
 
   await writeToLedger({
     staff_id: staffId,

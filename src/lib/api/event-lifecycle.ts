@@ -602,6 +602,12 @@ export interface TripReport {
   venueStops: TripReportVenueStop[];
   daySessions: TripReportDaySession[];
   roster: TripReportRosterEntry[];
+  support: Array<{
+    displayName: string;
+    roleLabel: string;
+    outboundTransportMode: string;
+    returnTransportMode: string;
+  }>;
   finance: TripReportFinance;
 
   rosterSummary: {
@@ -795,6 +801,18 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
   const status =
     rawStatus === "Closed" && !allSessionsClosed ? "Open" : rawStatus;
 
+  const { listEventSupportBookings } = await import("@/lib/api/event-support");
+  const { supportPersonKindLabel } = await import("@/lib/support-person");
+  const supportBookings = await listEventSupportBookings(eventId);
+  const support = supportBookings
+    .filter((s) => s.bookingStatus !== "Cancelled")
+    .map((s) => ({
+      displayName: s.displayName,
+      roleLabel: supportPersonKindLabel(s.personKind),
+      outboundTransportMode: s.outboundTransportMode,
+      returnTransportMode: s.returnTransportMode,
+    }));
+
   return {
     eventId,
     title: ev.title as string,
@@ -807,6 +825,7 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
     venueStops: stops,
     daySessions,
     roster,
+    support,
     finance: {
       ticketRevenue: finance.ticketRevenue,
       vendorExpenses: finance.vendorExpenses,

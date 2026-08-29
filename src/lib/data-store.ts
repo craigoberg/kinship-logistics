@@ -24,6 +24,11 @@ import {
   loadBusRunRouteOrderMap,
   sortRosterByRouteOrder,
 } from "@/lib/api/bus-run-routes";
+import {
+  clientRosterPerson,
+  rosterPersonRefs,
+  type TransportRosterPerson,
+} from "@/lib/support-person";
 
 export interface Participant {
   id: string;
@@ -665,6 +670,49 @@ export async function listStaffRegistry(): Promise<StaffMember[]> {
     rememberStaffDisplayName(r.auth_user_id, r.full_name);
   }
   return rows.map((r) => rowToStaff(r as StaffRow));
+}
+
+/** Personnel email for a staff_registry id (day-login / office contact). */
+export async function getStaffEmailById(
+  id: string | null | undefined,
+): Promise<string | null> {
+  const staffId = (id ?? "").trim();
+  if (!staffId) return null;
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("email")
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error) {
+    console.error("[getStaffEmailById]", error);
+    return null;
+  }
+  const email = String((data as { email?: string | null } | null)?.email ?? "").trim();
+  return email.includes("@") ? email : null;
+}
+
+/** Fallback when the ticket has a name but no staff id. */
+export async function getStaffEmailByFullName(
+  fullName: string | null | undefined,
+): Promise<string | null> {
+  const name = (fullName ?? "").trim();
+  if (!name) return null;
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("email")
+    .ilike("full_name", name);
+  if (error) {
+    console.error("[getStaffEmailByFullName]", error);
+    return null;
+  }
+  const emails = [
+    ...new Set(
+      (data ?? [])
+        .map((r) => String((r as { email?: string | null }).email ?? "").trim())
+        .filter((e) => e.includes("@")),
+    ),
+  ];
+  return emails.length === 1 ? emails[0]! : null;
 }
 
 export interface StaffPayload {
@@ -1818,7 +1866,7 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     category: LOOKUP_CATEGORIES.operatingDay,
     label: "Operating days",
     description:
-      "Calendar days the centre operates. Add Saturday/Sunday to open weekend rosters.",
+      "Days the centre is open, plus facility-wide open/close times (used when a person has no per-client schedule override). Add Saturday/Sunday to open weekend rosters.",
   },
   {
     category: LOOKUP_CATEGORIES.serviceType,
@@ -4020,6 +4068,10 @@ export interface TripLeg {
   toLabel: string;
   fromParticipantId: string | null;
   toParticipantId: string | null;
+  fromStaffId: string | null;
+  toStaffId: string | null;
+  fromCarerId: string | null;
+  toCarerId: string | null;
   status: LegStatus;
   startLat: number | null;
   startLng: number | null;
@@ -4058,6 +4110,10 @@ interface LegRow {
   to_label: string;
   from_participant_id: string | null;
   to_participant_id: string | null;
+  from_staff_id?: string | null;
+  to_staff_id?: string | null;
+  from_carer_id?: string | null;
+  to_carer_id?: string | null;
   status: LegStatus;
   start_lat: number | string | null;
   start_lng: number | string | null;
@@ -4090,6 +4146,10 @@ function rowToLeg(r: LegRow): TripLeg {
     toLabel: r.to_label,
     fromParticipantId: r.from_participant_id,
     toParticipantId: r.to_participant_id,
+    fromStaffId: r.from_staff_id ?? null,
+    toStaffId: r.to_staff_id ?? null,
+    fromCarerId: r.from_carer_id ?? null,
+    toCarerId: r.to_carer_id ?? null,
     status: r.status,
     startLat: numOrNull(r.start_lat),
     startLng: numOrNull(r.start_lng),
@@ -4674,13 +4734,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     return (a.created_at ?? "").localeCompare(b.created_at ?? "");
   });
 
-  type RosterEntry = {
-    id: string;
-    name: string;
-    /** Strict 3-tier fallback: override → permanent → street → null. */
-    address: string | null;
-  };
-  const roster: RosterEntry[] = (resolvedBookingRows ?? []).map((r) => {
+  const roster: TransportRosterPerson[] = (resolvedBookingRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       trip_pickup_address_override: string | null;
@@ -4703,8 +4757,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     const override = (row.trip_pickup_address_override ?? "").trim();
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return {
-      id: row.participant_id,
+    return clientRosterPerson({
+      participantId: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
       address:
         override.length > 0
@@ -4714,8 +4768,34 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
             : street.length > 0
               ? street
               : null,
-    };
+    });
   });
+
+  try {
+    const { listSupportRosterForEventTrip, listLegacyCarerRosterForEventTrip } =
+      await import("@/lib/api/event-support");
+    const dir = input.tripDirection === "return" ? "return" : "outbound";
+    const sessionDate =
+      input.tripDirection === "return"
+        ? input.returnSessionDate?.slice(0, 10)
+        : undefined;
+    const [support, legacyCarers] = await Promise.all([
+      listSupportRosterForEventTrip({
+        eventId: input.eventId,
+        direction: dir,
+        busRunCode: tripBusRunCode,
+        sessionDate,
+      }),
+      listLegacyCarerRosterForEventTrip({
+        eventId: input.eventId,
+        direction: dir,
+        busRunCode: tripBusRunCode,
+      }),
+    ]);
+    roster.push(...support, ...legacyCarers);
+  } catch (err) {
+    console.warn("[startTrip:support]", err);
+  }
 
   // 2. Resolve event venue + kind (outing vs legacy med rules).
   const { data: eventRow, error: eventErr } = await supabase
@@ -4883,6 +4963,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     to_label: string;
     from_participant_id: string | null;
     to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
     medication_expected: boolean;
     target_address: string | null;
   };
@@ -4896,32 +4980,42 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...rosterPersonRefs(null),
         medication_expected: false,
         target_address: returnAddress,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
-        const from = i === 0 ? null : roster[i - 1];
+        const from = i === 0 ? null : roster[i - 1]!;
+        const fromRefs = rosterPersonRefs(from);
+        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : venueLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
+          from_participant_id: fromRefs.participant_id,
+          to_participant_id: toRefs.participant_id,
+          from_staff_id: fromRefs.staff_id,
+          to_staff_id: toRefs.staff_id,
+          from_carer_id: fromRefs.carer_id,
+          to_carer_id: toRefs.carer_id,
           medication_expected: false,
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
+      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: originLabel,
-        from_participant_id: last.id,
+        from_participant_id: lastRefs.participant_id,
         to_participant_id: null,
+        from_staff_id: lastRefs.staff_id,
+        to_staff_id: null,
+        from_carer_id: lastRefs.carer_id,
+        to_carer_id: null,
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -4933,32 +5027,42 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: venueLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...rosterPersonRefs(null),
         medication_expected: false,
         target_address: null,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
-        const from = i === 0 ? null : roster[i - 1];
+        const from = i === 0 ? null : roster[i - 1]!;
+        const fromRefs = rosterPersonRefs(from);
+        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
-          medication_expected: medSet.has(to.id),
+          from_participant_id: fromRefs.participant_id,
+          to_participant_id: toRefs.participant_id,
+          from_staff_id: fromRefs.staff_id,
+          to_staff_id: toRefs.staff_id,
+          from_carer_id: fromRefs.carer_id,
+          to_carer_id: toRefs.carer_id,
+          medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
+      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: venueLabel,
-        from_participant_id: last.id,
+        from_participant_id: lastRefs.participant_id,
         to_participant_id: null,
+        from_staff_id: lastRefs.staff_id,
+        to_staff_id: null,
+        from_carer_id: lastRefs.carer_id,
+        to_carer_id: null,
         medication_expected: false,
         target_address: null,
       });
@@ -4969,8 +5073,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...rosterPersonRefs(null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -5049,9 +5152,15 @@ export async function listTodaysBusRunSummaries(
     .eq("active", true);
   if (error) throw error;
 
-  const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
-  const morningCounts: Record<string, number> = {};
-  const afternoonCounts: Record<string, number> = {};
+  const today = todayLocalIso();
+  const exemptIds = await loadExemptParticipantIdsForDate(today);
+  const floorHome = await loadFloorHomeTransportForDate(today);
+  const morningIds: Record<string, Set<string>> = {};
+  const afternoonIds: Record<string, Set<string>> = {};
+  const addId = (bag: Record<string, Set<string>>, run: string, pid: string) => {
+    if (!bag[run]) bag[run] = new Set();
+    bag[run]!.add(pid);
+  };
   for (const row of data ?? []) {
     const r = row as {
       participant_id: string;
@@ -5061,9 +5170,32 @@ export async function listTodaysBusRunSummaries(
     if (exemptIds.has(r.participant_id)) continue;
     const inb = r.inbound_transport ?? "";
     const outb = r.outbound_transport ?? "";
-    if (inb && knownRunCodes.has(inb)) morningCounts[inb] = (morningCounts[inb] ?? 0) + 1;
-    if (outb && knownRunCodes.has(outb)) afternoonCounts[outb] = (afternoonCounts[outb] ?? 0) + 1;
+    if (inb && knownRunCodes.has(inb)) addId(morningIds, inb, r.participant_id);
+    if (outb && knownRunCodes.has(outb)) {
+      const f = floorHome.get(r.participant_id);
+      if (f?.status === "absent" || f?.status === "checked_out") continue;
+      if (f?.departureVector === "family" || f?.departureVector === "independent") continue;
+      if (
+        f?.departureVector === "bus" &&
+        f.departureBusRunCode &&
+        f.departureBusRunCode !== outb
+      ) {
+        continue;
+      }
+      addId(afternoonIds, outb, r.participant_id);
+    }
   }
+  for (const [pid, f] of floorHome) {
+    if (exemptIds.has(pid)) continue;
+    if (f.status === "absent" || f.status === "checked_out") continue;
+    if (f.departureVector !== "bus" || !f.departureBusRunCode) continue;
+    if (!knownRunCodes.has(f.departureBusRunCode)) continue;
+    addId(afternoonIds, f.departureBusRunCode, pid);
+  }
+  const morningCounts: Record<string, number> = {};
+  const afternoonCounts: Record<string, number> = {};
+  for (const [run, ids] of Object.entries(morningIds)) morningCounts[run] = ids.size;
+  for (const [run, ids] of Object.entries(afternoonIds)) afternoonCounts[run] = ids.size;
 
   const summaries: BusRunSummary[] = [];
   for (const [runCode, passengerCount] of Object.entries(morningCounts)) {
@@ -5127,7 +5259,7 @@ export async function listBusRunRosterForDay(
   if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
 
   const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
-  const roster = (schedRows ?? []).map((r) => {
+  const roster: BusRunRosterEntry[] = (schedRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       participants:
@@ -5144,7 +5276,36 @@ export async function listBusRunRosterForDay(
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
     };
   });
-  const present = roster.filter((p) => !exemptIds.has(p.id));
+  let present = roster.filter((p) => !exemptIds.has(p.id));
+  if (direction === "afternoon") {
+    present = await applyAfternoonFloorHomeTransport(
+      present,
+      busRunCode,
+      todayLocalIso(),
+    );
+  }
+  try {
+    const { listSupportRosterForDayCentreRun, applyAfternoonSupportHomeTransport } =
+      await import("@/lib/api/support-attendance");
+    let support = await listSupportRosterForDayCentreRun({
+      busRunCode,
+      dayCode,
+      direction,
+    });
+    if (direction === "afternoon") {
+      support = await applyAfternoonSupportHomeTransport(
+        support,
+        busRunCode,
+        todayLocalIso(),
+      );
+    }
+    present = [
+      ...present,
+      ...support.map((s) => ({ id: s.id, name: s.name, address: s.address })),
+    ];
+  } catch (err) {
+    console.warn("[listBusRunRosterForDay:support]", err);
+  }
   const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
   return sortRosterByRouteOrder(present, orderMap);
 }
@@ -5165,9 +5326,123 @@ export async function loadExemptParticipantIdsForDate(dateIso: string): Promise<
   return out;
 }
 
+/** Floor Check-Out / walk-in home method for today's Day Centre session. */
+export type FloorHomeTransport = {
+  participantId: string;
+  status: string;
+  departureVector: "bus" | "family" | "independent" | null;
+  departureBusRunCode: string | null;
+};
+
+export async function loadFloorHomeTransportForDate(
+  dateIso: string,
+): Promise<Map<string, FloorHomeTransport>> {
+  const out = new Map<string, FloorHomeTransport>();
+  const { data: session, error: sessErr } = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", dateIso)
+    .maybeSingle();
+  if (sessErr || !session) return out;
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, status, departure_vector, departure_bus_run_code")
+    .eq("session_id", (session as { id: string }).id);
+  if (error) {
+    if (isSchemaMismatchError(error)) return out;
+    return out;
+  }
+  for (const raw of data ?? []) {
+    const row = raw as {
+      participant_id: string;
+      status: string;
+      departure_vector?: string | null;
+      departure_bus_run_code?: string | null;
+    };
+    const vector =
+      row.departure_vector === "bus" ||
+      row.departure_vector === "family" ||
+      row.departure_vector === "independent"
+        ? row.departure_vector
+        : null;
+    out.set(row.participant_id, {
+      participantId: row.participant_id,
+      status: row.status,
+      departureVector: vector,
+      departureBusRunCode: (row.departure_bus_run_code ?? "").trim() || null,
+    });
+  }
+  return out;
+}
+
+async function fetchBusRunRosterEntries(
+  participantIds: string[],
+): Promise<BusRunRosterEntry[]> {
+  if (participantIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("participants")
+    .select("id, first_name, last_name, regular_pickup_address, street_address")
+    .in("id", participantIds);
+  if (error) return [];
+  return (data ?? []).map((r) => {
+    const row = r as {
+      id: string;
+      first_name: string;
+      last_name: string;
+      regular_pickup_address: string | null;
+      street_address: string | null;
+    };
+    const regular = (row.regular_pickup_address ?? "").trim();
+    const street = (row.street_address ?? "").trim();
+    return {
+      id: row.id,
+      name: `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "(participant)",
+      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+    };
+  });
+}
+
+/**
+ * Afternoon home-run roster: weekly outbound minus Off-today / floor Absent,
+ * minus people who will go home with family/independent, plus walk-ins assigned
+ * to this bus. Morning is unchanged (schedule minus exempt only).
+ */
+export async function applyAfternoonFloorHomeTransport(
+  roster: BusRunRosterEntry[],
+  busRunCode: string,
+  dateIso: string,
+): Promise<BusRunRosterEntry[]> {
+  const floor = await loadFloorHomeTransportForDate(dateIso);
+  if (floor.size === 0) return roster;
+  const byId = new Map(roster.map((r) => [r.id, r]));
+  const extras: string[] = [];
+  for (const [pid, f] of floor) {
+    if (f.status === "absent" || f.status === "checked_out") {
+      byId.delete(pid);
+      continue;
+    }
+    if (f.departureVector === "family" || f.departureVector === "independent") {
+      byId.delete(pid);
+      continue;
+    }
+    if (f.departureVector === "bus" && f.departureBusRunCode) {
+      if (f.departureBusRunCode === busRunCode) {
+        if (!byId.has(pid)) extras.push(pid);
+      } else {
+        byId.delete(pid);
+      }
+    }
+  }
+  const extraRows = await fetchBusRunRosterEntries(extras);
+  for (const row of extraRows) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
 export function isPassengerPickupLeg(leg: TripLeg): boolean {
+  const hasPerson =
+    leg.toParticipantId != null || leg.toStaffId != null || leg.toCarerId != null;
   return (
-    leg.toParticipantId != null &&
+    hasPerson &&
     (leg.legKind === "depot_to_client" || leg.legKind === "client_to_client")
   );
 }
@@ -5219,6 +5494,10 @@ export type PickupChainEndpoint = {
   toLabel: string;
   fromParticipantId: string | null;
   toParticipantId: string | null;
+  fromStaffId: string | null;
+  toStaffId: string | null;
+  fromCarerId: string | null;
+  toCarerId: string | null;
   legKind: LegKind;
 };
 
@@ -5240,11 +5519,18 @@ export function computePickupChainEndpoints(
     .filter((l): l is TripLeg => l != null);
 
   const out = new Map<string, PickupChainEndpoint>();
-  let chainTail: { toLabel: string; toParticipantId: string | null } | null =
+  let chainTail: {
+    toLabel: string;
+    toParticipantId: string | null;
+    toStaffId: string | null;
+    toCarerId: string | null;
+  } | null =
     locked.length > 0
       ? {
           toLabel: locked[locked.length - 1]!.toLabel,
           toParticipantId: locked[locked.length - 1]!.toParticipantId,
+          toStaffId: locked[locked.length - 1]!.toStaffId,
+          toCarerId: locked[locked.length - 1]!.toCarerId,
         }
       : null;
   const originLabel = tripStartLabelForPickups(trip, legs);
@@ -5252,15 +5538,26 @@ export function computePickupChainEndpoints(
   for (const leg of orderedPending) {
     const fromLabel = chainTail ? chainTail.toLabel : originLabel;
     const fromParticipantId = chainTail ? chainTail.toParticipantId : null;
+    const fromStaffId = chainTail ? chainTail.toStaffId : null;
+    const fromCarerId = chainTail ? chainTail.toCarerId : null;
     const legKind: LegKind = chainTail ? "client_to_client" : "depot_to_client";
     out.set(leg.id, {
       fromLabel,
       toLabel: leg.toLabel,
       fromParticipantId,
       toParticipantId: leg.toParticipantId,
+      fromStaffId,
+      toStaffId: leg.toStaffId,
+      fromCarerId,
+      toCarerId: leg.toCarerId,
       legKind,
     });
-    chainTail = { toLabel: leg.toLabel, toParticipantId: leg.toParticipantId };
+    chainTail = {
+      toLabel: leg.toLabel,
+      toParticipantId: leg.toParticipantId,
+      toStaffId: leg.toStaffId,
+      toCarerId: leg.toCarerId,
+    };
   }
   return out;
 }
@@ -5284,6 +5581,10 @@ function rebuildPendingPickupChain(
       toLabel: ep.toLabel,
       fromParticipantId: ep.fromParticipantId,
       toParticipantId: ep.toParticipantId,
+      fromStaffId: ep.fromStaffId,
+      toStaffId: ep.toStaffId,
+      fromCarerId: ep.fromCarerId,
+      toCarerId: ep.toCarerId,
     };
   });
 }
@@ -5330,6 +5631,10 @@ export async function rebuildTripPickupChain(tripId: string): Promise<TripLeg[]>
         to_label: ep.toLabel,
         from_participant_id: ep.fromParticipantId,
         to_participant_id: ep.toParticipantId,
+        from_staff_id: ep.fromStaffId,
+        to_staff_id: ep.toStaffId,
+        from_carer_id: ep.fromCarerId,
+        to_carer_id: ep.toCarerId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", leg.id);
@@ -5495,6 +5800,10 @@ export async function reorderTripPickupLegs(
       patch.to_label = leg.toLabel;
       patch.from_participant_id = leg.fromParticipantId;
       patch.to_participant_id = leg.toParticipantId;
+      patch.from_staff_id = leg.fromStaffId;
+      patch.to_staff_id = leg.toStaffId;
+      patch.from_carer_id = leg.fromCarerId;
+      patch.to_carer_id = leg.toCarerId;
     } else if (
       leg.legKind === "client_to_venue" ||
       (leg.legKind === "venue_to_depot" && leg.fromParticipantId != null)
@@ -5578,8 +5887,7 @@ export async function startDayCentreRun(
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[startDayCentreRun:schedules]", schedErr);
 
-  type RosterEntry = { id: string; name: string; address: string | null };
-  const roster: RosterEntry[] = (schedRows ?? []).map((r) => {
+  const roster: TransportRosterPerson[] = (schedRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       participants:
@@ -5590,15 +5898,48 @@ export async function startDayCentreRun(
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return {
-      id: row.participant_id,
+    return clientRosterPerson({
+      participantId: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
-    };
+    });
   });
   const exemptIds = await loadExemptParticipantIdsForDate(today);
   for (let i = roster.length - 1; i >= 0; i--) {
     if (exemptIds.has(roster[i]!.id)) roster.splice(i, 1);
+  }
+  if (direction === "afternoon") {
+    const adjusted = await applyAfternoonFloorHomeTransport(
+      roster,
+      input.busRunCode,
+      today,
+    );
+    roster.splice(
+      0,
+      roster.length,
+      ...adjusted.map((r) =>
+        clientRosterPerson({
+          participantId: r.id,
+          name: r.name,
+          address: r.address,
+        }),
+      ),
+    );
+  }
+  try {
+    const { listSupportRosterForDayCentreRun, applyAfternoonSupportHomeTransport } =
+      await import("@/lib/api/support-attendance");
+    let support = await listSupportRosterForDayCentreRun({
+      busRunCode: input.busRunCode,
+      dayCode: input.dayCode,
+      direction,
+    });
+    if (direction === "afternoon") {
+      support = await applyAfternoonSupportHomeTransport(support, input.busRunCode, today);
+    }
+    roster.push(...support);
+  } catch (err) {
+    console.warn("[startDayCentreRun:support]", err);
   }
 
   if (input.participantOrder?.length) {
@@ -5681,9 +6022,14 @@ export async function startDayCentreRun(
     to_label: string;
     from_participant_id: string | null;
     to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
     medication_expected: boolean;
     target_address: string | null;
   };
+  const emptyRefs = rosterPersonRefs(null);
   const DEPOT = "Depot";
   const seeds: LegSeed[] = [];
 
@@ -5696,6 +6042,7 @@ export async function startDayCentreRun(
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: centreLabel,
+        ...emptyRefs,
         from_participant_id: null,
         to_participant_id: null,
         medication_expected: false,
@@ -5703,25 +6050,36 @@ export async function startDayCentreRun(
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
-        const to = roster[i];
-        const from = i === 0 ? null : roster[i - 1];
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1]!;
+        const fromRefs = rosterPersonRefs(from);
+        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
-          medication_expected: medSet.has(to.id),
+          from_participant_id: fromRefs.participant_id,
+          to_participant_id: toRefs.participant_id,
+          from_staff_id: fromRefs.staff_id,
+          to_staff_id: toRefs.staff_id,
+          from_carer_id: fromRefs.carer_id,
+          to_carer_id: toRefs.carer_id,
+          medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
-      const last = roster[roster.length - 1];
+      const last = roster[roster.length - 1]!;
+      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: centreLabel,
-        from_participant_id: last.id,
+        from_participant_id: lastRefs.participant_id,
         to_participant_id: null,
+        from_staff_id: lastRefs.staff_id,
+        to_staff_id: null,
+        from_carer_id: lastRefs.carer_id,
+        to_carer_id: null,
         medication_expected: false,
         target_address: centreAddr,
       });
@@ -5734,6 +6092,7 @@ export async function startDayCentreRun(
         leg_kind: "venue_to_depot",
         from_label: startLabel,
         to_label: DEPOT,
+        ...emptyRefs,
         from_participant_id: null,
         to_participant_id: null,
         medication_expected: false,
@@ -5741,25 +6100,36 @@ export async function startDayCentreRun(
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
-        const to = roster[i];
-        const from = i === 0 ? null : roster[i - 1];
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1]!;
+        const fromRefs = rosterPersonRefs(from);
+        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: i === 0 ? startLabel : from!.name,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
+          from_participant_id: fromRefs.participant_id,
+          to_participant_id: toRefs.participant_id,
+          from_staff_id: fromRefs.staff_id,
+          to_staff_id: toRefs.staff_id,
+          from_carer_id: fromRefs.carer_id,
+          to_carer_id: toRefs.carer_id,
           medication_expected: false,
           target_address: to.address,
         });
       }
-      const last = roster[roster.length - 1];
+      const last = roster[roster.length - 1]!;
+      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: DEPOT,
-        from_participant_id: last.id,
+        from_participant_id: lastRefs.participant_id,
         to_participant_id: null,
+        from_staff_id: lastRefs.staff_id,
+        to_staff_id: null,
+        from_carer_id: lastRefs.carer_id,
+        to_carer_id: null,
         medication_expected: false,
         target_address: depotAddr,
       });

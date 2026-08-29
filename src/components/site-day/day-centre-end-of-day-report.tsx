@@ -27,7 +27,13 @@ import {
   type EndOfDayMealBlock,
 } from "@/lib/api/site-day-end-of-day-report";
 import { useOperationalTodayIso } from "@/lib/operational-clock";
-import { parseIsoDateLocal, toIsoDateString, formatDate, cn } from "@/lib/utils";
+import {
+  parseIsoDateLocal,
+  toIsoDateString,
+  formatDateWithWeekday,
+  REGIONAL_DATE_WITH_WEEKDAY_FORMAT,
+  cn,
+} from "@/lib/utils";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
 import type { SiteIssue } from "@/lib/api/site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
@@ -81,7 +87,7 @@ export function DayCentreEndOfDayReport() {
           <p className="text-xs text-muted-foreground">
             {isToday
               ? "Live snapshot for today (SIM calendar). Refresh after floor taps."
-              : `Historical day · ${formatDate(selectedIso)}`}
+              : `Historical day · ${formatDateWithWeekday(selectedIso)}`}
           </p>
         </div>
         <div
@@ -100,13 +106,13 @@ export function DayCentreEndOfDayReport() {
                 if (next > operationalToday) return;
                 setPickedIso(next === operationalToday ? null : next);
               }}
-              dateFormat="dd-MMM-yy"
+              dateFormat={REGIONAL_DATE_WITH_WEEKDAY_FORMAT}
               captionLayout="dropdown"
               startMonth={startMonth}
               endMonth={endMonth}
               defaultMonth={parseIsoDateLocal(selectedIso)}
               disabledDates={(d) => toIsoDateString(d) > operationalToday}
-              className="h-11 w-[13.5rem] text-sm"
+              className="h-11 w-[16.5rem] text-sm"
             />
           </div>
           <Button
@@ -170,7 +176,7 @@ function ReportBody({
   if (!report.session) {
     return (
       <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground">
-        No Day Centre session was recorded on {formatDate(report.sessionDate)}.
+        No Day Centre session was recorded on {formatDateWithWeekday(report.sessionDate)}.
       </div>
     );
   }
@@ -189,7 +195,7 @@ function ReportBody({
 
       <Section icon={<ClipboardList className="h-4 w-4" />} title="Session">
         <div className="grid gap-3 sm:grid-cols-2 text-sm">
-          <Field label="Date">{formatDate(report.sessionDate)}</Field>
+          <Field label="Date">{formatDateWithWeekday(report.sessionDate)}</Field>
           <Field label="Status">
             <PhaseBadge phase={phase} />
           </Field>
@@ -316,6 +322,43 @@ function ReportBody({
           </div>
         ) : null}
       </Section>
+
+      {report.support.length > 0 ? (
+        <Section
+          icon={<UserPlus className="h-4 w-4" />}
+          title={`Support present (${report.counts.supportPresent})`}
+        >
+          <div className="divide-y rounded-lg border">
+            {report.support.map((s) => (
+              <div
+                key={s.id}
+                className="flex flex-wrap items-baseline justify-between gap-x-3 gap-y-1 px-3 py-2 text-sm"
+              >
+                <div>
+                  <span className="font-medium">{s.displayName}</span>
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    {s.roleLabel} · {s.arrivalHow}
+                  </span>
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  {s.checkedInAt ? (
+                    <>
+                      In <ClientTime iso={s.checkedInAt} options={TIME_OPTS} />
+                    </>
+                  ) : (
+                    s.status
+                  )}
+                  {s.checkedOutAt ? (
+                    <>
+                      {" · "}Left <ClientTime iso={s.checkedOutAt} options={TIME_OPTS} />
+                    </>
+                  ) : null}
+                </div>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : null}
 
       {report.visitors.length > 0 ? (
         <Section

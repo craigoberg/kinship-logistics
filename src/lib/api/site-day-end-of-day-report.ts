@@ -33,6 +33,8 @@ import {
   visitorKindLabel,
   type SiteDayVisitor,
 } from "@/lib/api/site-day-visitors";
+import { listSupportAttendanceRoll } from "@/lib/api/support-attendance";
+import { supportPersonKindLabel } from "@/lib/support-person";
 import {
   listIssues,
   sortByRygeOldestFirst,
@@ -142,6 +144,16 @@ export type EndOfDayVisitorRow = {
   leftAt: string | null;
 };
 
+export type EndOfDaySupportRow = {
+  id: string;
+  displayName: string;
+  roleLabel: string;
+  status: string;
+  arrivalHow: string;
+  checkedInAt: string | null;
+  checkedOutAt: string | null;
+};
+
 export type DayCentreEndOfDayReport = {
   sessionDate: string;
   generatedAt: string;
@@ -155,6 +167,7 @@ export type DayCentreEndOfDayReport = {
   stillOnSite: EndOfDayAttendanceRow[];
   meals: EndOfDayMealBlock[];
   visitors: EndOfDayVisitorRow[];
+  support: EndOfDaySupportRow[];
   issues: SiteIssue[];
   counts: {
     expected: number;
@@ -165,6 +178,7 @@ export type DayCentreEndOfDayReport = {
     stillOnSite: number;
     visitors: number;
     visitorsStillPresent: number;
+    supportPresent: number;
     issuesRed: number;
     issuesYellow: number;
     issuesGreen: number;
@@ -282,6 +296,7 @@ export async function buildDayCentreEndOfDayReport(
     stillOnSite: 0,
     visitors: 0,
     visitorsStillPresent: 0,
+    supportPresent: 0,
     issuesRed: 0,
     issuesYellow: 0,
     issuesGreen: 0,
@@ -301,12 +316,13 @@ export async function buildDayCentreEndOfDayReport(
       stillOnSite: [],
       meals: [],
       visitors: [],
+      support: [],
       issues: [],
       counts: emptyCounts,
     };
   }
 
-  const [roll, visitors, activities, issues, participants, busLookups] =
+  const [roll, visitors, activities, issues, participants, busLookups, supportRoll] =
     await Promise.all([
       listAttendanceRoll(session.id),
       listSiteDayVisitors(session.id),
@@ -314,6 +330,7 @@ export async function buildDayCentreEndOfDayReport(
       listIssues(session.id),
       listParticipants(),
       listLookupParameters(LOOKUP_CATEGORIES.busRun),
+      listSupportAttendanceRoll(session.id),
       primeStaffDisplayNames(),
     ]);
 
@@ -380,6 +397,19 @@ export async function buildDayCentreEndOfDayReport(
     buildMealBlock(act, mealRowsByActivity.get(act.id) ?? [], nameById, surnameMap),
   );
 
+  const supportRows: EndOfDaySupportRow[] = supportRoll.map((r) => ({
+    id: r.id,
+    displayName: r.displayName,
+    roleLabel: supportPersonKindLabel(r.personKind),
+    status: r.status,
+    arrivalHow:
+      r.arrivalMethod === "bus"
+        ? (r.arrivalBusRunCode && busDisplayByCode.get(r.arrivalBusRunCode)) || "Bus"
+        : arrivalMethodBadgeLabel(r.arrivalMethod),
+    checkedInAt: r.checkedInAt,
+    checkedOutAt: r.checkedOutAt,
+  }));
+
   const visitorRows: EndOfDayVisitorRow[] = visitors.map((v: SiteDayVisitor) => ({
     id: v.id,
     displayName: v.displayName,
@@ -407,6 +437,7 @@ export async function buildDayCentreEndOfDayReport(
     stillOnSite,
     meals,
     visitors: visitorRows,
+    support: supportRows,
     issues: sortedIssues,
     counts: {
       expected: mapped.length,
@@ -417,6 +448,7 @@ export async function buildDayCentreEndOfDayReport(
       stillOnSite: stillOnSite.length,
       visitors: visitorRows.length,
       visitorsStillPresent: visitorRows.filter((v) => !v.leftAt).length,
+      supportPresent: supportRows.filter((s) => s.status === "checked_in" || s.status === "checked_out").length,
       issuesRed: sortedIssues.filter((i) => i.severity === "red").length,
       issuesYellow: sortedIssues.filter((i) => i.severity === "yellow").length,
       issuesGreen: sortedIssues.filter((i) => i.severity === "green").length,

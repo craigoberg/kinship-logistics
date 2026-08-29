@@ -5,13 +5,13 @@ import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
 import { X } from "lucide-react";
 
-import { FormTicketChromeButton } from "@/components/global/form-ticket-chrome-button";
 import {
   HideFormTicketProvider,
   nodeText,
   useHideFormTicket,
   useRegisterTicketSurface,
 } from "@/lib/app-tickets/ticket-surface";
+import { isFloatingFabEvent } from "@/lib/ui/sticky-fab-position";
 import { cn } from "@/lib/utils";
 
 const Sheet = SheetPrimitive.Root;
@@ -60,19 +60,30 @@ interface SheetContentProps
   extends
     React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
     VariantProps<typeof sheetVariants> {
-  /** Hide the in-form Ticket chip (PIN, Incident, Raise ticket itself). */
+  /** Do not register this overlay as the Raise-ticket form surface (PIN, Incident, ticket itself). */
   hideTicket?: boolean;
 }
 
 const SheetContent = React.forwardRef<
   React.ElementRef<typeof SheetPrimitive.Content>,
   SheetContentProps
->(({ side = "right", className, children, hideTicket = false, ...props }, ref) => (
+>(({ side = "right", className, children, hideTicket = false, onInteractOutside, onPointerDownOutside, ...props }, ref) => (
   <SheetPortal>
     <SheetOverlay />
-    <SheetPrimitive.Content ref={ref} className={cn(sheetVariants({ side }), className)} {...props}>
+    <SheetPrimitive.Content
+      ref={ref}
+      className={cn(sheetVariants({ side }), className)}
+      {...props}
+      onInteractOutside={(e) => {
+        if (isFloatingFabEvent(e)) e.preventDefault();
+        onInteractOutside?.(e);
+      }}
+      onPointerDownOutside={(e) => {
+        if (isFloatingFabEvent(e)) e.preventDefault();
+        onPointerDownOutside?.(e);
+      }}
+    >
       <HideFormTicketProvider hide={hideTicket}>
-        {!hideTicket && <FormTicketChromeButton />}
         {children}
       </HideFormTicketProvider>
       <SheetPrimitive.Close className="absolute right-4 top-4 rounded-sm opacity-70 ring-offset-background cursor-pointer transition-opacity hover:opacity-100 focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none data-[state=open]:bg-secondary">
@@ -85,7 +96,7 @@ const SheetContent = React.forwardRef<
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
 const SheetHeader = ({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) => (
-  <div className={cn("flex flex-col space-y-2 pr-24 text-center sm:text-left", className)} {...props} />
+  <div className={cn("flex flex-col space-y-2 pr-10 text-center sm:text-left", className)} {...props} />
 );
 SheetHeader.displayName = "SheetHeader";
 

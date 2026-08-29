@@ -13,6 +13,8 @@ import { cn } from "@/lib/utils";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { IncidentIntakeDialog } from "./incident-intake-dialog";
 import { GlobalHealthSafetyFlow } from "./global-health-safety-flow";
+import { DraggableFab } from "./draggable-fab";
+import { useGlobalFabsHidden, useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
 
 /**
  * Harvest app context from the current URL and localStorage.
@@ -95,25 +97,28 @@ export function GlobalIncidentIntakeDrawer() {
   const [open, setOpen] = useState(false);
   const [healthSafetyOpen, setHealthSafetyOpen] = useState(false);
   const onManifest = pathname.startsWith("/manifest");
+  const fabsHidden = useGlobalFabsHidden();
+  useHideGlobalFabs(open || healthSafetyOpen);
 
-  const triggerPos = onManifest
-    ? "fixed right-28 top-3 z-40 md:right-32 md:top-4"
-    : "fixed bottom-24 right-4 z-40 md:bottom-8 md:right-6";
+  const defaultClassName = onManifest
+    ? "fixed right-28 top-3 z-[60] md:right-32 md:top-4"
+    : "fixed bottom-24 right-4 z-[60] md:bottom-8 md:right-6";
 
   return (
     <>
-      <button
-        type="button"
-        aria-label="Raise an incident, fault, or Health and Safety action"
+      <DraggableFab
+        id="incident"
+        hidden={fabsHidden}
+        defaultClassName={defaultClassName}
+        ariaLabel="Raise an incident, fault, or Health and Safety action"
         onClick={() => setOpen(true)}
         className={cn(
-          triggerPos,
           "flex items-center gap-2 rounded-full border-2 border-red-500/80 bg-red-600/90 px-4 py-2 text-xs font-bold uppercase tracking-wide text-white shadow-lg shadow-red-900/30 backdrop-blur transition hover:bg-red-600 md:text-sm",
         )}
       >
         <AlertTriangle className="h-4 w-4" />
         Incident / Fault
-      </button>
+      </DraggableFab>
 
       <IncidentIntakeDialog
         open={open}

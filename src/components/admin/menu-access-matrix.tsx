@@ -33,6 +33,7 @@ const MENUS: { key: string; label: string; description: string }[] = [
   { key: "transport", label: "Transport", description: "Ad-hoc run requests and mileage logging" },
   { key: "participants", label: "Participants", description: "Care profiles, IDDSI, medications" },
   { key: "staff", label: "Personnel Directory", description: "Staff, carers, certifications" },
+  { key: "run_planning", label: "Run Planning", description: "All-people Day Centre IN/OUT board and default bus-run order" },
   { key: "events", label: "Event Manage", description: "Office setup — roster, milestones, finance, Trip Report" },
   { key: "governance", label: "Governance Hub", description: "Unified issues, incident ledger, NDIS" },
   { key: "rights_voice", label: "Rights & voice", description: "Complaints / enquiry / feedback forms → Hub — BL-112" },
