@@ -62,7 +62,7 @@ import {
 } from "@/lib/ui/caution-callout";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
-import { haversineKm, getCurrentPosition } from "@/lib/geo";
+import { haversineKm, tryGetCurrentPosition, manifestGpsFallbackToast } from "@/lib/geo";
 import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
 import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
@@ -2308,36 +2308,46 @@ function ActiveLegCard({
   const runGps = async (mode: "start" | "end") => {
     setBusy(true);
     try {
-      const pos = await getCurrentPosition();
+      const geo = await tryGetCurrentPosition();
+      const pos = geo.ok ? geo.pos : null;
       if (mode === "start") {
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "en_route",
-            startLat: pos.lat,
-            startLng: pos.lng,
+            startLat: pos?.lat ?? null,
+            startLng: pos?.lng ?? null,
             startAt: operationalNowIso(),
           },
         });
       } else {
         const km =
-          leg.startLat != null && leg.startLng != null ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos) : 0;
+          pos && leg.startLat != null && leg.startLng != null
+            ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos)
+            : null;
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "arrived",
-            endLat: pos.lat,
-            endLng: pos.lng,
+            endLat: pos?.lat ?? null,
+            endLng: pos?.lng ?? null,
             endAt: operationalNowIso(),
-            gpsDistanceKm: Number(km.toFixed(2)),
-            loggedDistanceKm: Number(km.toFixed(2)),
+            gpsDistanceKm: km != null ? Number(km.toFixed(2)) : null,
+            ...(km != null ? { loggedDistanceKm: Number(km.toFixed(2)) } : {}),
           },
         });
       }
+      if (!geo.ok) {
+        const copy = manifestGpsFallbackToast(geo, mode);
+        toast.warning(copy.title, {
+          description: copy.description,
+          duration: 16_000,
+        });
+      }
     } catch (err) {
-      toast.error("GPS capture failed", {
+      toast.error("Could not update stop", {
         description: (err as Error).message,
         className: "border-red-700 bg-red-600 text-white font-medium",
       });

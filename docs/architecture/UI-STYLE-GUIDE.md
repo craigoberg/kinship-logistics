@@ -107,6 +107,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Meal SFH Manager approval** | **Defined** | `PinEntryTrigger` + `verifyManagerPin` before preparer attest | Open meal when preparer SFH missing/expired | Strict — Manager justification + PIN; then hand tablet to preparer |
 | **Medication Give Dose PIN** | **Defined** | `GiveDoseModal` dual PIN or sole-carer PIN + justification | Day Centre + Trip Programme med rounds | Never client witness; sole mode when one carer |
 | **Manifest odometer soft-warn** | **Defined** | Caution callout (`CAUTION_CALLOUT_*`) + Accept checkbox / Use suggested | Init start vs last; leg logged vs GPS; Close Run end vs start+Σ | Soft only — no Hub issue. Thresholds `manifest.odo_*`. Fleet Correct odometer = Admin number + justification (BL-096) |
+| **Manifest GPS deny / miss** | **Defined** | `tryGetCurrentPosition` + `toast.warning` (`manifestGpsFallbackToast`) | Depart Stop / Arrive at Stop | Always attempt GPS. Never block the leg. Null lat/lng if denied/timeout. iPhone Location Services hint. GUARDRAILS §1.1. |
 | **Manifest offline / pending sync banner** | **Defined** | `ManifestOfflineBanner` | Active `/manifest` run | Amber when offline; blue while syncing; Retry via `FieldActionButton`; Close Run blocked until outbox empty (BL-082) |
 | **DEV/TEST simulate offline** | **Defined** | `Switch` on same amber SIM row as clock (`DevOperationalClockBar`) | `IS_TEST_BUILD` only (DEV + TEST) | Forces `isAppOnline()` false for Manifest outbox QA — not a production control (BL-082) |
 | **DEV/TEST lane badge on SIM bar** | **Defined** | Centre label `DEV` / `TEST` from `getAppLaneBadge()` (`VITE_APP_LANE`) | Amber SIM row only | Distinguishes Cursor/DEV host vs Vercel TEST; not a security control |
@@ -530,6 +531,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-08-29 | Manifest GPS deny | Depart / Arrive proceed with blank GPS; warning toast includes iPhone Location Services path. Do not hard-block the bus. |
 | 2026-08-29 | Support floor cadence | Staff / volunteer / carer use the same Off today, clock/defer, PIN absent, late arrival, and event Group status / morning-evening rolls as clients. Not meals/meds. BL-125. |
 | 2026-08-29 | Admin Operating days | Open/close times live on Lookups → Operating days. Standalone Centre Operating Hours tab removed. “Is the centre open?” uses `operating_days`; clock values stay on `centre_operating_hours`. |
 | 2026-08-29 | Run Planning week grid | One person per row, Mon–Fri In/Out, pencil opens that record. Staff form Centre run week grid at top of edit sheet. |

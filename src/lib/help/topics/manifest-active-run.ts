@@ -16,6 +16,9 @@ export const manifestActiveRunTopic: HelpTopic = {
     "leg",
     "boarding",
     "return",
+    "gps",
+    "location",
+    "iphone",
   ],
   menus: ["manifest"],
   roles: ["driver", "support_worker", "manager", "assistant_manager"],
@@ -23,7 +26,11 @@ export const manifestActiveRunTopic: HelpTopic = {
   steps: [
     {
       heading: "Work the current leg",
-      body: "The active leg shows from → to. Use Depart Stop when leaving, Arrive when you reach the next stop. Maps deep-link is available while en route.",
+      body: "The active leg shows from → to. Use Depart Stop when leaving, Arrive when you reach the next stop. Maps deep-link is available while en route. GPS is attempted but does not block the stop — if the phone denies location, the run still proceeds and GPS stays blank.",
+    },
+    {
+      heading: "Turn on Location (iPhone)",
+      body: "If you tapped Don’t Allow, Safari will not ask again. Settings → Privacy & Security → Location Services (On) → Safari (or Chrome) → While Using. Reload the page. Then Depart / Arrive can stamp GPS.",
     },
     {
       heading: "Confirm passengers",
