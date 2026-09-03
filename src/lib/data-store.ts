@@ -4172,6 +4172,54 @@ function rowToLeg(r: LegRow): TripLeg {
   };
 }
 
+/** Map roster people onto trip_legs from_/to_ columns — never send bare carer_id. */
+function tripLegPersonColumns(
+  from: TransportRosterPerson | null,
+  to: TransportRosterPerson | null,
+) {
+  const fromRefs = rosterPersonRefs(from);
+  const toRefs = rosterPersonRefs(to);
+  return {
+    from_participant_id: fromRefs.participant_id,
+    to_participant_id: toRefs.participant_id,
+    from_staff_id: fromRefs.staff_id,
+    to_staff_id: toRefs.staff_id,
+    from_carer_id: fromRefs.carer_id,
+    to_carer_id: toRefs.carer_id,
+  };
+}
+
+type TripLegInsertRow = Record<string, unknown>;
+
+function omitUnmappedTripLegPersonColumns(row: TripLegInsertRow): TripLegInsertRow {
+  const {
+    from_staff_id: _fromStaff,
+    to_staff_id: _toStaff,
+    from_carer_id: _fromCarer,
+    to_carer_id: _toCarer,
+    staff_id: _staff,
+    carer_id: _carer,
+    participant_id: _participant,
+    ...rest
+  } = row;
+  return rest;
+}
+
+async function insertTripLegRows(legPayload: TripLegInsertRow[]) {
+  const first = await supabase
+    .from("trip_legs")
+    .insert(legPayload)
+    .select("*")
+    .order("leg_index", { ascending: true });
+  if (!first.error || !isSchemaMismatchError(first.error)) return first;
+  const stripped = legPayload.map(omitUnmappedTripLegPersonColumns);
+  return supabase
+    .from("trip_legs")
+    .insert(stripped)
+    .select("*")
+    .order("leg_index", { ascending: true });
+}
+
 export interface ActiveTripBundle {
   trip: TransportTrip;
   legs: TripLeg[];
@@ -4981,7 +5029,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        ...rosterPersonRefs(null),
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -4989,34 +5037,21 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
         const from = i === 0 ? null : roster[i - 1]!;
-        const fromRefs = rosterPersonRefs(from);
-        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : venueLabel,
           to_label: to.name,
-          from_participant_id: fromRefs.participant_id,
-          to_participant_id: toRefs.participant_id,
-          from_staff_id: fromRefs.staff_id,
-          to_staff_id: toRefs.staff_id,
-          from_carer_id: fromRefs.carer_id,
-          to_carer_id: toRefs.carer_id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: false,
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
-      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: originLabel,
-        from_participant_id: lastRefs.participant_id,
-        to_participant_id: null,
-        from_staff_id: lastRefs.staff_id,
-        to_staff_id: null,
-        from_carer_id: lastRefs.carer_id,
-        to_carer_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -5028,7 +5063,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: venueLabel,
-        ...rosterPersonRefs(null),
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: null,
       });
@@ -5036,34 +5071,21 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
         const from = i === 0 ? null : roster[i - 1]!;
-        const fromRefs = rosterPersonRefs(from);
-        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: fromRefs.participant_id,
-          to_participant_id: toRefs.participant_id,
-          from_staff_id: fromRefs.staff_id,
-          to_staff_id: toRefs.staff_id,
-          from_carer_id: fromRefs.carer_id,
-          to_carer_id: toRefs.carer_id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
-      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: venueLabel,
-        from_participant_id: lastRefs.participant_id,
-        to_participant_id: null,
-        from_staff_id: lastRefs.staff_id,
-        to_staff_id: null,
-        from_carer_id: lastRefs.carer_id,
-        to_carer_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: null,
       });
@@ -5074,7 +5096,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        ...rosterPersonRefs(null),
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -5092,11 +5114,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     ...s,
   }));
 
-  const { data: legRows, error: legErr } = await supabase
-    .from("trip_legs")
-    .insert(legPayload)
-    .select("*")
-    .order("leg_index", { ascending: true });
+  const { data: legRows, error: legErr } = await insertTripLegRows(legPayload);
   if (legErr) throwPg("[startTrip:legs]", legErr);
 
   const eventTitle = await fetchEventTitle(trip.eventId);
@@ -6106,7 +6124,6 @@ export async function startDayCentreRun(
     medication_expected: boolean;
     target_address: string | null;
   };
-  const emptyRefs = rosterPersonRefs(null);
   const DEPOT = "Depot";
   const seeds: LegSeed[] = [];
 
@@ -6119,9 +6136,7 @@ export async function startDayCentreRun(
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: centreLabel,
-        ...emptyRefs,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: centreAddr,
       });
@@ -6129,34 +6144,21 @@ export async function startDayCentreRun(
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
         const from = i === 0 ? null : roster[i - 1]!;
-        const fromRefs = rosterPersonRefs(from);
-        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: fromRefs.participant_id,
-          to_participant_id: toRefs.participant_id,
-          from_staff_id: fromRefs.staff_id,
-          to_staff_id: toRefs.staff_id,
-          from_carer_id: fromRefs.carer_id,
-          to_carer_id: toRefs.carer_id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
-      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: centreLabel,
-        from_participant_id: lastRefs.participant_id,
-        to_participant_id: null,
-        from_staff_id: lastRefs.staff_id,
-        to_staff_id: null,
-        from_carer_id: lastRefs.carer_id,
-        to_carer_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: centreAddr,
       });
@@ -6169,9 +6171,7 @@ export async function startDayCentreRun(
         leg_kind: "venue_to_depot",
         from_label: startLabel,
         to_label: DEPOT,
-        ...emptyRefs,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: depotAddr,
       });
@@ -6179,34 +6179,21 @@ export async function startDayCentreRun(
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
         const from = i === 0 ? null : roster[i - 1]!;
-        const fromRefs = rosterPersonRefs(from);
-        const toRefs = rosterPersonRefs(to);
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: i === 0 ? startLabel : from!.name,
           to_label: to.name,
-          from_participant_id: fromRefs.participant_id,
-          to_participant_id: toRefs.participant_id,
-          from_staff_id: fromRefs.staff_id,
-          to_staff_id: toRefs.staff_id,
-          from_carer_id: fromRefs.carer_id,
-          to_carer_id: toRefs.carer_id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: false,
           target_address: to.address,
         });
       }
       const last = roster[roster.length - 1]!;
-      const lastRefs = rosterPersonRefs(last);
       seeds.push({
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: DEPOT,
-        from_participant_id: lastRefs.participant_id,
-        to_participant_id: null,
-        from_staff_id: lastRefs.staff_id,
-        to_staff_id: null,
-        from_carer_id: lastRefs.carer_id,
-        to_carer_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: depotAddr,
       });
@@ -6224,11 +6211,7 @@ export async function startDayCentreRun(
     ...s,
   }));
 
-  const { data: legRows, error: legErr } = await supabase
-    .from("trip_legs")
-    .insert(legPayload)
-    .select("*")
-    .order("leg_index", { ascending: true });
+  const { data: legRows, error: legErr } = await insertTripLegRows(legPayload);
   if (legErr) {
     // Don't leave a leg-less active trip for the next Start Run reuse.
     await supabase
