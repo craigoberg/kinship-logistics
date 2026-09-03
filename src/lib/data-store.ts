@@ -17,6 +17,8 @@ import { effectiveReturnBusRun, matchesEventBusRun } from "@/lib/event-bus-runs"
 import {
   getSydneyTimeTodayIso,
   resolveOperationalNow,
+  sydneyWallClockToUtcDate,
+  todaysSydneyDayCode,
 } from "@/lib/operational-time";
 import { todayLocalIso, eventSpansDate } from "@/lib/utils";
 import { writeToLedger } from "@/lib/api/ledger";
@@ -26,8 +28,10 @@ import {
 } from "@/lib/api/bus-run-routes";
 import {
   clientRosterPerson,
+  parseRoutePersonKey,
   rosterPersonRefs,
   supportPersonKey,
+  supportRosterPerson,
   type TransportRosterPerson,
 } from "@/lib/support-person";
 
@@ -4321,8 +4325,15 @@ export async function getActiveTripForDriver(
     }
   }
 
+  let legs = (legRows ?? []).map((r) => rowToLeg(r as LegRow));
+  try {
+    legs = await reseatPendingAfternoonDayCentreLegs(trip, legs);
+  } catch (e) {
+    console.error("[getActiveTripForDriver] afternoon reseat failed", e);
+  }
+
   const eventTitle = await fetchTripBannerTitle(trip);
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
+  return { trip, legs, eventTitle };
 }
 
 export interface MedicationExceptionRow {
@@ -5515,7 +5526,11 @@ async function fetchBusRunRosterEntries(
 /**
  * Afternoon home-run roster: weekly outbound minus Off-today / floor Absent,
  * minus people who will go home with family/independent, plus walk-ins assigned
- * to this bus. Morning is unchanged (schedule minus exempt only).
+ * to this bus.
+ *
+ * Floor checkout does **not** drop someone whose home method is this bus.
+ * Check-Out means they left the floor to go home; the afternoon Manifest is
+ * how the bus takes them. Treating checked_out like Absent emptied the run.
  */
 export async function applyAfternoonFloorHomeTransport(
   roster: BusRunRosterEntry[],
@@ -5527,7 +5542,7 @@ export async function applyAfternoonFloorHomeTransport(
   const byId = new Map(roster.map((r) => [r.id, r]));
   const extras: string[] = [];
   for (const [pid, f] of floor) {
-    if (f.status === "absent" || f.status === "checked_out") {
+    if (f.status === "absent") {
       byId.delete(pid);
       continue;
     }
@@ -5555,6 +5570,112 @@ export function isPassengerPickupLeg(leg: TripLeg): boolean {
     hasPerson &&
     (leg.legKind === "depot_to_client" || leg.legKind === "client_to_client")
   );
+}
+
+function busRunRosterEntryToPerson(r: BusRunRosterEntry): TransportRosterPerson {
+  const parsed = parseRoutePersonKey(r.id);
+  if (parsed.kind === "participant") {
+    return clientRosterPerson({
+      participantId: r.id,
+      name: r.name,
+      address: r.address,
+    });
+  }
+  return supportRosterPerson({
+    kind: parsed.kind === "carer" ? "carer" : parsed.kind,
+    staffId: parsed.kind === "carer" ? null : parsed.id,
+    carerId: parsed.kind === "carer" ? parsed.id : null,
+    name: r.name,
+    address: r.address,
+  });
+}
+
+/**
+ * Open afternoon Manifest that was seeded empty because floor checkout had
+ * already fired: replace still-pending legs with the current home-run roster.
+ */
+async function reseatPendingAfternoonDayCentreLegs(
+  trip: TransportTrip,
+  legs: TripLeg[],
+): Promise<TripLeg[]> {
+  if (trip.eventId) return legs;
+  if (!trip.busRunCode) return legs;
+  if (trip.tripReturn === "none") return legs;
+  if (legs.length === 0) return legs;
+  if (legs.some((l) => l.status !== "pending")) return legs;
+
+  const dayCode = todaysSydneyDayCode(sydneyWallClockToUtcDate(trip.tripDate, "12:00"));
+  const rosterEntries = await listBusRunRosterForDay(trip.busRunCode, dayCode, "afternoon");
+  const pickupCount = legs.filter(isPassengerPickupLeg).length;
+  if (rosterEntries.length === pickupCount) return legs;
+
+  const roster = rosterEntries.map(busRunRosterEntryToPerson);
+  const startLabel = legs[0]?.fromLabel || "Day Centre";
+  const depotAddr =
+    legs.find((l) => l.legKind === "venue_to_depot")?.targetAddress ??
+    trip.originAddress;
+  const seeds: Array<{
+    leg_kind: LegKind;
+    from_label: string;
+    to_label: string;
+    from_participant_id: string | null;
+    to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
+    medication_expected: boolean;
+    target_address: string | null;
+  }> = [];
+
+  if (roster.length === 0) {
+    seeds.push({
+      leg_kind: "venue_to_depot",
+      from_label: startLabel,
+      to_label: "Depot",
+      ...tripLegPersonColumns(null, null),
+      medication_expected: false,
+      target_address: depotAddr,
+    });
+  } else {
+    for (let i = 0; i < roster.length; i++) {
+      const to = roster[i]!;
+      const from = i === 0 ? null : roster[i - 1]!;
+      seeds.push({
+        leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+        from_label: i === 0 ? startLabel : from!.name,
+        to_label: to.name,
+        ...tripLegPersonColumns(from, to),
+        medication_expected: false,
+        target_address: to.address,
+      });
+    }
+    const last = roster[roster.length - 1]!;
+    seeds.push({
+      leg_kind: "venue_to_depot",
+      from_label: last.name,
+      to_label: "Depot",
+      ...tripLegPersonColumns(last, null),
+      medication_expected: false,
+      target_address: depotAddr,
+    });
+  }
+
+  const { error: delErr } = await supabase.from("trip_legs").delete().eq("trip_id", trip.id);
+  if (delErr) throwPg("[reseatPendingAfternoonDayCentreLegs:delete]", delErr);
+
+  const legPayload = seeds.map((s, i) => ({
+    trip_id: trip.id,
+    leg_index: i + 1,
+    status: "pending" as LegStatus,
+    medication_handover_status: "not_required" as MedicationHandoverStatus,
+    medication_handover_confirmed: false,
+    unexpected_medication_logged: false,
+    ...s,
+  }));
+  const { data, error } = await insertTripLegRows(legPayload);
+  if (error) throwPg("[reseatPendingAfternoonDayCentreLegs:insert]", error);
+  return (data ?? []).map((r) => rowToLeg(r as LegRow));
 }
 
 /** Completed pickup where the passenger was skipped — bus never visited. */

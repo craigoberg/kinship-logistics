@@ -932,7 +932,7 @@ export async function applyAfternoonSupportHomeTransport(
   if (floor.size === 0) return roster;
   const byId = new Map(roster.map((r) => [r.id, r]));
   for (const [key, f] of floor) {
-    if (f.status === "absent" || f.status === "checked_out") {
+    if (f.status === "absent") {
       byId.delete(key);
       continue;
     }
