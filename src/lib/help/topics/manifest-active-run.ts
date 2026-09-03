@@ -34,7 +34,7 @@ export const manifestActiveRunTopic: HelpTopic = {
     },
     {
       heading: "Confirm passengers",
-      body: "On outbound pickups, confirm boarding as required. On return/drop-off runs, complete On Bus / at drop-off checks before the next Depart unlocks.",
+      body: "Everyone on the run boards — participants, staff, volunteers and carers — unless marked not travelling (same Skip path as a client). On outbound pickups, confirm boarding at each stop. On return/drop-off runs and venue hops, complete the boarding roll before Depart unlocks. Overnight morning/evening rolls are participants only.",
     },
     {
       heading: "Cancel pickup or no-show",

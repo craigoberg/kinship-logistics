@@ -29,9 +29,9 @@ import {
   listBusManifest,
   markNotTravelling,
   markOnBus,
-  seedBusManifest,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
+import { seedBusManifestForHop } from "@/lib/api/event-hop-transport";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import type { EventVenueStop } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
@@ -72,8 +72,9 @@ export function BusCheckOnPanel({ event, sessionId, sessionDate, stops }: Props)
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Mark each passenger on-board before the bus departs each hop.
-        Missing passengers must be recorded as "Not travelling".
+        Mark each person on-board before the bus departs each hop
+        (participants, staff, volunteers and carers). Stay-behind must be
+        recorded as &quot;Not travelling&quot;.
       </p>
       {sorted.slice(0, -1).map((fromStop, idx) => {
         const toStop = sorted[idx + 1];
@@ -160,12 +161,10 @@ function HopRoll({ event, sessionId, sessionDate, fromStop, toStop, hopIndex }: 
     if (!tripId) return;
     setSeeding(true);
     try {
-      const n = await seedBusManifest({
+      const n = await seedBusManifestForHop({
         eventId: event.id,
         eventDaySessionId: sessionId,
         tripId,
-        // Venue hops — passengers rostered for bus on this outing day.
-        direction: "outbound",
       });
       if (n === 0) {
         toast.message(

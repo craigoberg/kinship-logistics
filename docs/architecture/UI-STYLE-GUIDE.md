@@ -72,7 +72,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Day Centre Active Day tabs** | Defined | `ActiveDayPanel` Tabs | `/day` active session | Check-In · Activities · Check-Out · Issues — same IA as Event Deliver; `site_day_*` data |
 | **Day Centre Check-In count header** | **Defined** | `AttendanceRollPanel` summary | Check-In tab heading | `Booked / Arrived / Absent / Still expected`. Absent and already-left do **not** count as still expected. **Left** only when someone has checked out. Check-Out stays `n on site`. |
 | **Day Centre End of Day Report** | **Defined** | `DayCentreEndOfDayReport` + `DatePicker` | `/day` below the live session | Who came in (how/when), meal variations, checkout / went home, visitors, issues. Calendar defaults to operational today (SIM). Historical days read-only. Date display `Thu 27-Aug-26` (`formatDateWithWeekday` / `EEE dd-MMM-yy`) — weekday only on this report, not global dates. BL-123. |
-| **Day & trip support people** | **Defined** | Own stop + own methods; not fake `participants` | Day Centre run planner, Event roster, Check-In Support section, EOD / Trip Report | Staff / volunteer (`staff_registry`) and carer (`carers_registry`). Same pickup/drop-off as a client. Not on meal or med rolls. Casual tradies stay visitors. BL-125. |
+| **Day & trip support people** | **Defined** | Own stop + own methods; not fake `participants` | Day Centre run planner, Event roster, Check-In Support section, EOD / Trip Report | Staff / volunteer (`staff_registry`) and carer (`carers_registry`). Same pickup/drop-off as a client. **Bus boarding includes them** (no one left behind). Overnight morning/evening rolls stay **participants only**. Not on meal or med rolls. Casual tradies stay visitors. BL-125. |
 | **Check-off list order** | **Defined** | `sort-participants.ts` — surname A–Z, then given name, then id | Day/Event check-in, roll call, bus boarding, activity, meal, muster tap lists | **Never** re-sort by status after tap — style/badge only. Do not move checked-off people into a second section mid-list. Exception: return boarding may stay route/`legIndex` order. Display name may stay `First Last`. |
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
@@ -463,7 +463,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 |---------|--------|-----------|----------|
 | **Field select — outcome (2 options)** | Defined | `MobileFieldButton` tap list | Any 2-option binary choice on field floor (orderly/incident, open/close) |
 | **Field trip leader picker** | Defined | `MobileFieldButton` tap list | Short staff list (≤8) on field-floor config — not `Select` |
-| **Bus boarding per-person toggle** | Defined | `MobileFieldButton` `tone="success"` (selected = on-bus) | Manifest pickup “Passenger on board” + boarding roll rows — green, not `info` blue |
+| **Bus boarding — no one left behind** | **Defined** | Every person on that run/hop until on-bus or not travelling | Day Centre return roll, event IN/HOME, venue hops | Participants, staff, volunteers, carers. Overnight rolls stay clients-only. GUARDRAILS §11.10. |
 | **Field person confirm + nested absent** | Defined | `MobileFieldButton` (`tone="success"`) + `trailing` `UserX` | Whole name row = Confirm/toggle; **Not attending** sits **inside** the row chrome. **Second tap undoes** confirm → waiting (fat-finger / GUARDRAILS §4.4). Shell `div` + primary button + nested `UserX`. |
 | **Departure vector (events)** | Defined | `BottomSheet` + `MobileFieldButton` | Same pattern as Day Centre check-out; 2 options: Bus / Self |
 | **Event Deliver trip-day scroller** | Defined | Header under event title: `‹ date / Day N of M ›` chevrons | Multi-day only; switches `event_day_sessions` in Deliver. Test builds also move SIM clock date (keep time). Single-day: date text only. |
@@ -533,6 +533,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-03 | No one left behind | Bus boarding includes staff / volunteer / carer on Day Centre, trip IN/HOME, and multi-day hops. Stay-behind = not travelling (same as a participant). Morning/evening rolls stay participants only. |
 | 2026-09-03 | Return boarding roll | Include staff / volunteer / carer drop-off stops, not only `toParticipantId`. Head count is everyone on the bus. |
 | 2026-09-03 | Afternoon Manifest after checkout | Check-Out via bus keeps the person on that afternoon Manifest. Absent / family / independent still come off. |
 | 2026-09-03 | End of Day Went home how | Bus rows show Admin run name (floor code, else weekly OUT), not generic Bus. |

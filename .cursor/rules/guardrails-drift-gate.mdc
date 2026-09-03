@@ -32,6 +32,10 @@ alwaysApply: true
 
 `docs/architecture/GUARDRAILS.md` — permanent system directive for all builds.
 
+## No one left behind (GUARDRAILS §11.10 / §12.4.3 — locked 2026-09-03)
+
+Bus boarding / head count includes **everyone on that run or hop** (participant, staff, volunteer, carer) until **on the bus** or **not travelling**. Overnight morning/evening rolls stay **participants only**. See `.cursor/rules/bus-no-one-left-behind.mdc`.
+
 ## Driver manifest workflow (GUARDRAILS §11 — locked 2026-06-30)
 
 When touching `/manifest`, transport trip start, or pickup reorder:

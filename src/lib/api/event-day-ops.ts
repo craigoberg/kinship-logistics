@@ -205,7 +205,7 @@ async function fetchBusSeedBookings(eventId: string): Promise<BusSeedBooking[]> 
   return (result.data ?? []) as BusSeedBooking[];
 }
 
-async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<void> {
+export async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<void> {
   const participantRows = rows.filter((r) => r.participant_id != null);
   const carerRows = rows.filter((r) => r.carer_id != null && r.participant_id == null);
   const staffRows = rows.filter((r) => r.staff_id != null && r.participant_id == null && r.carer_id == null);

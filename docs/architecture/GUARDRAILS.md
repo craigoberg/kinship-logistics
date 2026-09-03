@@ -676,13 +676,30 @@ Same staff + still `active` → resume that trip (do not insert another). Anyone
 
 SQL: `docs/sql/2026-08-23_transport_run_slot_exclusivity.sql` (cancel leftover active drafts + unique indexes).
 
+#### 11.10 No one left behind — bus boarding (locked 2026-09-03)
+
+**Bus head count is every person on that vehicle**, not clients only.
+
+| Surface | Who must appear on boarding |
+| :-- | :-- |
+| Day Centre morning pickups | Each pickup stop — participant **or** staff/volunteer/carer (`isPassengerPickupLeg`) |
+| Day Centre afternoon return | Pre-departure return boarding roll — same person set as drop-off stops |
+| Event Transport IN / HOME | `event_bus_manifest` — rostered bus travellers including event support bookings |
+| Multi-day / single-day **venue hops** | `event_bus_manifest` for that hop — everyone still with the group (checked-in participants, accompanying carers, trip support people not absent/checked out) |
+
+**Off the bus** only via the same explicit paths as a participant: **not travelling** / Skip, cancelled pickup, or Left trip. Role (carer, volunteer, staff) must **not** drop someone from the list.
+
+**Not this rule:** overnight **morning** and **evening/curfew** rolls (§12.5), meals, and meds remain **participants only**. Support people are not roll-called at the hotel; they still board the bus with the group unless marked not travelling.
+
+Code: `isPassengerPickupLeg` / return boarding in `src/routes/manifest.tsx`; hop seed `seedBusManifestForHop` in `src/lib/api/event-hop-transport.ts`; IN/HOME `seedBusManifest` in `src/lib/api/event-day-ops.ts`. Agent rule: `.cursor/rules/bus-no-one-left-behind.mdc`.
+
 ### Amendment Process (§11)
 
 > **2026-06-30 — Project owner directive:** Step 3 run/start workflow and in-manifest drag reorder locked as specified in §11. Pre-start pickup lists removed. Drivable-chain label recompute mandatory on reorder. Consistent across Day Centre runs and event trips (including multi-day event contexts per §9 exception carry-over).
 
 ---
 
-## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended 2026-07-04 Day Centre parity; amended 2026-08-23 bus HOME close gate)
+## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended 2026-07-04 Day Centre parity; amended 2026-08-23 bus HOME close gate; amended 2026-09-03 no-one-left-behind boarding)
 
 > Status: Permanent Build Requirement. Applies to **out-of-centre single-day outings**, **multi-day tours**, and the **Venue Management** registry. Extends §11 (driver manifest) and Day Centre patterns (`client_attendance_log`, `site_day_sessions`) — **same cadence, temporary centre at the venue**. Does **not** replace Day Centre modules.
 
@@ -701,7 +718,7 @@ These trips are **not NDIS-funded**. Safety, auditability, and internal P&L repo
 | **Transport home** | Return legs completed and reconciled via §11 manifest (parallel to Day Centre going-home logging). **`event_manifest` → Closed** is not blocked on the last drop-off completing. |
 | **Venue safety (planning) ≠ live roll** | Registry baseline sign-off (§12.2) is **planning/compliance**. Live rolls are §12.4 event-floor + bus boarding + curfew/morning (multi-day). |
 | **One hop = one trip** | Each venue leg (Hotel → Park → Cinema → Hotel) is exactly **one** `transport_trip` with its own manifest lifecycle per §11. |
-| **Check on at bus boarding** | Before every hop **depart**, every expected bus traveller is checked **onto the bus** — transport accountability for that leg only. |
+| **Check on at bus boarding** | Before every hop **depart**, **every person on that hop** (participant, staff, volunteer, carer) is checked **onto the bus** or marked **not travelling** — same as §11.10. Transport accountability for that leg only. Overnight rolls stay participants-only (§12.5). |
 | **Group hop arrival** | When the **whole group** travels together on one bus, **no per-person event-floor check-in at the hop destination** — group presence is implied unless an incident was logged en route. |
 | **Self-transport** | Permitted **only** on **first day inbound** and **last day outbound** (roster + API). Self arrivals are checked in on the **event-floor roll** as they arrive at the venue. |
 | **Trip leader on duty** | A **Manager** (or Coordinator with manager-equivalent PIN per §7) must be assigned to **`event_day_sessions`** for each calendar day before Confirm. UI label: **Trip leader** (not “Day Centre manager”). |
@@ -864,7 +881,7 @@ Transport accountability only — keyed by `event_day_session_id` + `transport_t
 
 | Column | Purpose |
 | :-- | :-- |
-| `participant_id` / `carer_id` | Who is expected on **this bus for this leg** |
+| `participant_id` / `staff_id` / `carer_id` | Who is expected on **this bus for this leg** — one person per row |
 | `status` | `expected` \| `on_bus` \| `not_travelling` |
 | `checked_on_at` / `checked_on_by` | Tap when **boarding** — §4.4 fat-finger cards |
 
@@ -872,9 +889,10 @@ Transport accountability only — keyed by `event_day_session_id` + `transport_t
 
 1. **Every venue hop = one new `transport_trip`** (`trip_kind` e.g. `event_venue_hop`). Driver uses §11 manifest for that hop only.
 2. Trip leader or coordinator completes **bus boarding roll before driver Depart Stop**.
-3. **Depart gate:** all expected → `on_bus`; no active RED lock on trip day; optional manager PIN on depart.
-4. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
-5. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
+3. **Depart gate:** all expected → `on_bus` **or** `not_travelling`; no active RED lock on trip day; optional manager PIN on depart.
+4. **No one left behind (§11.10):** seed participants **and** staff/volunteers/carers still with the group. Do not build hop boarding from `participant_id` / checked-in clients only.
+5. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
+6. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
 
 #### 12.4.3a Outbound vs. return runs — two separate manifests
 
@@ -928,7 +946,7 @@ Transport HOME — return manifest (separate trip, trip_return = depot):
 | :-- | :-- |
 | **Day 1 — arrive at first stop** | Transport in (bus/self) → trip leader **opens location** → **event-floor check-in** (handover from transport) |
 | **Staying at venue until curfew** | No constant re-check-in — **curfew roll** (bedtime) + **morning roll** (breakfast) at base only — §12.5 |
-| **Daily bus hops** | **Boarding roll** when getting on bus → drive → group arrival at next location (no per-person floor check-in at destination) |
+| **Daily bus hops** | **Boarding roll** for **everyone still with the group** when getting on bus → drive → group arrival at next location (no per-person floor check-in at destination). Stay-behind = **not travelling**, same as a participant. |
 | **Return to hotel** | Boarding roll → if no incident en route, group back at base |
 | **Between days** | Repeat open/hops/curfew/morning pattern |
 | **Last day** | Morning roll (if applicable) → program → departure handover → **close location** → return transport home → **close event** |
@@ -966,7 +984,9 @@ Code: `src/lib/api/event-lifecycle-gates.ts`, `openEventLocation` / `closeEventL
 
 ### 12.5 Curfew & Morning Rolls — YELLOW → RED → SMS
 
-Multi-day **curfew** and **morning** accountability mirror **`client_attendance_log`** escalation semantics (`src/lib/api/client-attendance.ts`):
+Multi-day **curfew** and **morning** accountability are **participant (client) rolls only** — do not add staff, volunteers, or carers to hotel head-count. Support people board with the group on hops (§11.10) instead.
+
+These rolls mirror **`client_attendance_log`** escalation semantics (`src/lib/api/client-attendance.ts`):
 
 | Mechanism | Rule |
 | :-- | :-- |
@@ -1103,7 +1123,7 @@ First production slice for **Movies-style single-day**: Phases 1–3 + **Phase 8
 | Driver manifest | §11 — `src/routes/manifest.tsx` | One invocation per hop |
 | Day Centre arrival roll | `src/components/site-day/attendance-roll-panel.tsx` | **Template for `event_attendance_log` UI (Phase 8)** |
 | Day Centre open/close | `src/lib/api/site-day-sessions.ts`, `start-of-day-panel.tsx` | **Template for open/close location (Phase 8)** |
-| Bus boarding roll | `src/components/events/bus-check-on-panel.tsx` | Transport layer only — do not treat as event-floor roll |
+| Bus boarding roll | `HopBoardingPanel` on `/manifest`; seed `seedBusManifestForHop` | Transport layer only — do not treat as event-floor or overnight roll. `bus-check-on-panel.tsx` is unused legacy. |
 | Attendance sweep + SMS | `src/lib/api/client-attendance.ts` | Template for event-floor + curfew sweep |
 | Event day ops | `src/lib/api/event-day-ops.ts` | Split: bus manifest vs attendance log |
 | Venue admin | `src/routes/admin.tsx` → Venues tab | Built |
