@@ -1008,6 +1008,10 @@ function EventPickAndStart({
     queryKeys: [["today-bus-run-summaries", todayDayCode]],
   });
   useRealtimeInvalidate({
+    table: "support_attendance_schedules",
+    queryKeys: [["today-bus-run-summaries", todayDayCode]],
+  });
+  useRealtimeInvalidate({
     table: "transport_trips",
     queryKeys: [["transport-run-slot"]],
   });

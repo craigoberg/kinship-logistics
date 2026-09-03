@@ -27,6 +27,7 @@ import {
 import {
   clientRosterPerson,
   rosterPersonRefs,
+  supportPersonKey,
   type TransportRosterPerson,
 } from "@/lib/support-person";
 
@@ -5113,16 +5114,41 @@ export interface BusRunSummary {
   runLabel: string;
   /** "morning" = inbound pickup run; "afternoon" = outbound return run. */
   direction: "morning" | "afternoon";
-  /** Number of active participants assigned to this run today. */
+  /** Number of people on the weekly plan for this run today. */
   passengerCount: number;
+}
+
+function scheduledBusRunCode(
+  primary: string | null | undefined,
+  fallback: string | null | undefined,
+  knownRunCodes: Set<string>,
+): string {
+  const code = (primary ?? "").trim() || (fallback ?? "").trim();
+  return code && knownRunCodes.has(code) ? code : "";
+}
+
+function scheduleMatchesBusRun(
+  inbound: string | null | undefined,
+  outbound: string | null | undefined,
+  transportRequired: string | null | undefined,
+  busRunCode: string,
+  direction: "morning" | "afternoon",
+): boolean {
+  const primary = direction === "morning" ? inbound : outbound;
+  const code = (primary ?? "").trim() || (transportRequired ?? "").trim();
+  return code === busRunCode;
 }
 
 /**
  * Return all Day Centre bus runs (morning AND afternoon) that have at least
- * one active participant scheduled for the given day-of-week code.
+ * one active participant or support person scheduled for the given day.
  *
  * Fetches the authoritative set of bus run codes from system_lookup_parameters
  * so any code naming convention works (BUSRUN-1, R1, RUN-A, etc.).
+ *
+ * The Manifest picker uses the weekly plan (minus Off today). Floor check-out /
+ * family home method still shapes who is on the trip when the run starts; it
+ * must not hide a planned afternoon run from the dropdown.
  */
 export async function listTodaysBusRunSummaries(
   dayCode: string,
@@ -5147,7 +5173,7 @@ export async function listTodaysBusRunSummaries(
 
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
-    .select("participant_id, inbound_transport, outbound_transport")
+    .select("participant_id, inbound_transport, outbound_transport, transport_required")
     .eq("day_of_week", dayCode)
     .eq("active", true);
   if (error) throw error;
@@ -5166,24 +5192,47 @@ export async function listTodaysBusRunSummaries(
       participant_id: string;
       inbound_transport: string | null;
       outbound_transport: string | null;
+      transport_required: string | null;
     };
     if (exemptIds.has(r.participant_id)) continue;
-    const inb = r.inbound_transport ?? "";
-    const outb = r.outbound_transport ?? "";
-    if (inb && knownRunCodes.has(inb)) addId(morningIds, inb, r.participant_id);
-    if (outb && knownRunCodes.has(outb)) {
-      const f = floorHome.get(r.participant_id);
-      if (f?.status === "absent" || f?.status === "checked_out") continue;
-      if (f?.departureVector === "family" || f?.departureVector === "independent") continue;
-      if (
-        f?.departureVector === "bus" &&
-        f.departureBusRunCode &&
-        f.departureBusRunCode !== outb
-      ) {
-        continue;
+    const inb = scheduledBusRunCode(r.inbound_transport, r.transport_required, knownRunCodes);
+    const outb = scheduledBusRunCode(r.outbound_transport, r.transport_required, knownRunCodes);
+    if (inb) addId(morningIds, inb, r.participant_id);
+    if (outb) addId(afternoonIds, outb, r.participant_id);
+  }
+  try {
+    const { data: supportRows, error: supportErr } = await supabase
+      .from("support_attendance_schedules")
+      .select("person_kind, staff_id, carer_id, inbound_transport, outbound_transport")
+      .eq("day_of_week", dayCode)
+      .eq("active", true);
+    if (supportErr) {
+      if (!isSchemaMismatchError(supportErr)) {
+        console.warn("[listTodaysBusRunSummaries:support]", supportErr.message);
       }
-      addId(afternoonIds, outb, r.participant_id);
+    } else {
+      const { loadExemptSupportKeysForDate } = await import("@/lib/api/support-attendance");
+      const exemptSupport = await loadExemptSupportKeysForDate(today);
+      for (const raw of supportRows ?? []) {
+        const s = raw as {
+          person_kind: "staff" | "volunteer" | "carer";
+          staff_id: string | null;
+          carer_id: string | null;
+          inbound_transport: string | null;
+          outbound_transport: string | null;
+        };
+        const key = s.carer_id
+          ? supportPersonKey("carer", s.carer_id)
+          : supportPersonKey(s.person_kind, s.staff_id ?? "");
+        if (!key || key.endsWith(":") || exemptSupport.has(key)) continue;
+        const inb = scheduledBusRunCode(s.inbound_transport, null, knownRunCodes);
+        const outb = scheduledBusRunCode(s.outbound_transport, null, knownRunCodes);
+        if (inb) addId(morningIds, inb, key);
+        if (outb) addId(afternoonIds, outb, key);
+      }
     }
+  } catch (err) {
+    console.warn("[listTodaysBusRunSummaries:support]", err);
   }
   for (const [pid, f] of floorHome) {
     if (exemptIds.has(pid)) continue;
@@ -5246,35 +5295,49 @@ export async function listBusRunRosterForDay(
   dayCode: string,
   direction: "morning" | "afternoon",
 ): Promise<BusRunRosterEntry[]> {
-  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
     .select(
-      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "participant_id, inbound_transport, outbound_transport, transport_required, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("day_of_week", dayCode)
-    .eq(transportCol, busRunCode)
     .eq("active", true)
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
 
   const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
-  const roster: BusRunRosterEntry[] = (schedRows ?? []).map((r) => {
+  const roster: BusRunRosterEntry[] = (schedRows ?? []).flatMap((r) => {
     const row = r as unknown as {
       participant_id: string;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+      transport_required: string | null;
       participants:
         | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
         | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
         | null;
     };
+    if (
+      !scheduleMatchesBusRun(
+        row.inbound_transport,
+        row.outbound_transport,
+        row.transport_required,
+        busRunCode,
+        direction,
+      )
+    ) {
+      return [];
+    }
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return {
-      id: row.participant_id,
-      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
-      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
-    };
+    return [
+      {
+        id: row.participant_id,
+        name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+        address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+      },
+    ];
   });
   let present = roster.filter((p) => !exemptIds.has(p.id));
   if (direction === "afternoon") {
@@ -5874,35 +5937,49 @@ export async function startDayCentreRun(
   }
 
   // 1. Build roster from participant_attendance_schedules.
-  // Morning runs match inbound_transport; afternoon/return runs match outbound_transport.
-  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
+  // Morning matches inbound (legacy fallback: transport_required); afternoon matches outbound.
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
     .select(
-      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "participant_id, inbound_transport, outbound_transport, transport_required, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("day_of_week", input.dayCode)
-    .eq(transportCol, input.busRunCode)
     .eq("active", true)
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[startDayCentreRun:schedules]", schedErr);
 
-  const roster: TransportRosterPerson[] = (schedRows ?? []).map((r) => {
+  const roster: TransportRosterPerson[] = (schedRows ?? []).flatMap((r) => {
     const row = r as unknown as {
       participant_id: string;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+      transport_required: string | null;
       participants:
         | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
         | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
         | null;
     };
+    if (
+      !scheduleMatchesBusRun(
+        row.inbound_transport,
+        row.outbound_transport,
+        row.transport_required,
+        input.busRunCode,
+        direction,
+      )
+    ) {
+      return [];
+    }
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return clientRosterPerson({
-      participantId: row.participant_id,
-      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
-      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
-    });
+    return [
+      clientRosterPerson({
+        participantId: row.participant_id,
+        name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+        address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+      }),
+    ];
   });
   const exemptIds = await loadExemptParticipantIdsForDate(today);
   for (let i = roster.length - 1; i >= 0; i--) {
