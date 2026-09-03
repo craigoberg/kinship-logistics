@@ -91,6 +91,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Desktop/mobile dialog** | Defined | `Dialog` / `AlertDialog` | Standard modals | Primitives: `max-h-[90dvh] overflow-y-auto` so footers stay reachable. Sticky header/footer shells override with `overflow-hidden` + inner scroll. `PinEntryDialog` uses bottom sheet on mobile |
 | **Issue / anomaly declaration** | Defined | `IssueDeclarationPanel` / `LogAnomalyModal` | RYGE gates | Do not hand-roll severity forms |
 | **RED verbal consultation** | Defined | `VerbalConsultationDialog` | RED path | Manager by name; operator PIN only |
+| **Manifest Day Centre title** | **Defined** | Sticky header `Daily Run — {run} · Morning` / `… · Afternoon Return` | Active `/manifest` Day Centre trip | Event trips keep the event title. Run label from Admin `bus_runs`. Confirms which bus the driver started. |
+| **End of Day Went home how** | **Defined** | Bus = Admin run display name (floor `departure_bus_run_code`, else weekly OUT) | Day Centre Report **Went home** | Family / independent stay those labels. Generic **Bus** only when the vector is bus and no run code is on file. |
 | **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
 | **Office `Select` (shadcn)** | **Defined** | `Select` from `ui/select.tsx` | Admin filters/enums (status, asset type, venue type, manager) | Admin-wide. Field routes still prefer tap lists when ≤6 options (§4.5); long field pickers may use Select (existing exception). |
 | **Page-level Submit (non-dialog)** | **Defined** | Inline primary on card/row | Tour roll, site addresses, MYOB, centre-hours row Save | Sticky page footer not required on Admin |
@@ -531,6 +533,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-03 | Manifest Day Centre title | Sticky header `Daily Run — {run} · Morning` / `Afternoon Return` from `bus_run_code`. |
+| 2026-09-03 | End of Day Went home how | Bus rows show Admin run name (floor code, else weekly OUT), not generic Bus. |
 | 2026-08-29 | Manifest GPS deny | Depart / Arrive proceed with blank GPS; warning toast includes iPhone Location Services path. Do not hard-block the bus. |
 | 2026-08-29 | Support floor cadence | Staff / volunteer / carer use the same Off today, clock/defer, PIN absent, late arrival, and event Group status / morning-evening rolls as clients. Not meals/meds. BL-125. |
 | 2026-08-29 | Admin Operating days | Open/close times live on Lookups → Operating days. Standalone Centre Operating Hours tab removed. “Is the centre open?” uses `operating_days`; clock values stay on `centre_operating_hours`. |

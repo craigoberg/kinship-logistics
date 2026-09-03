@@ -35,6 +35,7 @@ import {
 } from "@/lib/api/site-day-visitors";
 import { listSupportAttendanceRoll } from "@/lib/api/support-attendance";
 import { supportPersonKindLabel } from "@/lib/support-person";
+import { normalizeDayCode } from "@/lib/api/run-planning";
 import {
   listIssues,
   sortByRygeOldestFirst,
@@ -51,6 +52,10 @@ import {
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import { MEAL_SOURCE_LABELS } from "@/lib/meal-open";
 import { operationalNowIso } from "@/lib/operational-clock";
+import {
+  sydneyWallClockToUtcDate,
+  todaysSydneyDayCode,
+} from "@/lib/operational-time";
 import {
   sortByParticipantSurname,
   surnameMapFromParticipants,
@@ -199,6 +204,71 @@ function arrivalHowLabel(
   return arrivalMethodBadgeLabel(row.arrivalMethod);
 }
 
+function isSelfOrEmptyTransport(code: string | null | undefined): boolean {
+  const v = (code ?? "").trim().toLowerCase();
+  if (!v) return true;
+  return v.includes("self") || v.includes("private") || v.includes("family");
+}
+
+function busRunDisplay(
+  code: string | null | undefined,
+  busDisplayByCode: Map<string, string>,
+): string | null {
+  const raw = (code ?? "").trim();
+  if (!raw || isSelfOrEmptyTransport(raw)) return null;
+  return busDisplayByCode.get(raw) ?? raw;
+}
+
+function departureHowLabel(
+  row: ClientAttendanceRow,
+  ledgerVector: DepartureVector | undefined,
+  busDisplayByCode: Map<string, string>,
+  scheduledOutbound: string | null,
+): string | null {
+  if (row.status !== "checked_out" && !row.checkedOutAt) return null;
+  const vector = row.departureVector ?? ledgerVector ?? null;
+  if (vector === "family") return DEPARTURE_VECTOR_LABELS.family;
+  if (vector === "independent") return DEPARTURE_VECTOR_LABELS.independent;
+
+  const namedRun = busRunDisplay(
+    row.departureBusRunCode ?? scheduledOutbound,
+    busDisplayByCode,
+  );
+  if (vector === "bus" || vector == null) {
+    return namedRun ?? (vector === "bus" ? DEPARTURE_VECTOR_LABELS.bus : null);
+  }
+  return DEPARTURE_VECTOR_LABELS[vector] ?? vector;
+}
+
+async function loadScheduledOutboundCodes(
+  dateIso: string,
+): Promise<Map<string, string>> {
+  const dayCode = todaysSydneyDayCode(sydneyWallClockToUtcDate(dateIso, "12:00"));
+  const { data, error } = await supabase
+    .from("participant_attendance_schedules")
+    .select("participant_id, outbound_transport, transport_required, day_of_week, active")
+    .eq("active", true);
+  const out = new Map<string, string>();
+  if (error) {
+    if (!isSchemaMismatchError(error)) {
+      console.warn("[loadScheduledOutboundCodes]", error.message);
+    }
+    return out;
+  }
+  for (const raw of data ?? []) {
+    const row = raw as {
+      participant_id: string;
+      outbound_transport: string | null;
+      transport_required: string | null;
+      day_of_week: string | null;
+    };
+    if (normalizeDayCode(row.day_of_week ?? "") !== dayCode) continue;
+    const code = (row.outbound_transport ?? "").trim() || (row.transport_required ?? "").trim();
+    if (code) out.set(row.participant_id, code);
+  }
+  return out;
+}
+
 async function listMealRollsForActivities(
   activityIds: string[],
 ): Promise<
@@ -335,6 +405,7 @@ export async function buildDayCentreEndOfDayReport(
     ]);
 
   const checkoutVectors = await loadCheckoutVectors(session.id);
+  const scheduledOutbound = await loadScheduledOutboundCodes(sessionDate);
   const mealActs = activities.filter((a) => a.activityKind === "meal");
   const mealRows = await listMealRollsForActivities(
     mealActs.map((a) => a.id),
@@ -363,9 +434,12 @@ export async function buildDayCentreEndOfDayReport(
       nameById.get(r.participantId) ?? r.participantId,
       arrivalHowLabel(r, busDisplayByCode),
       r.status === "checked_out" || r.checkedOutAt
-        ? checkoutVectors.has(r.participantId)
-          ? DEPARTURE_VECTOR_LABELS[checkoutVectors.get(r.participantId)!]
-          : null
+        ? departureHowLabel(
+            r,
+            checkoutVectors.get(r.participantId),
+            busDisplayByCode,
+            scheduledOutbound.get(r.participantId) ?? null,
+          )
         : null,
     ),
   );

@@ -487,7 +487,7 @@ function PersonList({
 }) {
   return (
     <div className="overflow-hidden rounded-lg border">
-      <div className="hidden grid-cols-[1fr_7rem_4.5rem] gap-2 border-b bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
+      <div className="hidden grid-cols-[1fr_8rem_4.5rem] gap-2 border-b bg-muted/30 px-3 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground sm:grid">
         <span>Name</span>
         <span>{howLabel}</span>
         <span>When</span>
@@ -499,7 +499,7 @@ function PersonList({
           return (
             <div
               key={r.participantId}
-              className="grid grid-cols-1 gap-0.5 px-3 py-2 text-sm sm:grid-cols-[1fr_7rem_4.5rem] sm:items-baseline sm:gap-2"
+              className="grid grid-cols-1 gap-0.5 px-3 py-2 text-sm sm:grid-cols-[1fr_8rem_4.5rem] sm:items-baseline sm:gap-2"
             >
               <span className="font-medium">{r.name}</span>
               <span className="text-xs text-muted-foreground sm:text-sm">{how}</span>

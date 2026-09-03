@@ -4240,6 +4240,35 @@ async function fetchEventTitle(eventId: string | null): Promise<string | null> {
   return (data?.title as string | undefined) ?? null;
 }
 
+async function fetchBusRunDisplayName(code: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("system_lookup_parameters")
+    .select("display_name")
+    .eq("category", "bus_runs")
+    .eq("code", code)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fetchBusRunDisplayName]", error);
+    return code;
+  }
+  const name = ((data as { display_name?: string } | null)?.display_name ?? "").trim();
+  return name || code;
+}
+
+/** Sticky Manifest header: event title, or Daily Run — {run} · Morning/Afternoon. */
+export async function fetchTripBannerTitle(trip: TransportTrip): Promise<string> {
+  if (trip.eventId) {
+    const title = await fetchEventTitle(trip.eventId);
+    if (title) return title;
+  }
+  if (trip.busRunCode) {
+    const run = await fetchBusRunDisplayName(trip.busRunCode);
+    const dir = trip.tripReturn !== "none" ? "Afternoon Return" : "Morning";
+    return `Daily Run — ${run} · ${dir}`;
+  }
+  return "Daily Run";
+}
+
 function throwPg(prefix: string, error: { message: string; details?: string | null; hint?: string | null; code?: string | null }): never {
   const parts = [
     error.message,
@@ -4292,7 +4321,7 @@ export async function getActiveTripForDriver(
     }
   }
 
-  const eventTitle = await fetchEventTitle(trip.eventId);
+  const eventTitle = await fetchTripBannerTitle(trip);
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
@@ -4646,7 +4675,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         .eq("trip_id", existing.id)
         .order("leg_index", { ascending: true });
       if (legErr) throwPg("[startTrip:reuseLegs]", legErr);
-      const eventTitle = await fetchEventTitle(existing.eventId);
+      const eventTitle = await fetchTripBannerTitle(existing);
       return {
         trip: existing,
         legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
@@ -5117,7 +5146,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   const { data: legRows, error: legErr } = await insertTripLegRows(legPayload);
   if (legErr) throwPg("[startTrip:legs]", legErr);
 
-  const eventTitle = await fetchEventTitle(trip.eventId);
+  const eventTitle = await fetchTripBannerTitle(trip);
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
@@ -5944,7 +5973,7 @@ export async function startDayCentreRun(
         return {
           trip: existing,
           legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-          eventTitle: `${centreLabel} — ${input.busRunLabel}`,
+          eventTitle: await fetchTripBannerTitle(existing),
         };
       }
       await supabase
@@ -6221,11 +6250,10 @@ export async function startDayCentreRun(
     throwPg("[startDayCentreRun:legs]", legErr);
   }
 
-  const dirLabel = direction === "afternoon" ? "Return" : "Morning";
   return {
     trip,
     legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-    eventTitle: `${centreLabel} — ${input.busRunLabel} (${dirLabel})`,
+    eventTitle: await fetchTripBannerTitle(trip),
   };
 }
 
