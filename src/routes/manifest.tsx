@@ -1677,14 +1677,18 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     };
   }, [isReturnRun, trip.id, trip.eventId, trip.tripDate, trip.eventDaySessionId, qc]);
 
-  // Derive return passengers from the drop-off legs (exclude venue_to_depot).
+  // Derive return boarding from drop-off legs — every person on the run
+  // (participant, staff, volunteer, carer). No one left behind.
   const returnPassengers: ReturnPassenger[] = useMemo(() => {
     if (!isReturnRun) return [];
     return legs
-      .filter((l) => l.toParticipantId != null && l.legKind !== "venue_to_depot")
+      .filter((l) => isPassengerPickupLeg(l))
       .filter((l) => !(l.status === "completed" && l.passengerPresent === false))
       .sort((a, b) => a.legIndex - b.legIndex)
-      .map((l) => ({ id: l.toParticipantId!, name: l.toLabel }));
+      .map((l) => ({
+        id: l.toParticipantId ?? l.toStaffId ?? l.toCarerId ?? l.id,
+        name: l.toLabel,
+      }));
   }, [isReturnRun, legs]);
 
   const boardingKey = `return_boarding_confirmed_${trip.id}`;
@@ -2227,7 +2231,9 @@ function ReturnBoardingRoll({
         Pre-departure — Return boarding roll
       </div>
       <p className="mt-1.5 text-sm text-slate-300">
-        Check <strong>every passenger</strong> onto the bus before departing. You are responsible for confirming head count.
+        Check <strong>every person</strong> onto the bus before departing —
+        participants, staff, volunteers and carers. You are responsible for
+        confirming head count.
       </p>
       <div className="mt-3 space-y-2">
         {passengers.map((p) => {

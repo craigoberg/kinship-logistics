@@ -533,6 +533,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-03 | Return boarding roll | Include staff / volunteer / carer drop-off stops, not only `toParticipantId`. Head count is everyone on the bus. |
 | 2026-09-03 | Afternoon Manifest after checkout | Check-Out via bus keeps the person on that afternoon Manifest. Absent / family / independent still come off. |
 | 2026-09-03 | End of Day Went home how | Bus rows show Admin run name (floor code, else weekly OUT), not generic Bus. |
 | 2026-08-29 | Manifest GPS deny | Depart / Arrive proceed with blank GPS; warning toast includes iPhone Location Services path. Do not hard-block the bus. |
