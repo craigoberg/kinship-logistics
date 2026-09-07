@@ -215,7 +215,7 @@ function ManifestPage() {
   }, [eventId, eventDaySessionId]);
 
   return (
-    <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden bg-background">
       {/* Permanent Session Identity Header */}
       <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
         <div className="flex items-center gap-2 min-w-0">
@@ -364,7 +364,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   // Multi-device handshake short-circuit branches removed.
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4">
       {step === "vehicle" && (
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
@@ -1882,8 +1882,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   );
 
   return (
-    <>
-      <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-border bg-slate-900 text-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0 flex-1 pr-3">
             <div className="truncate text-base font-bold leading-tight">
@@ -1907,7 +1907,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       <main
         data-manifest-scroll
         className={cn(
-          "flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
+          "min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
           "overscroll-y-contain",
         )}
       >
@@ -2049,7 +2049,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         />
       )}
 
-      <footer className="sticky bottom-0 z-20 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+      <footer className="z-20 shrink-0 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
         {allLegsComplete ? (
           <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
         ) : activeIsEnRoute ? (
@@ -2063,7 +2063,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         )}
         <CancelTripButton tripId={trip.id} />
       </footer>
-    </>
+    </div>
   );
 }
 

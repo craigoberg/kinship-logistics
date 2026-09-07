@@ -112,7 +112,7 @@ function DevOperationalClockBarInner() {
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
           override || simOffline
             ? "border-amber-600/60 bg-amber-500 text-amber-950"
             : "border-dashed border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",

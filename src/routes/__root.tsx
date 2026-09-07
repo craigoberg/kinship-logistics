@@ -186,6 +186,9 @@ function RootComponent() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAuthRoute = pathname === "/auth";
   const isPublicRoute = isPublicSitePath(pathname);
+  // Manifest uses an inner overflow pane. If SIM bar + AppShell + h-[100dvh]
+  // can also scroll the document, iOS/Chrome bounce between the two layers.
+  const lockViewport = pathname.startsWith("/manifest");
 
   // Unlock SIM TIME after paint so lazy routes (e.g. Event Deliver) finish
   // hydrating against the same "live" date the server rendered.
@@ -205,11 +208,19 @@ function RootComponent() {
           <Outlet />
         ) : (
           <>
-            <DevOperationalClockBar />
-            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-            <AppShell>
-              <Outlet />
-            </AppShell>
+            <div
+              className={
+                lockViewport
+                  ? "flex h-dvh flex-col overflow-hidden overscroll-none"
+                  : undefined
+              }
+            >
+              <DevOperationalClockBar />
+              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+              <AppShell viewportLock={lockViewport}>
+                <Outlet />
+              </AppShell>
+            </div>
             <IdleLockGate />
             <NotificationSimulator />
             <RoleAwareGuardians />
