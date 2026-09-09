@@ -3,7 +3,7 @@
  * Weekly plan + floor presence. Not meal / med / NDIS billing.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
@@ -453,16 +453,35 @@ export async function seedSupportRollFromSchedules(sessionId: string): Promise<n
     };
   });
 
-  const { error: upsertErr } = await supabase
+  const { data: existing, error: existErr } = await supabase
     .from("support_attendance_log")
-    .upsert(payload, { onConflict: "session_id,staff_id", ignoreDuplicates: true });
-  if (upsertErr && !isSchemaMismatchError(upsertErr)) {
-    const { error: insErr } = await supabase.from("support_attendance_log").insert(payload);
-    if (insErr && insErr.code !== "23505" && !isSchemaMismatchError(insErr)) {
-      throw new Error(insErr.message);
-    }
+    .select("staff_id, carer_id")
+    .eq("session_id", sessionId);
+  if (existErr && !isSchemaMismatchError(existErr)) {
+    throw new Error(existErr.message);
   }
-  return payload.length;
+  const haveStaff = new Set(
+    (existing ?? [])
+      .map((r) => (r as { staff_id: string | null }).staff_id)
+      .filter((id): id is string => !!id),
+  );
+  const haveCarer = new Set(
+    (existing ?? [])
+      .map((r) => (r as { carer_id: string | null }).carer_id)
+      .filter((id): id is string => !!id),
+  );
+  const toInsert = payload.filter((row) => {
+    if (row.carer_id) return !haveCarer.has(row.carer_id);
+    if (row.staff_id) return !haveStaff.has(row.staff_id);
+    return true;
+  });
+  if (toInsert.length === 0) return 0;
+
+  const { error: insErr } = await supabase.from("support_attendance_log").insert(toInsert);
+  if (insErr && !isDuplicateKeyError(insErr) && !isSchemaMismatchError(insErr)) {
+    throw new Error(insErr.message);
+  }
+  return toInsert.length;
 }
 
 export async function recordSupportArrival(input: {

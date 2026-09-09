@@ -8,7 +8,7 @@
 // ============================================================================
 
 import { supabase } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { loadExemptParticipantIdsForDate, resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
   applyFloorDayAbsenceExemption,
@@ -313,15 +313,17 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
   );
   if (!attending.length) return 0;
 
-  const payload = attending.map((s: Record<string, unknown>) => {
-    // 3-tier priority ladder.
+  const byParticipant = new Map<string, Record<string, unknown>>();
+  for (const s of attending) {
+    const participantId = String(s.participant_id ?? "");
+    if (!participantId || byParticipant.has(participantId)) continue;
     const arrivalOverride = readScheduleClock(s, SCHEDULE_ARRIVAL_FIELDS);
     const departureOverride = readScheduleClock(s, SCHEDULE_DEPARTURE_FIELDS);
-    const arrivalClock = arrivalOverride ?? masterOpen; // null → Tier 3 baseline
+    const arrivalClock = arrivalOverride ?? masterOpen;
     const departureClock = departureOverride ?? masterClose;
-    return {
+    byParticipant.set(participantId, {
       session_id: sessionId,
-      participant_id: s.participant_id as string,
+      participant_id: participantId,
       expected_arrival_at: sydneyTimeTodayFromClock(arrivalClock),
       expected_departure_at: sydneyTimeTodayFromClock(
         departureClock ?? "15:00",
@@ -331,16 +333,29 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
           (s.transport_required as string | null) ??
           null,
       ),
-      // Explicit — TEST OpenAPI bootstrap tables omit DEFAULT 'expected'.
       status: "expected" as const,
-    };
-  });
+    });
+  }
+
+  const { data: existing, error: existErr } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id")
+    .eq("session_id", sessionId);
+  if (existErr) throw existErr;
+  const have = new Set(
+    (existing ?? []).map((r) => String((r as { participant_id: string }).participant_id)),
+  );
+  const toInsert = [...byParticipant.values()].filter(
+    (row) => !have.has(String(row.participant_id)),
+  );
+  if (toInsert.length === 0) return 0;
 
   const { data: inserted, error: insErr } = await supabase
     .from("client_attendance_log")
-    .upsert(payload, { onConflict: "session_id,participant_id", ignoreDuplicates: true })
+    .insert(toInsert)
     .select("id");
   if (insErr) {
+    if (isDuplicateKeyError(insErr)) return 0;
     console.error("[client-attendance] seed failed", insErr);
     throw insErr;
   }

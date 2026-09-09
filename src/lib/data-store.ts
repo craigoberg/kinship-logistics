@@ -10,7 +10,7 @@
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { assessEventReturnTransport, resolveReturnHomeBusEligibleIds } from "@/lib/api/event-transport";
 import { assertTransportRunSlotStartable } from "@/lib/api/transport-run-exclusivity";
 import { effectiveReturnBusRun, matchesEventBusRun } from "@/lib/event-bus-runs";
@@ -1943,8 +1943,12 @@ export interface NewAttendanceLog {
   ndisCancellationReason?: string | null;
 }
 
-/** Live DEV/TEST may not have this column yet (PGRST204). Flip off after first miss. */
-let attendanceRosterLogsHasScheduleId = true;
+/**
+ * Live DEV/TEST may not have this column yet (PGRST204). Stay off until a
+ * write without it succeeds and a later migration adds the column — sending
+ * it first paints a 400 in the browser console even when we retry.
+ */
+let attendanceRosterLogsHasScheduleId = false;
 
 function attendanceLogInsertPayload(
   input: NewAttendanceLog,
@@ -1969,30 +1973,63 @@ function attendanceLogInsertPayload(
   return insertPayload;
 }
 
+async function findAttendanceLogForDate(
+  participantId: string,
+  rosterDate: string,
+): Promise<AttendanceLogRow | null> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .select("*")
+    .eq("participant_id", participantId)
+    .eq("roster_date", rosterDate)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (isSchemaMismatchError(error)) return null;
+    throw error;
+  }
+  return (data as AttendanceLogRow | null) ?? null;
+}
+
+async function updateAttendanceLogRow(
+  id: string,
+  input: NewAttendanceLog,
+): Promise<AttendanceLog> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .update({
+      actual_status: input.actualStatus,
+      driver_notes: input.driverNotes ?? null,
+      expected_service: input.expectedService,
+      ...(input.ndisCancellationReason
+        ? { ndis_cancellation_reason: input.ndisCancellationReason }
+        : {}),
+    })
+    .eq("id", id)
+    .select("*")
+    .single();
+  if (error) throw error;
+  return rowToAttendanceLog(data as AttendanceLogRow);
+}
+
 export async function insertAttendanceLog(
   input: NewAttendanceLog,
 ): Promise<AttendanceLog> {
-  const first = await supabase
+  const existing = await findAttendanceLogForDate(input.participantId, input.rosterDate);
+  if (existing) return updateAttendanceLogRow(existing.id, input);
+
+  const { data, error } = await supabase
     .from("attendance_roster_logs")
     .insert(attendanceLogInsertPayload(input, attendanceRosterLogsHasScheduleId))
     .select("*")
     .single();
-  if (
-    first.error &&
-    attendanceRosterLogsHasScheduleId &&
-    isSchemaMismatchError(first.error)
-  ) {
-    attendanceRosterLogsHasScheduleId = false;
-    const retry = await supabase
-      .from("attendance_roster_logs")
-      .insert(attendanceLogInsertPayload(input, false))
-      .select("*")
-      .single();
-    if (retry.error) throw retry.error;
-    return rowToAttendanceLog(retry.data as AttendanceLogRow);
+  if (!error) return rowToAttendanceLog(data as AttendanceLogRow);
+  if (isDuplicateKeyError(error)) {
+    const again = await findAttendanceLogForDate(input.participantId, input.rosterDate);
+    if (again) return updateAttendanceLogRow(again.id, input);
   }
-  if (first.error) throw first.error;
-  return rowToAttendanceLog(first.data as AttendanceLogRow);
+  throw error;
 }
 
 // ---------- daily roster engine ----------
