@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Plus, Trash2, Save } from "lucide-react";
+import { KeyRound, Pencil, Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -16,7 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
-import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -63,6 +63,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [notes, setNotes] = useState("");
   const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
+  const [editingCert, setEditingCert] = useState<number | null>(null);
   const [dayPassword, setDayPassword] = useState("");
   const [dayPasswordConfirm, setDayPasswordConfirm] = useState("");
   const [passwordPinOpen, setPasswordPinOpen] = useState(false);
@@ -84,6 +85,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setNotes(staff?.notes ?? "");
     setPin("");
     setCerts(staff?.certifications ?? []);
+    setEditingCert(null);
     setDayPassword("");
     setDayPasswordConfirm("");
     setPasswordPinOpen(false);
@@ -195,6 +197,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         name: c.name.trim(),
         number: c.number.trim(),
         expiry: c.expiry || null,
+        deferredUntil: c.deferredUntil || null,
       })),
     ...(pinHash !== undefined ? { pinHash } : {}),
   });
@@ -383,7 +386,10 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setCerts((p) => [...p, { ...EMPTY_CERT }])}
+                onClick={() => {
+                  setEditingCert(certs.length);
+                  setCerts((p) => [...p, { ...EMPTY_CERT }]);
+                }}
                 className="h-7 gap-1.5"
               >
                 <Plus className="h-3.5 w-3.5" />
@@ -396,11 +402,57 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               </p>
             ) : (
               <div className="space-y-2">
-                {certs.map((c, i) => (
+                {certs.map((c, i) => {
+                  const isEditing = editingCert === i;
+                  return (
                   <div
                     key={i}
                     className="space-y-3 rounded-md border border-border bg-card/40 p-3"
                   >
+                    {!isEditing ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate text-sm font-semibold">
+                            {c.name.trim() || "Untitled certification"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {c.number.trim() ? `# ${c.number.trim()}` : "No certification number"}
+                            {" · "}
+                            {c.expiry
+                              ? `Expires ${formatDate(c.expiry)}`
+                              : "No expiry"}
+                            {c.deferredUntil
+                              ? ` · Deferred until ${formatDate(c.deferredUntil)}`
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1.5"
+                            onClick={() => setEditingCert(i)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                          <IconActionButton
+                            type="button"
+                            onClick={() => {
+                              setCerts((p) => p.filter((_, idx) => idx !== i));
+                              setEditingCert((cur) =>
+                                cur === i ? null : cur != null && cur > i ? cur - 1 : cur,
+                              );
+                            }}
+                            tooltip="Remove certification"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </IconActionButton>
+                        </div>
+                      </div>
+                    ) : (
+                    <>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -411,6 +463,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                           value={c.name}
                           onChange={(e) => updateCert(i, { name: e.target.value })}
                           className="h-9"
+                          autoFocus
                         />
                       </div>
                       <div className="grid gap-1">
@@ -461,18 +514,37 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                         </p>
                       </div>
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingCert(null)}
+                      >
+                        Done
+                      </Button>
                       <IconActionButton
                         type="button"
-                        onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
+                        onClick={() => {
+                          setCerts((p) => p.filter((_, idx) => idx !== i));
+                          setEditingCert(null);
+                        }}
                         tooltip="Remove certification"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </IconActionButton>
                     </div>
+                    </>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
+            )}
+            {certs.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Use Edit to correct a name or number, then Save changes at the bottom.
+              </p>
             )}
           </section>
 

@@ -86,6 +86,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Idle screen lock** | **Defined** | `IdleLockGate` + `PinReauthDialog` (`dismissible={false}`, `requiredStaffId`) | After Admin idle minutes on signed-in shell | Same staff PIN; no Cancel/Escape; skip active Manifest; minutes `auth_idle_lock_minutes` (default 15; 0 = off). Wall-clock idle, not SIM. Admin: `IdleLockAdminPanel` |
 | **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
 | **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
+| **Staff certification edit** | **Defined** | `StaffFormSheet` cert card **Edit** | Correct name / number / expiry / defer | Existing cards start as a summary + **Edit**. New cards open in the field editors. Persist with sheet **Save changes**. Include `deferredUntil` in the JSONB write. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
 | **Field single-select (compact)** | Defined | `MobileOptionButton` | Enum rows, med status | Same visual contract |
 | **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` + `overflow-y-auto` (built into `BottomSheet` / bottom `SheetContent`) |
@@ -554,6 +555,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-09 | Staff certification edit | Personnel sheet: summary card + Edit; Save changes writes name, number, expiry, and defer. |
 | 2026-09-09 | Hide chrome on scroll | Dashboard + Manifest: scroll down hides SIM / AppShell / BottomNav / Cancel Reset; scroll up reveals. ~48px travel + 400ms lock so collapsing chrome cannot flicker. Manifest uses the inner scroller. Close Run and Incident/Raise stay. |
 | 2026-09-09 | Manifest start-flow CTAs | Selected vehicle / start point = green. Continue, Confirm & Roll, Start run = slate until ready, then amber pulse. |
 | 2026-09-09 | Floor CTA colours | Amber+pulse = do this next; green = already chosen; blue = you-are-here; slate = blocked; red = danger. Manifest restyled to match. |
