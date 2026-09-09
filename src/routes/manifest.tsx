@@ -65,6 +65,7 @@ import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-
 import { haversineKm, tryGetCurrentPosition, manifestGpsFallbackToast } from "@/lib/geo";
 import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
 import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
+import { useChromeVisibility, useHideChromeOnScrollRef } from "@/hooks/chrome-visibility";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type {
@@ -170,6 +171,7 @@ function ManifestPage() {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const navigate = useNavigate();
   const manifestQueryClient = useQueryClient();
+  const { chromeHidden } = useChromeVisibility();
 
   // Multi-device handshake rehydration removed — RED issues now resolve
   // locally via VerbalConsultationDialog inside IssueAccumulatorPanel. No
@@ -217,7 +219,15 @@ function ManifestPage() {
   return (
     <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden bg-background">
       {/* Permanent Session Identity Header */}
-      <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
+      <div
+        className={cn(
+          "z-30 flex shrink-0 items-center justify-between overflow-hidden border-b border-border bg-slate-900 px-4 text-xs text-white shadow-md transition-[max-height,padding,opacity] duration-200",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-2.5 opacity-100",
+        )}
+        aria-hidden={chromeHidden}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")}
@@ -278,6 +288,7 @@ function staffName(staffId: string): string {
 }
 
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
+  const bindChromeScroll = useHideChromeOnScrollRef<HTMLDivElement>();
   const today = useOperationalTodayIso();
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const driverName = staffName(driverStaffId);
@@ -364,7 +375,10 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   // Multi-device handshake short-circuit branches removed.
 
   return (
-    <div className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4">
+    <div
+      ref={bindChromeScroll}
+      className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4"
+    >
       {step === "vehicle" && (
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
@@ -1642,6 +1656,8 @@ interface ActiveTripScreenProps {
 const ACTIVE_TRIP_QUERY_KEY = ["transport_trips", "active"] as const;
 
 function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
+  const bindChromeScroll = useHideChromeOnScrollRef<HTMLElement>();
+  const { chromeHidden } = useChromeVisibility();
   const { trip, legs, eventTitle } = bundle;
   const qc = useQueryClient();
   const reorderPickups = useReorderTripPickupLegs();
@@ -1937,6 +1953,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       <OfficeRunNoticeBanner tripId={trip.id} className="mx-3 mt-3" />
 
       <main
+        ref={bindChromeScroll}
         data-manifest-scroll
         className={cn(
           "min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
@@ -2081,7 +2098,14 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         />
       )}
 
-      <footer className="z-20 shrink-0 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
+      <footer
+        className={cn(
+          "z-20 shrink-0 space-y-2 overflow-hidden border-t border-border bg-card transition-[max-height,padding,opacity] duration-200",
+          chromeHidden && !allLegsComplete
+            ? "max-h-0 border-t-0 p-0 opacity-0 pointer-events-none"
+            : "p-3 pb-[max(env(safe-area-inset-bottom),12px)] opacity-100",
+        )}
+      >
         {preDepartureOpen ? (
           <div className="text-center text-xs text-muted-foreground">
             Check everyone onto the bus, then All Aboard.
@@ -2097,7 +2121,14 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
             Drag upcoming stops to reorder · tap Depart Stop when ready.
           </div>
         )}
-        <CancelTripButton tripId={trip.id} />
+        <div
+          className={cn(
+            "overflow-hidden transition-[max-height,opacity] duration-200",
+            chromeHidden ? "max-h-0 opacity-0 pointer-events-none" : "max-h-16 opacity-100",
+          )}
+        >
+          <CancelTripButton tripId={trip.id} />
+        </div>
       </footer>
     </div>
   );

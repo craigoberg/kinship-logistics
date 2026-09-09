@@ -20,6 +20,7 @@ import {
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { useMenuAccess } from "@/hooks/use-menu-access";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
 import { pathToMenuKey } from "@/lib/menu-access";
 
 export const NAV_ITEMS = [
@@ -99,6 +100,7 @@ export function BottomNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [menuOpen, setMenuOpen] = useState(false);
   const { canOpen } = useMenuAccess();
+  const { chromeHidden } = useChromeVisibility();
   const visibleItems = NAV_ITEMS.filter((item) => navItemVisible(item, canOpen));
   const visibleDock = DOCK_ITEMS.filter((item) => navItemVisible(item, canOpen));
 
@@ -116,7 +118,11 @@ export function BottomNav() {
     <>
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        aria-hidden={chromeHidden}
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur transition-transform duration-200 md:hidden",
+          chromeHidden && "translate-y-full pointer-events-none",
+        )}
       >
         <ul className={cn("grid", DOCK_COL_CLASS[visibleDock.length + 1] ?? "grid-cols-5")}>
           {visibleDock.map((item) => (

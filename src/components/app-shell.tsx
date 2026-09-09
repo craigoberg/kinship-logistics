@@ -18,6 +18,7 @@ import { FloorAnnouncementStrip } from "@/components/ops/floor-announcement-stri
 import { MenuGate } from "@/components/auth/menu-gate";
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import { accessRoleLabel } from "@/lib/access-roles";
+import { useChromeVisibility, useHideChromeOnScroll } from "@/hooks/chrome-visibility";
 
 /** Human-readable label for the active user's role. */
 function roleLabel(role: string | null | undefined, accessRole?: string | null): string {
@@ -92,6 +93,8 @@ export function AppShell({
 
   const [medOpen, setMedOpen] = useState(false);
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
+  const { chromeHidden } = useChromeVisibility();
+  useHideChromeOnScroll(!viewportLock && isDashboard ? "window" : null);
 
   const handleLogout = () => {
     try {
@@ -151,7 +154,15 @@ export function AppShell({
           viewportLock && "min-h-0 overflow-hidden",
         )}
       >
-        <header className="sticky top-0 z-30 flex min-h-14 shrink-0 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-2 backdrop-blur md:min-h-16 md:px-6">
+        <header
+          className={cn(
+            "sticky top-0 z-30 flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-border bg-background/90 px-4 backdrop-blur transition-[max-height,padding,opacity,border-color] duration-200 md:px-6",
+            chromeHidden
+              ? "max-h-0 min-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+              : "min-h-14 py-2 opacity-100 md:min-h-16",
+          )}
+          aria-hidden={chromeHidden}
+        >
           {/* Left: menu toggle (md+) + page title */}
           <div className="flex min-w-0 items-center gap-2">
             <IconActionButton
@@ -218,11 +229,12 @@ export function AppShell({
         <SiteNoGoBanner />
         <FloorAnnouncementStrip />
         <main
-          className={
+          className={cn(
             viewportLock
-              ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-8"
-              : "flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6"
-          }
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden md:pb-8"
+              : "flex-1 px-4 pt-4 md:px-6 md:pb-8 md:pt-6",
+            chromeHidden ? "pb-4" : "pb-24",
+          )}
         >
           <MenuGate>{children}</MenuGate>
         </main>

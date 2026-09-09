@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { getSydneyIsoDate } from "@/lib/operational-time";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
 
 function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries();
@@ -107,16 +108,21 @@ function DevOperationalClockBarInner() {
   };
 
   const laneBadge = getAppLaneBadge();
+  const { chromeHidden } = useChromeVisibility();
 
   return (
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3 transition-[max-height,padding,opacity,border-color] duration-200",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-1.5 opacity-100",
           override || simOffline
             ? "border-amber-600/60 bg-amber-500 text-amber-950"
             : "border-dashed border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",
         )}
+        aria-hidden={chromeHidden}
       >
         <button
           type="button"

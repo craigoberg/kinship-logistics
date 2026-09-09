@@ -27,6 +27,7 @@ import { Toaster } from "../components/ui/sonner";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
 import { IdleLockGate } from "../components/auth/idle-lock-gate";
+import { ChromeVisibilityProvider } from "@/hooks/chrome-visibility";
 import {
   markOperationalClockClientReady,
 } from "@/lib/operational-clock";
@@ -207,7 +208,7 @@ function RootComponent() {
           // Bare shell — auth login or public yada.org.au pages (BL-110).
           <Outlet />
         ) : (
-          <>
+          <ChromeVisibilityProvider>
             <div
               className={
                 lockViewport
@@ -224,7 +225,7 @@ function RootComponent() {
             <IdleLockGate />
             <NotificationSimulator />
             <RoleAwareGuardians />
-          </>
+          </ChromeVisibilityProvider>
         )}
         <Toaster />
         </TicketSurfaceProvider>
