@@ -1943,30 +1943,56 @@ export interface NewAttendanceLog {
   ndisCancellationReason?: string | null;
 }
 
-export async function insertAttendanceLog(
+/** Live DEV/TEST may not have this column yet (PGRST204). Flip off after first miss. */
+let attendanceRosterLogsHasScheduleId = true;
+
+function attendanceLogInsertPayload(
   input: NewAttendanceLog,
-): Promise<AttendanceLog> {
+  includeScheduleId: boolean,
+): Record<string, unknown> {
   const insertPayload: Record<string, unknown> = {
     participant_id: input.participantId,
-    schedule_id: input.scheduleId ?? null,
     roster_date: input.rosterDate,
     expected_service: input.expectedService,
     actual_status: input.actualStatus,
     driver_notes: input.driverNotes ?? null,
     created_at: resolveOperationalNow().toISOString(),
   };
+  if (includeScheduleId) {
+    insertPayload.schedule_id = input.scheduleId ?? null;
+  }
   // Only include the NDIS reason column when set, so legacy installs without
   // the column still accept the insert.
   if (input.ndisCancellationReason !== undefined && input.ndisCancellationReason !== null) {
     insertPayload.ndis_cancellation_reason = input.ndisCancellationReason;
   }
-  const { data, error } = await supabase
+  return insertPayload;
+}
+
+export async function insertAttendanceLog(
+  input: NewAttendanceLog,
+): Promise<AttendanceLog> {
+  const first = await supabase
     .from("attendance_roster_logs")
-    .insert(insertPayload)
+    .insert(attendanceLogInsertPayload(input, attendanceRosterLogsHasScheduleId))
     .select("*")
     .single();
-  if (error) throw error;
-  return rowToAttendanceLog(data as AttendanceLogRow);
+  if (
+    first.error &&
+    attendanceRosterLogsHasScheduleId &&
+    isSchemaMismatchError(first.error)
+  ) {
+    attendanceRosterLogsHasScheduleId = false;
+    const retry = await supabase
+      .from("attendance_roster_logs")
+      .insert(attendanceLogInsertPayload(input, false))
+      .select("*")
+      .single();
+    if (retry.error) throw retry.error;
+    return rowToAttendanceLog(retry.data as AttendanceLogRow);
+  }
+  if (first.error) throw first.error;
+  return rowToAttendanceLog(first.data as AttendanceLogRow);
 }
 
 // ---------- daily roster engine ----------
@@ -2315,23 +2341,29 @@ export async function insertAttendanceLogsBulk(
   rows: NewAttendanceLog[],
 ): Promise<AttendanceLog[]> {
   if (rows.length === 0) return [];
-  const payload = rows.map((r) => ({
-    participant_id: r.participantId,
-    schedule_id: r.scheduleId ?? null,
-    roster_date: r.rosterDate,
-    expected_service: r.expectedService,
-    actual_status: r.actualStatus,
-    driver_notes: r.driverNotes ?? null,
-  }));
-  const { data, error } = await supabase
-    .from("attendance_roster_logs")
-    .insert(payload)
-    .select("*");
-  if (error) {
-    console.error("[insertAttendanceLogsBulk] supabase error", { error, payload });
-    throw new Error(error.message || "Bulk insert failed");
+  const firstPayload = rows.map((r) =>
+    attendanceLogInsertPayload(r, attendanceRosterLogsHasScheduleId),
+  );
+  let result = await supabase.from("attendance_roster_logs").insert(firstPayload).select("*");
+  if (
+    result.error &&
+    attendanceRosterLogsHasScheduleId &&
+    isSchemaMismatchError(result.error)
+  ) {
+    attendanceRosterLogsHasScheduleId = false;
+    result = await supabase
+      .from("attendance_roster_logs")
+      .insert(rows.map((r) => attendanceLogInsertPayload(r, false)))
+      .select("*");
   }
-  return (data ?? []).map((r) => rowToAttendanceLog(r as AttendanceLogRow));
+  if (result.error) {
+    console.error("[insertAttendanceLogsBulk] supabase error", {
+      error: result.error,
+      payload: firstPayload,
+    });
+    throw new Error(result.error.message || "Bulk insert failed");
+  }
+  return (result.data ?? []).map((r) => rowToAttendanceLog(r as AttendanceLogRow));
 }
 
 // ---------- ledger reconciliation on absence ----------
