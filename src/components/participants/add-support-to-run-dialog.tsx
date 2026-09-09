@@ -24,6 +24,7 @@ import {
   LOOKUP_CATEGORIES,
 } from "@/lib/data-store";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { SUPPORT_SCHEDULES_KEY, upsertSupportSchedule } from "@/lib/api/support-attendance";
 import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
 import { busRunRouteQueryKey, type BusRunRouteDirection } from "@/lib/api/bus-run-routes";
@@ -47,6 +48,8 @@ interface Props {
 
 export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: Props) {
   const qc = useQueryClient();
+  const { user, isReady } = useAuthReady();
+  const signedIn = isReady && !!user;
   const [kind, setKind] = useState<SupportPersonKind>("staff");
   const [personId, setPersonId] = useState("");
   const [days, setDays] = useState<string[]>(["DAY-TUE", "DAY-THU"]);
@@ -59,13 +62,13 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
   const staffQ = useQuery({
     queryKey: ["staff-registry-support"],
     queryFn: listStaffRegistry,
-    enabled: open,
+    enabled: open && signedIn,
     staleTime: 60_000,
   });
   const carerQ = useQuery({
     queryKey: ["carers-registry-support"],
     queryFn: listCarersRegistry,
-    enabled: open,
+    enabled: open && signedIn,
     staleTime: 60_000,
   });
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);

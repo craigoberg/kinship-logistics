@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { iddsiLevel } from "@/lib/iddsi";
 import { dayChronoIndex } from "@/lib/data-store";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -118,6 +119,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-center gap-2">
                     <span className="truncate font-semibold">{p.fullName}</span>
+                    {p.participantKind === "guest" && (
+                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                        Guest
+                      </Badge>
+                    )}
                     {pending.has(p.id) && (
                       <PendingBadge
                         onClick={() =>
@@ -176,6 +182,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                   <td className="px-3 py-2 font-medium">
                     <div className="flex items-center gap-2">
                       <span className="truncate">{p.fullName}</span>
+                      {p.participantKind === "guest" && (
+                        <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                          Guest
+                        </Badge>
+                      )}
                       {pending.has(p.id) && (
                         <PendingBadge
                           onClick={() =>

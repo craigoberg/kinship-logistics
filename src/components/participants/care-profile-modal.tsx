@@ -29,6 +29,15 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -42,11 +51,13 @@ import {
 import { enqueue } from "@/lib/sync-queue";
 import {
   useUpdateParticipant,
+  useArchiveGuestParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
   useTodaysComplianceLogs,
   useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
+import { listLiveGuestEventTitles } from "@/lib/api/event-guest";
 import { CarerNetworkPanel } from "./carer-network-panel";
 
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -86,6 +97,9 @@ export function CareProfileModal({
   const [regularPickupAddress, setRegularPickupAddress] = useState("");
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [liveGuestEvents, setLiveGuestEvents] = useState<string[]>([]);
+  const archiveGuest = useArchiveGuestParticipant();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editMedSchedule, setEditMedSchedule] = useState<MedicationSchedule | null>(null);
   const [editMedOpen, setEditMedOpen] = useState(false);
@@ -113,6 +127,24 @@ export function CareProfileModal({
       setDirty(false);
     }
   }, [participant]);
+
+  useEffect(() => {
+    if (!archiveOpen || !participant || participant.participantKind !== "guest") {
+      setLiveGuestEvents([]);
+      return;
+    }
+    let cancelled = false;
+    void listLiveGuestEventTitles(participant.id)
+      .then((titles) => {
+        if (!cancelled) setLiveGuestEvents(titles);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveGuestEvents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [archiveOpen, participant]);
 
   if (!participant) return null;
 
@@ -192,7 +224,11 @@ export function CareProfileModal({
               <div className="min-w-0">
                 <DialogTitle className="truncate">{participant.fullName || "Participant"}</DialogTitle>
                 <DialogDescription>
-                  NDIS {participant.ndisNumber} · Updated {formatDate(participant.updatedAt)}
+                  {participant.participantKind === "guest"
+                    ? `Event guest · ${participant.ndisNumber}`
+                    : `NDIS ${participant.ndisNumber}`}
+                  {" · Updated "}
+                  {formatDate(participant.updatedAt)}
                 </DialogDescription>
                 {participant.streetAddress && (
                   <p className="mt-1 text-xs text-muted-foreground">
@@ -317,7 +353,20 @@ export function CareProfileModal({
               </div>
 
               <DialogFooter className="mt-1 shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                  {participant.participantKind === "guest" && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="gap-1.5"
+                      onClick={() => setArchiveOpen(true)}
+                    >
+                      <Archive className="h-4 w-4" />
+                      Archive guest
+                    </Button>
+                  )}
+                </div>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
@@ -450,6 +499,53 @@ export function CareProfileModal({
         participantName={participant.fullName}
         editing={editMedSchedule}
       />
+
+      <AlertDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive guest “{participant.fullName}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This hides them from the Participants directory. They stay an event guest
+              and can be reused from Add guest. The carer record is not changed.
+              {liveGuestEvents.length > 0 && (
+                <>
+                  {" "}
+                  Still booked on {liveGuestEvents.join(", ")}. Close that event when
+                  the trip is finished.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={archiveGuest.isPending}
+              onClick={async () => {
+                try {
+                  await archiveGuest.mutateAsync(participant.id);
+                  toast.success("Guest archived", {
+                    description: `${participant.fullName} is hidden from Participants.`,
+                  });
+                  setArchiveOpen(false);
+                  onOpenChange(false);
+                } catch (err) {
+                  toast.error("Could not archive guest", {
+                    description: (err as Error).message,
+                    className: "!bg-red-600 !text-white !border-red-700",
+                    duration: 12_000,
+                  });
+                }
+              }}
+            >
+              {archiveGuest.isPending ? "Archiving…" : "Archive guest"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

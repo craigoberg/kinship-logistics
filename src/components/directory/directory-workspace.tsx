@@ -31,6 +31,7 @@ import {
   useParticipants,
 } from "@/hooks/use-supabase-data";
 import { isActiveUserManager } from "@/lib/data-store";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
@@ -78,6 +79,7 @@ export function DirectoryWorkspace() {
   const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
   const [onboardingPack, setOnboardingPack] = useState<OnboardingPackType>("staff");
+  const { canOpen } = useMenuAccess();
   useEffect(() => setIsManager(isActiveUserManager()), []);
 
   const startOnboarding = (pack: OnboardingPackType) => {
@@ -189,13 +191,15 @@ export function DirectoryWorkspace() {
             </div>
           )}
         </div>
-        <p className="text-xs text-muted-foreground">
-          Print / sign / file packs also live under{" "}
-          <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
-            Hub → Onboarding
-          </Link>
-          .
-        </p>
+        {canOpen("onboarding") ? (
+          <p className="text-xs text-muted-foreground">
+            Print / sign / file packs also live under{" "}
+            <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+              Hub → Onboarding
+            </Link>
+            .
+          </p>
+        ) : null}
 
         <TabsContent value="staff" className="mt-4 space-y-3">
           <SearchBar

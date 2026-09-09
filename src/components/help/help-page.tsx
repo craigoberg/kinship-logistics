@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import {
   HELP_TOPICS,
   buildHelpAreaChips,
@@ -21,6 +22,7 @@ export function HelpPage() {
   const [query, setQuery] = useState("");
   const [menuFilter, setMenuFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { canOpen } = useMenuAccess();
   const [profile, setProfile] = useState(() => getActiveUserProfile());
 
   useEffect(() => {
@@ -59,6 +61,7 @@ export function HelpPage() {
       <HelpArticle
         topic={selected}
         allVisible={visibleTopics}
+        canOpen={canOpen}
         onBack={() => setSelectedId(null)}
         onOpenRelated={(id) => setSelectedId(id)}
       />
@@ -188,16 +191,18 @@ function FilterChip({
 function HelpArticle({
   topic,
   allVisible,
+  canOpen,
   onBack,
   onOpenRelated,
 }: {
   topic: HelpTopic;
   allVisible: HelpTopic[];
+  canOpen: (menuKey: string) => boolean;
   onBack: () => void;
   onOpenRelated: (id: string) => void;
 }) {
   const navigate = useNavigate();
-  const deepLink = resolveHelpDeepLink(topic.menus);
+  const deepLink = resolveHelpDeepLink(topic.menus, canOpen);
   const related = (topic.relatedIds ?? [])
     .map((id) => getHelpTopicById(allVisible, id))
     .filter((t): t is HelpTopic => !!t);

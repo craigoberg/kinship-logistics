@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnifiedIssuesPanel } from "./unified-issues-panel";
 import { ComplianceAssetsPanel } from "./compliance-assets-panel";
@@ -13,6 +14,8 @@ export function GovernanceHubWorkspace(props: {
   initialTab?: HubTab;
 }) {
   const { openIssueId, initialTab } = props;
+  const { canOpen } = useMenuAccess();
+  const showOnboarding = canOpen("onboarding");
   const [hubTab, setHubTab] = useState<HubTab>(() => {
     if (openIssueId) return "issues";
     return initialTab ?? "issues";
@@ -24,8 +27,14 @@ export function GovernanceHubWorkspace(props: {
       setHubTab("issues");
       return;
     }
-    if (initialTab) setHubTab(initialTab);
-  }, [openIssueId, initialTab]);
+    if (initialTab && (initialTab !== "onboarding" || showOnboarding)) {
+      setHubTab(initialTab);
+    }
+  }, [openIssueId, initialTab, showOnboarding]);
+
+  useEffect(() => {
+    if (hubTab === "onboarding" && !showOnboarding) setHubTab("issues");
+  }, [hubTab, showOnboarding]);
 
   return (
     <Tabs
@@ -37,7 +46,9 @@ export function GovernanceHubWorkspace(props: {
         <TabsTrigger value="issues">Human Incidents</TabsTrigger>
         <TabsTrigger value="maintenance">Maintenance &amp; Repairs</TabsTrigger>
         <TabsTrigger value="assets">Compliance &amp; Renewals</TabsTrigger>
-        <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
+        {showOnboarding ? (
+          <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
+        ) : null}
         <TabsTrigger value="app_tickets">App tickets</TabsTrigger>
       </TabsList>
 
@@ -62,9 +73,11 @@ export function GovernanceHubWorkspace(props: {
         />
       </TabsContent>
 
-      <TabsContent value="onboarding" className="space-y-4">
-        <OnboardingWorkspace />
-      </TabsContent>
+      {showOnboarding ? (
+        <TabsContent value="onboarding" className="space-y-4">
+          <OnboardingWorkspace />
+        </TabsContent>
+      ) : null}
 
       <TabsContent value="app_tickets" className="space-y-4">
         <AppTicketsPanel />

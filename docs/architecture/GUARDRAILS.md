@@ -79,9 +79,9 @@ All operator and manager **authentication PIN capture** must use the canonical o
 4. **Verify once at entry** — PIN is verified when the pad completes; parent forms gate submit on `*PinVerified` flags (or refs if the API still needs the value). Do not re-prompt with a text field.
 5. **New PIN surfaces** — any new build requiring PIN auth must import from `src/components/auth/`; code review / agent rules treat raw PIN inputs as a blocking defect.
 
-### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — menus/roles still last)
+### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — Phase 2/3 still later)
 
-Full **menu / role** RBAC remains deferred (`docs/BACKLOG.md` **BL-002**). **Day-login JWT for operational data is in force** as of 2026-08-20 (`docs/sql/2026-08-20_day_login_operational_rls.sql`, BL-117). PIN is action step-up and floor identity, not the database role.
+**Phase 1 menu visibility is built** (`role_menu_access` + Admin → Menu Access + `MenuGate`; BL-002). **Day-login JWT for operational data is in force** as of 2026-08-20 (`docs/sql/2026-08-20_day_login_operational_rls.sql`, BL-117). PIN is action step-up and floor identity, not the database role. Phase 2 (read-only menus) and Phase 3 (relationship-scoped rows) are not built.
 
 #### Target two-tier session
 

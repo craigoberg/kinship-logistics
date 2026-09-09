@@ -14,6 +14,7 @@ export type HelpDeepLinkTo =
   | "/events"
   | "/event-deliver"
   | "/governance"
+  | "/rights-voice"
   | "/admin"
   | "/sync"
   | "/help";
@@ -30,8 +31,10 @@ export const HELP_MENU_ROUTES: Record<
   staff: { to: "/staff", label: "Open Staff" },
   run_planning: { to: "/run-planning", label: "Open Run Planning" },
   events: { to: "/events", label: "Open Event Manage" },
+  event_deliver: { to: "/event-deliver", label: "Open Event Deliver" },
   "event-deliver": { to: "/event-deliver", label: "Open Event Deliver" },
   governance: { to: "/governance", label: "Open Governance Hub" },
+  rights_voice: { to: "/rights-voice", label: "Open Rights & voice" },
   admin: { to: "/admin", label: "Open Admin" },
   sync: { to: "/sync", label: "Open Sync Queue" },
   help: { to: "/help", label: "Open Help" },
@@ -41,6 +44,7 @@ export const HELP_MENU_ROUTES: Record<
 const MENU_DEEP_LINK_PRIORITY = [
   "manifest",
   "day",
+  "event_deliver",
   "event-deliver",
   "events",
   "governance",
@@ -55,15 +59,17 @@ const MENU_DEEP_LINK_PRIORITY = [
 
 export function resolveHelpDeepLink(
   menus: string[],
+  canOpen?: (menuKey: string) => boolean,
 ): { to: HelpDeepLinkTo; label: string } | null {
+  const allowed = (key: string) => !canOpen || canOpen(key);
   for (const key of MENU_DEEP_LINK_PRIORITY) {
-    if (menus.includes(key) && HELP_MENU_ROUTES[key]) {
+    if (menus.includes(key) && HELP_MENU_ROUTES[key] && allowed(key)) {
       return HELP_MENU_ROUTES[key];
     }
   }
   for (const key of menus) {
     const hit = HELP_MENU_ROUTES[key];
-    if (hit) return hit;
+    if (hit && allowed(key)) return hit;
   }
   return null;
 }

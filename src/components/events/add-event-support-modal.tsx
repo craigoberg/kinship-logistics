@@ -23,6 +23,7 @@ import {
   LOOKUP_CATEGORIES,
 } from "@/lib/data-store";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import {
   EVENT_SUPPORT_KEY,
@@ -41,6 +42,8 @@ interface Props {
 
 export function AddEventSupportModal({ open, eventId, onClose }: Props) {
   const qc = useQueryClient();
+  const { user, isReady } = useAuthReady();
+  const signedIn = isReady && !!user;
   const [kind, setKind] = useState<SupportPersonKind>("staff");
   const [personId, setPersonId] = useState("");
   const [outMode, setOutMode] = useState<"bus" | "self">("bus");
@@ -52,12 +55,12 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
   const staffQ = useQuery({
     queryKey: ["staff-registry-support"],
     queryFn: listStaffRegistry,
-    enabled: open,
+    enabled: open && signedIn,
   });
   const carerQ = useQuery({
     queryKey: ["carers-registry-support"],
     queryFn: listCarersRegistry,
-    enabled: open,
+    enabled: open && signedIn,
   });
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);

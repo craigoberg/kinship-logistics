@@ -67,6 +67,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Date (calendar)** | Defined | `DatePicker` | Any operator-facing date | Display `dd-Mmm-yy`; storage `YYYY-MM-DD`. Default caption = label + ‹ › |
 | **Date of birth** | Defined | `DatePicker` + `getDobDatePickerProps()` | Guest DOB and any DOB field | Month + year dropdowns (`captionLayout="dropdown"`), years newest-first, last 120 years through today, future days disabled. Do not chevron-step decades. |
 | **Close event guest archive** | Defined | `archiveGuestParticipantsForEvent` via `promoteEventStatus` | Event Manage → Closed | Silent; toast archived/skipped counts; skip guests still on Open/Confirmed |
+| **Archive leftover event guest** | **Defined** | Care profile `AlertDialog` + `archiveGuestFromCareProfile` | Participants directory → open guest → **Archive guest** | Soft-hide (`archived_at`). Does not delete. Does not touch `carers_registry`. Warn if still on Open/Confirmed. Reuse via Add guest. |
 | **Day Centre visitor → event guest** | Defined | `PromoteVisitorToEventDialog` + `AddGuestBookingModal` prefill | Visitor card **Add to event…** | Command event pick (Planning/Confirmed/Open, end ≥ today) → Add guest with name/host/note seeded; DOB/emergency/allergies still required |
 | **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` + driver `PinEntryDialog` | Manifest active-stop header (`WalkOnStopIconButton`, same chrome as pickup Cancel/Absent) and Event Deliver Check-In list footer (`WalkOnFloorButton` compact outline) | Guest / client / carer pick-lists or new; minimal fields; canned YELLOW office issue. Not a floor CTA. Not on each roll row. Not Day Centre visitors. BL-122. |
 | **Day Centre Active Day tabs** | Defined | `ActiveDayPanel` Tabs | `/day` active session | Check-In · Activities · Check-Out · Issues — same IA as Event Deliver; `site_day_*` data |
@@ -127,7 +128,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. **Checked-in = hi-vis** solid `bg-success text-success-foreground` (§4.5) — not pale emerald tint. |
 | **Event Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Event Deliver Check-In | Was BottomSheet-on-Check-In (BL-013). Picker still Bus (Rx) vs Self; finalize is the wide row. |
 | **Day Centre Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Day Centre attendance roll | Was BottomSheet-on-Check-In. Day Centre chips use Admin displayName (Run 1); Event uses R1/R2. |
-| **Checkbox lists (office)** | Deferred (BL-002) | shadcn `Checkbox` matrix | Menu Access | Keep disabled placeholder until RBAC; do not invent a new matrix UI in feature PRs |
+| **Checkbox lists (office)** | **Defined** | shadcn `Checkbox` matrix | Admin → Menu Access | Live ticks save immediately (`role_menu_access`). Manager column locked on. Phase 2 None/View/Update is a later control — do not invent it in feature PRs. |
 | **Toggle / switch** | **Defined (Admin/office)** | `Switch` | Admin booleans (fleet flags, preserve login, bool params) | Field-route operational yes/no may still use `MobileOptionButton` / `Checkbox` — ask if unclear |
 | **Admin colour picker** | **Defined** | Native `<input type="color">` | Lookup badge colours | Keep native until a shared palette ships |
 | **Admin CMS rich text editor** | **Defined** | `CmsRichTextEditor` (`cms-rich-text-editor.tsx`) | Admin → Public website page body | Visual + HTML tabs. Toolbar: undo/redo, heading, bold/italic/underline, lists, link, image, document, YouTube, table, media library. Insert dialogs: `CharacterCountedInput` + URL outline + missing-fields list. Library is `cms_media` URLs (no upload). Sanitize via `sanitizeCmsHtml` on save and public render. Uploads = BL-119. |
@@ -301,7 +302,7 @@ These patterns are **banned app-wide** — do not use in any new code, and remov
 |---------|----------|------------------|
 | Office `Select` | Accept shadcn `Select` Admin-wide for filters/enums | Pattern registry |
 | Admin `Switch` | Accept for fleet flags, preserve-login, boolean system params | Pattern registry |
-| Menu Access checkbox matrix | Leave as BL-002 placeholder (disabled Checkbox grid) | Do not redesign now |
+| Menu Access checkbox matrix | Live shadcn Checkbox grid; Manager column locked | Phase 2 read/write control TBD |
 | Page / panel Save | Inline primary on card/row is OK | Tour roll, addresses, MYOB, centre-hours |
 | Sheet footers | Match dialog §4.2 — Close left + Save right | `fleet-asset-form-sheet`, venue form sheet |
 | Lookup colour | Keep native `type="color"` | Lookups |
@@ -533,6 +534,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-08 | Menu Access checkbox matrix | Live office Checkbox grid; Manager column locked. Saves to `role_menu_access`. Phase 2 None/View/Update TBD. |
+| 2026-09-08 | Archive leftover event guest | Care profile AlertDialog on guests only. Hides from Participants; carer row unchanged. |
 | 2026-09-03 | No one left behind | Bus boarding includes staff / volunteer / carer on Day Centre, trip IN/HOME, and multi-day hops. Stay-behind = not travelling (same as a participant). Morning/evening rolls stay participants only. |
 | 2026-09-03 | Return boarding roll | Include staff / volunteer / carer drop-off stops, not only `toParticipantId`. Head count is everyone on the bus. |
 | 2026-09-03 | Afternoon Manifest after checkout | Check-Out via bus keeps the person on that afternoon Manifest. Absent / family / independent still come off. |

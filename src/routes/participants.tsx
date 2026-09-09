@@ -18,6 +18,7 @@ import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-di
 import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
 import { type OnboardingCase } from "@/lib/api/onboarding";
 import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import type { Participant } from "@/lib/data-store";
@@ -75,6 +76,7 @@ function ParticipantsPage() {
   const [transportFilter, setTransportFilter] = useState("all");
   const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
 
@@ -84,17 +86,27 @@ function ParticipantsPage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Participants directory</h2>
           <p className="text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
-            {" "}
-            Full intake pack (print / sign / file):{" "}
-            <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
-              Hub → Onboarding
-            </Link>
-            . Bus run order for everyone is in{" "}
-            <Link to="/run-planning" className="underline underline-offset-2">
-              Run Planning
-            </Link>
-            .
+            {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
+            {canOpen("onboarding") ? (
+              <>
+                {" "}
+                Full intake pack (print / sign / file):{" "}
+                <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+                  Hub → Onboarding
+                </Link>
+                .
+              </>
+            ) : null}
+            {canOpen("run_planning") ? (
+              <>
+                {" "}
+                Bus run order for everyone is in{" "}
+                <Link to="/run-planning" className="underline underline-offset-2">
+                  Run Planning
+                </Link>
+                .
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">

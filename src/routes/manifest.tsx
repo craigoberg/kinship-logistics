@@ -1703,6 +1703,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       const tapped = new Set(
         tappedRaw ? (JSON.parse(tappedRaw) as string[]) : [],
       );
+      // Empty tap list is normal after All Aboard on older builds, and after
+      // a hard refresh. Do not treat that as "someone new" or the roll comes
+      // back when the first drop-off is confirmed (legs refetch).
+      if (tapped.size === 0) return;
       const missing = returnPassengers.some((p) => !tapped.has(p.id));
       if (missing) {
         localStorage.removeItem(boardingKey);
@@ -1715,6 +1719,22 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
   const handleAllBoarded = () => {
     localStorage.setItem(boardingKey, "true");
+    const tapKey = `return_boarding_${trip.id}`;
+    try {
+      const existing = localStorage.getItem(tapKey);
+      const tapped = existing ? (JSON.parse(existing) as string[]) : [];
+      if (tapped.length === 0) {
+        localStorage.setItem(
+          tapKey,
+          JSON.stringify(returnPassengers.map((p) => p.id)),
+        );
+      }
+    } catch {
+      localStorage.setItem(
+        tapKey,
+        JSON.stringify(returnPassengers.map((p) => p.id)),
+      );
+    }
     setBoardingConfirmed(true);
   };
   // Empty legs (failed hop seed) must not look "complete".
@@ -2218,7 +2238,6 @@ function ReturnBoardingRoll({
     } catch (_) { /* best-effort */ } finally {
       setSaving(false);
     }
-    localStorage.removeItem(boardingKey);
     onAllBoarded();
   };
 

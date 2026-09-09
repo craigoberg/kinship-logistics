@@ -75,7 +75,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
   const available = useMemo(
     () =>
       [...participants]
-        .filter((p) => !booked.has(p.id))
+        .filter((p) => p.participantKind !== "guest" && !booked.has(p.id))
         .sort((a, b) => a.fullName.localeCompare(b.fullName)),
     [participants, booked],
   );

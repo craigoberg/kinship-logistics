@@ -9,6 +9,7 @@ import {
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 export type GuestParticipant = {
   id: string;
@@ -249,15 +250,67 @@ export async function reactivateGuestParticipant(
   if (error) throw error;
 }
 
+export async function listLiveGuestEventTitles(
+  participantId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select("booking_status, event_manifest!inner(title, status)")
+    .eq("participant_id", participantId)
+    .eq("is_guest_booking", true)
+    .neq("booking_status", "Cancelled");
+  if (error) {
+    if (isSchemaMismatchError(error)) return [];
+    throw error;
+  }
+  const titles: string[] = [];
+  for (const raw of data ?? []) {
+    const r = raw as {
+      event_manifest?: { title?: string; status?: string } | null;
+    };
+    const status = r.event_manifest?.status ?? "";
+    if (status === "Open" || status === "Confirmed") {
+      const title = (r.event_manifest?.title ?? "Event").trim() || "Event";
+      titles.push(`${title} (${status})`);
+    }
+  }
+  return titles;
+}
+
+/** Soft-hide an event guest. Returns false if already archived or not a guest. */
 export async function archiveGuestParticipant(
   participantId: string,
-): Promise<void> {
-  const { error } = await supabase
+): Promise<boolean> {
+  const { data, error } = await supabase
     .from("participants")
-    .update({ archived_at: new Date().toISOString() })
+    .update({ archived_at: operationalNowIso() })
     .eq("id", participantId)
-    .eq("participant_kind", "guest");
+    .eq("participant_kind", "guest")
+    .is("archived_at", null)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  return !!data;
+}
+
+/** Care-profile / directory archive — ledger receipt + friendly error if not a guest. */
+export async function archiveGuestFromCareProfile(
+  participantId: string,
+): Promise<void> {
+  const archived = await archiveGuestParticipant(participantId);
+  if (!archived) {
+    throw new Error("Only an active event guest can be archived from this screen.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "EVENT_GUEST_PARTICIPANT_ARCHIVED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: { participant_id: participantId, source: "care_profile" },
+  });
 }
 
 export type ArchiveGuestsForEventResult = {
@@ -330,7 +383,8 @@ export async function archiveGuestParticipantsForEvent(
       skippedIds.push(participantId);
       continue;
     }
-    await archiveGuestParticipant(participantId);
+    const didArchive = await archiveGuestParticipant(participantId);
+    if (!didArchive) continue;
     archivedIds.push(participantId);
     await writeToLedger({
       staff_id: staffId,

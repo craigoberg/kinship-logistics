@@ -29,17 +29,22 @@ import {
 import {
   clientRosterPerson,
   parseRoutePersonKey,
+  rosterParticipantIds,
   rosterPersonRefs,
   supportPersonKey,
   supportRosterPerson,
   type TransportRosterPerson,
 } from "@/lib/support-person";
 
+export type ParticipantKind = "client" | "guest";
+
 export interface Participant {
   id: string;
   firstName: string;
   lastName: string;
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
+  /** `guest` = event bring-a-friend; not a directory client. */
+  participantKind: ParticipantKind;
   ndisNumber: string;
   streetAddress: string | null;
   /** Coordinator-managed permanent pickup address, used by the manifest engine
@@ -194,6 +199,7 @@ interface ParticipantRow {
   id: string;
   first_name: string;
   last_name: string;
+  participant_kind?: string | null;
   ndis_number: string;
   street_address: string | null;
   regular_pickup_address: string | null;
@@ -219,6 +225,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     firstName: r.first_name ?? "",
     lastName: r.last_name ?? "",
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+    participantKind: r.participant_kind === "guest" ? "guest" : "client",
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
     regularPickupAddress: r.regular_pickup_address ?? null,
@@ -800,6 +807,8 @@ export interface ActiveUserProfile {
   fullName: string;
   role: UserRole;
   staffRole: string | null;
+  /** SYSTEM ACCESS LEVEL (`staff_registry.personnel_type`) — Menu Access matrix. */
+  accessRole?: string | null;
   vehicleId?: string | null;
   vehicleName?: string | null;
   /** Day-login auth.users.id when linked — used to resolve reported_by UUIDs. */
@@ -923,19 +932,26 @@ export async function loginWithPin(
     fullName: record.full_name || "Staff Member",
     role,
     staffRole: record.role,
+    accessRole: accessKey || null,
     vehicleId,
     vehicleName,
     authUserId,
   };
 
   if (typeof localStorage !== "undefined") {
-    localStorage.setItem(USER_ROLE_KEY, role);
-    localStorage.setItem(WORKFLOW_MODE_KEY, role);
     localStorage.setItem(STAFF_KEY, record.id);
-    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+    persistActiveUserProfile(profile);
   }
 
   return profile;
+}
+
+/** Write the floor profile used by Menu Access and attribution. */
+export function persistActiveUserProfile(profile: ActiveUserProfile): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(USER_ROLE_KEY, profile.role);
+  localStorage.setItem(WORKFLOW_MODE_KEY, profile.role);
+  localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
 }
 
 export function getActiveUserRole(): UserRole | null {
@@ -1067,7 +1083,14 @@ function rowToCarer(r: CarerRow): Carer {
   };
 }
 
+/** carers_registry is authenticated-only (BL-117). Skip the REST call with no JWT. */
+async function hasDayLoginSession(): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return !!data.session;
+}
+
 export async function listCarersRegistry(): Promise<Carer[]> {
+  if (!(await hasDayLoginSession())) return [];
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -1077,6 +1100,7 @@ export async function listCarersRegistry(): Promise<Carer[]> {
 }
 
 export async function listCarersForParticipant(participantId: string): Promise<Carer[]> {
+  if (!(await hasDayLoginSession())) return [];
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -1088,6 +1112,7 @@ export async function listCarersForParticipant(participantId: string): Promise<C
 }
 
 export async function getPrimaryCarer(participantId: string): Promise<Carer | null> {
+  if (!(await hasDayLoginSession())) return null;
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -4931,7 +4956,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   //    • Legacy events: any active participant_medication_schedules row (unchanged).
   //    • Return runs: always false (set below on seeds).
   //    Day Centre runs use startDayCentreRun + schedules — not this path.
-  const participantIds = roster.map((p) => p.id);
+  const participantIds = rosterParticipantIds(roster);
   const medSet = new Set<string>();
   const eventKind = eventMeta.event_kind ?? "legacy";
   const isOutingEvent =
@@ -6197,8 +6222,8 @@ export async function startDayCentreRun(
     roster.sort((a, b) => (routeMap.get(a.id) ?? 9999) - (routeMap.get(b.id) ?? 9999));
   }
 
-  // 2. Medication flags.
-  const participantIds = roster.map((p) => p.id);
+  // 2. Medication flags — participants only (staff / carer keys are not UUIDs).
+  const participantIds = rosterParticipantIds(roster);
   const medSet = new Set<string>();
   if (participantIds.length) {
     const { data: medRows } = await supabase
@@ -6851,6 +6876,18 @@ export async function listCheckpointsForAsset(
 
 export type ClearanceIssueSeverity = "green" | "yellow" | "red";
 
+/** Local walk-around sentinel — never persist; CHECK allows green|yellow|red|NULL only. */
+function persistClearanceItemSeverity(
+  value: string | null | undefined,
+): ClearanceIssueSeverity | null {
+  if (value == null) return null;
+  const n = value.trim().toLowerCase();
+  if (!n) return null;
+  if (n === "red-verbal-cleared" || n === "red_verbal_cleared") return "red";
+  if (n === "green" || n === "yellow" || n === "red") return n;
+  return null;
+}
+
 export interface AssetClearanceItem {
   id: string;
   clearanceId: string;
@@ -6967,7 +7004,7 @@ export async function insertAssetClearanceWithItems(input: {
     checkpoint_id: i.checkpointId,
     is_passed: i.passed,
     notes: i.notes ?? null,
-    severity: i.severity ?? null,
+    severity: persistClearanceItemSeverity(i.severity),
     workaround_text: i.workaroundText ?? null,
   }));
   const { data, error } = await supabase

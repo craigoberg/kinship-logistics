@@ -50,7 +50,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "Menu Access",
-      body: "Role × menu matrix (Manager-only). Checkboxes are placeholders until BL-002 wires role_menu_access. Help soft-filters by role today.",
+      body: "Role × menu matrix (Manager-only). Ticks save to role_menu_access and hide menus the role cannot open. Manager is always granted every menu. Read-only and per-person scope come later.",
     },
     {
       heading: "Backup & Restore",

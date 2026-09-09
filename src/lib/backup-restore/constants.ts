@@ -26,7 +26,7 @@ export const SERVICE_ROLE_ONLY_FUNCTIONS = [
 ] as const;
 
 /** Tables whose rows must never be overwritten when restoring into DEV. */
-export const AUTH_PROTECTED_TABLES = ["staff_registry"] as const;
+export const AUTH_PROTECTED_TABLES = ["staff_registry", "role_menu_access"] as const;
 
 /**
  * Environment-specific config — preserved alongside login credentials when
@@ -49,7 +49,6 @@ export const PRESERVE_LOCAL_TABLES = [
  * (auth.users, sessions, etc.) are outside public.list_backup_tables() scope.
  */
 export const FUTURE_AUTH_PROTECTED_TABLES = [
-  "role_menu_access",
   "user_credentials",
   "staff_auth_links",
 ] as const;

@@ -81,6 +81,15 @@ export function supportRosterPerson(input: {
   };
 }
 
+/** Client UUIDs only — never `s:` / `c:` route keys (those 400 a UUID column). */
+export function rosterParticipantIds(roster: TransportRosterPerson[]): string[] {
+  const ids = new Set<string>();
+  for (const p of roster) {
+    if (p.personKind === "participant" && p.participantId) ids.add(p.participantId);
+  }
+  return [...ids];
+}
+
 export function rosterPersonRefs(entry: TransportRosterPerson | null | undefined): {
   participant_id: string | null;
   staff_id: string | null;

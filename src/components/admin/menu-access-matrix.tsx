@@ -1,5 +1,6 @@
-import { useEffect, useState } from "react";
 import { Lock, ShieldCheck } from "lucide-react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
 import {
   Table,
   TableBody,
@@ -10,58 +11,69 @@ import {
 } from "@/components/ui/table";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
-import { isActiveUserManager } from "@/lib/data-store";
-
-/**
- * Menu Access Control matrix — placeholder UI.
- *
- * Lists every top-level menu/screen against the six operational roles. Permission
- * cells are intentionally left as inert checkboxes; the wiring to a real
- * `role_menu_access` table will be added once the role/permission model is
- * finalised. Manager-only by gate.
- */
-
-import { ACCESS_ROLES } from "@/lib/access-roles";
-
-const ROLES = ACCESS_ROLES;
-
-
-const MENUS: { key: string; label: string; description: string }[] = [
-  { key: "dashboard", label: "Operations Dashboard", description: "Live exception hub and escalation pool" },
-  { key: "day", label: "Day Centre", description: "Site-day workflow, anomalies, handshakes" },
-  { key: "manifest", label: "Bus Manifest", description: "Driver walkaround, run sheet, dual-PIN" },
-  { key: "transport", label: "Transport", description: "Ad-hoc run requests and mileage logging" },
-  { key: "participants", label: "Participants", description: "Care profiles, IDDSI, medications" },
-  { key: "staff", label: "Personnel Directory", description: "Staff, carers, certifications" },
-  { key: "run_planning", label: "Run Planning", description: "All-people Day Centre IN/OUT board and default bus-run order" },
-  { key: "events", label: "Event Manage", description: "Office setup — roster, milestones, finance, Trip Report" },
-  { key: "governance", label: "Governance Hub", description: "Unified issues, incident ledger, NDIS" },
-  { key: "rights_voice", label: "Rights & voice", description: "Complaints / enquiry / feedback forms → Hub — BL-112" },
-  { key: "admin", label: "Admin Configuration", description: "Lookups, public website, parameters, access matrix" },
-  { key: "onboarding", label: "Onboarding (Hub tab)", description: "Client / staff / volunteer / accompanying packs — BL-065" },
-  { key: "public_website", label: "Public website (Admin tab)", description: "yada.org.au CMS + forms — BL-110/111" },
-  { key: "sync", label: "Sync Queue", description: "Offline reconciliation and replay" },
-  { key: "help", label: "Help", description: "Searchable how-to guides (topic roles soft-filtered until BL-002)" },
-];
+import { ACCESS_ROLES, type AccessRoleKey } from "@/lib/access-roles";
+import {
+  MENU_CATALOGUE,
+  isOpenAccessLevel,
+  lookupAccessLevel,
+  type AppMenuKey,
+} from "@/lib/menu-access";
+import { upsertRoleMenuAccess } from "@/lib/api/role-menu-access";
+import {
+  ROLE_MENU_ACCESS_QUERY_KEY,
+  useMenuAccess,
+} from "@/hooks/use-menu-access";
 
 export function MenuAccessMatrix() {
-  const [isManager, setIsManager] = useState(false);
+  const queryClient = useQueryClient();
+  const { canEditMatrix, rows, tableUnavailable, isLoading } = useMenuAccess();
 
-  useEffect(() => {
-    setIsManager(isActiveUserManager());
-  }, []);
+  const save = useMutation({
+    mutationFn: upsertRoleMenuAccess,
+    onSuccess: async () => {
+      await queryClient.invalidateQueries({ queryKey: ROLE_MENU_ACCESS_QUERY_KEY });
+    },
+    onError: (err) => {
+      toast.error("Could not save menu access", {
+        description: err instanceof Error ? err.message : "Try again.",
+      });
+    },
+  });
 
-  if (!isManager) {
+  if (!canEditMatrix) {
     return (
       <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
         <Lock className="mx-auto mb-2 h-6 w-6 text-muted-foreground" />
         <p className="text-sm font-medium">Manager-only area</p>
         <p className="mt-1 text-xs text-muted-foreground">
-          The Menu Access Control matrix is restricted to users with the Manager role.
+          Only a Manager (SYSTEM ACCESS LEVEL) can change the Menu Access matrix.
         </p>
       </div>
     );
   }
+
+  if (tableUnavailable) {
+    return (
+      <div className="rounded-lg border border-dashed bg-muted/30 p-8 text-center">
+        <p className="text-sm font-medium">Menu Access table is not on this database yet</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Run <code>docs/sql/2026-09-08_role_menu_access.sql</code> in the SQL Editor, then
+          hard-refresh.
+        </p>
+      </div>
+    );
+  }
+
+  const grants = rows ?? [];
+
+  const onToggle = (roleKey: AccessRoleKey, menuKey: AppMenuKey, next: boolean) => {
+    if (roleKey === "manager") return;
+    save.mutate({
+      roleKey,
+      menuKey,
+      accessLevel: next ? "write" : "none",
+    });
+  };
 
   return (
     <div className="space-y-4">
@@ -69,9 +81,8 @@ export function MenuAccessMatrix() {
         <div>
           <h2 className="text-lg font-semibold tracking-tight">Menu Access Control</h2>
           <p className="text-sm text-muted-foreground">
-            Map each operational role to the menus they can reach. Permissions
-            are placeholders for now — flesh out per role once the access model
-            is signed off.
+            Tick a cell to let that SYSTEM ACCESS LEVEL open the menu. Manager is
+            always on (failsafe). Changes save as you tap.
           </p>
         </div>
         <Badge variant="secondary" className="gap-1">
@@ -83,30 +94,41 @@ export function MenuAccessMatrix() {
         <Table>
           <TableHeader>
             <TableRow>
-              <TableHead className="min-w-[220px] sticky left-0 bg-card">Menu / Screen</TableHead>
-              {ROLES.map((role) => (
-                <TableHead key={role.key} className="text-center whitespace-nowrap">
+              <TableHead className="sticky left-0 min-w-[220px] bg-card">
+                Menu / Screen
+              </TableHead>
+              {ACCESS_ROLES.map((role) => (
+                <TableHead key={role.key} className="whitespace-nowrap text-center">
                   {role.label}
                 </TableHead>
               ))}
             </TableRow>
           </TableHeader>
           <TableBody>
-            {MENUS.map((menu) => (
+            {MENU_CATALOGUE.map((menu) => (
               <TableRow key={menu.key}>
                 <TableCell className="sticky left-0 bg-card align-top">
                   <div className="font-medium">{menu.label}</div>
                   <div className="text-xs text-muted-foreground">{menu.description}</div>
                 </TableCell>
-                {ROLES.map((role) => (
-                  <TableCell key={role.key} className="text-center">
-                    <Checkbox
-                      aria-label={`${role.label} can access ${menu.label}`}
-                      defaultChecked={role.key === "manager"}
-                      disabled
-                    />
-                  </TableCell>
-                ))}
+                {ACCESS_ROLES.map((role) => {
+                  const locked = role.key === "manager";
+                  const checked =
+                    locked ||
+                    isOpenAccessLevel(lookupAccessLevel(grants, role.key, menu.key));
+                  return (
+                    <TableCell key={role.key} className="text-center">
+                      <Checkbox
+                        aria-label={`${role.label} can access ${menu.label}`}
+                        checked={checked}
+                        disabled={locked || isLoading || save.isPending}
+                        onCheckedChange={(v) =>
+                          onToggle(role.key, menu.key, v === true)
+                        }
+                      />
+                    </TableCell>
+                  );
+                })}
               </TableRow>
             ))}
           </TableBody>
@@ -114,8 +136,8 @@ export function MenuAccessMatrix() {
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Editing is disabled until the permission schema is finalised. Reach out
-        to the architect to wire this matrix to <code>role_menu_access</code>.
+        Phase 1 is open / hide only. Read-only and per-person scope (e.g. a carer
+        seeing one client) come later — they are not extra ticks on this grid.
       </p>
     </div>
   );

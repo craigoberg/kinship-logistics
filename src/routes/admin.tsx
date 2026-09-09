@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import {
   Tabs,
   TabsContent,
@@ -32,6 +33,15 @@ type AdminTab =
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
+  const { canOpen, canEditMatrix } = useMenuAccess();
+  const showWebsite = canOpen("public_website");
+  const showAccess = canEditMatrix;
+
+  useEffect(() => {
+    if (tab === "website" && !showWebsite) setTab("lookups");
+    if (tab === "access" && !showAccess) setTab("lookups");
+  }, [tab, showWebsite, showAccess]);
+
   return (
     <div className="mx-auto w-full max-w-7xl space-y-6 p-4 md:p-6">
       <header className="space-y-1">
@@ -49,9 +59,13 @@ function AdminPage() {
           <TabsTrigger value="fleet">Fleet Register</TabsTrigger>
           <TabsTrigger value="venues">Venues</TabsTrigger>
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
-          <TabsTrigger value="website">Public website</TabsTrigger>
+          {showWebsite ? (
+            <TabsTrigger value="website">Public website</TabsTrigger>
+          ) : null}
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
-          <TabsTrigger value="access">Menu Access</TabsTrigger>
+          {showAccess ? (
+            <TabsTrigger value="access">Menu Access</TabsTrigger>
+          ) : null}
           <TabsTrigger value="backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
@@ -66,15 +80,19 @@ function AdminPage() {
         <TabsContent value="vendors">
           <VendorsWorkspace />
         </TabsContent>
-        <TabsContent value="website">
-          <PublicWebsiteWorkspace />
-        </TabsContent>
+        {showWebsite ? (
+          <TabsContent value="website">
+            <PublicWebsiteWorkspace />
+          </TabsContent>
+        ) : null}
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
         </TabsContent>
-        <TabsContent value="access">
-          <MenuAccessMatrix />
-        </TabsContent>
+        {showAccess ? (
+          <TabsContent value="access">
+            <MenuAccessMatrix />
+          </TabsContent>
+        ) : null}
         <TabsContent value="backup">
           <BackupRestoreWorkspace />
         </TabsContent>

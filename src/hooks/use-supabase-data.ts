@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { getOperationalTodayIso, useOperationalTodayIso } from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
 import {
@@ -17,6 +18,7 @@ import {
   type FleetAssetPatch,
 } from "@/lib/api/fleet";
 import { createVendor, listVendors, type Vendor } from "@/lib/api/vendors";
+import { archiveGuestFromCareProfile } from "@/lib/api/event-guest";
 import { listTransportAssets } from "@/lib/data-store";
 import { busRunEffectiveColor } from "@/lib/bus-run-palette";
 
@@ -483,10 +485,12 @@ export function useGiveDose() {
 
 
 export function useStaffRegistry() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["staff_registry"],
     queryFn: listStaffRegistry,
     staleTime: 60_000,
+    enabled: isReady && !!user,
   });
 }
 
@@ -512,10 +516,14 @@ export function useUpdateStaffMember() {
 }
 
 export function useCarersRegistry() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["carers_registry"],
     queryFn: listCarersRegistry,
     staleTime: 30_000,
+    // carers_registry is authenticated-only after day-login RLS. Same first-paint
+    // gate as useSystemParameters — otherwise Staff / care profile 401s.
+    enabled: isReady && !!user,
   });
 }
 
@@ -543,19 +551,21 @@ export function useUpdateCarer() {
 }
 
 export function useCarersForParticipant(participantId: string | null | undefined) {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["carers_for_participant", participantId],
     queryFn: () => listCarersForParticipant(participantId as string),
-    enabled: !!participantId,
+    enabled: isReady && !!user && !!participantId,
     staleTime: 30_000,
   });
 }
 
 export function usePrimaryCarer(participantId: string | null | undefined) {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["primary_carer", participantId],
     queryFn: () => getPrimaryCarer(participantId as string),
-    enabled: !!participantId,
+    enabled: isReady && !!user && !!participantId,
     staleTime: 30_000,
   });
 }
@@ -627,10 +637,12 @@ export function useUnlinkCarer() {
 
 
 export function useParticipants() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["participants"],
     queryFn: listParticipants,
     staleTime: 30_000,
+    enabled: isReady && !!user,
   });
 }
 
@@ -660,6 +672,18 @@ export function useInsertParticipant() {
     mutationFn: (input: NewParticipant) => insertParticipant(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
+    },
+  });
+}
+
+export function useArchiveGuestParticipant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (participantId: string) => archiveGuestFromCareProfile(participantId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["participants"] });
+      qc.invalidateQueries({ queryKey: ["guest-participants"] });
       invalidateTransportCaches(qc);
     },
   });

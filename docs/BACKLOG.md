@@ -24,7 +24,7 @@ Items that need a product/ops decision **before** implementation.
 | ID | Topic | Question / notes | Status |
 |----|--------|------------------|--------|
 | BL-001 | **Trip expense vendors** | **Done 2026-07-11.** Simple `vendors` registry (Admin → Vendors). Log expense uses type-ahead picker; unknown names prompt to add to list. Vendor name stored on ledger row for MYOB alignment — no in-app AP tracking. SQL: `docs/sql/2026-07-11_vendors_registry.sql`. | **done** |
-| BL-002 | **Security RBAC mode** | **Menus still last.** **2026-08-20 data-plane slice (BL-117):** operational tables require day-login JWT; anon only for published CMS + `submit_public_form`. **2026-08-22 idle PIN lock built:** `auth_idle_lock_minutes` (default 15; 0 = off); same staff `PinReauthDialog`; exempt active Manifest. **Remaining:** menu/`role_menu_access`; Hub/Admin gates; trip leader vs manager. **Do not** re-open anon ALL on PII tables. Target two-tier: (1) **Day session** — email + password (**built**). (2) **Screen lock** — **built.** (3) **Action step-up** — existing `PinEntryDialog`. **Build constraints:** GUARDRAILS §2.4 + `.cursor/rules/rbac-forward-compat.mdc`. | **deferred** (menus last; RLS slice → BL-117; idle lock shipped) |
+| BL-002 | **Security RBAC mode** | **Phase 1 menus (2026-09-08):** Admin → Menu Access writes `role_menu_access`; sidebar/dock/route `MenuGate` hide+block by `personnel_type`. Manager failsafe (always all menus). SQL `docs/sql/2026-09-08_role_menu_access.sql`. **Already built:** day-login JWT (BL-117); idle PIN lock (`auth_idle_lock_minutes`). **Phase 2 (later):** `access_level = read` — open screen, no writes. **Phase 3 (later):** relationship scope (e.g. carer Mary sees Fred only) — not another matrix tick; needs login + RLS. **Still later:** Hub/Admin fine-gates; trip leader vs manager. **Do not** re-open anon ALL on PII tables. Session: (1) Day login **built** (2) Screen lock **built** (3) Action PIN **built**. **Build constraints:** GUARDRAILS §2.4 + `.cursor/rules/rbac-forward-compat.mdc`. | **ready** (Phase 1 menus; Phase 2/3 not started) |
 | BL-003 | **Event-day RED verbal auth** | **Done 2026-07-11 (revised).** Shared `EventDayVerbalAnomalyFlow` wires `LogAnomalyModal` → `VerbalConsultationDialog` (manager by name, operator PIN only) → `[VERBAL WORKAROUND]` issue on trip days and Manage Event **Log Issue**. Manager confirms in Hub later. | **done** |
 
 ---
@@ -49,7 +49,7 @@ Cross-cutting setup — not feature-complete until provider accounts, credential
 | BL-123 | **Day Centre End of Day Report** | **Built 2026-08-26.** `/day` report below the live session: calendar (`DatePicker`) defaults to operational today (SIM); historical days read-only. Arrivals (who/how/when), meal dispositions (Served / Modified / Own order / Declined / N/A), checkout / went home, visitors, RYGE issues. Assembler `buildDayCentreEndOfDayReport`. Not the BL-078 PIN handover form. | **done** |
 | BL-124 | **Floor Absent off afternoon Manifest + late arrival / walk-in home** | **Built 2026-08-28.** Check-In **Mark Absent for Today** uses the same date-scoped skip as Office Off today (morning + afternoon). Late arrival = tap the absent row (method chip, default Self). **+ Add Attendee** already existed for unexpected registered clients; now requires how they go home. Visitors/trades stay **+ Add visitor**. SQL `docs/sql/2026-08-28_day_centre_floor_absence_home_transport.sql`. | **ready** |
 
-**RBAC:** Menu/role gates **BL-002** (still last). Operational data-plane **BL-117** (day-login JWT). Follow GUARDRAILS §2.4 and `.cursor/rules/rbac-forward-compat.mdc`.
+**RBAC:** Menu/role gates **BL-002** Phase 1 (matrix + nav/route). Operational data-plane **BL-117** (day-login JWT). Follow GUARDRAILS §2.4 and `.cursor/rules/rbac-forward-compat.mdc`.
 
 | ID | Item | Notes | Status |
 |----|------|-------|--------|
@@ -225,6 +225,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 
 | Date | Change |
 |------|--------|
+| 2026-09-08 | BL-002 Phase 1 — Menu Access matrix live (`role_menu_access`); nav + `MenuGate` by SYSTEM ACCESS LEVEL; Manager failsafe. Phase 2 read-only + Phase 3 carer-scope later. SQL `2026-09-08_role_menu_access.sql` |
 | 2026-08-29 | BL-125 support floor parity — no-show/defer/PIN absent/late arrival/Off today skip + event Group status & morning/evening rolls; SQL `2026-08-29_support_floor_parity.sql` |
 | 2026-08-29 | BL-125 Run Planning IA — defaults stay on Staff/Participants; all-people board + run order on `/run-planning`; trip roster always includes support people |
 | 2026-08-29 | BL-125 locked + built — staff / volunteer / carer day & trip presence + own pickup/drop-off; SQL `2026-08-29_support_people_attendance.sql`; BL-081 waits on live counts |

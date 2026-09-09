@@ -32,6 +32,7 @@ import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { cn } from "@/lib/utils";
 import { listCarersForParticipant, type Carer } from "@/lib/data-store";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import { listGuestParticipants } from "@/lib/api/event-guest";
 import {
   addEventWalkOn,
@@ -185,6 +186,8 @@ export function WalkOnPersonModal({
   busRunCode = null,
 }: WalkOnPersonModalProps) {
   const qc = useQueryClient();
+  const { user, isReady } = useAuthReady();
+  const signedIn = isReady && !!user;
   const [kind, setKind] = useState<WalkOnKind>("guest");
   const [hostId, setHostId] = useState<string | null>(hostParticipantId);
   const [guestMode, setGuestMode] = useState<"reuse" | "new">("reuse");
@@ -223,7 +226,7 @@ export function WalkOnPersonModal({
   const carersQ = useQuery({
     queryKey: ["walk-on-carers", hostId],
     queryFn: () => listCarersForParticipant(hostId!),
-    enabled: open && kind === "carer" && !!hostId,
+    enabled: signedIn && open && kind === "carer" && !!hostId,
     staleTime: 15_000,
   });
 
