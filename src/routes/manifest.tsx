@@ -1717,6 +1717,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     }
   }, [isReturnRun, returnPassengers, trip.id, boardingKey]);
 
+  const preDepartureOpen =
+    (isReturnRun && !boardingConfirmed && returnPassengers.length > 0) ||
+    (isVenueHop && !hopBoardingReady && activeLeg?.status === "pending");
+
   const handleAllBoarded = () => {
     localStorage.setItem(boardingKey, "true");
     const tapKey = `return_boarding_${trip.id}`;
@@ -1824,8 +1828,9 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
   const activeRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
+    if (preDepartureOpen) return;
     if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [activeLeg?.id]);
+  }, [activeLeg?.id, preDepartureOpen]);
 
   const prevLegIdsRef = useRef<string[]>(legs.map((l) => l.id));
   useEffect(() => {
@@ -1911,7 +1916,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
               {isVenueHop ? " · Venue hop" : ""}
             </div>
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {formatDate(trip.tripDate)} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
+              {formatDate(trip.tripDate)}
+              {preDepartureOpen
+                ? " · Pre-departure"
+                : ` · Leg ${Math.min(completedCount + 1, legs.length)} of ${legs.length}`}
             </div>
           </div>
           <div className="text-right">
@@ -1931,7 +1939,6 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           "overscroll-y-contain",
         )}
       >
-        {/* Return run: boarding roll gate before first leg departs */}
         {isReturnRun && !boardingConfirmed && returnPassengers.length > 0 && (
           <ReturnBoardingRoll
             tripId={trip.id}
@@ -1940,17 +1947,17 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           />
         )}
 
-        {isVenueHop && activeLeg && activeLeg.status === "pending" && (
+        {isVenueHop && !hopBoardingReady && activeLeg?.status === "pending" && (
           <HopBoardingPanel tripId={trip.id} originLabel={activeLeg.fromLabel} />
         )}
 
-        {completedLegs.map((l) => (
+        {!preDepartureOpen && completedLegs.map((l) => (
           <LegRow key={l.id} leg={l} locked />
         ))}
 
-        {activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
+        {!preDepartureOpen && activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
 
-        {activeIsPendingPickup && pendingPickups.length > 0 && (
+        {!preDepartureOpen && activeIsPendingPickup && pendingPickups.length > 0 && (
           <>
             {pendingPickups.length >= 2 ? (
               <PointerSortableList
@@ -1986,7 +1993,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </>
         )}
 
-        {activeInProgress && !activeIsEnRoute && pendingPickups.length >= 2 && (
+        {!preDepartureOpen && activeInProgress && !activeIsEnRoute && pendingPickups.length >= 2 && (
           <div className="space-y-2">
             <div className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Upcoming stops — drag to reorder
@@ -2014,7 +2021,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </div>
         )}
 
-        {activeInProgress && !activeIsEnRoute && pendingPickups.length === 1 && (
+        {!preDepartureOpen && activeInProgress && !activeIsEnRoute && pendingPickups.length === 1 && (
           renderUpcomingPickupRow(
             pendingPickups[0]!,
             completedPickupCount + 2,
@@ -2034,7 +2041,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </Card>
         )}
 
-        {allLegsComplete && (
+        {!preDepartureOpen && allLegsComplete && (
           <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
             <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
             <div className="mt-2 text-lg font-bold">All legs completed</div>
@@ -2042,7 +2049,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </Card>
         )}
 
-        {!activeIsEnRoute &&
+        {!preDepartureOpen &&
+          !activeIsEnRoute &&
           upcomingStaticLegs.map((l) => (
             <LegRow
               key={l.id}
@@ -2070,7 +2078,11 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       )}
 
       <footer className="z-20 shrink-0 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
-        {allLegsComplete ? (
+        {preDepartureOpen ? (
+          <div className="text-center text-xs text-muted-foreground">
+            Check everyone onto the bus, then All Aboard.
+          </div>
+        ) : allLegsComplete ? (
           <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
         ) : activeIsEnRoute ? (
           <div className="text-center text-xs text-muted-foreground">

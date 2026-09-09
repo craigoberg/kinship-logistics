@@ -95,6 +95,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Manifest Day Centre title** | **Defined** | Sticky header `Daily Run — {run} · Morning` / `… · Afternoon Return` | Active `/manifest` Day Centre trip | Event trips keep the event title. Run label from Admin `bus_runs`. Confirms which bus the driver started. |
 | **End of Day Went home how** | **Defined** | Bus = Admin run display name (floor `departure_bus_run_code`, else weekly OUT) | Day Centre Report **Went home** | Family / independent stay those labels. Generic **Bus** only when the vector is bus and no run code is on file. |
 | **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
+| **Manifest pre-departure boarding** | **Defined** | Return `ReturnBoardingRoll` / hop `HopBoardingPanel` only | Home run and venue hop before first depart | Header shows **Pre-departure**. Hide all leg cards until All Aboard / hop boarded. Then boarding panel closes and the active leg appears. Do not `scrollIntoView` the first leg while the roll is open. |
 | **Office `Select` (shadcn)** | **Defined** | `Select` from `ui/select.tsx` | Admin filters/enums (status, asset type, venue type, manager) | Admin-wide. Field routes still prefer tap lists when ≤6 options (§4.5); long field pickers may use Select (existing exception). |
 | **Page-level Submit (non-dialog)** | **Defined** | Inline primary on card/row | Tour roll, site addresses, MYOB, centre-hours row Save | Sticky page footer not required on Admin |
 | **Admin date-range export pack** | **Defined** | `AuditPackWorkspace` (+ MYOB sibling pattern) | NDIS Audit Pack ZIP, MYOB CSV | `DatePicker` from/to · section `Switch`es · **Named vs De-id `Switch` (BL-093)** · primary Generate · `PinEntryDialog` step-up · progress text. See `docs/architecture/NDIS-AUDIT-PACK.md` |
@@ -534,6 +535,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-09 | Manifest pre-departure | Home/hop boarding is the only card until All Aboard. Legs stay hidden; header says Pre-departure. |
 | 2026-09-08 | Menu Access checkbox matrix | Live office Checkbox grid; Manager column locked. Saves to `role_menu_access`. Phase 2 None/View/Update TBD. |
 | 2026-09-08 | Archive leftover event guest | Care profile AlertDialog on guests only. Hides from Participants; carer row unchanged. |
 | 2026-09-03 | No one left behind | Bus boarding includes staff / volunteer / carer on Day Centre, trip IN/HOME, and multi-day hops. Stay-behind = not travelling (same as a participant). Morning/evening rolls stay participants only. |
