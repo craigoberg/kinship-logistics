@@ -6,17 +6,17 @@ import { cn } from "@/lib/utils";
  *
  * Touch-friendly: default height h-14 (~56px), rounded-xl, full-width.
  * Use `size="sm"` (h-12) for secondary field CTAs or nested actions.
- * Use `pulse` on the active "Depart" step to draw driver attention.
+ * Use `pulse` on the single **next** floor commit (All Aboard, Depart, Arrive, Confirm).
  *
- * Style guide: docs/architecture/UI-STYLE-GUIDE.md — "Field route CTA" (Defined).
+ * Style guide: docs/architecture/UI-STYLE-GUIDE.md — Floor CTA colours (Defined).
  */
 
 export type FieldActionVariant =
-  | "primary"      // Blue  — start, initialise, navigate
-  | "success"      // Green — confirm, complete, arrive, all-aboard
-  | "caution"      // Amber — depart (draws attention without panic)
-  | "destructive"  // Red   — close run, escalate, no-show
-  | "secondary";   // Muted — back, change vehicle, cancel secondary
+  | "primary"      // Blue  — you-are-here / navigate (not the floor commit)
+  | "success"      // Green — already chosen / done (not “tap me next”)
+  | "caution"      // Amber — do this next (pulse on the active commit)
+  | "destructive"  // Red   — danger / undo (Incident, Cancel trip, no-show)
+  | "secondary";   // Slate — waiting / blocked
 
 const VARIANT_CLASSES: Record<FieldActionVariant, string> = {
   primary:     "bg-blue-600  text-white  hover:bg-blue-700  active:bg-blue-800",

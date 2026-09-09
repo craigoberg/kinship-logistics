@@ -2297,19 +2297,15 @@ function ReturnBoardingRoll({
       <div className="mt-3 text-center text-sm text-slate-400">
         {boardedCount}/{passengers.length} confirmed
       </div>
-      <button
-        type="button"
+      <FieldActionButton
+        className="mt-3"
+        variant={allBoarded ? "caution" : "secondary"}
+        pulse={allBoarded && !saving}
         disabled={!allBoarded || saving}
-        onClick={confirm}
-        className={cn(
-          "mt-3 h-14 w-full rounded-xl font-bold text-white transition",
-          allBoarded
-            ? "animate-pulse bg-green-600 hover:bg-green-500 hover:animate-none"
-            : "cursor-not-allowed bg-slate-700 opacity-60",
-        )}
+        onClick={() => void confirm()}
       >
-        {saving ? "Confirming…" : allBoarded ? "✅ All Aboard — Depart" : `Waiting for ${passengers.length - boardedCount} more…`}
-      </button>
+        {saving ? "Confirming…" : allBoarded ? "All Aboard — Depart" : `Waiting for ${passengers.length - boardedCount} more…`}
+      </FieldActionButton>
     </Card>
   );
 }
@@ -2478,14 +2474,14 @@ function ActiveLegCard({
 
           <div className="mt-4">
             {leg.status === "en_route" ? (
-              <button
-                type="button"
+              <FieldActionButton
+                variant="caution"
+                pulse={!busy}
                 disabled={busy}
-                onClick={() => runGps("end")}
-                className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
+                onClick={() => void runGps("end")}
               >
-                🛑 Arrive at Stop
-              </button>
+                Arrive at Stop
+              </FieldActionButton>
             ) : leg.status === "arrived" ? (
               <ArrivedChecklist
                 leg={leg}
@@ -2496,17 +2492,17 @@ function ActiveLegCard({
               />
             ) : leg.status === "completed" ? null : boardingRequired ? (
               <div className="flex h-14 w-full items-center justify-center rounded-xl bg-slate-700 text-sm font-bold text-slate-400">
-                ✋ Complete boarding roll above to depart
+                Complete boarding roll above to depart
               </div>
             ) : (
-              <button
-                type="button"
+              <FieldActionButton
+                variant="caution"
+                pulse={!busy}
                 disabled={busy}
-                onClick={() => runGps("start")}
-                className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
+                onClick={() => void runGps("start")}
               >
-                🚀 Depart Stop
-              </button>
+                Depart Stop
+              </FieldActionButton>
             )}
           </div>
         </div>
@@ -3000,19 +2996,14 @@ function ArrivedChecklist({
         </div>
       )}
 
-      <button
-        type="button"
+      <FieldActionButton
+        variant={blocked || patch.isPending ? "secondary" : "caution"}
+        pulse={!blocked && !patch.isPending}
         disabled={blocked || patch.isPending}
         onClick={() => void confirm()}
-        className={cn(
-          "h-14 w-full touch-manipulation rounded-xl text-lg font-bold text-white transition active:scale-[0.98] disabled:opacity-60",
-          blocked || patch.isPending
-            ? "cursor-not-allowed bg-slate-700"
-            : "bg-green-600 hover:bg-green-700",
-        )}
       >
         {patch.isPending ? "Logging…" : confirmLabel}
-      </button>
+      </FieldActionButton>
     </div>
   );
 }

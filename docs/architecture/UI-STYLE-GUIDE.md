@@ -96,6 +96,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **End of Day Went home how** | **Defined** | Bus = Admin run display name (floor `departure_bus_run_code`, else weekly OUT) | Day Centre Report **Went home** | Family / independent stay those labels. Generic **Bus** only when the vector is bus and no run code is on file. |
 | **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
 | **Manifest pre-departure boarding** | **Defined** | Return `ReturnBoardingRoll` / hop `HopBoardingPanel` only | Home run and venue hop before first depart | Header shows **Pre-departure**. Hide all leg cards until All Aboard / hop boarded. Then boarding panel closes and the active leg appears. Do not `scrollIntoView` the first leg while the roll is open. |
+| **Floor CTA colours** | **Defined** | Amber pulse = next commit; green = done; blue = you-are-here; slate = blocked; red = danger | Manifest, Day Centre, Event Deliver | Locked 2026-09-09. See Quick reference — colours. RYGE chips and Raise-ticket FAB are exceptions. |
 | **Office `Select` (shadcn)** | **Defined** | `Select` from `ui/select.tsx` | Admin filters/enums (status, asset type, venue type, manager) | Admin-wide. Field routes still prefer tap lists when ≤6 options (§4.5); long field pickers may use Select (existing exception). |
 | **Page-level Submit (non-dialog)** | **Defined** | Inline primary on card/row | Tour roll, site addresses, MYOB, centre-hours row Save | Sticky page footer not required on Admin |
 | **Admin date-range export pack** | **Defined** | `AuditPackWorkspace` (+ MYOB sibling pattern) | NDIS Audit Pack ZIP, MYOB CSV | `DatePicker` from/to · section `Switch`es · **Named vs De-id `Switch` (BL-093)** · primary Generate · `PinEntryDialog` step-up · progress text. See `docs/architecture/NDIS-AUDIT-PACK.md` |
@@ -151,7 +152,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Programme Absent (mode toggle)** | **Defined** | `ProgrammeAbsentDialog` | Programme activity UserX | Large tap mode: **Still on the trip** (default) vs **Left the trip**. Hydrates skip vs left-trip reason lists. Field / touch-first. |
 | **Toast feedback** | **Defined** | `operationToasts` in `operation-toasts.ts` | After save/defer/resolve in Hub manage flows | Standard copy; `sonner` toast |
 | **Empty states** | Defined | Dashed border card | No rows in a list | `rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground` — no shared component needed |
-| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold` — variants: `primary` (blue), `success` (green), `caution` (amber, use `pulse`), `destructive` (red), `secondary` (muted). `fullWidth={false}` for toolbar chips. See `src/components/ui/field-action-button.tsx` |
+| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold`. **Floor CTA colours** (locked 2026-09-09): `caution`+`pulse` = do this next; `success` = already chosen/done; `primary` = you-are-here/navigate (not the commit); `secondary` = waiting/blocked; `destructive` = danger. `fullWidth={false}` for toolbar chips. |
 | **Manager ops toolbar** | **Defined** | `ManagerOpsChip` → `FieldActionButton` solid fills | Emergency / lockdown / infectious / do-not-open / suspend chips **inside** H&S sheet or Start-of-Day | **Never** thin outline on dark UI. Tones: `emergency`=solid red, `caution`=solid amber+black, `neutral`=muted. `layout="chip"` or `stack`. |
 | **Big Red → Health & Safety** | **Defined** | `IncidentIntakeDialog` lane 3 → `GlobalHealthSafetyFlow` | Every screen via Big Red | Third lane opens H&S BottomSheet (Emergency · site hold · Infectious). **No** INCIDENT write. **No** duplicate H&S/Emergency chips on Day Centre Active, Event Deliver, or Manifest. Log anomaly / Close / Log Venue Issue stay on primary bars. Start-of-Day **Do not open** may remain on that panel. |
 | **Big Red Incident shell (mobile)** | **Defined** | `IncidentIntakeDialog` + `VerbalConsultationDialog`: `BottomSheet` mobile / `Dialog` desktop; sticky Close-left + `FieldActionButton` primary; multi-select lists `min-h-14` solid selected | Phone-first Big Red Human/Asset + RED verbal | Same fields; no wizard. H&S lane already sheets. Filter + tall tap lists (not `Select`) for clients/staff/managers. |
@@ -202,14 +203,31 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 
 ## Quick reference — colours (active / selected)
 
-Use Tailwind semantic tokens from `styles.css` — **solid fill + white text**:
+Use Tailwind semantic tokens from `styles.css` — **solid fill + white text** (amber caution uses black text).
+
+### Floor CTA colours (locked 2026-09-09)
+
+One meaning per colour on Manifest, Day Centre, and Event Deliver. Do not invent a fourth “go” colour.
+
+| Colour | Means | `FieldActionButton` | Examples |
+|--------|--------|---------------------|----------|
+| **Amber (pulse)** | **Do this next** — the one commit that moves the run | `caution` + `pulse` | All Aboard (roll complete), Depart Stop, Arrive at Stop, Confirm & Log |
+| **Green (steady)** | **Already chosen / done** | `success` | Person On bus, At drop-off default, completed ticks. **Not** the next commit. |
+| **Blue** | **You are here** — chrome / navigate | `primary` | Active-leg card border, Live “in progress”, office Start/Open navigation. Not the floor commit. |
+| **Slate** | Waiting / blocked | `secondary` or disabled | All Aboard before the roll is full; “complete boarding first” |
+| **Red** | Danger / undo | `destructive` | Incident, Cancel trip, unsafe drop, no-show |
+
+**Exceptions (do not reuse for floor commits):** RYGE Green/Yellow/Red chips = health severity, not “tap me”. Raise-ticket FAB stays green (GREEN lane identity). Close Run PIN stays red (locks the record). SIM TIME / offline banners stay amber tints.
+
+**Manifest sequence:** names slate → green; All Aboard flashing amber → roll closes; Depart flashing amber; Arrive flashing amber; At drop-off green; Confirm & Log amber.
+
+### Token map
 
 | Meaning | Token |
 |---------|--------|
-| Primary / brand action | `primary` |
-| Informational | `info` |
-| Success / on-bus / checked | `success` |
-| Caution / yellow | `warning` |
+| You-are-here / brand navigate | `primary` / `info` |
+| Already chosen / on-bus / checked | `success` |
+| Do this next / caution banner | `warning` |
 | Danger / RED / no-show | `destructive` |
 
 Selected row: `border-2`, `ring-2`, `shadow-md` (see §4.5).
@@ -330,7 +348,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 
 | Pattern | Decision | Component |
 |---------|----------|-----------|
-| Start of Day primary CTAs (`h-16 w-full`) | Use `FieldActionButton` — same rule as manifest | `start-of-day-panel.tsx` — `success` when ready, `secondary` when blocked; `caution` (amber) for "Log Anomalies" |
+| Start of Day primary CTAs (`h-16 w-full`) | Use `FieldActionButton` — Floor CTA colours | `start-of-day-panel.tsx` — `caution`+`pulse` when ready to open; `secondary` when blocked; Log Anomalies stays `caution` without pulse (exception path, not the next commit) |
 | Absence reason picker (6 options, field route) | `MobileOptionButton` tap list — ≤6 options on field routes must use tap list (same rule as manifest) | `adjust-expected-time-modal.tsx` |
 | Participant search (Add Attendee) | Accept shadcn `Command` + `CommandInput` — canonical pattern for long searchable lists | Added to pattern registry |
 | Boolean confirms in Add Attendee (med bag, unexpected med) | Accept `Checkbox` — boolean confirm is not a selector; does not need `MobileOptionButton` row | Pattern registry |
@@ -366,9 +384,9 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 
 | UI element | Component | Notes |
 |------------|-----------|-------|
-| Open Day CTA | `FieldActionButton variant="success"` | Disabled + `secondary` until all checks ticked |
+| Open Day CTA | `FieldActionButton` | Locked: `caution`+`pulse` when ready, `secondary` until checks ticked. Day Centre still ships `success` until that restyle. |
 | Open Day PIN | `PinEntryTrigger` + `verifyOperatorPin` | Check Leader sign-off; PIN success opens centre |
-| Close Centre CTA | `FieldActionButton variant="success"` in closure dialog | Big green “Finalise & sign with PIN”; footer **Close** only (no small blue primary) |
+| Close Centre CTA | `FieldActionButton` in closure dialog | Locked: `caution`+`pulse` for Finalise & PIN. Day Centre still ships `success` until that restyle. Footer **Close** only. |
 | Close Centre mandated checks | `MandatedChecksList` + `useMandatedCloseChecks` | Same big green ticks as Open; Admin key `site_management.mandated_close_checks`; empty = high-trust close |
 | End of Day Report | `DayCentreEndOfDayReport` | Calendar + arrivals / meals / checkout / issues; SIM today |
 | Log Anomalies CTA | `FieldActionButton variant="caution" size="sm"` | Amber — secondary field action |
@@ -535,6 +553,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-09 | Floor CTA colours | Amber+pulse = do this next; green = already chosen; blue = you-are-here; slate = blocked; red = danger. Manifest restyled to match. |
 | 2026-09-09 | Manifest pre-departure | Home/hop boarding is the only card until All Aboard. Legs stay hidden; header says Pre-departure. |
 | 2026-09-08 | Menu Access checkbox matrix | Live office Checkbox grid; Manager column locked. Saves to `role_menu_access`. Phase 2 None/View/Update TBD. |
 | 2026-09-08 | Archive leftover event guest | Care profile AlertDialog on guests only. Hides from Participants; carer row unchanged. |

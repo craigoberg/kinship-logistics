@@ -163,6 +163,7 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | RED Verbal Consultation   | `src/components/issue-engine/verbal-consultation-dialog.tsx` | Remote manager contact log — manager by name, operator PIN only; Hub close-out by manager. |
 | Global Escalation Intercept | `src/components/dashboard/global-escalation-interceptor.tsx`  | Real-time broadcast coordinator pop-up handling atomic RPC claims.                               |
 | Field single-select rows    | `src/components/manifest/mobile-field-button.tsx`             | `MobileFieldButton` / `MobileOptionButton` — high-contrast tap lists (§4.5).                     |
+| Field route CTA             | `src/components/ui/field-action-button.tsx`                   | Floor next-action = `caution` (+ `pulse`). Green `success` = already done. Blue `primary` = chrome / navigate. See UI-STYLE-GUIDE Floor CTA colours. |
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
@@ -1248,7 +1249,7 @@ All must use `useRealtimeInvalidate` (§10.3) — no ad-hoc channel subscription
 
 - **Entry point:** Top-level menu item `Event Deliver` (same level as `Manifest`, `Day Centre`). Also available as a `Run this event` button inside the event card when status = `confirmed` or `open` and today is a valid trip day.
 - **Active events list:** Cards show event name, today's phase, outstanding check-ins. Touch-friendly full-width cards.
-- **All CTAs:** `FieldActionButton` (§BL-060 Manifest audit pattern) — `h-14`, full-width, variant by context (`success` for open/close, `caution` for exceptions).
+- **All CTAs:** `FieldActionButton` — `h-14`, full-width. Next commit = `caution` (+ `pulse`). Selected/done = `success`. You-are-here = `primary`. Danger = `destructive`. UI-STYLE-GUIDE Floor CTA colours.
 - **Movement method picker:** `MobileFieldButton` tap list (Bus / Walk / Already on-site) — not a native Select.
 - **Arrival and checkout rolls:** Same `MobileOptionButton` / full-width touch rows as Day Centre attendance (§4.4).
 - **No extra fields or steps** not specified here — ask before adding.
