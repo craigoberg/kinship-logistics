@@ -4,14 +4,17 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
 import { useRouterState } from "@tanstack/react-router";
 
-const HIDE_DELTA = 12;
-const SHOW_DELTA = 8;
-const TOP_REVEAL_PX = 24;
+/** Pixels of travel in one direction before chrome flips. */
+const TRAVEL_PX = 48;
+/** Ignore scroll events after a flip so layout resize cannot bounce the state. */
+const LOCK_MS = 420;
+const TOP_PX = 2;
 
 type ChromeVisibilityValue = {
   chromeHidden: boolean;
@@ -56,19 +59,36 @@ function scrollTopOf(target: Window | HTMLElement): number {
 
 /**
  * Hide AppShell / BottomNav / Manifest Cancel on scroll down; reveal on
- * scroll up or when the scroller is back near the top.
- * Dashboard uses the document (`"window"`). Manifest uses its inner pane.
+ * scroll up. Dashboard uses the document (`"window"`). Manifest uses its
+ * inner pane. Travel is accumulated so touch jitter and layout-resize
+ * scroll events cannot flicker the chrome.
  */
 export function useHideChromeOnScroll(target: Window | HTMLElement | null | "window") {
-  const { setChromeHidden } = useChromeVisibility();
+  const { chromeHidden, setChromeHidden } = useChromeVisibility();
+  const hiddenRef = useRef(chromeHidden);
+  hiddenRef.current = chromeHidden;
 
   useEffect(() => {
     const el = target === "window" ? window : target;
     if (!el) return;
 
     let last = scrollTopOf(el);
-    if (last <= TOP_REVEAL_PX) setChromeHidden(false);
     let frame = 0;
+    let lockUntil = 0;
+    let hideTravel = 0;
+    let showTravel = 0;
+
+    const apply = (hidden: boolean) => {
+      if (hiddenRef.current === hidden) return;
+      hiddenRef.current = hidden;
+      setChromeHidden(hidden);
+      hideTravel = 0;
+      showTravel = 0;
+      lockUntil = performance.now() + LOCK_MS;
+      window.requestAnimationFrame(() => {
+        last = scrollTopOf(el);
+      });
+    };
 
     const onScroll = () => {
       if (frame) return;
@@ -76,14 +96,24 @@ export function useHideChromeOnScroll(target: Window | HTMLElement | null | "win
         frame = 0;
         const top = scrollTopOf(el);
         const delta = top - last;
-        if (top <= TOP_REVEAL_PX) {
-          setChromeHidden(false);
-        } else if (delta > HIDE_DELTA) {
-          setChromeHidden(true);
-        } else if (delta < -SHOW_DELTA) {
-          setChromeHidden(false);
-        }
         last = top;
+
+        if (performance.now() < lockUntil) return;
+        if (top <= TOP_PX) {
+          apply(false);
+          return;
+        }
+        if (delta === 0) return;
+
+        if (delta > 0) {
+          hideTravel += delta;
+          showTravel = 0;
+          if (!hiddenRef.current && hideTravel >= TRAVEL_PX) apply(true);
+        } else {
+          showTravel += -delta;
+          hideTravel = 0;
+          if (hiddenRef.current && showTravel >= TRAVEL_PX) apply(false);
+        }
       });
     };
 

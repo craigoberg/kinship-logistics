@@ -156,7 +156,7 @@ export function AppShell({
       >
         <header
           className={cn(
-            "sticky top-0 z-30 flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-border bg-background/90 px-4 backdrop-blur transition-[max-height,padding,opacity,border-color] duration-200 md:px-6",
+            "sticky top-0 z-30 flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-border bg-background/90 px-4 backdrop-blur md:px-6",
             chromeHidden
               ? "max-h-0 min-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
               : "min-h-14 py-2 opacity-100 md:min-h-16",
@@ -229,12 +229,11 @@ export function AppShell({
         <SiteNoGoBanner />
         <FloorAnnouncementStrip />
         <main
-          className={cn(
+          className={
             viewportLock
-              ? "flex min-h-0 flex-1 flex-col overflow-hidden md:pb-8"
-              : "flex-1 px-4 pt-4 md:px-6 md:pb-8 md:pt-6",
-            chromeHidden ? "pb-4" : "pb-24",
-          )}
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-8"
+              : "flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6"
+          }
         >
           <MenuGate>{children}</MenuGate>
         </main>

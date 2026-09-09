@@ -221,7 +221,7 @@ function ManifestPage() {
       {/* Permanent Session Identity Header */}
       <div
         className={cn(
-          "z-30 flex shrink-0 items-center justify-between overflow-hidden border-b border-border bg-slate-900 px-4 text-xs text-white shadow-md transition-[max-height,padding,opacity] duration-200",
+          "z-30 flex shrink-0 items-center justify-between overflow-hidden border-b border-border bg-slate-900 px-4 text-xs text-white shadow-md",
           chromeHidden
             ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
             : "py-2.5 opacity-100",
@@ -377,7 +377,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   return (
     <div
       ref={bindChromeScroll}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain p-4"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [overflow-anchor:none] p-4"
     >
       {step === "vehicle" && (
         <Card className="p-5">
@@ -1956,7 +1956,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         ref={bindChromeScroll}
         data-manifest-scroll
         className={cn(
-          "min-h-0 flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
+          "min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] px-3 pb-4 pt-3 space-y-2",
           "overscroll-y-contain",
         )}
       >
@@ -2100,7 +2100,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
       <footer
         className={cn(
-          "z-20 shrink-0 space-y-2 overflow-hidden border-t border-border bg-card transition-[max-height,padding,opacity] duration-200",
+          "z-20 shrink-0 space-y-2 overflow-hidden border-t border-border bg-card",
           chromeHidden && !allLegsComplete
             ? "max-h-0 border-t-0 p-0 opacity-0 pointer-events-none"
             : "p-3 pb-[max(env(safe-area-inset-bottom),12px)] opacity-100",
@@ -2123,7 +2123,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         )}
         <div
           className={cn(
-            "overflow-hidden transition-[max-height,opacity] duration-200",
+            "overflow-hidden",
             chromeHidden ? "max-h-0 opacity-0 pointer-events-none" : "max-h-16 opacity-100",
           )}
         >

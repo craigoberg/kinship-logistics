@@ -114,7 +114,7 @@ function DevOperationalClockBarInner() {
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3 transition-[max-height,padding,opacity,border-color] duration-200",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3",
           chromeHidden
             ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
             : "py-1.5 opacity-100",
