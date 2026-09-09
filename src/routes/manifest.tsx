@@ -388,7 +388,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                         a.makeModel ? ` · ${a.makeModel}` : ""
                       }`}
                       icon={<Bus className="h-5 w-5" />}
-                      tone="info"
+                      tone={assetId === a.id ? "success" : "neutral"}
                       active={assetId === a.id}
                       onClick={() => {
                         setAssetId(a.id);
@@ -472,24 +472,30 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                 </div>
               )}
             </div>
-            <button
+            <FieldActionButton
               type="submit"
+              variant={
+                assetId &&
+                odoReasonable &&
+                !((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
+                  ? "caution"
+                  : "secondary"
+              }
+              pulse={
+                !!(
+                  assetId &&
+                  odoReasonable &&
+                  !((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
+                )
+              }
               disabled={
                 !assetId ||
                 !odoReasonable ||
                 ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
               }
-              className={cn(
-                "h-14 w-full rounded-xl font-bold text-white shadow transition",
-                !assetId ||
-                  !odoReasonable ||
-                  ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-                  ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700",
-              )}
             >
               Continue to Vehicle Clearance →
-            </button>
+            </FieldActionButton>
           </form>
         </Card>
       )}
@@ -677,13 +683,14 @@ function FastPassBanner({
       <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
         Please inspect for obvious new damage before departing.
       </p>
-      <button
-        type="button"
+      <FieldActionButton
+        className="mt-5"
+        variant="caution"
+        pulse
         onClick={onConfirm}
-        className="mt-5 h-14 w-full rounded-xl bg-green-600 text-base font-bold text-white shadow transition hover:bg-green-700"
       >
-        ✓ Confirm &amp; Roll
-      </button>
+        Confirm &amp; Roll
+      </FieldActionButton>
       <button
         type="button"
         onClick={onBack}
@@ -1393,19 +1400,18 @@ function EventPickAndStart({
             </p>
           )}
 
-          <button
-            type="button"
+          <FieldActionButton
+            variant={
+              selectedRun && !startDayCentreRun.isPending && !dayCentreStartBlocked
+                ? "caution"
+                : "secondary"
+            }
+            pulse={!!(selectedRun && !startDayCentreRun.isPending && !dayCentreStartBlocked)}
             disabled={!selectedRun || startDayCentreRun.isPending || dayCentreStartBlocked}
             onClick={submitDayCentreRun}
-            className={cn(
-              "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              !selectedRun || startDayCentreRun.isPending || dayCentreStartBlocked
-                ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700",
-            )}
           >
             {startDayCentreRun.isPending ? "Opening…" : "Start Day Centre Run & Open Manifest"}
-          </button>
+          </FieldActionButton>
         </div>
       )}
 
@@ -1495,17 +1501,15 @@ function EventPickAndStart({
                     onAlternateAddressChange={setEventAlternateAddress}
                     heading="Starting from"
                   />
-                  <button
+                  <FieldActionButton
                     type="submit"
+                    variant={!eventId || startTrip.isPending ? "secondary" : "caution"}
+                    pulse={!!(eventId && !startTrip.isPending)}
                     disabled={!eventId || startTrip.isPending}
                     onClick={() => setEventRunDirection("outbound")}
-                    className={cn(
-                      "h-14 w-full rounded-xl font-bold text-white shadow transition bg-blue-600",
-                      (!eventId || startTrip.isPending) && "opacity-60 cursor-not-allowed",
-                    )}
                   >
                     {startTrip.isPending ? "Opening…" : "Start Outbound Run & Open Manifest"}
-                  </button>
+                  </FieldActionButton>
                 </div>
               ) : null}
             </EventTransportRunsStep3>
@@ -1524,8 +1528,8 @@ function EventPickAndStart({
                     "rounded-lg border px-3 py-3 text-sm font-semibold transition text-left",
                     closedReturnOnly && "cursor-not-allowed opacity-50",
                     eventRunDirection === "outbound"
-                      ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                      : "border-border text-muted-foreground hover:border-blue-400",
+                      ? "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300"
+                      : "border-border text-muted-foreground hover:border-green-400",
                   )}
                 >
                   <div className="font-bold">Outbound</div>
@@ -1595,15 +1599,15 @@ function EventPickAndStart({
           )}
 
           {!(isOuting && tripDaySession) && (
-          <button
+          <FieldActionButton
             type="submit"
-            disabled={!eventId || startTrip.isPending || eventTransportBlocked}
-            className={cn(
-              "h-14 w-full rounded-xl font-bold text-white shadow transition",
+            variant={
               !eventId || startTrip.isPending || eventTransportBlocked
-                ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700",
-            )}
+                ? "secondary"
+                : "caution"
+            }
+            pulse={!!(eventId && !startTrip.isPending && !eventTransportBlocked)}
+            disabled={!eventId || startTrip.isPending || eventTransportBlocked}
           >
             {eventTransportBlocked
               ? "Confirm event in Events first"
@@ -1613,7 +1617,7 @@ function EventPickAndStart({
                   ? "Start Return Run & Open Manifest"
                   : "Start Outbound Run & Open Manifest"
             }
-          </button>
+          </FieldActionButton>
           )}
         </form>
       )}

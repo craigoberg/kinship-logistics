@@ -553,6 +553,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-09 | Manifest start-flow CTAs | Selected vehicle / start point = green. Continue, Confirm & Roll, Start run = slate until ready, then amber pulse. |
 | 2026-09-09 | Floor CTA colours | Amber+pulse = do this next; green = already chosen; blue = you-are-here; slate = blocked; red = danger. Manifest restyled to match. |
 | 2026-09-09 | Manifest pre-departure | Home/hop boarding is the only card until All Aboard. Legs stay hidden; header says Pre-departure. |
 | 2026-09-08 | Menu Access checkbox matrix | Live office Checkbox grid; Manager column locked. Saves to `role_menu_access`. Phase 2 None/View/Update TBD. |
