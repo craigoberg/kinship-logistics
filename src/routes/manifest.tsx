@@ -60,6 +60,8 @@ import {
   CAUTION_CALLOUT_CLASS,
   CAUTION_CALLOUT_ICON_CLASS,
 } from "@/lib/ui/caution-callout";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useFleetDutyGap } from "@/hooks/use-fleet-duty-gap";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { haversineKm, tryGetCurrentPosition, manifestGpsFallbackToast } from "@/lib/geo";
@@ -995,6 +997,7 @@ function EventPickAndStart({
   );
   const startTrip = useStartTrip();
   const startDayCentreRun = useStartDayCentreRun();
+  const fleetDuty = useFleetDutyGap(asset);
 
   // SIM-aware weekday (DAY-MON … DAY-SUN). Do not use wall-clock Date — TEST
   // SIM TIME must drive which attendance schedules load.
@@ -1164,8 +1167,9 @@ function EventPickAndStart({
   };
 
   // ── Day Centre Run submit ──────────────────────────────────────────────────
-  const submitDayCentreRun = () => {
+  const submitDayCentreRun = async () => {
     if (!selectedRun || startDayCentreRun.isPending || dcInFlightRef.current) return;
+    if (!(await fleetDuty.ensureApproved())) return;
     if (dayCentreClosed && dayCentreSlot) {
       toast.error(transportRunSlotClosedMessage(dayCentreSlot));
       return;
@@ -1236,9 +1240,10 @@ function EventPickAndStart({
     (selectedEvent?.status === "Closed" && !closedReturnOnly);
 
   // ── Event submit ───────────────────────────────────────────────────────────
-  const submitEvent = (e: React.FormEvent) => {
+  const submitEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventId || startTrip.isPending || eventInFlightRef.current) return;
+    if (!(await fleetDuty.ensureApproved())) return;
     if (selectedEvent?.status === "Planning") {
       toast.error("Event is still Planning — promote to Confirmed in Events first.");
       return;
@@ -1318,6 +1323,22 @@ function EventPickAndStart({
       <p className="mt-1 text-sm text-muted-foreground">
         Step 3 of 3 — choose your starting point, then open the manifest to run the route.
       </p>
+      {fleetDuty.needsGap && (
+        <div className="mt-4">
+          <DutyRequirementGapPanel
+            actorName={fleetDuty.driver?.fullName ?? "This driver"}
+            evalResult={fleetDuty.evalResult}
+            note={fleetDuty.note}
+            onNoteChange={fleetDuty.setNote}
+            managerId={fleetDuty.managerId}
+            onManagerIdChange={fleetDuty.setManagerId}
+            managerPin={fleetDuty.managerPin}
+            onManagerPin={fleetDuty.setManagerPin}
+            managers={fleetDuty.managers}
+            title="Driver"
+          />
+        </div>
+      )}
 
       {/* Tab switcher */}
       <div className="mt-4 flex rounded-lg border border-border overflow-hidden">
@@ -1421,7 +1442,12 @@ function EventPickAndStart({
                 : "secondary"
             }
             pulse={!!(selectedRun && !startDayCentreRun.isPending && !dayCentreStartBlocked)}
-            disabled={!selectedRun || startDayCentreRun.isPending || dayCentreStartBlocked}
+            disabled={
+              !selectedRun ||
+              startDayCentreRun.isPending ||
+              dayCentreStartBlocked ||
+              (fleetDuty.needsGap && !fleetDuty.approved)
+            }
             onClick={submitDayCentreRun}
           >
             {startDayCentreRun.isPending ? "Opening…" : "Start Day Centre Run & Open Manifest"}
@@ -1502,6 +1528,11 @@ function EventPickAndStart({
               selected={selectedTransportRun}
               onSelect={setSelectedTransportRun}
               onHopStarted={clearLocalStorage}
+              dutyGate={{
+                needsGap: fleetDuty.needsGap,
+                approved: fleetDuty.approved,
+                ensureApproved: fleetDuty.ensureApproved,
+              }}
             >
               {showOutingOutboundStart ? (
                 <div className="space-y-4 mt-4">
@@ -1519,7 +1550,11 @@ function EventPickAndStart({
                     type="submit"
                     variant={!eventId || startTrip.isPending ? "secondary" : "caution"}
                     pulse={!!(eventId && !startTrip.isPending)}
-                    disabled={!eventId || startTrip.isPending}
+                    disabled={
+                      !eventId ||
+                      startTrip.isPending ||
+                      (fleetDuty.needsGap && !fleetDuty.approved)
+                    }
                     onClick={() => setEventRunDirection("outbound")}
                   >
                     {startTrip.isPending ? "Opening…" : "Start Outbound Run & Open Manifest"}
@@ -1621,7 +1656,12 @@ function EventPickAndStart({
                 : "caution"
             }
             pulse={!!(eventId && !startTrip.isPending && !eventTransportBlocked)}
-            disabled={!eventId || startTrip.isPending || eventTransportBlocked}
+            disabled={
+              !eventId ||
+              startTrip.isPending ||
+              eventTransportBlocked ||
+              (fleetDuty.needsGap && !fleetDuty.approved)
+            }
           >
             {eventTransportBlocked
               ? "Confirm event in Events first"

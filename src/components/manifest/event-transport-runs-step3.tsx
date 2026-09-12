@@ -37,6 +37,12 @@ interface Props {
   onHopStarted: () => void;
   /** Outbound (Transport IN) only — Depot/Day Centre start picker + submit */
   children?: React.ReactNode;
+  /** BL-126 — same Manager approval as parent Start Run. */
+  dutyGate?: {
+    needsGap: boolean;
+    approved: boolean;
+    ensureApproved: () => Promise<boolean>;
+  };
 }
 
 function statusIcon(status: EventTransportRunCard["status"]) {
@@ -73,6 +79,7 @@ export function EventTransportRunsStep3({
   onSelect,
   onHopStarted,
   children,
+  dutyGate,
 }: Props) {
   const { data: runs = [], isLoading } = useEventTransportRuns(eventId, sessionId, sessionDate);
   const startHop = useStartEventVenueHop();
@@ -157,6 +164,8 @@ export function EventTransportRunsStep3({
       return;
     }
 
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
+
     const tripId = card.tripId;
     if (!tripId) {
       toast.error(
@@ -183,8 +192,9 @@ export function EventTransportRunsStep3({
     );
   };
 
-  const submitReturn = () => {
+  const submitReturn = async () => {
     if (!selected || selected.kind !== "return") return;
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
     const returnCard = selected.card;
     if (!canStartRun(returnCard.status)) {
       toast.error("Return home is not ready yet — finish Check-Out first.");
@@ -355,7 +365,11 @@ export function EventTransportRunsStep3({
           {canStartHop(selected.card.status) ? (
             <button
               type="button"
-              disabled={startHop.isPending || !selected.card.tripId}
+              disabled={
+                startHop.isPending ||
+                !selected.card.tripId ||
+                !!(dutyGate?.needsGap && !dutyGate.approved)
+              }
               onClick={() => void submitHop()}
               className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
             >
@@ -398,7 +412,11 @@ export function EventTransportRunsStep3({
           </div>
           <button
             type="button"
-            disabled={startTrip.isPending || !canStartRun(selected.card.status)}
+            disabled={
+              startTrip.isPending ||
+              !canStartRun(selected.card.status) ||
+              !!(dutyGate?.needsGap && !dutyGate.approved)
+            }
             onClick={submitReturn}
             className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
           >

@@ -22,6 +22,7 @@ export const adminOverviewTopic: HelpTopic = {
   relatedIds: [
     "admin-venues",
     "admin-vendors",
+    "admin-duty-roles",
     "hub-update-sla",
     "checkin-roll-escalations",
     "event-open-checks",
@@ -37,8 +38,8 @@ export const adminOverviewTopic: HelpTopic = {
       body: "Vehicles for Manifest — rego/compliance context, current odometer hints, and odometer corrections. Depot/bus-run name lists often live under Lookups.",
     },
     {
-      heading: "Venues & Vendors",
-      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. See the dedicated how-tos.",
+      heading: "Venues, Vendors & Duty roles",
+      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, Bus Driver) and their certificates or orientations — not menu access.",
     },
     {
       heading: "System Parameters — structured panels",

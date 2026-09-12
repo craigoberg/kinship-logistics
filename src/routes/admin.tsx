@@ -13,6 +13,7 @@ import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
 import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-workspace";
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
 import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
+import { DutyRolesWorkspace } from "@/components/admin/duty-roles-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
 import { PublicWebsiteWorkspace } from "@/components/admin/public-website-workspace";
 
@@ -26,6 +27,7 @@ type AdminTab =
   | "fleet"
   | "venues"
   | "vendors"
+  | "duty"
   | "parameters"
   | "website"
   | "access"
@@ -49,7 +51,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet, venues, vendors, public website (yada.org.au), lookups, thresholds, role access, and backups.
+          Manage fleet, venues, vendors, Duty roles, public website (yada.org.au), lookups, thresholds, role access, and backups.
         </p>
       </header>
 
@@ -59,6 +61,7 @@ function AdminPage() {
           <TabsTrigger value="fleet">Fleet Register</TabsTrigger>
           <TabsTrigger value="venues">Venues</TabsTrigger>
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
+          <TabsTrigger value="duty">Duty roles</TabsTrigger>
           {showWebsite ? (
             <TabsTrigger value="website">Public website</TabsTrigger>
           ) : null}
@@ -79,6 +82,9 @@ function AdminPage() {
         </TabsContent>
         <TabsContent value="vendors">
           <VendorsWorkspace />
+        </TabsContent>
+        <TabsContent value="duty">
+          <DutyRolesWorkspace />
         </TabsContent>
         {showWebsite ? (
           <TabsContent value="website">

@@ -57,6 +57,14 @@ function scrollTopOf(target: Window | HTMLElement): number {
   return target.scrollTop;
 }
 
+/** True when the pane can actually scroll far enough to be a hide gesture. */
+function contentOverflows(target: Window | HTMLElement): boolean {
+  if (target instanceof Window) {
+    return document.documentElement.scrollHeight - window.innerHeight > TRAVEL_PX;
+  }
+  return target.scrollHeight - target.clientHeight > TRAVEL_PX;
+}
+
 /**
  * Hide AppShell / BottomNav / Manifest Cancel on scroll down; reveal on
  * scroll up. Dashboard uses the document (`"window"`). Manifest uses its
@@ -72,22 +80,37 @@ export function useHideChromeOnScroll(target: Window | HTMLElement | null | "win
     const el = target === "window" ? window : target;
     if (!el) return;
 
+    // New pane / route attach: chrome starts visible.
+    setChromeHidden(false);
+    hiddenRef.current = false;
+
     let last = scrollTopOf(el);
     let frame = 0;
     let lockUntil = 0;
     let hideTravel = 0;
     let showTravel = 0;
+    let revealTimer = 0;
 
     const apply = (hidden: boolean) => {
-      if (hiddenRef.current === hidden) return;
-      hiddenRef.current = hidden;
-      setChromeHidden(hidden);
+      const next = hidden && !contentOverflows(el) ? false : hidden;
+      if (hiddenRef.current === next) return;
+      hiddenRef.current = next;
+      setChromeHidden(next);
       hideTravel = 0;
       showTravel = 0;
       lockUntil = performance.now() + LOCK_MS;
       window.requestAnimationFrame(() => {
         last = scrollTopOf(el);
       });
+      if (next) {
+        window.clearTimeout(revealTimer);
+        revealTimer = window.setTimeout(revealIfNoOverflow, LOCK_MS + 16);
+      }
+    };
+
+    const revealIfNoOverflow = () => {
+      if (performance.now() < lockUntil) return;
+      if (hiddenRef.current && !contentOverflows(el)) apply(false);
     };
 
     const onScroll = () => {
@@ -98,11 +121,11 @@ export function useHideChromeOnScroll(target: Window | HTMLElement | null | "win
         const delta = top - last;
         last = top;
 
-        if (performance.now() < lockUntil) return;
-        if (top <= TOP_PX) {
+        if (!contentOverflows(el) || top <= TOP_PX) {
           apply(false);
           return;
         }
+        if (performance.now() < lockUntil) return;
         if (delta === 0) return;
 
         if (delta > 0) {
@@ -118,8 +141,19 @@ export function useHideChromeOnScroll(target: Window | HTMLElement | null | "win
     };
 
     el.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", revealIfNoOverflow);
+    const roTarget = el instanceof Window ? document.documentElement : el;
+    const ro =
+      typeof ResizeObserver !== "undefined"
+        ? new ResizeObserver(revealIfNoOverflow)
+        : null;
+    ro?.observe(roTarget);
+
     return () => {
       el.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", revealIfNoOverflow);
+      ro?.disconnect();
+      window.clearTimeout(revealTimer);
       if (frame) window.cancelAnimationFrame(frame);
     };
   }, [target, setChromeHidden]);

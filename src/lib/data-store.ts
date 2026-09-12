@@ -611,6 +611,8 @@ export interface StaffCertification {
    * Persisted inside the staff_registry.certifications JSONB array.
    */
   deferredUntil?: string | null;
+  /** BL-126 catalogue id — preferred match over free-text name. */
+  requirementTypeId?: string | null;
 }
 
 export interface StaffMember {
@@ -661,6 +663,8 @@ function rowToStaff(r: StaffRow): StaffMember {
       number: c?.number ?? "",
       expiry: c?.expiry ?? null,
       deferredUntil: (c as { deferredUntil?: string | null })?.deferredUntil ?? null,
+      requirementTypeId:
+        (c as { requirementTypeId?: string | null })?.requirementTypeId ?? null,
     })),
     createdAt: r.created_at,
   };

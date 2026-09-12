@@ -46,7 +46,7 @@ export const addStaffTopic: HelpTopic = {
     },
     {
       heading: "Certifications later",
-      body: "WWC, First Aid, SFH, licence and similar certs are tracked via compliance / Hub after intake — get identity and PIN correct first.",
+      body: "After identity and PIN, add certificates and orientations from the Admin catalogue (Safe Food Handler, WWCC, licences). Assign Duty roles (Food Preparation, Bus Driver) separately from System access. Hub still tracks expiry.",
     },
   ],
 };

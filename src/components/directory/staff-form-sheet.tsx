@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { KeyRound, Pencil, Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 import {
@@ -25,6 +26,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PinPad } from "@/components/auth/pin-pad";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
@@ -33,6 +35,13 @@ import {
   useUpdateStaffMember,
 } from "@/hooks/use-supabase-data";
 import { setStaffDayLoginPassword } from "@/lib/api/staff-auth";
+import {
+  listDutyRoles,
+  listRequirementTypes,
+  listStaffDutyRoleIds,
+  replaceStaffDutyRoles,
+} from "@/lib/api/duty-roles";
+import { evaluateRequirementHolds, requirementTypeMatchesName } from "@/lib/duty-roles";
 import { getActiveUserProfile, hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 import { ACCESS_ROLES } from "@/lib/access-roles";
@@ -49,7 +58,13 @@ interface Props {
   staff: StaffMember | null;
 }
 
-const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null, deferredUntil: null };
+const EMPTY_CERT: StaffCertification = {
+  name: "",
+  number: "",
+  expiry: null,
+  deferredUntil: null,
+  requirementTypeId: null,
+};
 
 export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const isEdit = !!staff;
@@ -64,6 +79,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
   const [editingCert, setEditingCert] = useState<number | null>(null);
+  const [dutyRoleIds, setDutyRoleIds] = useState<string[]>([]);
   const [dayPassword, setDayPassword] = useState("");
   const [dayPasswordConfirm, setDayPasswordConfirm] = useState("");
   const [passwordPinOpen, setPasswordPinOpen] = useState(false);
@@ -72,6 +88,27 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const insert = useInsertStaffMember();
   const update = useUpdateStaffMember();
   const busy = insert.isPending || update.isPending || passwordBusy;
+
+  const reqTypesQ = useQuery({
+    queryKey: ["duty-roles", "types"],
+    queryFn: () => listRequirementTypes(false),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const dutyRolesQ = useQuery({
+    queryKey: ["duty-roles", "roles"],
+    queryFn: () => listDutyRoles(false),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const assignedQ = useQuery({
+    queryKey: ["staff-duty-roles", staff?.id ?? "new"],
+    queryFn: () => listStaffDutyRoleIds(staff!.id),
+    enabled: open && !!staff?.id,
+    staleTime: 15_000,
+  });
+  const catalogue = reqTypesQ.data ?? [];
+  const dutyRoles = dutyRolesQ.data ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -86,10 +123,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setPin("");
     setCerts(staff?.certifications ?? []);
     setEditingCert(null);
+    setDutyRoleIds([]);
     setDayPassword("");
     setDayPasswordConfirm("");
     setPasswordPinOpen(false);
   }, [open, staff]);
+
+  useEffect(() => {
+    if (!open || !staff?.id || !assignedQ.data) return;
+    setDutyRoleIds(assignedQ.data);
+  }, [open, staff?.id, assignedQ.data]);
 
   const updateCert = (i: number, patch: Partial<StaffCertification>) => {
     setCerts((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -137,13 +180,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
       }
       const payload = buildStaffPayload(pinHash);
       console.log("[staff-form] sending mutation", payload);
-      if (isEdit && staff) {
-        await update.mutateAsync({ id: staff.id, payload });
-        toast.success("Personnel updated", { description: payload.fullName });
-      } else {
-        await insert.mutateAsync(payload);
-        toast.success("Personnel added", { description: payload.fullName });
+      const saved =
+        isEdit && staff
+          ? await update.mutateAsync({ id: staff.id, payload })
+          : await insert.mutateAsync(payload);
+      try {
+        await replaceStaffDutyRoles(saved.id, dutyRoleIds);
+      } catch (dutyErr) {
+        console.warn("[staff-form] duty roles save skipped", dutyErr);
       }
+      toast.success(isEdit ? "Personnel updated" : "Personnel added", {
+        description: payload.fullName,
+      });
       onOpenChange(false);
     } catch (err) {
       console.error("[staff-form] save failed", err);
@@ -192,12 +240,13 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     active,
     notes: notes.trim() || null,
     certifications: certs
-      .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
+      .filter((c) => c.name.trim() || c.number.trim() || c.expiry || c.requirementTypeId)
       .map((c) => ({
         name: c.name.trim(),
         number: c.number.trim(),
         expiry: c.expiry || null,
         deferredUntil: c.deferredUntil || null,
+        requirementTypeId: c.requirementTypeId ?? null,
       })),
     ...(pinHash !== undefined ? { pinHash } : {}),
   });
@@ -377,10 +426,67 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             </Field>
           </section>
 
+          {dutyRoles.length > 0 && (
+            <section className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Duty roles
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Jobs this person can be asked to do. Separate from System access.
+                Requirements still have to be on file below.
+              </p>
+              <div className="space-y-2">
+                {dutyRoles.map((d) => {
+                  const checked = dutyRoleIds.includes(d.id);
+                  const reqs = catalogue.filter((t) => d.requirementIds.includes(t.id));
+                  const gap = evaluateRequirementHolds(
+                    { certifications: certs } as StaffMember,
+                    reqs,
+                  );
+                  const gapText =
+                    gap.overall === "ok"
+                      ? "Requirements current"
+                      : gap.missingNames.length
+                        ? `Missing ${gap.missingNames.join(", ")}`
+                        : `Expired ${gap.expiredNames.join(", ")}`;
+                  return (
+                    <label
+                      key={d.id}
+                      className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                    >
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={checked}
+                        onCheckedChange={(v) => {
+                          setDutyRoleIds((prev) =>
+                            v ? [...prev, d.id] : prev.filter((id) => id !== d.id),
+                          );
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="font-medium">{d.name}</span>
+                        <span
+                          className={cn(
+                            "mt-0.5 block text-[11px]",
+                            gap.overall === "ok"
+                              ? "text-muted-foreground"
+                              : "text-destructive",
+                          )}
+                        >
+                          {gapText}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Certifications
+                Certificates &amp; orientations
               </Label>
               <Button
                 type="button"
@@ -393,12 +499,12 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 className="h-7 gap-1.5"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Add certification
+                Add record
               </Button>
             </div>
             {certs.length === 0 ? (
               <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                No certifications recorded.
+                No certificates or orientations recorded.
               </p>
             ) : (
               <div className="space-y-2">
@@ -456,15 +562,45 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Certificate name
+                          Requirement
                         </Label>
-                        <Input
-                          placeholder="e.g. First Aid / CPR"
-                          value={c.name}
-                          onChange={(e) => updateCert(i, { name: e.target.value })}
-                          className="h-9"
-                          autoFocus
-                        />
+                        {catalogue.length > 0 ? (
+                          <Select
+                            value={
+                              c.requirementTypeId ||
+                              catalogue.find((t) =>
+                                requirementTypeMatchesName(t, c.name),
+                              )?.id ||
+                              ""
+                            }
+                            onValueChange={(id) => {
+                              const type = catalogue.find((t) => t.id === id);
+                              updateCert(i, {
+                                requirementTypeId: id,
+                                name: type?.name ?? c.name,
+                              });
+                            }}
+                          >
+                            <SelectTrigger className="h-9" autoFocus>
+                              <SelectValue placeholder="Pick from catalogue" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {catalogue.map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} ({t.kind})
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        ) : (
+                          <Input
+                            placeholder="e.g. Safe Food Handler"
+                            value={c.name}
+                            onChange={(e) => updateCert(i, { name: e.target.value })}
+                            className="h-9"
+                            autoFocus
+                          />
+                        )}
                       </div>
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
