@@ -5,7 +5,7 @@ export const adminDutyRolesTopic: HelpTopic = {
   kind: "howto",
   title: "Duty roles — requirements for jobs, not logins",
   summary:
-    "Create Duty roles (Food Preparation, Bus Driver) and attach certificates or orientations. Bind them to meal prep or vehicles. Separate from Manager / Driver menu access.",
+    "Create Duty roles (Food Preparation, On the floor, Bus Driver) and attach certificates or orientations. Bind them to floor functions. Separate from Manager / Driver menu access.",
   keywords: [
     "duty role",
     "duty roles",
@@ -15,36 +15,46 @@ export const adminDutyRolesTopic: HelpTopic = {
     "safe food",
     "licence",
     "wwcc",
+    "ndis",
+    "worker screening",
     "requirements",
     "admin",
   ],
   menus: ["admin", "staff"],
   roles: ["manager", "assistant_manager"],
-  relatedIds: ["admin-overview", "add-staff", "meals-service", "manifest-start-run"],
+  relatedIds: [
+    "admin-overview",
+    "add-staff",
+    "meals-service",
+    "manifest-start-run",
+    "day-centre-happy-path",
+    "medication-rounds",
+    "event-open-checks",
+  ],
   steps: [
     {
-      heading: "Open Admin → Duty roles",
-      body: "Three tabs: Duty roles, Requirements, Bindings. This is not Menu Access — a Bus Driver duty does not open extra screens.",
+      heading: "Official names first",
+      body: "Create and rename certificates and orientations only in Admin → Lookups → Certificates & orientations. Also-matches maps old spellings (Food Handler Basic). Duty roles and Staff cannot invent a name.",
     },
     {
-      heading: "Requirements",
-      body: "Add a certificate (Safe Food Handler, LR, WWCC) or an orientation (kitchen induction). Also-matches names map old spellings like Food Handler Basic. Expiry is set on the person, not here — leave expiry blank if it never expires.",
+      heading: "Open Admin → Duty roles",
+      body: "Two tabs: Duty roles and Bindings. This is not Menu Access — a Bus Driver duty does not open extra screens.",
     },
     {
       heading: "Duty roles",
-      body: "Create the job (Food Preparation, Bus Driver, Car Driver) and tick which requirements it needs. A person can hold several Duty roles.",
+      body: "Create the job (Food Preparation, Bus Driver, Car Driver) and tick which Lookups types it needs. A person can hold several Duty roles.",
     },
     {
       heading: "Bindings",
-      body: "Meal preparation uses Food Preparation. Fleet categories (bus / Coaster / HiAce) use Bus or Car Driver. You can bind one extra vehicle. Centre Open/Close can be listed but do not gate the floor unless you add that later.",
+      body: "Bind a Duty role to a function the app already has: Meal preparation, Drive fleet, On the floor (helper check-in), Centre open/close, Open event location, Close event day, Medical admin, Medication witness. No binding, or a role with no tickets, falls through and allows the action.",
     },
     {
       heading: "Staff sheet",
-      body: "Assign Duty roles on the person, then pick catalogue items for their certificates and orientations.",
+      body: "Assign Duty roles on the person, then pick certificates and orientations from the Lookups dropdown. Number and expiry stay on the person.",
     },
     {
       heading: "Floor gap",
-      body: "If someone is preparing a meal or starting a run without current requirements, a Manager writes a justification and enters their PIN — same as today’s meal path. The run or meal can proceed; the approval is ledgered.",
+      body: "If the person doing that function is missing or expired on the bound tickets, a Manager writes a justification and enters their PIN. The action can proceed; the approval is ledgered. Staff and volunteers on Personnel are checked at helper Arrived. Carers are not yet (no catalogue holds on the carer record).",
     },
   ],
 };

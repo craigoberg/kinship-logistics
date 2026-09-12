@@ -1,5 +1,6 @@
 /**
- * BL-126 — Admin: requirement catalogue, Duty roles, function/asset bindings.
+ * BL-126 — Admin: Duty roles and function/asset bindings.
+ * Ticket names live in Lookups → Certificates & orientations.
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -50,9 +51,7 @@ import {
   listDutyRoles,
   listRequirementTypes,
   setDutyRoleActive,
-  setRequirementTypeActive,
   upsertDutyRole,
-  upsertRequirementType,
 } from "@/lib/api/duty-roles";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import {
@@ -63,7 +62,6 @@ import {
   type DutyFunctionKey,
   type DutyRole,
   type DutySubjectKind,
-  type RequirementKind,
   type RequirementType,
 } from "@/lib/duty-roles";
 
@@ -106,16 +104,15 @@ export function DutyRolesWorkspace() {
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
         Duty roles are jobs people can be asked to do (Food Preparation, Bus Driver).
-        They are not menu access. Attach certificates or orientations — expiry is
-        optional. Bind a role to meal prep or a vehicle category to challenge it on
-        the floor. Centre Open/Close can be bound later; they are not required today.
+        They are not menu access. Tick official certificates and orientations from
+        Lookups → Certificates & orientations. Bind a role to a floor function to
+        challenge it. No tickets on a role means that bind falls through.
       </p>
       {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
 
       <Tabs defaultValue="roles" className="space-y-4">
         <TabsList>
           <TabsTrigger value="roles">Duty roles</TabsTrigger>
-          <TabsTrigger value="requirements">Requirements</TabsTrigger>
           <TabsTrigger value="bindings">Bindings</TabsTrigger>
         </TabsList>
 
@@ -124,14 +121,6 @@ export function DutyRolesWorkspace() {
             roles={rolesQ.data ?? []}
             types={typesQ.data ?? []}
             loading={rolesQ.isLoading}
-            canEdit={canEdit}
-            onInvalidate={invalidate}
-          />
-        </TabsContent>
-        <TabsContent value="requirements">
-          <RequirementsPanel
-            types={typesQ.data ?? []}
-            loading={typesQ.isLoading}
             canEdit={canEdit}
             onInvalidate={invalidate}
           />
@@ -147,206 +136,6 @@ export function DutyRolesWorkspace() {
           />
         </TabsContent>
       </Tabs>
-    </div>
-  );
-}
-
-function RequirementsPanel({
-  types,
-  loading,
-  canEdit,
-  onInvalidate,
-}: {
-  types: RequirementType[];
-  loading: boolean;
-  canEdit: boolean;
-  onInvalidate: () => void;
-}) {
-  const [editor, setEditor] = useState<"new" | RequirementType | null>(null);
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<RequirementKind>("certificate");
-  const [aliasText, setAliasText] = useState("");
-
-  const nameOk = name.trim().length >= 2;
-  const missing = !nameOk ? ["Requirement name (min 2)"] : [];
-
-  const saveMut = useMutation({
-    mutationFn: () =>
-      upsertRequirementType({
-        id: editor === "new" || !editor ? undefined : editor.id,
-        name,
-        kind,
-        aliases: aliasText.split(",").map((a) => a.trim()).filter(Boolean),
-      }),
-    onSuccess: () => {
-      toast.success(editor === "new" ? "Requirement added" : "Requirement updated");
-      setEditor(null);
-      onInvalidate();
-    },
-    onError: (e: Error) =>
-      toast.error("Could not save requirement", { description: e.message }),
-  });
-
-  const archiveMut = useMutation({
-    mutationFn: (row: RequirementType) => setRequirementTypeActive(row.id, !row.active),
-    onSuccess: () => {
-      toast.success("Requirement updated");
-      onInvalidate();
-    },
-    onError: (e: Error) => toast.error("Could not update", { description: e.message }),
-  });
-
-  function openNew() {
-    setEditor("new");
-    setName("");
-    setKind("certificate");
-    setAliasText("");
-  }
-  function openEdit(row: RequirementType) {
-    setEditor(row);
-    setName(row.name);
-    setKind(row.kind);
-    setAliasText(row.aliases.join(", "));
-  }
-
-  return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
-        {canEdit && (
-          <Button size="sm" onClick={openNew}>
-            <Plus className="mr-1 h-4 w-4" /> Add requirement
-          </Button>
-        )}
-      </div>
-      <div className="rounded-md border">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Name</TableHead>
-              <TableHead className="w-32">Kind</TableHead>
-              <TableHead>Also matches</TableHead>
-              <TableHead className="w-24">Status</TableHead>
-              <TableHead className="w-24" />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  Loading…
-                </TableCell>
-              </TableRow>
-            ) : types.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-muted-foreground">
-                  No requirements yet. Run the BL-126 SQL, or add one here.
-                </TableCell>
-              </TableRow>
-            ) : (
-              types.map((t) => (
-                <TableRow key={t.id}>
-                  <TableCell className="font-medium">{t.name}</TableCell>
-                  <TableCell className="capitalize">{t.kind}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {t.aliases.join(", ") || "—"}
-                  </TableCell>
-                  <TableCell>
-                    {t.active ? (
-                      <Badge className="bg-emerald-600 text-white">Active</Badge>
-                    ) : (
-                      <Badge variant="secondary">Archived</Badge>
-                    )}
-                  </TableCell>
-                  <TableCell>
-                    {canEdit && (
-                      <div className="flex justify-end gap-1">
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => openEdit(t)}
-                          tooltip="Edit requirement"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </IconActionButton>
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => archiveMut.mutate(t)}
-                          tooltip={t.active ? "Archive" : "Restore"}
-                        >
-                          <Archive className="h-4 w-4" />
-                        </IconActionButton>
-                      </div>
-                    )}
-                  </TableCell>
-                </TableRow>
-              ))
-            )}
-          </TableBody>
-        </Table>
-      </div>
-
-      <Dialog open={!!editor} onOpenChange={(o) => !o && setEditor(null)}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>
-              {editor === "new" ? "Add requirement" : "Edit requirement"}
-            </DialogTitle>
-            <DialogDescription>
-              Certificates usually have a number. Orientations often never expire —
-              leave expiry blank on the person.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-3">
-            <CharacterCountedInput
-              label="Name"
-              value={name}
-              onValueChange={setName}
-              minChars={2}
-              maxChars={80}
-              required
-            />
-            <div className="grid gap-1">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Kind
-              </Label>
-              <Select value={kind} onValueChange={(v) => setKind(v as RequirementKind)}>
-                <SelectTrigger className="h-9">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="certificate">Certificate</SelectItem>
-                  <SelectItem value="orientation">Orientation</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="grid gap-1">
-              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Also matches (comma-separated)
-              </Label>
-              <Input
-                value={aliasText}
-                onChange={(e) => setAliasText(e.target.value)}
-                placeholder="Food Handler Basic, SFH"
-                className="h-9"
-              />
-            </div>
-            {missing.length > 0 && (
-              <p className="text-sm text-destructive">Missing: {missing.join(", ")}</p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditor(null)}>
-              Close
-            </Button>
-            <Button
-              type="button"
-              disabled={!nameOk || saveMut.isPending}
-              onClick={() => saveMut.mutate()}
-            >
-              Save
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }
@@ -529,7 +318,7 @@ function RolesPanel({
               </p>
               {activeTypes.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
-                  Add requirements on the Requirements tab first.
+                  Add types in Lookups → Certificates &amp; orientations first.
                 </p>
               ) : (
                 activeTypes.map((t) => {
@@ -718,8 +507,8 @@ function BindingsPanel({
             <DialogTitle>Add binding</DialogTitle>
             <DialogDescription>
               Whoever does this function (or drives this vehicle) is challenged for
-              the Duty role’s requirements. Centre Open/Close bindings do not gate
-              the floor until you ask for that later.
+              the Duty role’s requirements. No binding, or a role with no tickets,
+              falls through and allows the action.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">

@@ -43,7 +43,7 @@ export const eventOpenChecksTopic: HelpTopic = {
     },
     {
       heading: "Trip leader PIN",
-      body: "When ticks (and any open-RED gates) are clear, Tap to enter PIN and open with the trip leader PIN. Ledger records EVENT_LOCATION_OPENED with completed check labels. Open RED on the session blocks PIN.",
+      body: "When ticks (and any open-RED gates) are clear, Tap to enter PIN and open with the trip leader PIN. If Admin bound Open event location to a Duty role and the trip leader is missing those tickets, a Manager must justify + PIN first. Ledger records EVENT_LOCATION_OPENED with completed check labels. Open RED on the session blocks PIN.",
     },
     {
       heading: "Configure the tick list (Admin)",

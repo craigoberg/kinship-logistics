@@ -61,6 +61,8 @@ import {
   resolveStaffDisplayName,
 } from "@/lib/data-store";
 import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   sessionId: string;
@@ -103,6 +105,13 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
+  const openDuty = useDutyFunctionGap({
+    functionKey: "centre_open",
+    staffId: getStaffId(),
+    subjectLabel: "Day Centre open",
+    enabled: confirmOpen,
+    ledgerCategory: "CENTRE",
+  });
   const allChecked =
     mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
 
@@ -440,6 +449,21 @@ export function StartOfDayPanel({ sessionId }: Props) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 py-1">
+            {openDuty.needsGap && (
+              <DutyRequirementGapPanel
+                actorName={openDuty.actor?.fullName ?? "Check Leader"}
+                evalResult={openDuty.evalResult}
+                note={openDuty.note}
+                onNoteChange={openDuty.setNote}
+                managerId={openDuty.managerId}
+                onManagerIdChange={openDuty.setManagerId}
+                managerPin={openDuty.managerPin}
+                onManagerPin={openDuty.setManagerPin}
+                managers={openDuty.managers}
+                title="Centre open"
+                disabled={openMut.isPending}
+              />
+            )}
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Check Leader PIN <span className="text-rose-600">*</span>
             </Label>
@@ -451,9 +475,10 @@ export function StartOfDayPanel({ sessionId }: Props) {
               title="Declare site safe"
               description="PIN confirms the walkthrough is complete and opens the centre."
               required
-              disabled={openMut.isPending}
+              disabled={openMut.isPending || (openDuty.needsGap && !openDuty.approved)}
               onVerify={verifyOperatorPin}
-              onSuccess={() => {
+              onSuccess={async () => {
+                if (!(await openDuty.ensureApproved())) return;
                 setOpenerPinVerified(true);
                 openMut.mutate();
               }}

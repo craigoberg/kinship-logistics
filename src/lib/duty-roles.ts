@@ -14,6 +14,10 @@ export const DUTY_FUNCTION_KEYS = [
   { key: "centre_open", label: "Centre open" },
   { key: "centre_close", label: "Centre close" },
   { key: "med_admin", label: "Medical admin" },
+  { key: "floor_on_duty", label: "On the floor (helper check-in)" },
+  { key: "event_venue_open", label: "Open event location" },
+  { key: "event_day_close", label: "Close event day / location" },
+  { key: "med_witness", label: "Medication witness" },
 ] as const;
 
 export type DutyFunctionKey = (typeof DUTY_FUNCTION_KEYS)[number]["key"];

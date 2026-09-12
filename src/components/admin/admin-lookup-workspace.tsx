@@ -44,6 +44,7 @@ import {
 } from "@/hooks/use-supabase-data";
 import { TransportSiteAddressesPanel } from "@/components/admin/transport-site-addresses-panel";
 import { OperatingDaysPanel } from "@/components/admin/operating-days-panel";
+import { CertificateTypesPanel } from "@/components/admin/certificate-types-panel";
 import {
   CAUTION_CALLOUT_BODY_CLASS,
   CAUTION_CALLOUT_CLASS,
@@ -74,6 +75,8 @@ export function AdminLookupWorkspace() {
           {c.category === LOOKUP_CATEGORIES.busRun && <TransportSiteAddressesPanel />}
           {c.category === LOOKUP_CATEGORIES.operatingDay ? (
             <OperatingDaysPanel />
+          ) : c.category === LOOKUP_CATEGORIES.certificateType ? (
+            <CertificateTypesPanel />
           ) : (
             <CategoryPanel
               category={c.category}

@@ -46,7 +46,7 @@ export const addStaffTopic: HelpTopic = {
     },
     {
       heading: "Certifications later",
-      body: "After identity and PIN, add certificates and orientations from the Admin catalogue (Safe Food Handler, WWCC, licences). Assign Duty roles (Food Preparation, Bus Driver) separately from System access. Hub still tracks expiry.",
+      body: "After identity and PIN, add certificates and orientations from the Lookups list (Admin → Lookups → Certificates & orientations). You pick a name; you do not type one. Assign Duty roles separately from System access. Hub still tracks expiry.",
     },
   ],
 };

@@ -91,7 +91,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
   const reqTypesQ = useQuery({
     queryKey: ["duty-roles", "types"],
-    queryFn: () => listRequirementTypes(false),
+    queryFn: () => listRequirementTypes(true),
     staleTime: 30_000,
     enabled: open,
   });
@@ -108,6 +108,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     staleTime: 15_000,
   });
   const catalogue = reqTypesQ.data ?? [];
+  const activeCatalogue = catalogue.filter((t) => t.active);
   const dutyRoles = dutyRolesQ.data ?? [];
 
   useEffect(() => {
@@ -211,7 +212,15 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const personnelTypeMissing = !isEdit && !personnelType;
   const pinMissing = !isEdit && !pinValidLive;
   const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
-  const canSave = !busy && !nameMissing && !roleMissing && !personnelTypeMissing && !pinMissing && !pinBadFormat;
+  const certTypeMissing = certs.some((c) => !(c.requirementTypeId ?? "").trim());
+  const canSave =
+    !busy &&
+    !nameMissing &&
+    !roleMissing &&
+    !personnelTypeMissing &&
+    !pinMissing &&
+    !pinBadFormat &&
+    !certTypeMissing;
 
   const formEmail = email.trim().toLowerCase();
   const formEmailValid = formEmail.includes("@");
@@ -240,7 +249,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     active,
     notes: notes.trim() || null,
     certifications: certs
-      .filter((c) => c.name.trim() || c.number.trim() || c.expiry || c.requirementTypeId)
+      .filter((c) => (c.requirementTypeId ?? "").trim())
       .map((c) => ({
         name: c.name.trim(),
         number: c.number.trim(),
@@ -492,6 +501,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 type="button"
                 size="sm"
                 variant="outline"
+                disabled={activeCatalogue.length === 0}
                 onClick={() => {
                   setEditingCert(certs.length);
                   setCerts((p) => [...p, { ...EMPTY_CERT }]);
@@ -502,6 +512,12 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 Add record
               </Button>
             </div>
+            {activeCatalogue.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Add official names in Admin → Lookups → Certificates &amp; orientations
+                first.
+              </p>
+            )}
             {certs.length === 0 ? (
               <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
                 No certificates or orientations recorded.
@@ -562,45 +578,45 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Requirement
+                          Certificate / orientation
                         </Label>
-                        {catalogue.length > 0 ? (
-                          <Select
-                            value={
-                              c.requirementTypeId ||
-                              catalogue.find((t) =>
-                                requirementTypeMatchesName(t, c.name),
-                              )?.id ||
-                              ""
-                            }
-                            onValueChange={(id) => {
-                              const type = catalogue.find((t) => t.id === id);
-                              updateCert(i, {
-                                requirementTypeId: id,
-                                name: type?.name ?? c.name,
-                              });
-                            }}
+                        <Select
+                          value={
+                            c.requirementTypeId ||
+                            catalogue.find((t) =>
+                              requirementTypeMatchesName(t, c.name),
+                            )?.id ||
+                            ""
+                          }
+                          onValueChange={(id) => {
+                            const type = catalogue.find((t) => t.id === id);
+                            updateCert(i, {
+                              requirementTypeId: id,
+                              name: type?.name ?? c.name,
+                            });
+                          }}
+                        >
+                          <SelectTrigger
+                            className={requiredFieldOutline(
+                              !(c.requirementTypeId ?? "").trim(),
+                              "h-9",
+                            )}
+                            autoFocus
                           >
-                            <SelectTrigger className="h-9" autoFocus>
-                              <SelectValue placeholder="Pick from catalogue" />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {catalogue.map((t) => (
+                            <SelectValue placeholder="Pick from Lookups list" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {catalogue
+                              .filter(
+                                (t) => t.active || t.id === (c.requirementTypeId ?? ""),
+                              )
+                              .map((t) => (
                                 <SelectItem key={t.id} value={t.id}>
                                   {t.name} ({t.kind})
                                 </SelectItem>
                               ))}
-                            </SelectContent>
-                          </Select>
-                        ) : (
-                          <Input
-                            placeholder="e.g. Safe Food Handler"
-                            value={c.name}
-                            onChange={(e) => updateCert(i, { name: e.target.value })}
-                            className="h-9"
-                            autoFocus
-                          />
-                        )}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -794,6 +810,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                   personnelTypeMissing && "System access level",
                   pinMissing && "4-digit PIN",
                   pinBadFormat && "PIN must be exactly 4 digits",
+                  certTypeMissing && "Certificate / orientation type",
                 ]
                   .filter(Boolean)
                   .join(", ")}

@@ -139,8 +139,9 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Admin lookup edit** | **Defined** | `AdminLookupWorkspace` Edit dialog | Lookups (Day Centre Bus Runs, codes, names) | Actions: **Edit** + **Remove**. Dialog uses `CharacterCountedInput` for code + display name; Save disabled until dirty + valid. Bus run code change cascades assignments (`update_lookup_parameter`) so Manifest / Clients keep the run. |
 | **Admin numeric fields** | **Defined** | `Input type="number"` | Roll thresholds, odometer, capacities | `NumericEntryTrigger` remains field-only (BL-055) |
 | **Admin registry list** | **Defined** | shadcn `Table` + action column | Fleet, Vendors, Venues, Duty roles | Column layout like Vendors; actions via icon buttons — not whole-row “dead” click chrome |
-| **Duty role Admin** | **Defined** | `DutyRolesWorkspace` (Vendors-style Table + dialogs) | Admin → Duty roles | Three tabs: Duty roles, Requirements, Bindings. `CharacterCountedInput` names; office `Select` for kind/function; `Checkbox` for required items. §4.3 missing-fields list + Save disabled. |
-| **Staff Duty roles** | **Defined** | Checkbox list on `StaffFormSheet` | Personnel edit | Separate from SYSTEM ACCESS LEVEL. Requirement picker is office `Select` from catalogue. |
+| **Duty role Admin** | **Defined** | `DutyRolesWorkspace` (Vendors-style Table + dialogs) | Admin → Duty roles | Two tabs: Duty roles, Bindings. Tick types from Lookups catalogue. `CharacterCountedInput` names; office `Select` for function; `Checkbox` for required items. §4.3 missing-fields list + Save disabled. |
+| **Certificate type Lookups** | **Defined** | `CertificateTypesPanel` (special Lookups panel) | Admin → Lookups → Certificates & orientations | Same Table + dialog as the old Duty Requirements tab. Kind `Select`, aliases, archive. Not `lookup_parameters`. |
+| **Staff Duty roles** | **Defined** | Checkbox list on `StaffFormSheet` | Personnel edit | Separate from SYSTEM ACCESS LEVEL. Cert picker is office `Select` from Lookups types only — no free-text name. |
 | **Admin Yes/No (2-option)** | **Defined** | `MobileOptionButton` | Baseline sign-off yes/no | Same compact enum contract as Day Centre |
 | **Sheet footer (save)** | **Defined** | `SheetFooter` + §4.2 | Fleet / Venue sheets | Close (outline, left) + Save right; Close never `disabled={pending}` |
 | **Icon-only action tooltip** | **Defined** | `IconActionButton` (`ui/icon-action-button.tsx`) | Table/row action icons (Open, Edit, Clone, Archive, Remove…) | Required hover label + `aria-label`. App-wide `TooltipProvider` in `AppShell`. Do not ship bare `size="icon"` actions without a tooltip. Status-only icons (e.g. hoist) may use `Tooltip` without a button. |
@@ -557,6 +558,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-13 | Certificate types in Lookups | Official names live in Lookups → Certificates & orientations (`requirement_types`). Duty roles tick; Staff dropdown only. |
+| 2026-09-13 | Duty function hooks | Same `DutyRequirementGapPanel` on helper Arrived, Centre open/close, event open/close, Give dose. Empty bind = no panel. |
 | 2026-09-12 | Hide chrome on scroll | Stay visible on load and when Manifest/Dashboard content is shorter than the screen. Hide only after a real ~48px scroll on an overflowing pane. |
 | 2026-09-12 | Duty role Admin + staff assignment | Admin → Duty roles registry (Vendors Table). Staff sheet: Duty role checkboxes + catalogue Select for certs/orientations. Floor gap = existing meal Manager note + PIN panel. |
 | 2026-09-09 | Staff certification edit | Personnel sheet: summary card + Edit; Save changes writes name, number, expiry, and defer. |

@@ -47,6 +47,8 @@ import {
 import type { EventDaySession } from "@/lib/api/event-outing";
 import { getEventDayPhaseDisplay } from "@/lib/event-day-phase-display";
 import { useVenueOpenChecks } from "@/hooks/use-system-parameters";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   session: EventDaySession;
@@ -97,6 +99,20 @@ export function EventLocationPanel({
 
   const managerStaffId = session.manager_staff_id ?? getActiveUserProfile()?.staffId ?? "";
   const tripLeaderName = (session.manager_name ?? "").trim() || null;
+  const openDuty = useDutyFunctionGap({
+    functionKey: "event_venue_open",
+    staffId: managerStaffId || null,
+    subjectLabel: tripLeaderName ?? "Trip leader",
+    enabled: openDialog,
+    ledgerCategory: "CENTRE",
+  });
+  const closeDuty = useDutyFunctionGap({
+    functionKey: "event_day_close",
+    staffId: managerStaffId || null,
+    subjectLabel: tripLeaderName ?? "Trip leader",
+    enabled: closeDialog,
+    ledgerCategory: "CENTRE",
+  });
   const tripLeaderPinHint = tripLeaderName
     ? `${tripLeaderName} (trip leader) — their PIN, not another manager’s.`
     : "The assigned trip leader’s PIN — not another manager’s.";
@@ -152,7 +168,10 @@ export function EventLocationPanel({
   });
 
   const closeMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (!(await closeDuty.ensureApproved())) {
+        throw new Error("Manager must approve the duty requirement gap first.");
+      }
       if (!managerPinVerified || !verifiedManagerPin) {
         throw new Error("Manager PIN required.");
       }
@@ -394,6 +413,21 @@ export function EventLocationPanel({
                 disabled={openMut.isPending}
               />
             </div>
+            {openDuty.needsGap && (
+              <DutyRequirementGapPanel
+                actorName={tripLeaderName ?? openDuty.actor?.fullName ?? "Trip leader"}
+                evalResult={openDuty.evalResult}
+                note={openDuty.note}
+                onNoteChange={openDuty.setNote}
+                managerId={openDuty.managerId}
+                onManagerIdChange={openDuty.setManagerId}
+                managerPin={openDuty.managerPin}
+                onManagerPin={openDuty.setManagerPin}
+                managers={openDuty.managers}
+                title="Open location"
+                disabled={openMut.isPending}
+              />
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">
                 Trip leader PIN{tripLeaderName ? ` — ${tripLeaderName}` : ""}
@@ -412,12 +446,17 @@ export function EventLocationPanel({
                 title="Open event location"
                 description={tripLeaderPinHint}
                 disabled={
-                  !managerStaffId || openMut.isPending || !venueWalkthroughReady || hasRed
+                  !managerStaffId ||
+                  openMut.isPending ||
+                  !venueWalkthroughReady ||
+                  hasRed ||
+                  (openDuty.needsGap && !openDuty.approved)
                 }
                 onVerify={async (pin) => {
                   await verifyManagerPin(managerStaffId, pin);
                 }}
-                onSuccess={(pin) => {
+                onSuccess={async (pin) => {
+                  if (!(await openDuty.ensureApproved())) return;
                   setVerifiedManagerPin(pin);
                   setManagerPinVerified(true);
                   openMut.mutate(pin);
@@ -470,6 +509,20 @@ export function EventLocationPanel({
               <Label className="text-xs">Close notes (optional)</Label>
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={2} />
             </div>
+            {closeDuty.needsGap && (
+              <DutyRequirementGapPanel
+                actorName={tripLeaderName ?? closeDuty.actor?.fullName ?? "Trip leader"}
+                evalResult={closeDuty.evalResult}
+                note={closeDuty.note}
+                onNoteChange={closeDuty.setNote}
+                managerId={closeDuty.managerId}
+                onManagerIdChange={closeDuty.setManagerId}
+                managerPin={closeDuty.managerPin}
+                onManagerPin={closeDuty.setManagerPin}
+                managers={closeDuty.managers}
+                title="Close location"
+              />
+            )}
             <div className="space-y-1.5">
               <Label className="text-xs">
                 Trip leader PIN{tripLeaderName ? ` — ${tripLeaderName}` : ""}
@@ -485,7 +538,7 @@ export function EventLocationPanel({
                 length={4}
                 title="Close event location"
                 description={tripLeaderPinHint}
-                disabled={!managerStaffId}
+                disabled={!managerStaffId || (closeDuty.needsGap && !closeDuty.approved)}
                 onVerify={async (pin) => {
                   await verifyManagerPin(managerStaffId, pin);
                 }}

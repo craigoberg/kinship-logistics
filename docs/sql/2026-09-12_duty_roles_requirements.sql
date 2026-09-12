@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS public.duty_bindings (
   id            uuid PRIMARY KEY DEFAULT gen_random_uuid(),
   function_key  text NOT NULL
                 CHECK (function_key IN (
-                  'meal_prep', 'fleet_drive', 'centre_open', 'centre_close', 'med_admin'
+                  'meal_prep', 'fleet_drive', 'centre_open', 'centre_close', 'med_admin',
+                  'floor_on_duty', 'event_venue_open', 'event_day_close', 'med_witness'
                 )),
   subject_kind  text NOT NULL DEFAULT 'function'
                 CHECK (subject_kind IN ('function', 'vehicle_category', 'fleet_asset')),

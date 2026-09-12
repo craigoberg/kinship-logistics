@@ -31,6 +31,10 @@ import { supportPersonKindLabel } from "@/lib/support-person";
 import type { ArrivalMethod } from "@/lib/api/client-attendance";
 import type { AttendanceRollMode } from "./attendance-roll-panel";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import {
+  DutyOnDutyConfirmSheet,
+  type DutyOnDutyPending,
+} from "@/components/duty/duty-on-duty-confirm-sheet";
 
 interface Props {
   sessionId: string;
@@ -41,6 +45,7 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
   const qc = useQueryClient();
   const [pickerFor, setPickerFor] = useState<SupportAttendanceRow | null>(null);
   const [adjustRow, setAdjustRow] = useState<SupportAttendanceRow | null>(null);
+  const [dutyPending, setDutyPending] = useState<DutyOnDutyPending | null>(null);
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
@@ -90,6 +95,18 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
     onSuccess: () => void qc.invalidateQueries({ queryKey: SUPPORT_ROLL_KEY(sessionId) }),
     onError: (err: Error) => toast.error(err.message),
   });
+
+  const requestArrive = (
+    row: SupportAttendanceRow,
+    method: ArrivalMethod,
+    run?: string | null,
+  ) => {
+    setDutyPending({
+      staffId: row.staffId,
+      displayName: row.displayName,
+      onProceed: () => checkIn.mutate({ row, method, run }),
+    });
+  };
 
   if (visible.length === 0) return null;
 
@@ -157,11 +174,7 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                   <Button
                     size="sm"
                     onClick={() =>
-                      checkIn.mutate({
-                        row,
-                        method: row.arrivalMethod,
-                        run: row.arrivalBusRunCode,
-                      })
+                      requestArrive(row, row.arrivalMethod, row.arrivalBusRunCode)
                     }
                   >
                     {row.status === "absent" ? "Late arrival" : "Arrived"}
@@ -186,9 +199,13 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
           if (!pickerFor) return;
           const method: ArrivalMethod = sel.kind === "bus" ? "bus" : "private";
           const run = sel.kind === "bus" ? sel.busRunCode : null;
-          checkIn.mutate({ row: pickerFor, method, run });
+          requestArrive(pickerFor, method, run);
           setPickerFor(null);
         }}
+      />
+      <DutyOnDutyConfirmSheet
+        pending={dutyPending}
+        onDismiss={() => setDutyPending(null)}
       />
       <AdjustExpectedTimeModal
         row={null}

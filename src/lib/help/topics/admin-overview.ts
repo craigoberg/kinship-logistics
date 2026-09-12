@@ -31,7 +31,7 @@ export const adminOverviewTopic: HelpTopic = {
   steps: [
     {
       heading: "Lookups",
-      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days drive the calendar Centre chips, staff Centre run, and attendance seeder defaults.",
+      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Certificates & orientations is the official ticket-name list for Duty roles and Staff. Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days drive the calendar Centre chips, staff Centre run, and attendance seeder defaults.",
     },
     {
       heading: "Fleet Register",
@@ -39,7 +39,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "Venues, Vendors & Duty roles",
-      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, Bus Driver) and their certificates or orientations — not menu access.",
+      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, On the floor, Bus Driver) bound to floor functions — not menu access.",
     },
     {
       heading: "System Parameters — structured panels",

@@ -29,7 +29,9 @@ import { CharacterCountedTextarea } from "@/components/ui/character-counted-text
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { MandatedChecksList } from "@/components/site-day/mandated-checks-list";
 import { supabase } from "@/integrations/supabase/client";
-import { listParticipants, resolveStaffIdWithFallback } from "@/lib/data-store";
+import { getStaffId, listParticipants, resolveStaffIdWithFallback } from "@/lib/data-store";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 import { tryGetGps } from "@/lib/api/ledger";
 import {
   listAttendanceRoll,
@@ -62,6 +64,13 @@ export function DayCentreClosureModal({ open, onOpenChange, sessionId }: Props) 
   const [pinOpen, setPinOpen] = useState(false);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const closeChecks = useMandatedCloseChecks();
+  const closeDuty = useDutyFunctionGap({
+    functionKey: "centre_close",
+    staffId: getStaffId(),
+    subjectLabel: "Day Centre close",
+    enabled: open,
+    ledgerCategory: "CENTRE",
+  });
   const allChecksConfirmed =
     closeChecks.length === 0 || ticked.size >= closeChecks.length;
 
@@ -127,10 +136,14 @@ export function DayCentreClosureModal({ open, onOpenChange, sessionId }: Props) 
     justOk &&
     stillOnSite.length === 0 &&
     visitorsStillPresent.length === 0 &&
-    allChecksConfirmed;
+    allChecksConfirmed &&
+    closeDuty.approved;
 
   const finaliseMut = useMutation({
     mutationFn: async () => {
+      if (!(await closeDuty.ensureApproved())) {
+        throw new Error("Manager must approve the duty requirement gap first.");
+      }
       if (!allChecksConfirmed) {
         throw new Error("Complete all mandated close checks before closing.");
       }
@@ -369,6 +382,22 @@ export function DayCentreClosureModal({ open, onOpenChange, sessionId }: Props) 
                       paramKey="site_management.mandated_close_checks"
                       emptyTrustVerb="close"
                     />
+
+                    {closeDuty.needsGap && (
+                      <DutyRequirementGapPanel
+                        actorName={closeDuty.actor?.fullName ?? "Closer"}
+                        evalResult={closeDuty.evalResult}
+                        note={closeDuty.note}
+                        onNoteChange={closeDuty.setNote}
+                        managerId={closeDuty.managerId}
+                        onManagerIdChange={closeDuty.setManagerId}
+                        managerPin={closeDuty.managerPin}
+                        onManagerPin={closeDuty.setManagerPin}
+                        managers={closeDuty.managers}
+                        title="Centre close"
+                        disabled={finaliseMut.isPending}
+                      />
+                    )}
 
                     {closeChecks.length > 0 && !allChecksConfirmed && (
                       <div className="flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 p-3 text-sm text-yellow-800 dark:text-yellow-200">

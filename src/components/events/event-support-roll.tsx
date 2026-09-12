@@ -1,7 +1,7 @@
 /**
  * Event Deliver Support roll — staff / volunteer / carer.
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Users } from "lucide-react";
 import { toast } from "sonner";
@@ -17,6 +17,10 @@ import {
   seedEventSupportRoll,
 } from "@/lib/api/event-support";
 import { supportPersonKindLabel } from "@/lib/support-person";
+import {
+  DutyOnDutyConfirmSheet,
+  type DutyOnDutyPending,
+} from "@/components/duty/duty-on-duty-confirm-sheet";
 
 interface Props {
   sessionId: string;
@@ -26,6 +30,7 @@ interface Props {
 
 export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Props) {
   const qc = useQueryClient();
+  const [dutyPending, setDutyPending] = useState<DutyOnDutyPending | null>(null);
   const rollQ = useQuery({
     queryKey: EVENT_SUPPORT_ROLL_KEY(sessionId),
     queryFn: () => listEventSupportAttendance(sessionId),
@@ -95,7 +100,16 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
             <Badge variant="outline">{row.status.replace("_", " ")}</Badge>
             {mode === "check_in" && row.status === "expected" && (
               <>
-                <Button size="sm" onClick={() => arrive.mutate(row)}>
+                <Button
+                  size="sm"
+                  onClick={() =>
+                    setDutyPending({
+                      staffId: row.staffId,
+                      displayName: row.displayName,
+                      onProceed: () => arrive.mutate(row),
+                    })
+                  }
+                >
                   Arrived
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => absent.mutate(row.id)}>
@@ -111,6 +125,10 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
           </div>
         ))}
       </div>
+      <DutyOnDutyConfirmSheet
+        pending={dutyPending}
+        onDismiss={() => setDutyPending(null)}
+      />
     </section>
   );
 }

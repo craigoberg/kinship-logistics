@@ -25,6 +25,8 @@ import {
   listBusHomeHandoverGaps,
 } from "@/lib/api/event-transport";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   session: EventDaySession;
@@ -51,6 +53,13 @@ export function EventCloseDayPanel({
 
   const isClosed = isEventLocationClosed(session.phase);
   const managerStaffId = session.manager_staff_id ?? getActiveUserProfile()?.staffId ?? "";
+  const closeDuty = useDutyFunctionGap({
+    functionKey: "event_day_close",
+    staffId: managerStaffId || null,
+    subjectLabel: "Event day close",
+    enabled: sheetOpen,
+    ledgerCategory: "CENTRE",
+  });
 
   const { data: eveningProgress, isLoading: eveningLoading } = useQuery({
     queryKey: ["event-accountability-progress", "curfew", session.id],
@@ -99,7 +108,10 @@ export function EventCloseDayPanel({
   const pendingEvening = eveningProgress?.pending ?? 0;
 
   const closeMut = useMutation({
-    mutationFn: () => {
+    mutationFn: async () => {
+      if (!(await closeDuty.ensureApproved())) {
+        throw new Error("Manager must approve the duty requirement gap first.");
+      }
       if (!pinVerified || !verifiedPin) throw new Error("Trip leader PIN required.");
       return closeEventLocation({
         sessionId: session.id,
@@ -223,6 +235,21 @@ export function EventCloseDayPanel({
             />
           </div>
 
+          {closeDuty.needsGap && (
+            <DutyRequirementGapPanel
+              actorName={closeDuty.actor?.fullName ?? "Trip leader"}
+              evalResult={closeDuty.evalResult}
+              note={closeDuty.note}
+              onNoteChange={closeDuty.setNote}
+              managerId={closeDuty.managerId}
+              onManagerIdChange={closeDuty.setManagerId}
+              managerPin={closeDuty.managerPin}
+              onManagerPin={closeDuty.setManagerPin}
+              managers={closeDuty.managers}
+              title="Close day"
+            />
+          )}
+
           <div className="space-y-1.5">
             <Label className="text-xs">Trip leader PIN</Label>
             <PinEntryTrigger
@@ -232,7 +259,7 @@ export function EventCloseDayPanel({
               length={4}
               title={closeLabel}
               description="Trip leader Manager PIN required."
-              disabled={!managerStaffId}
+              disabled={!managerStaffId || (closeDuty.needsGap && !closeDuty.approved)}
               onVerify={async (pin) => {
                 await verifyManagerPin(managerStaffId, pin);
               }}
@@ -250,7 +277,7 @@ export function EventCloseDayPanel({
             <Button
               variant="destructive"
               className="flex-1"
-              disabled={!pinVerified || !verifiedPin || closeMut.isPending}
+              disabled={!pinVerified || !verifiedPin || closeMut.isPending || !closeDuty.approved}
               onClick={() => closeMut.mutate()}
             >
               {closeMut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}

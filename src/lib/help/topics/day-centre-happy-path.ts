@@ -35,11 +35,11 @@ export const dayCentreHappyPathTopic: HelpTopic = {
     },
     {
       heading: "Open the Day Centre",
-      body: "On Day Centre → Start of day, complete mandated open checks, then Declare Site Safe & Open with the Site Opener PIN.",
+      body: "On Day Centre → Start of day, complete mandated open checks, then Declare Site Safe & Open with the Site Opener PIN. If Admin bound a Duty role to Centre open and the opener is missing those tickets, a Manager must justify + PIN first (same as meals).",
     },
     {
       heading: "Check-In",
-      body: "On Active Day → Check-In, mark expected participants present (or absent with reason + PIN). Absent people stay on the roll but are off morning and afternoon Manifest. If they turn up later, set arrival method (usually Self / family) and tap the wide row — that is a late arrival: they check in, go onto Check-Out, and onto the afternoon bus if that is how they go home. + Add Attendee is for a registered client who was not on today’s roll (or was Off today and then arrived); you must pick how they go home. + Add visitor is for non-clients (family, trades, site visitors).",
+      body: "On Active Day → Check-In, mark expected participants present (or absent with reason + PIN). Absent people stay on the roll but are off morning and afternoon Manifest. If they turn up later, set arrival method (usually Self / family) and tap the wide row — that is a late arrival: they check in, go onto Check-Out, and onto the afternoon bus if that is how they go home. + Add Attendee is for a registered client who was not on today’s roll (or was Off today and then arrived); you must pick how they go home. + Add visitor is for non-clients (family, trades, site visitors). Support Arrived (staff / volunteer) also checks On the floor Duty bindings when office has set them.",
     },
     {
       heading: "Activities (meals & meds)",

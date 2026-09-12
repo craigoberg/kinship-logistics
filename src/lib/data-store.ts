@@ -1884,6 +1884,8 @@ export const LOOKUP_CATEGORIES = {
   operatingDay: "operating_days",
   eventType: "event_types",
   busRun: "bus_runs",
+  /** Sentinel for Lookups special panel — not a lookup_parameters category. */
+  certificateType: "certificate_types",
 } as const;
 
 
@@ -1927,6 +1929,12 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     label: "Day Centre Bus Runs",
     description:
       "Named recurring bus runs (e.g. Run 1, Run 2). Edit code or display name in place — clients stay assigned. Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
+  },
+  {
+    category: LOOKUP_CATEGORIES.certificateType,
+    label: "Certificates & orientations",
+    description:
+      "Official ticket names (Safe Food Handler, WWCC, Kitchen orientation). Duty roles and Staff pick from this list — they cannot invent a spelling.",
   },
 ];
 
