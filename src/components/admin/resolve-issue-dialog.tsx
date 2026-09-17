@@ -57,7 +57,8 @@ import {
   useCouncilSlaHours,
 } from "@/hooks/use-system-parameters";
 import { resolveCouncilMailtoFrom, cleanCouncilIssueText } from "@/lib/governance/council-email";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, todayLocalIso } from "@/lib/utils";
+import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
 import { toast } from "sonner";
 
 // ── Helpers for clean display ──────────────────────────────────────────────
@@ -222,14 +223,14 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
                 : "Sev_3";
           const hours = councilSlaHours[hoursKey] ?? 24;
           const deadlineIso = new Date(
-            Date.now() + hours * 3600 * 1000,
+            operationalNowMs() + hours * 3600 * 1000,
           ).toISOString();
           const tokens = {
             severity: councilSev,
             deadline: formatDateTime(deadlineIso),
             description: cleanCouncilIssueText(issue.description || issue.title),
             workaround: note.trim(),
-            date: formatDate(new Date().toISOString().slice(0, 10)),
+            date: formatDate(todayLocalIso()),
           };
           const res = await dispatchCouncilEmail({
             issueId: issue.sourceRowId,
@@ -307,7 +308,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
     onSuccess: () => {
       invalidateAll();
       qc.invalidateQueries({ queryKey: ["hub-review-started-keys"] });
-      const waitLabel = formatHubWaitDuration(issue.createdAt, new Date().toISOString());
+      const waitLabel = formatHubWaitDuration(
+        issue.occurredAt || issue.createdAt,
+        operationalNowIso(),
+      );
       operationToasts.reviewStarted(waitLabel);
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),
@@ -409,9 +413,10 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
   const workflow = reviewStarted
     ? ("in_progress" as const)
     : deriveIssueWorkflowStatus(issue, new Set());
+  const waitFrom = issue.occurredAt || issue.createdAt;
   const waitLabel = reviewStartedNote
-    ? formatHubWaitDuration(issue.createdAt, reviewStartedNote.stampedAt)
-    : formatHubWaitDuration(issue.createdAt, new Date().toISOString());
+    ? formatHubWaitDuration(waitFrom, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(waitFrom, operationalNowIso());
 
   const contextCard = (
     <div className="space-y-2 rounded-md border bg-muted/30 p-3 text-sm">

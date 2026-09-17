@@ -48,7 +48,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchApprovedRedWorkarounds,
   isDayCentreScopedIssue,
-  redHasAcceptedWorkaround,
+  doesIssueBlockDayCentreOpen,
 } from "@/lib/site-day/red-workaround";
 import { DayCentreBlockingRedResolveButton } from "./day-centre-blocking-red-resolve-button";
 import { ClientTime } from "@/components/ui/client-time";
@@ -133,14 +133,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
     staleTime: 5_000,
   });
   const escMap = escMapQ.data ?? null;
-  // Deferred REDs are parked in Hub — they must not hold Open Centre (parity
-  // with fetchDayCentreBlockingReds). Accepted workarounds also clear the gate.
-  const blockingIssues = dayScopedOpen.filter((i) => {
-    if (i.status === "deferred") return false;
-    if (i.severity === "red") return !redHasAcceptedWorkaround(i, escMap);
-    if (i.severity === "yellow") return !i.workaroundPlan?.trim();
-    return false;
-  });
+  const blockingIssues = dayScopedOpen.filter((i) =>
+    doesIssueBlockDayCentreOpen(i, escMap),
+  );
   const hasBlocking = blockingIssues.length > 0;
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
   const registerIssues = sortSiteIssuesByRygeNewestFirst(dayScopedOpen);
@@ -263,7 +258,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
                     </span>
                     <div className="flex items-center gap-2">
                       <ClientTime
-                        iso={issue.createdAt}
+                        iso={issue.occurredAt}
                         className="text-xs text-muted-foreground"
                       />
                       {isManager ? (

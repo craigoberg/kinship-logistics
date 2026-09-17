@@ -78,7 +78,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
 | **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds. Stamps must be SIM-aware (`operationalNowIso`) — GUARDRAILS §5.3 |
-| **SIM / operational clock (all date-time work)** | **Defined** | `operationalNowIso()` / `todayLocalIso()` / `useOperationalTodayIso()` | Any feature that uses a date or time | Honour amber SIM TIME. Never `new Date()` for floor stamps or “today”. Ledger `created_at` + outbox `savedAt` may stay wall clock. |
+| **SIM / operational clock (all date-time work)** | **Defined** | `operationalNowIso()` / `todayLocalIso()` / `useOperationalTodayIso()` / `operationalRowStamps()` | Any feature that uses a date or time | Honour amber SIM TIME. Never `new Date()` for floor stamps, Logs, Hub notes, or “today”. Ledger `created_at` is SIM. Outbox `savedAt` may stay wall clock. |
 | **Time entry (half-hour + exact)** | Defined | `HalfHourTimeField` | Roll call times, tour defaults | Single `HH:mm` input + clock popup (24h half-hour slots). **Not** separate dropdown + second field |
 | **Occurred at (vs Logged at)** | **Defined** | `OccurredAtFields` (`DatePicker` + `HalfHourTimeField`) | Big Red Human/Asset, Log Anomaly, any late-filed issue | Operator when-it-happened; system `created_at` = logged. No future; Hub shows both |
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
@@ -173,7 +173,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Departure vector / quick inline choice** | Defined | `BottomSheet` + `MobileFieldButton` rows | Check-out departure method, 2–4 quick options | Slide-up sheet, `tone="neutral"`, immediate action on tap — no persistent selected state needed. |
 | **Dialog dismiss during save** | Defined | Always allow Close — no `isPending` guard | All modals | Remove `if (isPending) return` from `onOpenChange`; do not `disabled={busy}` the Close button. |
 | **Loading states** | Partial | `Loader2` inline, `Skeleton` | Fetches | Prefer inline spinner on buttons; skeleton for tables TBD |
-| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). Not for production operator forms. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
+| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). SIM lasts this sitting: same calendar day + refresh; **expires at Sydney midnight** and on **day login / `/auth` PIN** (not idle unlock). Not for production operator forms. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
 
 ---
 
@@ -382,7 +382,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Yellow/Standby = “light muster”. **Red** = “Evacuate — muster at muster point” + EVACUATE callout; same Expected / Accounted / Missing taps for the care roll (not a whole-site visitor list). Empty roll when activated without Day Centre / trip day context |
 | **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
 | **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
-| **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each blocker with **Resolve** (Hub manage in place). Deferred + resolved + accepted workaround unlock Open Centre. Outline Hub link secondary. |
+| **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each **site** blocker with **Resolve**. Lost Soul attendance overdue REDs do not appear here (Hub only; Open Centre proceeds). Deferred + resolved + accepted workaround + Lost Soul unlock Open Centre. Outline Hub link secondary. |
 | **Day Centre End of Day Report** | Defined | `DayCentreEndOfDayReport` | `/day` always (below session) | Canonical `DatePicker`; default operational today; future dates disabled; date shows weekday (`Thu 27-Aug-26`); sections match Trip Report cards |
 
 ### Component inventory (Defined in Day Centre flow)
@@ -558,6 +558,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-17 | SIM log stamps | Issues, ledger, Hub notes, session open/close, and resolve times write `operationalNowIso()`. Screens prefer Occurred. Outbox `savedAt` stays wall clock. |
+| 2026-09-17 | Lost Soul Open Centre | Attendance overdue / missing-person REDs stay in Hub; they do not block Open Centre. Absent if never arrived; check-in if found/late. No extra Lost roll status. |
+| 2026-09-17 | DEV operational clock | SIM is temporary: same Sydney wall day + refresh; expires at midnight; cleared on day login and `/auth` PIN, not idle unlock |
 | 2026-09-13 | Certificate types in Lookups | Official names live in Lookups → Certificates & orientations (`requirement_types`). Duty roles tick; Staff dropdown only. |
 | 2026-09-13 | Duty function hooks | Same `DutyRequirementGapPanel` on helper Arrived, Centre open/close, event open/close, Give dose. Empty bind = no panel. |
 | 2026-09-12 | Hide chrome on scroll | Stay visible on load and when Manifest/Dashboard content is shorter than the screen. Hide only after a real ~48px scroll on an overflowing pane. |

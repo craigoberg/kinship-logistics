@@ -19,6 +19,7 @@ import {
   type UserRole,
 } from "@/lib/data-store";
 import { Button } from "@/components/ui/button";
+import { clearOperationalClockOnOperatorLogin } from "@/lib/operational-clock";
 
 export const Route = createFileRoute("/auth")({
   ssr: false,
@@ -67,6 +68,7 @@ function AuthTerminal() {
     setError(null);
     try {
       const profile = await verifyLoginPin(value);
+      clearOperationalClockOnOperatorLogin();
       toast.success(`Welcome, ${profile.fullName}`, {
         description:
           profile.role === "driver"

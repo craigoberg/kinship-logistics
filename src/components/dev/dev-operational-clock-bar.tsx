@@ -176,7 +176,7 @@ function DevOperationalClockBarInner() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         title="DEV operational clock"
-        description="Sydney date + time for multi-day and YELLOW/RED testing. Ledger timestamps stay real."
+        description="Sydney date + time for this sitting only. Kept across refresh the same calendar day. Cleared at Sydney midnight, and when you day-login or PIN on the sign-in screen (not idle unlock). Ledger timestamps stay real."
       >
         <div className="space-y-4 pb-4">
           <div className="grid gap-2">

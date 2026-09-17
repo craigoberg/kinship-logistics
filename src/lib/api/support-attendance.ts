@@ -10,6 +10,7 @@ import {
   getOperationalTodayIso,
   operationalNowIso,
   operationalNowMs,
+  operationalRowStamps,
 } from "@/lib/operational-clock";
 import { getSydneyDayIndex, sydneyTimeTodayFromClock } from "@/lib/operational-time";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
@@ -775,6 +776,7 @@ export async function sweepOverdueSupportArrivals(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();

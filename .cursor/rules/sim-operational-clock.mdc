@@ -20,7 +20,10 @@ Any work that uses a **date, time, “today”, duration, overdue check, or oper
 
 ## Wall-clock exception only
 
-- `operational_ledger.created_at` (DB default) and outbox `savedAt` (when the device queued a write)
+- Outbox `savedAt` (when the device queued a write)
+- SIM expiry: compare the **Sydney wall date** SIM was set on vs live `new Date()` — never use SIM to decide whether SIM itself is stale
 - If the **operator will see the time on a screen**, it is not this exception
+
+Operator-visible log stamps (`operational_ledger.created_at`, issue `created_at` / `occurred_at`, Hub `stamped_at`) use `operationalNowIso()`.
 
 Production builds use the same helpers (live clock). Never special-case TEST with a second clock.

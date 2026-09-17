@@ -1,4 +1,4 @@
-import { supabase } from "@/integrations/supabase/client";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso } from "@/lib/utils";
 import {
   listStaffRegistry,
@@ -82,7 +82,10 @@ async function toLedgerInsert(payload: LedgerWriteInput): Promise<LedgerInsert> 
  */
 export async function writeToLedger(payload: LedgerWriteInput): Promise<void> {
   try {
-    const row = await toLedgerInsert(payload);
+    const row = {
+      ...(await toLedgerInsert(payload)),
+      created_at: operationalNowIso(),
+    };
     const { error } = await supabase.from("operational_ledger").insert(row);
     if (error) {
       console.error("[ledger] write failed", error);
@@ -103,7 +106,10 @@ export async function writeToLedger(payload: LedgerWriteInput): Promise<void> {
  * the operator — a failed ledger write must never silently complete.
  */
 export async function writeToLedgerOrThrow(payload: LedgerWriteInput): Promise<void> {
-  const row = await toLedgerInsert(payload);
+  const row = {
+    ...(await toLedgerInsert(payload)),
+    created_at: operationalNowIso(),
+  };
   const { error } = await supabase.from("operational_ledger").insert(row);
   if (error) {
     throw new Error(`[ledger] RED write failed — operation aborted: ${error.message}`);
@@ -273,6 +279,7 @@ export async function resolveCertification(
       category: "CENTRE",
       severity: severityAfter,
       action_type: "CERTIFICATION_RESOLVED",
+      created_at: operationalNowIso(),
       gps_lat: gps?.lat ?? null,
       gps_lng: gps?.lng ?? null,
       metadata: {

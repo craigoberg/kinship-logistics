@@ -11,6 +11,7 @@ import {
   primeStaffDisplayNames,
 } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { publicFormHubDisplay } from "@/lib/governance/public-form-hub";
 
 export type UnifiedIssueSource =
@@ -774,7 +775,7 @@ export async function resolveUnifiedIssue(
   }
 
 
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
 
@@ -954,6 +955,7 @@ async function insertHubNote(args: {
     note: args.note.trim(),
     kind: args.kind,
     staff_id: staffId,
+    stamped_at: operationalNowIso(),
     metadata: args.metadata ?? null,
   });
   if (error) throw error;
@@ -1067,7 +1069,7 @@ export async function forceAckEscalation(
   if (reason.length < 10) {
     throw new Error("Force-ack reason must be at least 10 characters.");
   }
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const staffId = await resolveStaffIdWithFallback();
 
   await insertHubNote({

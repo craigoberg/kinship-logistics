@@ -22,7 +22,7 @@ import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
 } from "@/lib/operational-time";
-import { getOperationalTodayIso, operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
+import { getOperationalTodayIso, operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
 export type ArrivalMethod = "bus" | "private" | "walk_in" | "other";
@@ -415,7 +415,7 @@ async function autoCloseYellowIssue(
   }
 
   // YELLOW + open → auto-close.
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   await supabase
     .from("site_issues_register")
     .update({ status: "resolved", resolved_at: nowIso })
@@ -1357,6 +1357,7 @@ export async function sweepOverdueArrivals(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();
@@ -1492,7 +1493,7 @@ async function fireRedSmsPipeline(
     }
     await supabase
       .from("client_attendance_log")
-      .update({ red_sms_dispatched_at: new Date().toISOString() })
+      .update({ red_sms_dispatched_at: operationalNowIso() })
       .eq("id", attendanceId);
   } catch (e) {
     console.error("[client-attendance] SMS pipeline threw", e);
@@ -1548,7 +1549,7 @@ async function autoCloseYellowDepartureIssue(
     return { kind: "red_left_open", issueId };
   }
 
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   await supabase
     .from("site_issues_register")
     .update({ status: "resolved", resolved_at: nowIso })
@@ -1750,6 +1751,7 @@ export async function sweepOverdueDepartures(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();
@@ -1900,7 +1902,7 @@ async function fireRedDepartureSmsPipeline(
     }
     await supabase
       .from("client_attendance_log")
-      .update({ departure_red_sms_dispatched_at: new Date().toISOString() })
+      .update({ departure_red_sms_dispatched_at: operationalNowIso() })
       .eq("id", attendanceId);
   } catch (e) {
     console.error("[client-attendance] departure SMS pipeline threw", e);

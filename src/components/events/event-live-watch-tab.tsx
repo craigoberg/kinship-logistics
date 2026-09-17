@@ -260,10 +260,10 @@ function WatchBody({ snap }: { snap: EventWatchSnapshot }) {
                     <div className="font-medium leading-snug">{issue.title}</div>
                     <div className="mt-0.5 text-[11px] text-muted-foreground">
                       {issue.status.replace(/_/g, " ")}
-                      {issue.createdAt ? (
+                      {issue.occurredAt || issue.createdAt ? (
                         <>
                           {" · "}
-                          <ClientTime iso={issue.createdAt} />
+                          <ClientTime iso={issue.occurredAt || issue.createdAt} />
                         </>
                       ) : null}
                     </div>

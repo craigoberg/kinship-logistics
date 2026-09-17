@@ -821,7 +821,7 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
     startDate: ev.start_date as string,
     endDate: (ev.end_date as string | null) ?? null,
     primaryVenueName: vName,
-    generatedAt: new Date().toISOString(),
+    generatedAt: operationalNowIso(),
     venueStops: stops,
     daySessions,
     roster,

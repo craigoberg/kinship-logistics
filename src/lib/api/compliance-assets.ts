@@ -3,6 +3,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { resolveStaffIdWithFallback, verifyStaffPin, resolveStaffDisplayName } from "@/lib/data-store";
 import { tryGetGps, writeToLedger } from "@/lib/api/ledger";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 // ---------------------------------------------------------------------------
 // Compliance Governance Engine — registry of every "thing that expires".
@@ -212,6 +213,7 @@ async function insertComplianceHubNote(args: {
     note: args.note.trim(),
     kind: args.kind,
     staff_id: staffId,
+    stamped_at: operationalNowIso(),
     metadata: args.metadata ?? null,
   });
   if (error) throw error;
@@ -684,6 +686,7 @@ export async function resolveComplianceAsset(
       category: "CENTRE",
       severity: "GREEN",
       action_type: "COMPLIANCE_ASSET_RESOLVED",
+      created_at: operationalNowIso(),
       gps_lat: gps?.lat ?? null,
       gps_lng: gps?.lng ?? null,
       metadata: {

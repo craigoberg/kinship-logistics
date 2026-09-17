@@ -490,7 +490,7 @@ function ReportIssueRow({ issue }: { issue: TripReportIssue }) {
             <p className="mt-0.5 text-muted-foreground">Workaround: {issue.workaroundPlan}</p>
           )}
           <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-            <span>{formatDateTime(issue.createdAt)}</span>
+            <span>{formatDateTime(issue.occurredAt || issue.createdAt)}</span>
             <span className="font-semibold uppercase">{sevLabel}</span>
             {issue.isVerbalWorkaround && (
               <span className="font-semibold text-amber-700">Verbal workaround — Hub close-out by manager</span>

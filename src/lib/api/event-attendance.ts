@@ -13,7 +13,7 @@ import {
   leftTripHubDescription,
   type LeftTripDisposition,
 } from "@/lib/trip-absent";
-import { operationalNowIso } from "@/lib/operational-clock";
+import { operationalNowIso, operationalRowStamps } from "@/lib/operational-clock";
 
 export type EventArrivalMethod = "bus" | "private" | "walk_in" | "other";
 export type EventAttendanceStatus = "expected" | "checked_in" | "checked_out" | "absent";
@@ -699,6 +699,7 @@ export async function markEventAttendanceAbsent({
     owner: "internal",
     status: "open",
     update_log: "",
+    ...operationalRowStamps(),
   });
   if (issueErr) {
     console.warn("[markEventAttendanceAbsent] Hub issue creation failed (non-fatal):", issueErr.message);

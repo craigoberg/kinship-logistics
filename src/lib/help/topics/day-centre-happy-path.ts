@@ -31,7 +31,7 @@ export const dayCentreHappyPathTopic: HelpTopic = {
   steps: [
     {
       heading: "Clear open RED blockers",
-      body: "Day Centre cannot open while unresolved RED site issues lack an agreed workaround. A manager must clear or workaround them in the Hub first.",
+      body: "Day Centre cannot open while unresolved site REDs (building, staffing, safety) lack an agreed workaround. Late or missing people (attendance Lost Soul REDs) stay open in the Hub for review but do not block Open Centre — mark them Absent if they never arrive; check them in if they turn up late.",
     },
     {
       heading: "Open the Day Centre",

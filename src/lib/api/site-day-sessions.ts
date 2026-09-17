@@ -293,7 +293,7 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
     .update({
       phase: "closed_orderly",
       closed_by_id: closedByUserId,
-      close_declared_at: new Date().toISOString(),
+      close_declared_at: operationalNowIso(),
       close_leader_notes: notes || null,
     })
     .eq("id", existing.data.id)
@@ -489,7 +489,7 @@ export async function submitManagerHandshake(
     manager_plan_text: args.plan,
     manager_decision: args.decision,
     manager_auth_staff_id: args.managerStaffId,
-    manager_auth_at: new Date().toISOString(),
+    manager_auth_at: operationalNowIso(),
   };
   console.debug("[submitManagerHandshake] update payload", payload);
   const { data, error } = await supabase
@@ -564,13 +564,13 @@ export async function submitLeaderHandshake(
     .update({
       leader_decision: args.decision,
       leader_auth_staff_id: args.leaderStaffId,
-      leader_auth_at: new Date().toISOString(),
+      leader_auth_at: operationalNowIso(),
       phase: nextPhase,
       ...(bothGo
-        ? { open_declared_at: new Date().toISOString() }
+        ? { open_declared_at: operationalNowIso() }
         : {
             closed_by_id: args.leaderStaffId,
-            close_declared_at: new Date().toISOString(),
+            close_declared_at: operationalNowIso(),
           }),
     })
     .eq("id", args.sessionId)

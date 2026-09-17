@@ -2250,7 +2250,7 @@ export interface RemoveScheduleInput {
 export async function removeAttendanceSchedule(
   input: RemoveScheduleInput,
 ): Promise<void> {
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const staffId = input.staffId ?? (await resolveStaffIdWithFallback());
 
   const { data: row, error: fetchErr } = await supabase
@@ -2359,7 +2359,7 @@ export async function discontinueMedicationSchedule(
     .update({
       active: false,
       status: "Archived",
-      archived_at: new Date().toISOString(),
+      archived_at: resolveOperationalNow().toISOString(),
       archived_by_id: input.authorizedById,
       archive_witnessed_by_id: input.witnessedById,
       archive_reference_type: input.referenceType,
@@ -7187,7 +7187,7 @@ export async function submitManagerAuthorization(
     .from("asset_daily_clearance")
     .update({
       manager_auth_staff_id: managerStaffId,
-      manager_auth_pin_verified_at: new Date().toISOString(),
+      manager_auth_pin_verified_at: resolveOperationalNow().toISOString(),
     })
     .eq("id", clearanceId)
     .select("*")
@@ -7226,7 +7226,7 @@ export async function submitDriverAuthorization(
     );
   }
 
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const nextStatus: ClearanceStatus = currentClearance.requiresManagerReview
     ? "authorized_override"
     : currentClearance.status;
@@ -7715,6 +7715,7 @@ export async function raiseOperationalEscalation(input: {
         source_kind: input.sourceKind ?? "bus_walkaround",
         source_issue_id: input.sourceIssueId ?? null,
         raised_by: raisedBy,
+        created_at: resolveOperationalNow().toISOString(),
       },
     ])
     .select("*")
@@ -7861,7 +7862,7 @@ export async function supersedeOlderGroundedForVehicle(
     .from("operational_escalations")
     .update({
       status: "resolved_superseded",
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
     })
     .eq("vehicle_info", vehicleInfo)
     .eq("status", "resolved_denied")
@@ -8010,7 +8011,7 @@ export async function resolveOperationalEscalation(args: {
     .update({
       status: args.approved ? "resolved_approved" : "resolved_denied",
       resolved_by: args.managerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
       resolution_notes: args.notes,
     })
     .eq("id", args.id)
@@ -8073,7 +8074,7 @@ export async function rejectEscalationProposal(args: {
     .update({
       status: "resolved_denied",
       resolved_by: args.openerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
       resolution_notes: newNotes,
     })
     .eq("id", args.escalationId);
@@ -8112,7 +8113,7 @@ export async function acceptEscalationWorkaround(args: {
       .update({
         status: "workaround_accepted",
         workaround_plan: trimmedPlan || null,
-        workaround_accepted_at: new Date().toISOString(),
+        workaround_accepted_at: resolveOperationalNow().toISOString(),
       })
       .eq("id", args.sourceIssueId)
       .select("id, status, workaround_plan");
@@ -8128,7 +8129,7 @@ export async function acceptEscalationWorkaround(args: {
   // the operator acknowledgment (the opener is the on-site operator). Write
   // operator_acknowledged_* in the SAME update so the Hub does not leave a
   // residual "awaiting operator ack" row that would lock the centre.
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const { error: escErr } = await supabase
     .from("operational_escalations")
     .update({

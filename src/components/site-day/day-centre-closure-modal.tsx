@@ -33,6 +33,7 @@ import { getStaffId, listParticipants, resolveStaffIdWithFallback } from "@/lib/
 import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
 import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 import { tryGetGps } from "@/lib/api/ledger";
+import { operationalNowIso } from "@/lib/operational-clock";
 import {
   listAttendanceRoll,
   type ClientAttendanceRow,
@@ -165,6 +166,7 @@ export function DayCentreClosureModal({ open, onOpenChange, sessionId }: Props) 
           category: "CENTRE",
           severity: "INFO",
           action_type: "CENTRE_CLOSED",
+          created_at: operationalNowIso(),
           gps_lat: gps?.lat ?? null,
           gps_lng: gps?.lng ?? null,
           metadata: {

@@ -26,6 +26,7 @@ import {
 import { completeTransportRequest, type TransportRequest } from "@/lib/api/transport-requests";
 import { invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 import { enqueue } from "@/lib/sync-queue";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useQueryClient } from "@tanstack/react-query";
 
@@ -118,7 +119,7 @@ export function TransportForm({
       passenger_present: present,
       status,
       notes,
-      timestamp: new Date().toISOString(),
+      timestamp: operationalNowIso(),
       transport_request_id: linkedRequestId || null,
     };
 

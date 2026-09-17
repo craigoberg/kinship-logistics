@@ -3,6 +3,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { createIssue, markResolved } from "@/lib/api/site-issues";
 import { writeToLedger, tryGetGps, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { listAttendanceRoll } from "@/lib/api/client-attendance";
@@ -391,6 +392,7 @@ export async function activateEmergency(input: {
       event_day_session_id: input.eventDaySessionId ?? null,
       surface: input.surface,
       activated_by_staff_id: input.managerStaffId,
+      activated_at: operationalNowIso(),
       hub_issue_id: issue.id,
     })
     .select("*")
@@ -457,7 +459,7 @@ export async function updateMusterState(args: {
     .update({
       state: args.state,
       updated_by_staff_id: args.staffId || null,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     })
     .eq("id", args.musterId)
     .select("*")
@@ -492,9 +494,9 @@ export async function standDownEmergency(input: {
     .update({
       status: "stood_down",
       stood_down_by_staff_id: input.managerStaffId,
-      stood_down_at: new Date().toISOString(),
+      stood_down_at: operationalNowIso(),
       debrief_text: debrief,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     })
     .eq("id", input.emergencyId)
     .select("*")
@@ -583,7 +585,7 @@ export async function declareDoNotOpenCentre(input: {
     .update({
       close_leader_notes: reason,
       closed_by_id: null,
-      close_declared_at: new Date().toISOString(),
+      close_declared_at: operationalNowIso(),
       lockdown_hub_issue_id: issue.id,
     })
     .eq("id", input.siteDaySessionId);
@@ -631,7 +633,7 @@ export async function declareCentreLockdown(input: {
       lockdown_reason: reason,
       lockdown_severity: input.severity,
       lockdown_hub_issue_id: issue.id,
-      lockdown_at: new Date().toISOString(),
+      lockdown_at: operationalNowIso(),
       lockdown_by_staff_id: input.managerStaffId,
     })
     .eq("id", input.siteDaySessionId);
@@ -751,7 +753,7 @@ export async function declareProgrammeSuspend(input: {
       programme_suspend_reason: reason,
       programme_suspend_severity: input.severity,
       programme_suspend_hub_issue_id: issue.id,
-      programme_suspended_at: new Date().toISOString(),
+      programme_suspended_at: operationalNowIso(),
       programme_suspended_by_staff_id: input.managerStaffId,
     })
     .eq("id", input.eventDaySessionId);

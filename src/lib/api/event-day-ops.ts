@@ -14,7 +14,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
-import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
+import { operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { sydneyWallClockToUtcDate } from "@/lib/operational-time";
 import { listEventVenueStops } from "@/lib/api/event-outing";
 import { formatDate, formatTime } from "@/lib/utils";
@@ -1420,6 +1420,7 @@ export async function markAbsent(
         owner: "internal",
         status: "open",
         update_log: "",
+        ...operationalRowStamps(),
       })
       .select("id")
       .single();
@@ -1680,6 +1681,7 @@ export async function sweepAccountabilityRoll(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();

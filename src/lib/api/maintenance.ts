@@ -9,6 +9,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { formatDate, formatDateTime } from "@/lib/utils";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
@@ -252,7 +253,7 @@ export async function createMaintenanceItem(
     location_label: item.locationLabel ?? null,
     reported_by: item.reportedBy ?? null,
     defer_count: 0,
-    occurred_at: item.occurredAt ?? new Date().toISOString(),
+    occurred_at: item.occurredAt ?? operationalNowIso(),
   };
 
   let { data, error } = await supabase
@@ -291,7 +292,7 @@ export async function addMaintenanceNote(
   if (error) throw error;
 
   // Touch last_note_at so the list-view urgency staleness timer resets.
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   await supabase
     .from("maintenance_items")
     .update({ last_note_at: nowIso })
@@ -310,7 +311,7 @@ export async function updateMaintenanceStatus(
   const patch: Record<string, unknown> = { status };
   if (resolutionNotes !== undefined) patch.resolution_notes = resolutionNotes;
   if (status === "resolved" || status === "closed") {
-    patch.resolved_at = new Date().toISOString();
+    patch.resolved_at = operationalNowIso();
   }
   const { error } = await supabase
     .from("maintenance_items")

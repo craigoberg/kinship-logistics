@@ -7,11 +7,12 @@
  * Gated by IS_TEST_BUILD. Production builds always use the live clock.
  * GUARDRAILS §5.3: any date/time work must honour this clock. Floor stamps
  * operators see (depart/arrive/board, check-in, open/close, Off today) use
- * `operationalNowIso()`. Ledger `created_at` and outbox `savedAt` may stay
- * real wall time. Production builds always use the live clock via the same
- * helpers.
+ * `operationalNowIso()`. Ledger `created_at` is SIM so Logs/Hub match the
+ * amber bar. Outbox `savedAt` stays real wall time (when the device queued).
+ * Production builds always use the live clock via the same helpers.
  */
 import { useSyncExternalStore } from "react";
+import { toast } from "sonner";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   getSydneyIsoDate,
@@ -30,6 +31,11 @@ export interface OperationalClockOverride {
   time: string;
 }
 
+/** Persisted with the override — Sydney wall date when SIM was applied. */
+interface StoredOperationalClockOverride extends OperationalClockOverride {
+  setOnWallDate: string;
+}
+
 type Listener = () => void;
 const listeners = new Set<Listener>();
 
@@ -41,6 +47,7 @@ let memoryCache: OperationalClockOverride | null | undefined;
  * Flipped once in the root after mount.
  */
 let clientReady = false;
+let wallDateWatcherStarted = false;
 
 function canOverride(): boolean {
   return IS_TEST_BUILD && typeof window !== "undefined";
@@ -50,28 +57,85 @@ function canOverride(): boolean {
 export function markOperationalClockClientReady(): void {
   if (typeof window === "undefined" || clientReady) return;
   clientReady = true;
+  expireStaleOperationalClockOverride("midnight");
   memoryCache = undefined; // re-read localStorage on next access
   notify();
+  startWallDateWatcher();
 }
 
-function parseOverride(raw: string | null): OperationalClockOverride | null {
+function isIsoDate(value: unknown): value is string {
+  return typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+/** Real Sydney calendar date — wall clock, never SIM. Used only to expire SIM. */
+function wallSydneyDateIso(now: Date = new Date()): string {
+  return getSydneyIsoDate(now);
+}
+
+function parseStoredOverride(raw: string | null): StoredOperationalClockOverride | null {
   if (!raw) return null;
   try {
-    const parsed = JSON.parse(raw) as Partial<OperationalClockOverride>;
-    if (
-      typeof parsed.date === "string" &&
-      /^\d{4}-\d{2}-\d{2}$/.test(parsed.date) &&
-      typeof parsed.time === "string" &&
-      /^\d{1,2}:\d{2}$/.test(parsed.time.trim())
-    ) {
-      const [hh, mm] = parsed.time.trim().split(":").map(Number);
-      const time = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
-      return { date: parsed.date, time };
-    }
+    const parsed = JSON.parse(raw) as Partial<StoredOperationalClockOverride>;
+    if (!isIsoDate(parsed.date) || typeof parsed.time !== "string") return null;
+    if (!/^\d{1,2}:\d{2}$/.test(parsed.time.trim())) return null;
+    const [hh, mm] = parsed.time.trim().split(":").map(Number);
+    const time = `${String(hh).padStart(2, "0")}:${String(mm).padStart(2, "0")}`;
+    if (!isIsoDate(parsed.setOnWallDate)) return null;
+    return { date: parsed.date, time, setOnWallDate: parsed.setOnWallDate };
+  } catch {
+    return null;
+  }
+}
+
+function toPublicOverride(stored: StoredOperationalClockOverride): OperationalClockOverride {
+  return { date: stored.date, time: stored.time };
+}
+
+/**
+ * Drop SIM when a real Sydney day has passed since it was set, or when the
+ * stored blob is the old forever-persist shape (no setOnWallDate).
+ * Safe to call often. Does not run during SSR getSnapshot.
+ */
+export function expireStaleOperationalClockOverride(
+  reason: "midnight" | "legacy" = "midnight",
+): boolean {
+  if (!canOverride() || !clientReady) return false;
+  let raw: string | null = null;
+  try {
+    raw = localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY);
+  } catch {
+    return false;
+  }
+  if (!raw) return false;
+  const stored = parseStoredOverride(raw);
+  const wallDate = wallSydneyDateIso();
+  const stale = !stored || stored.setOnWallDate !== wallDate;
+  if (!stale) return false;
+  memoryCache = null;
+  try {
+    localStorage.removeItem(OPERATIONAL_CLOCK_STORAGE_KEY);
   } catch {
     /* ignore */
   }
-  return null;
+  toast.message("SIM TIME expired — back to live clock", {
+    description:
+      stored && reason === "midnight"
+        ? "A new calendar day started since this SIM was set."
+        : "Saved SIM TIME was from a previous session and is no longer kept overnight.",
+  });
+  notify();
+  return true;
+}
+
+function startWallDateWatcher(): void {
+  if (typeof window === "undefined" || wallDateWatcherStarted) return;
+  wallDateWatcherStarted = true;
+  const tick = () => {
+    expireStaleOperationalClockOverride("midnight");
+  };
+  window.addEventListener("focus", tick);
+  document.addEventListener("visibilitychange", tick);
+  window.setInterval(tick, 60_000);
 }
 
 function readOverride(): OperationalClockOverride | null {
@@ -80,7 +144,8 @@ function readOverride(): OperationalClockOverride | null {
   if (!clientReady) return null;
   if (memoryCache !== undefined) return memoryCache;
   try {
-    memoryCache = parseOverride(localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY));
+    const stored = parseStoredOverride(localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY));
+    memoryCache = stored ? toPublicOverride(stored) : null;
   } catch {
     memoryCache = null;
   }
@@ -114,6 +179,12 @@ export function operationalNowIso(): string {
   return getOperationalNow().toISOString();
 }
 
+/** Insert stamps for operator-visible log rows (issues, ledger). Honour SIM. */
+export function operationalRowStamps(): { created_at: string; occurred_at: string } {
+  const now = operationalNowIso();
+  return { created_at: now, occurred_at: now };
+}
+
 /** Sydney YYYY-MM-DD for "today" decisions. */
 export function getOperationalTodayIso(): string {
   return getSydneyIsoDate(getOperationalNow());
@@ -133,9 +204,13 @@ export function setOperationalClockOverride(next: OperationalClockOverride): voi
   const [hh, mm] = next.time.trim().split(":").map(Number);
   const time = `${String(Math.min(23, Math.max(0, hh ?? 0))).padStart(2, "0")}:${String(Math.min(59, Math.max(0, mm ?? 0))).padStart(2, "0")}`;
   const value: OperationalClockOverride = { date: next.date, time };
+  const stored: StoredOperationalClockOverride = {
+    ...value,
+    setOnWallDate: wallSydneyDateIso(),
+  };
   memoryCache = value;
   try {
-    localStorage.setItem(OPERATIONAL_CLOCK_STORAGE_KEY, JSON.stringify(value));
+    localStorage.setItem(OPERATIONAL_CLOCK_STORAGE_KEY, JSON.stringify(stored));
   } catch {
     /* ignore */
   }
@@ -151,6 +226,23 @@ export function clearOperationalClockOverride(): void {
     /* ignore */
   }
   notify();
+}
+
+/**
+ * Day email login or PIN on `/auth` — not idle unlock / action step-up.
+ * SIM is a same-sitting QA tool; a new operator session returns to wall clock.
+ */
+export function clearOperationalClockOnOperatorLogin(): void {
+  if (!canOverride()) return;
+  const hadOverride =
+    memoryCache != null ||
+    (typeof localStorage !== "undefined" &&
+      !!localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY));
+  if (!hadOverride) return;
+  clearOperationalClockOverride();
+  toast.message("SIM TIME cleared on sign-in", {
+    description: "Back to live wall clock. Set SIM again only for this sitting.",
+  });
 }
 
 /** Shift the operational clock by minutes (starts from override or live now). */

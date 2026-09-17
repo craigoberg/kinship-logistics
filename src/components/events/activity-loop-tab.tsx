@@ -1513,7 +1513,7 @@ function CompletedActivityDetail({
     const closeMs = closedAt ? Date.parse(closedAt) : NaN;
     if (!Number.isFinite(openMs)) return dayIssues;
     return dayIssues.filter((issue) => {
-      const t = Date.parse(issue.createdAt);
+      const t = Date.parse(issue.occurredAt || issue.createdAt);
       if (!Number.isFinite(t)) return false;
       if (t < openMs) return false;
       if (Number.isFinite(closeMs) && t > closeMs + 5 * 60_000) return false; // +5 min grace after close
@@ -1704,7 +1704,7 @@ function CompletedActivityDetail({
                       {issue.severity}
                     </span>
                     <span className="text-[11px] text-muted-foreground">
-                      {formatTime(issue.createdAt)} · {issue.status}
+                      {formatTime(issue.occurredAt || issue.createdAt)} · {issue.status}
                     </span>
                   </div>
                   <p className="text-xs whitespace-pre-wrap">{issue.issueDescription}</p>

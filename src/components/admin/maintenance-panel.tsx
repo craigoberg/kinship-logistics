@@ -57,6 +57,7 @@ import { useMaintenanceUrgencyParams } from "@/hooks/use-system-parameters";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
 import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { isManagerProfile } from "@/lib/governance/is-manager";
 import { resolveStaffIdWithFallback, getStaffId, resolveStaffDisplayName } from "@/lib/data-store";
@@ -164,9 +165,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   );
   const reviewStarted =
     item.status === "in_progress" || isHubReviewStarted(maintenanceNotesForReview);
+  const waitFrom = item.occurredAt || item.createdAt;
   const waitLabel = reviewStartedNote
-    ? formatHubWaitDuration(item.createdAt, reviewStartedNote.stampedAt)
-    : formatHubWaitDuration(item.createdAt, new Date().toISOString());
+    ? formatHubWaitDuration(waitFrom, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(waitFrom, operationalNowIso());
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
@@ -213,7 +215,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     },
     onSuccess: () => {
       invalidate();
-      const waitLabel = formatHubWaitDuration(item.createdAt, new Date().toISOString());
+      const waitLabel = formatHubWaitDuration(
+        item.occurredAt || item.createdAt,
+        operationalNowIso(),
+      );
       operationToasts.reviewStarted(waitLabel);
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),

@@ -48,6 +48,7 @@ import {
   type LedgerSeverity,
 } from "@/lib/api/ledger";
 import { enqueue } from "@/lib/sync-queue";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { toast } from "sonner";
 import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
 import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
@@ -212,7 +213,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         action_performed: eventType,
         witness_1_identity: w1!.fullName,
         witness_2_identity: w2!.fullName,
-        timestamp: new Date().toISOString(),
+        timestamp: operationalNowIso(),
         metadata: {
           medication_name: medicationName.trim(),
           dosage: dosage.trim(),

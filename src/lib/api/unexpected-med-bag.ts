@@ -19,6 +19,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { getTodaySession } from "@/lib/api/site-day-sessions";
+import { operationalRowStamps } from "@/lib/operational-clock";
 
 export type UnexpectedMedContext = "transport" | "centre";
 
@@ -144,6 +145,7 @@ export async function raiseUnexpectedMedBagIssue(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();

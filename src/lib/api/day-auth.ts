@@ -3,6 +3,7 @@
  * Front door before PIN terminal. Not full RBAC (menus / idle lock / tight RLS).
  */
 import { supabase } from "@/integrations/supabase/client";
+import { clearOperationalClockOnOperatorLogin } from "@/lib/operational-clock";
 
 export async function signInDaySession(
   email: string,
@@ -31,6 +32,7 @@ export async function signInDaySession(
   if (!user) {
     throw new Error("Day login failed — no session returned.");
   }
+  clearOperationalClockOnOperatorLogin();
   return { userId: user.id, email: user.email ?? trimmed };
 }
 
