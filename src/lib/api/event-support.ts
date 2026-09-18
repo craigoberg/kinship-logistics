@@ -5,6 +5,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
+import { formatTravelHow, withAuditActorMeta } from "@/lib/api/office-change-log";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { matchesEventBusRun, effectiveReturnBusRun } from "@/lib/event-bus-runs";
@@ -303,6 +304,9 @@ export async function recordEventSupportArrival(input: {
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+  const names = await resolveNames();
+  const logged = toAtt(data as AttDb, names);
+  const how = formatTravelHow(input.arrivalMethod, input.arrivalBusRunCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -310,10 +314,17 @@ export async function recordEventSupportArrival(input: {
     action_type: "EVENT_SUPPORT_CHECKIN",
     gps_lat: null,
     gps_lng: null,
-    metadata: { row_id: input.rowId },
+    metadata: await withAuditActorMeta({
+      row_id: input.rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      arrival_method: input.arrivalMethod,
+      arrival_bus_run_code: input.arrivalBusRunCode ?? null,
+      summary: `Checked in ${logged.displayName} (${logged.personKind}) to trip ${how}`.trim(),
+    }),
   });
-  const names = await resolveNames();
-  return toAtt(data as AttDb, names);
+  return logged;
 }
 
 export async function checkOutEventSupport(input: {
@@ -337,6 +348,12 @@ export async function checkOutEventSupport(input: {
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+  const names = await resolveNames();
+  const logged = toAtt(data as AttDb, names);
+  const how = formatTravelHow(
+    input.returnTransport === "self" ? "self" : input.returnTransport,
+    input.returnBusRunCode,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -344,10 +361,17 @@ export async function checkOutEventSupport(input: {
     action_type: "EVENT_SUPPORT_CHECKOUT",
     gps_lat: null,
     gps_lng: null,
-    metadata: { row_id: input.rowId },
+    metadata: await withAuditActorMeta({
+      row_id: input.rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      return_transport: input.returnTransport ?? null,
+      return_bus_run_code: input.returnBusRunCode ?? null,
+      summary: `Checked out ${logged.displayName} (${logged.personKind}) from trip ${how}`.trim(),
+    }),
   });
-  const names = await resolveNames();
-  return toAtt(data as AttDb, names);
+  return logged;
 }
 
 export async function markEventSupportAbsent(

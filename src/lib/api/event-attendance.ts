@@ -9,6 +9,11 @@ import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { listParticipants, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import {
+  formatTravelHow,
+  lookupParticipantName,
+  withAuditActorMeta,
+} from "@/lib/api/office-change-log";
+import {
   encodeLeftTripNotes,
   leftTripHubDescription,
   type LeftTripDisposition,
@@ -323,6 +328,12 @@ export async function toggleEventCheckIn(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(
+    isIn ? null : row.arrivalMethod,
+    isIn ? null : row.arrivalBusRunCode,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -330,13 +341,18 @@ export async function toggleEventCheckIn(
     action_type: isIn ? "EVENT_FLOOR_CHECKIN_UNDO" : "EVENT_FLOOR_CHECKIN",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
       attendance_id: row.id,
+      person_name: who,
+      location: "trip",
       arrival_method: isIn ? null : row.arrivalMethod,
       arrival_bus_run_code: isIn ? null : row.arrivalBusRunCode,
-    },
+      summary: isIn
+        ? `Undid check-in for ${who} on trip`
+        : `Checked in ${who} to trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);
@@ -414,6 +430,10 @@ export async function recordEventArrival(
 
   const gps = await tryGetGps();
   const checkedInNow = alsoCheckIn && row.status === "expected";
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const arrivalMethod = isSelf ? "walk_in" : "bus";
+  const how = formatTravelHow(arrivalMethod, runCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -423,14 +443,19 @@ export async function recordEventArrival(
       : "EVENT_FLOOR_ARRIVAL_METHOD",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
       attendance_id: row.id,
-      arrival_method: isSelf ? "walk_in" : "bus",
+      person_name: who,
+      location: "trip",
+      arrival_method: arrivalMethod,
       arrival_bus_run_code: runCode,
       prior_arrival_method: row.arrivalMethod,
-    },
+      summary: checkedInNow
+        ? `Checked in ${who} to trip ${how}`.trim()
+        : `Set arrival for ${who} on trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);
@@ -480,6 +505,12 @@ export async function checkoutEventParticipant(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(
+    returnTransport === "self" ? "self" : "bus",
+    runCode,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -487,12 +518,15 @@ export async function checkoutEventParticipant(
     action_type: "EVENT_FLOOR_CHECKOUT",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
+      person_name: who,
+      location: "trip",
       return_transport: returnTransport,
       return_bus_run_code: runCode,
-    },
+      summary: `Checked out ${who} from trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);

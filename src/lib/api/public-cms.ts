@@ -4,6 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 const SCHEMA_HINT =
   "CMS tables missing — run docs/sql/2026-08-10_public_cms_and_forms.sql then hard refresh.";
@@ -125,7 +126,15 @@ export async function upsertCmsPage(
     .select("*")
     .single();
   if (error) throwSchema(error);
-  return mapPage(data as Record<string, unknown>);
+  const page = mapPage(data as Record<string, unknown>);
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "cms",
+    recordId: page.id,
+    recordName: page.title,
+    summary: `Saved public page ${page.slug} (${page.status})`,
+  });
+  return page;
 }
 
 export async function setCmsPageStatus(
@@ -136,6 +145,13 @@ export async function setCmsPageStatus(
   if (status === "published") patch.published_at = new Date().toISOString();
   const { error } = await supabase.from("cms_pages").update(patch).eq("id", id);
   if (error) throwSchema(error);
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "cms",
+    recordId: id,
+    recordName: id,
+    summary: `Set public page status to ${status}`,
+  });
 }
 
 export async function listCmsNav(visibleOnly = false): Promise<CmsNavItem[]> {
@@ -169,6 +185,13 @@ export async function upsertCmsNavItem(
       })
       .eq("id", item.id);
     if (error) throwSchema(error);
+    void recordOfficeChangeBestEffort({
+      action: "updated",
+      entity: "cms",
+      recordId: item.id,
+      recordName: item.label,
+      summary: `Updated public nav ${item.label}`,
+    });
     return;
   }
   const { error } = await supabase.from("cms_nav").insert({
@@ -178,6 +201,12 @@ export async function upsertCmsNavItem(
     visible: item.visible ?? true,
   });
   if (error) throwSchema(error);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "cms",
+    recordName: item.label,
+    summary: `Added public nav ${item.label}`,
+  });
 }
 
 export async function listCmsMedia(): Promise<CmsMediaItem[]> {

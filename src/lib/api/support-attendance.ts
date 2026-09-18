@@ -5,7 +5,8 @@
 import { supabase } from "@/integrations/supabase/client";
 import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { formatTravelHow, withAuditActorMeta } from "@/lib/api/office-change-log";
+import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import {
   getOperationalTodayIso,
   operationalNowIso,
@@ -31,6 +32,11 @@ import {
   type SupportPersonKind,
   type TransportRosterPerson,
 } from "@/lib/support-person";
+import {
+  buildScheduleChangeSummary,
+  recordRunPlanningChangeBestEffort,
+  type RunPlanningChangeSource,
+} from "@/lib/api/run-planning-changelog";
 
 const WEEKDAY_INDEX: Record<string, number> = {
   Sunday: 0,
@@ -266,7 +272,17 @@ export async function upsertSupportSchedule(input: {
   expectedArrivalTime: string;
   expectedDepartureTime: string;
   pickupAddressOverride?: string | null;
+  source?: RunPlanningChangeSource;
 }): Promise<SupportSchedule> {
+  let before: ScheduleDb | null = null;
+  if (input.id) {
+    const { data: existing } = await supabase
+      .from("support_attendance_schedules")
+      .select("*")
+      .eq("id", input.id)
+      .maybeSingle();
+    before = (existing as ScheduleDb | null) ?? null;
+  }
   const row = {
     person_kind: input.personKind,
     staff_id: input.personKind === "carer" ? null : input.staffId ?? null,
@@ -290,15 +306,81 @@ export async function upsertSupportSchedule(input: {
   const { data, error } = await q.select("*").single();
   if (error) throw new Error(error.message);
   const names = await resolveSupportNames();
-  return toSchedule(data as ScheduleDb, names);
+  const saved = toSchedule(data as ScheduleDb, names);
+  const action = before ? "updated" : "created";
+  void recordRunPlanningChangeBestEffort({
+    action,
+    source: input.source ?? (input.personKind === "carer" ? "carer_sheet" : "staff_sheet"),
+    personKind: saved.personKind,
+    personId: saved.carerId ?? saved.staffId,
+    personName: saved.displayName,
+    dayOfWeek: saved.dayOfWeek,
+    scheduleId: saved.id,
+    summary: buildScheduleChangeSummary({
+      action,
+      personName: saved.displayName,
+      dayOfWeek: saved.dayOfWeek,
+      beforeIn: before?.inbound_transport,
+      beforeOut: before?.outbound_transport,
+      afterIn: saved.inboundTransport,
+      afterOut: saved.outboundTransport,
+    }),
+    beforeState: before
+      ? {
+          inbound: before.inbound_transport,
+          outbound: before.outbound_transport,
+          active: before.active,
+        }
+      : null,
+    afterState: {
+      inbound: saved.inboundTransport,
+      outbound: saved.outboundTransport,
+      active: true,
+    },
+  });
+  return saved;
 }
 
-export async function deactivateSupportSchedule(id: string): Promise<void> {
+export async function deactivateSupportSchedule(
+  id: string,
+  source?: RunPlanningChangeSource,
+): Promise<void> {
+  const { data: existing } = await supabase
+    .from("support_attendance_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
   const { error } = await supabase
     .from("support_attendance_schedules")
     .update({ active: false })
     .eq("id", id);
   if (error) throw new Error(error.message);
+  const before = existing as ScheduleDb | null;
+  if (!before) return;
+  const names = await resolveSupportNames();
+  const personName = displayNameFor(before.person_kind, before.staff_id, before.carer_id, names);
+  void recordRunPlanningChangeBestEffort({
+    action: "cleared",
+    source: source ?? (before.person_kind === "carer" ? "carer_sheet" : "staff_sheet"),
+    personKind: before.person_kind,
+    personId: before.carer_id ?? before.staff_id,
+    personName,
+    dayOfWeek: before.day_of_week,
+    scheduleId: before.id,
+    summary: buildScheduleChangeSummary({
+      action: "cleared",
+      personName,
+      dayOfWeek: before.day_of_week,
+      beforeIn: before.inbound_transport,
+      beforeOut: before.outbound_transport,
+    }),
+    beforeState: {
+      inbound: before.inbound_transport,
+      outbound: before.outbound_transport,
+      active: before.active,
+    },
+    afterState: { active: false },
+  });
 }
 
 export async function loadExemptSupportKeysForDate(dateIso: string): Promise<Set<string>> {
@@ -521,6 +603,9 @@ export async function recordSupportArrival(input: {
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+  const names = await resolveSupportNames();
+  const logged = toLog(data as LogDb, names);
+  const how = formatTravelHow(input.arrivalMethod, input.arrivalBusRunCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -528,10 +613,17 @@ export async function recordSupportArrival(input: {
     action_type: "SUPPORT_CHECKIN",
     gps_lat: null,
     gps_lng: null,
-    metadata: { row_id: input.rowId, arrival_method: input.arrivalMethod },
+    metadata: await withAuditActorMeta({
+      row_id: input.rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "Day Centre",
+      arrival_method: input.arrivalMethod,
+      arrival_bus_run_code: input.arrivalBusRunCode ?? null,
+      summary: `Checked in ${logged.displayName} (${logged.personKind}) to Day Centre ${how}`.trim(),
+    }),
   });
-  const names = await resolveSupportNames();
-  return toLog(data as LogDb, names);
+  return logged;
 }
 
 export async function checkOutSupport(input: {
@@ -555,6 +647,13 @@ export async function checkOutSupport(input: {
     .select("*")
     .single();
   if (error) throw new Error(error.message);
+  const names = await resolveSupportNames();
+  const logged = toLog(data as LogDb, names);
+  const how = formatTravelHow(
+    null,
+    input.departureBusRunCode,
+    input.departureVector,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -562,10 +661,17 @@ export async function checkOutSupport(input: {
     action_type: "SUPPORT_CHECKOUT",
     gps_lat: null,
     gps_lng: null,
-    metadata: { row_id: input.rowId },
+    metadata: await withAuditActorMeta({
+      row_id: input.rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "Day Centre",
+      departure_vector: input.departureVector ?? null,
+      departure_bus_run_code: input.departureBusRunCode ?? null,
+      summary: `Checked out ${logged.displayName} (${logged.personKind}) from Day Centre ${how}`.trim(),
+    }),
   });
-  const names = await resolveSupportNames();
-  return toLog(data as LogDb, names);
+  return logged;
 }
 
 export async function persistSupportDepartureMethod(input: {
@@ -629,7 +735,14 @@ export async function markSupportAbsent(
     action_type: "SUPPORT_ABSENT",
     gps_lat: null,
     gps_lng: null,
-    metadata: { row_id: row.id, reason: reasonCode },
+    metadata: await withAuditActorMeta({
+      row_id: row.id,
+      person_name: row.displayName,
+      person_kind: row.personKind,
+      location: "Day Centre",
+      reason: reasonCode,
+      summary: `Marked ${row.displayName} (${row.personKind}) absent from Day Centre (${reasonCode})`,
+    }),
   });
   const names = await resolveSupportNames();
   return toLog(data as LogDb, names);
@@ -727,6 +840,7 @@ export async function sweepOverdueSupportArrivals(
   const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
+  const ledgered = new Set<string>();
   for (const r of roll) {
     if (r.status === "checked_in" || r.status === "checked_out" || r.status === "absent") continue;
     if (!r.expectedArrivalAt) continue;
@@ -736,34 +850,47 @@ export async function sweepOverdueSupportArrivals(
     if (overdueMins < yellowMins) continue;
     const wantRed = overdueMins >= redMins;
     const pName = r.displayName;
+    const sweepMeta = {
+      attendance_id: r.id,
+      overdue_mins: overdueMins,
+      automated: true,
+      actor_name: "System",
+      why: "Not arrived by expected time",
+      person_name: pName,
+      person_kind: r.personKind,
+      location: "Day Centre",
+      description: `${pName} (${r.personKind}) not arrived at Day Centre — overdue ${overdueMins} min`,
+    };
     if (!r.escalationIssueId) {
       const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `${wantRed ? "RED" : "YELLOW"}:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
       if (wantRed) {
         try {
           await writeToLedgerOrThrow({
-            staff_id: staffId,
+            staff_id: DEFAULT_STAFF_UUID,
             category: "CENTRE",
             severity: "RED",
             action_type: "SUPPORT_ATTENDANCE_RED_ESCALATED",
             gps_lat: null,
             gps_lng: null,
-            metadata: { attendance_id: r.id, overdue_mins: overdueMins, automated: true },
+            metadata: sweepMeta,
           });
         } catch {
           continue;
         }
       } else {
         await writeToLedger({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CENTRE",
           severity: "YELLOW",
           action_type: "SUPPORT_ATTENDANCE_YELLOW_RAISED",
           gps_lat: null,
           gps_lng: null,
-          metadata: { attendance_id: r.id, overdue_mins: overdueMins, automated: true },
+          metadata: sweepMeta,
         });
       }
+      ledgered.add(ledgerKey);
       const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
       const { data: issue, error: issueErr } = await supabase
         .from("site_issues_register")
@@ -794,20 +921,22 @@ export async function sweepOverdueSupportArrivals(
       continue;
     }
     if (wantRed && r.escalationSeverity !== "red") {
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `RED:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
       try {
         await writeToLedgerOrThrow({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CENTRE",
           severity: "RED",
           action_type: "SUPPORT_ATTENDANCE_RED_ESCALATED",
           gps_lat: null,
           gps_lng: null,
-          metadata: { attendance_id: r.id, overdue_mins: overdueMins, automated: true },
+          metadata: sweepMeta,
         });
       } catch {
         continue;
       }
+      ledgered.add(ledgerKey);
       await supabase
         .from("site_issues_register")
         .update({ severity: "red" })

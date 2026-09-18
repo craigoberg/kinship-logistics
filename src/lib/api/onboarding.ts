@@ -19,6 +19,7 @@ import {
   type WeekDay,
 } from "@/lib/data-store";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import {
   displayNameFromPayload,
   emptyClientSupport,
@@ -193,7 +194,15 @@ export async function createOnboardingCase(
     .select("*")
     .single();
   if (error) throwSchema(error);
-  return rowToCase(data as OnboardingCaseRow);
+  const created = rowToCase(data as OnboardingCaseRow);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "onboarding",
+    recordId: created.id,
+    recordName: created.displayName ?? "unnamed draft",
+    summary: `Started ${created.packType} onboarding draft ${created.displayName ?? "unnamed"}`,
+  });
+  return created;
 }
 
 export async function saveOnboardingDraft(
@@ -210,10 +219,16 @@ export async function saveOnboardingDraft(
     .select("*")
     .single();
   if (error) throwSchema(error);
-  return rowToCase(data as OnboardingCaseRow);
+  const saved = rowToCase(data as OnboardingCaseRow);
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "onboarding",
+    recordId: saved.id,
+    recordName: saved.displayName ?? "unnamed draft",
+    summary: `Saved ${saved.packType} onboarding draft ${saved.displayName ?? "unnamed"}`,
+  });
+  return saved;
 }
-
-/** Insert on first Save draft; update thereafter. No row until this is called. */
 export async function upsertOnboardingDraft(args: {
   id?: string | null;
   packType: OnboardingPackType;
@@ -241,6 +256,15 @@ export async function deleteOnboardingDraft(id: string): Promise<void> {
     .eq("id", id)
     .eq("status", "draft");
   if (error) throwSchema(error);
+  if (!isUnnamedOnboardingDraft(existing.displayName)) {
+    void recordOfficeChangeBestEffort({
+      action: "deleted",
+      entity: "onboarding",
+      recordId: id,
+      recordName: existing.displayName ?? "onboarding draft",
+      summary: `Deleted ${existing.packType} onboarding draft ${existing.displayName}`,
+    });
+  }
 }
 
 /** Remove leftover unnamed drafts created by the old open-insert path. */
@@ -866,7 +890,15 @@ export async function confirmOnboardingCase(
     .select("*")
     .single();
   if (error) throwSchema(error);
-  return rowToCase(data as OnboardingCaseRow);
+  const confirmed = rowToCase(data as OnboardingCaseRow);
+  void recordOfficeChangeBestEffort({
+    action: "confirmed",
+    entity: "onboarding",
+    recordId: confirmed.id,
+    recordName: confirmed.displayName ?? "onboarding pack",
+    summary: `Confirmed ${confirmed.packType} onboarding for ${confirmed.displayName ?? "pack"}`,
+  });
+  return confirmed;
 }
 
 /** Latest Hub review due date on a prior pack for the same person (if any). */

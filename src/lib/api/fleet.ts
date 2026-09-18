@@ -7,6 +7,7 @@ import {
   type TransportAsset,
 } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 
 export type { TransportAsset };
@@ -164,6 +165,14 @@ export async function updateFleetAsset(
     throw error;
   }
   await syncComplianceAssetsForVehicle(assetId);
+  void recordOfficeChangeBestEffort({
+    action: patch.isActive === false ? "archived" : "updated",
+    entity: "fleet",
+    recordId: assetId,
+    recordName: patch.name?.trim() || patch.regoPlate?.trim() || "fleet asset",
+    category: "VEHICLE",
+    after: { ...patch },
+  });
 }
 
 export async function insertFleetAsset(input: FleetAssetInput): Promise<string> {
@@ -191,6 +200,19 @@ export async function insertFleetAsset(input: FleetAssetInput): Promise<string> 
   }
   const id = (data as { id: string }).id;
   await syncComplianceAssetsForVehicle(id);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "fleet",
+    recordId: id,
+    recordName: input.name.trim() || input.regoPlate.trim(),
+    category: "VEHICLE",
+    after: {
+      name: input.name.trim(),
+      regoPlate: input.regoPlate.trim(),
+      makeModel: input.makeModel ?? null,
+      passengerCapacity: input.passengerCapacity,
+    },
+  });
   return id;
 }
 

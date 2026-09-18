@@ -11,6 +11,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -276,7 +277,15 @@ export async function createMaintenanceItem(
 
   if (error) throw error;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return rowToItem(data as Record<string, any>);
+  const created = rowToItem(data as Record<string, any>);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "maintenance",
+    recordId: created.id,
+    recordName: created.title,
+    summary: `Logged maintenance item ${created.title}`,
+  });
+  return created;
 }
 
 export async function addMaintenanceNote(
@@ -318,6 +327,13 @@ export async function updateMaintenanceStatus(
     .update(patch)
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Set maintenance status to ${status}`,
+  });
 }
 
 export async function deferMaintenanceItem(
@@ -353,6 +369,13 @@ export async function deferMaintenanceItem(
     `Deferred to ${formatDate(untilDate)}. Reason: ${reason}`,
     author,
   );
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Deferred maintenance to ${untilDate}`,
+  });
 }
 
 export async function assignMaintenanceItem(
@@ -364,6 +387,13 @@ export async function assignMaintenanceItem(
     .update({ assigned_to: assignedTo, status: "in_progress" })
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Assigned maintenance to ${assignedTo}`,
+  });
 }
 
 // ── Query key ─────────────────────────────────────────────────────────────────

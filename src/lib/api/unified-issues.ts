@@ -947,18 +947,23 @@ async function insertHubNote(args: {
   note: string;
   kind: HubIssueNote["kind"];
   metadata?: Record<string, unknown> | null;
-}): Promise<void> {
+}): Promise<string | null> {
   const staffId = await resolveStaffIdWithFallback().catch(() => null);
-  const { error } = await supabase.from("hub_issue_notes").insert({
-    source: args.source,
-    source_row_id: args.sourceRowId,
-    note: args.note.trim(),
-    kind: args.kind,
-    staff_id: staffId,
-    stamped_at: operationalNowIso(),
-    metadata: args.metadata ?? null,
-  });
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .insert({
+      source: args.source,
+      source_row_id: args.sourceRowId,
+      note: args.note.trim(),
+      kind: args.kind,
+      staff_id: staffId,
+      stamped_at: operationalNowIso(),
+      metadata: args.metadata ?? null,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return (data as { id?: string } | null)?.id ?? null;
 }
 
 /**
@@ -1021,11 +1026,30 @@ export async function appendUpdateNote(
     throw new Error("Update note must be at least 10 characters.");
   }
 
-  await insertHubNote({
+  const hubNoteId = await insertHubNote({
     source: issue.source,
     sourceRowId: issue.sourceRowId,
     note: trimmed,
     kind: "append",
+  });
+
+  const staffId = await resolveStaffIdWithFallback();
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: issue.source === "renewal" || issue.source === "escalation" ? "VEHICLE" : "CENTRE",
+    severity: severityToLedger(issue.severity),
+    action_type: "governance.issue_noted",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      source: issue.source,
+      source_row_id: issue.sourceRowId,
+      hub_note_id: hubNoteId,
+      title: issue.title,
+      note: trimmed,
+      kind: "append",
+    },
   });
 
   // Backward-compat mirror for day_centre's existing column.
@@ -1154,6 +1178,7 @@ export async function deferUnifiedIssue(
       source_row_id: issue.sourceRowId,
       deferred_until: args.untilIso,
       note,
+      title: issue.title,
     },
   });
 }
@@ -1208,6 +1233,7 @@ export async function escalateUnifiedIssueToCouncil(
       source_row_id: issue.sourceRowId,
       council_severity: args.councilSeverity,
       note,
+      title: issue.title,
     },
   });
 }

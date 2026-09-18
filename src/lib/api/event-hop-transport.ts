@@ -691,6 +691,11 @@ export async function prepareEventHopManifest(opts: {
       hop_index: opts.hopIndex,
       from_stop_id: opts.fromStopId,
       to_stop_id: opts.toStopId,
+      from_label:
+        (fromRow as { label_override?: string | null } | null)?.label_override ??
+        fromVenues?.name ??
+        null,
+      location: "trip",
     },
   });
 
@@ -933,6 +938,9 @@ export async function startEventVenueHop(
       event_id: row.event_id,
       hop_index: row.hop_index,
       driver_staff_id: input.driverStaffId,
+      from_label: labels.fromLabel,
+      to_label: labels.toLabel,
+      location: "trip",
     },
   });
 

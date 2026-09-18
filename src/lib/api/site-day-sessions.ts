@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_STAFF_UUID,
   resolveStaffIdWithFallback,
   verifyStaffPin,
 } from "@/lib/data-store";
@@ -146,9 +147,11 @@ async function siteLedger(
   action: string,
   metadata: Record<string, unknown>,
   severity: "RED" | "YELLOW" | "GREEN" | "INFO" = "INFO",
+  opts?: { automated?: boolean },
 ): Promise<void> {
   try {
-    const staffId = await resolveStaffIdWithFallback();
+    const automated = opts?.automated === true;
+    const staffId = automated ? DEFAULT_STAFF_UUID : await resolveStaffIdWithFallback();
     const gps = await tryGetGps();
     await writeToLedger({
       staff_id: staffId,
@@ -157,7 +160,11 @@ async function siteLedger(
       action_type: `site_day.${action}`,
       gps_lat: gps?.lat ?? null,
       gps_lng: gps?.lng ?? null,
-      metadata,
+      metadata: {
+        location: "Day Centre",
+        ...metadata,
+        ...(automated ? { automated: true, actor_name: "System" } : {}),
+      },
     });
   } catch (err) {
     console.error("[site_day.ledger] write failed", err);
@@ -216,8 +223,13 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "initialize",
-    { session_id: next.id, session_date: next.sessionDate },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      why: "Day Centre session row created for the operational day",
+    },
     "INFO",
+    { automated: true },
   );
   return next;
 }
@@ -262,7 +274,12 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "open",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "Leader declared the centre open",
+    },
     "GREEN",
   );
   // BL-100 / BL-073 — seed Activities template (meals + med round) if empty.
@@ -303,7 +320,12 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "close",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "All clients accounted",
+    },
     "GREEN",
   );
   return next;
@@ -368,6 +390,7 @@ export async function reopenSession(args: {
       session_date: next.sessionDate,
       manager_staff_id: args.managerStaffId,
       reason: args.reason,
+      why: args.reason,
       prior_close_at: priorCloseAt,
       prior_closed_by: priorClosedBy,
     },

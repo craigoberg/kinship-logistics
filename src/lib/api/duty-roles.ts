@@ -3,6 +3,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { writeToLedger, type LedgerCategory } from "@/lib/api/ledger";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
   evaluateRequirementHolds,
@@ -125,7 +126,15 @@ export async function upsertRequirementType(input: {
     .select("id, name, kind, aliases, active, sort_order")
     .single();
   if (error) throw error;
-  return rowToRequirement(data as RequirementRow);
+  const saved = rowToRequirement(data as RequirementRow);
+  void recordOfficeChangeBestEffort({
+    action: input.id ? "updated" : "created",
+    entity: "duty_requirement",
+    recordId: saved.id,
+    recordName: saved.name,
+    after: { name: saved.name, kind: saved.kind, active: saved.active },
+  });
+  return saved;
 }
 
 export async function setRequirementTypeActive(
@@ -137,6 +146,13 @@ export async function setRequirementTypeActive(
     .update({ active, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "duty_requirement",
+    recordId: id,
+    recordName: "requirement type",
+    summary: `${active ? "Activated" : "Deactivated"} a requirement type`,
+  });
 }
 
 export async function listDutyRoles(includeInactive = false): Promise<DutyRole[]> {
@@ -213,7 +229,15 @@ export async function upsertDutyRole(input: {
     );
     if (insErr) throw insErr;
   }
-  return rowToDutyRole(role, ids);
+  const saved = rowToDutyRole(role, ids);
+  void recordOfficeChangeBestEffort({
+    action: input.id ? "updated" : "created",
+    entity: "duty_role",
+    recordId: saved.id,
+    recordName: saved.name,
+    after: { name: saved.name, description: saved.description, active: saved.active },
+  });
+  return saved;
 }
 
 export async function setDutyRoleActive(id: string, active: boolean): Promise<void> {
@@ -222,6 +246,13 @@ export async function setDutyRoleActive(id: string, active: boolean): Promise<vo
     .update({ active, updated_at: new Date().toISOString() })
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "duty_role",
+    recordId: id,
+    recordName: "duty role",
+    summary: `${active ? "Activated" : "Deactivated"} a duty role`,
+  });
 }
 
 export async function listStaffDutyRoleIds(staffId: string): Promise<string[]> {
@@ -249,11 +280,20 @@ export async function replaceStaffDutyRoles(
     throw delErr;
   }
   const ids = [...new Set(dutyRoleIds.filter(Boolean))];
-  if (ids.length === 0) return;
-  const { error } = await supabase.from("staff_duty_roles").insert(
-    ids.map((duty_role_id) => ({ staff_id: staffId, duty_role_id })),
-  );
-  if (error) throw error;
+  if (ids.length > 0) {
+    const { error } = await supabase.from("staff_duty_roles").insert(
+      ids.map((duty_role_id) => ({ staff_id: staffId, duty_role_id })),
+    );
+    if (error) throw error;
+  }
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "staff",
+    recordId: staffId,
+    recordName: "staff duty roles",
+    summary: `Set duty roles for a staff member (${ids.length} role${ids.length === 1 ? "" : "s"})`,
+    after: { dutyRoleIds: ids },
+  });
 }
 
 export async function listDutyBindings(): Promise<DutyBinding[]> {
@@ -290,12 +330,27 @@ export async function createDutyBinding(input: {
     .select("id, function_key, subject_kind, subject_id, duty_role_id")
     .single();
   if (error) throw error;
-  return rowToBinding(data as BindingRow);
+  const binding = rowToBinding(data as BindingRow);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "duty_binding",
+    recordId: binding.id,
+    recordName: input.functionKey,
+    summary: `Bound duty role to ${input.functionKey}`,
+  });
+  return binding;
 }
 
 export async function deleteDutyBinding(id: string): Promise<void> {
   const { error } = await supabase.from("duty_bindings").delete().eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "deleted",
+    entity: "duty_binding",
+    recordId: id,
+    recordName: "duty binding",
+    summary: "Removed a duty-role binding",
+  });
 }
 
 function bindingsForFunction(
@@ -413,6 +468,7 @@ export async function recordDutyGapApproval(input: {
       approved_by_staff_id: input.managerStaffId,
       note: input.note.trim(),
       gap: input.missingSummary,
+      summary: `Manager approved duty gap for ${input.subjectLabel}: ${input.staffName} missing ${input.missingSummary}`,
     },
   });
 }

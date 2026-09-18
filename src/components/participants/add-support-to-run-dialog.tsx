@@ -27,6 +27,7 @@ import { useLookupParameters } from "@/hooks/use-supabase-data";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { SUPPORT_SCHEDULES_KEY, upsertSupportSchedule } from "@/lib/api/support-attendance";
 import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
+import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
 import { busRunRouteQueryKey, type BusRunRouteDirection } from "@/lib/api/bus-run-routes";
 import { classifyWorkforceKind, type SupportPersonKind } from "@/lib/support-person";
 import { cn } from "@/lib/utils";
@@ -116,6 +117,7 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
           expectedArrivalTime: arrive,
           expectedDepartureTime: depart,
           pickupAddressOverride: address,
+          source: "add_to_run",
         });
       }
     },
@@ -124,6 +126,7 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
       void qc.invalidateQueries({ queryKey: busRunRouteQueryKey(busRunCode, direction) });
       void qc.invalidateQueries({ queryKey: SUPPORT_SCHEDULES_KEY });
       void qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      void qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
       onClose();
     },
     onError: (err: Error) => toast.error(err.message),

@@ -292,6 +292,8 @@ export function useInsertAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       console.error("[useInsertAttendanceSchedule] insert failed", err);
@@ -314,6 +316,8 @@ export function useUpdateAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not update schedule", { description: err.message });
@@ -328,6 +332,8 @@ export function useArchiveAttendanceSchedule() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not archive schedule", { description: err.message });
@@ -342,6 +348,8 @@ export function useRemoveAttendanceSchedule() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not remove schedule", { description: err.message });
@@ -898,6 +906,7 @@ export function useReorderBusRunDefaultRoute() {
     },
     onSuccess: (_data, { busRunCode, direction }) => {
       void qc.invalidateQueries({ queryKey: busRunRouteQueryKey(busRunCode, direction) });
+      void qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => showRedToast("Could not save run route", err),
   });
@@ -1282,6 +1291,8 @@ import {
   reorderBusRunDefaultRoute,
   type BusRunRouteDirection,
 } from "@/lib/api/bus-run-routes";
+import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
+import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
 import { listTodaysRunLiveStatus } from "@/lib/api/run-live-status";
 import {
   acknowledgeTripRunNotice,

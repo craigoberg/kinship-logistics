@@ -6,8 +6,9 @@ import {
   insertEventBooking,
   type EventRosterBooking,
 } from "@/lib/data-store";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { recordOfficeChangeBestEffort, resolveAuditActor } from "@/lib/api/office-change-log";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { operationalNowIso } from "@/lib/operational-clock";
 
@@ -155,15 +156,21 @@ export async function createWalkOnGuestParticipant(input: {
   }
 
   const guest = mapGuest(data as Record<string, unknown>);
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_WALK_ON_GUEST_CREATED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { participant_id: guest.id, display_name: guest.fullName },
+    metadata: {
+      summary: `Added walk-on guest ${guest.fullName}`,
+      actor_name: actor.name,
+      person_name: guest.fullName,
+      participant_id: guest.id,
+      display_name: guest.fullName,
+    },
   });
   return guest;
 }
@@ -226,15 +233,21 @@ export async function createGuestParticipant(input: {
   }
 
   const guest = mapGuest(data as Record<string, unknown>);
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_GUEST_PARTICIPANT_CREATED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { participant_id: guest.id, display_name: guest.fullName },
+    metadata: {
+      summary: `Added event guest ${guest.fullName}`,
+      actor_name: actor.name,
+      person_name: guest.fullName,
+      participant_id: guest.id,
+      display_name: guest.fullName,
+    },
   });
   return guest;
 }
@@ -248,6 +261,13 @@ export async function reactivateGuestParticipant(
     .update({ archived_at: null, participant_kind: "guest" })
     .eq("id", participantId);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "guest",
+    recordId: participantId,
+    recordName: "event guest",
+    summary: "Reactivated an archived event guest",
+  });
 }
 
 export async function listLiveGuestEventTitles(
@@ -301,15 +321,20 @@ export async function archiveGuestFromCareProfile(
   if (!archived) {
     throw new Error("Only an active event guest can be archived from this screen.");
   }
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_GUEST_PARTICIPANT_ARCHIVED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { participant_id: participantId, source: "care_profile" },
+    metadata: {
+      summary: "Archived event guest from care profile",
+      actor_name: actor.name,
+      participant_id: participantId,
+      source: "care_profile",
+    },
   });
 }
 
@@ -449,15 +474,18 @@ export async function addGuestBookingToEvent(input: {
         : "no",
   });
 
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_GUEST_BOOKING_ADDED",
     gps_lat: null,
     gps_lng: null,
     metadata: {
+      summary: `Booked guest ${booking.participantName || "guest"} on event`,
+      actor_name: actor.name,
+      person_name: booking.participantName,
       event_id: input.eventId,
       booking_id: booking.id,
       participant_id: input.participantId,

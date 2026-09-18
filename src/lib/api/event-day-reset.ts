@@ -12,6 +12,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { seedEventAttendanceRoll } from "@/lib/api/event-attendance";
 import { applyOvernightDayStartContinuity } from "@/lib/api/event-day-continuity";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
   operationalNowIso,
@@ -332,7 +333,7 @@ export async function resetEventDayToStartOfDay(
     action_type: "EVENT_RESET_START_OF_DAY",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       session_id: sessionId,
       event_id: eventId,
       session_date: sessionDate,
@@ -341,7 +342,8 @@ export async function resetEventDayToStartOfDay(
       overnight_continuity: overnightDay,
       test_only: true,
       operational_clock: { date: sessionDate, time: START_OF_DAY_CLOCK },
-    },
+      summary: `Reset start of day for trip on ${sessionDate} (cleared ${tripIds.length} trip${tripIds.length === 1 ? "" : "s"}) — test rewind`,
+    }),
   });
 
   return next;

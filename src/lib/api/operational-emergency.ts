@@ -432,6 +432,8 @@ export async function activateEmergency(input: {
       severity: input.severity,
       surface: input.surface,
       situation,
+      why: situation,
+      location: input.surface === "trip" ? "trip" : "Day Centre",
       hub_issue_id: issue.id,
     },
   });
@@ -540,6 +542,9 @@ export async function standDownEmergency(input: {
       emergency_id: current.id,
       mode: current.mode,
       debrief,
+      why: debrief,
+      location: current.surface === "trip" ? "trip" : "Day Centre",
+      surface: current.surface,
       hub_issue_id: current.hubIssueId,
       hub_issue_left_open: true,
     },
@@ -601,6 +606,8 @@ export async function declareDoNotOpenCentre(input: {
     metadata: {
       session_id: input.siteDaySessionId,
       reason,
+      why: reason,
+      location: "Day Centre",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -652,6 +659,8 @@ export async function declareCentreLockdown(input: {
     metadata: {
       session_id: input.siteDaySessionId,
       reason,
+      why: reason,
+      location: "Day Centre",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -697,7 +706,7 @@ export async function clearCentreLockdown(input: {
     action_type: "SITE_LOCKDOWN_CLEARED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { session_id: input.siteDaySessionId },
+    metadata: { session_id: input.siteDaySessionId, location: "Day Centre" },
   });
 }
 
@@ -773,6 +782,9 @@ export async function declareProgrammeSuspend(input: {
       event_id: input.eventId,
       event_day_session_id: input.eventDaySessionId,
       reason,
+      why: reason,
+      location: "trip",
+      surface: "trip",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -818,7 +830,11 @@ export async function clearProgrammeSuspend(input: {
     action_type: "PROGRAMME_SUSPEND_CLEARED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { event_day_session_id: input.eventDaySessionId },
+    metadata: {
+      event_day_session_id: input.eventDaySessionId,
+      location: "trip",
+      surface: "trip",
+    },
   });
 }
 

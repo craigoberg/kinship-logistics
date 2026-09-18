@@ -16,6 +16,7 @@ import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
 import { DutyRolesWorkspace } from "@/components/admin/duty-roles-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
 import { PublicWebsiteWorkspace } from "@/components/admin/public-website-workspace";
+import { ActivityLogWorkspace } from "@/components/admin/activity-log-workspace";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
@@ -31,6 +32,7 @@ type AdminTab =
   | "parameters"
   | "website"
   | "access"
+  | "activity"
   | "backup";
 
 function AdminPage() {
@@ -51,7 +53,7 @@ function AdminPage() {
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet, venues, vendors, Duty roles, public website (yada.org.au), lookups, thresholds, role access, and backups.
+          Manage fleet, venues, vendors, Duty roles, public website (yada.org.au), lookups, thresholds, activity log, role access, and backups.
         </p>
       </header>
 
@@ -69,6 +71,7 @@ function AdminPage() {
           {showAccess ? (
             <TabsTrigger value="access">Menu Access</TabsTrigger>
           ) : null}
+          <TabsTrigger value="activity">Activity log</TabsTrigger>
           <TabsTrigger value="backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
@@ -99,6 +102,9 @@ function AdminPage() {
             <MenuAccessMatrix />
           </TabsContent>
         ) : null}
+        <TabsContent value="activity">
+          <ActivityLogWorkspace />
+        </TabsContent>
         <TabsContent value="backup">
           <BackupRestoreWorkspace />
         </TabsContent>

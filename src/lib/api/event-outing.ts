@@ -10,6 +10,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { parseIsoDateLocal, toIsoDateString, formatDate } from "@/lib/utils";
 import {
@@ -360,7 +361,16 @@ export async function upsertEventVenueStop(
       .select("*")
       .single();
     if (error) throw error;
-    return data as EventVenueStop;
+    const stop = data as EventVenueStop;
+    void recordOfficeChangeBestEffort({
+      action: "updated",
+      entity: "itinerary",
+      recordId: stop.id,
+      recordName: String(stop.label_override || stop.activity_kind || "itinerary stop"),
+      category: "TRIP",
+      summary: `Updated itinerary stop on ${input.session_date}`,
+    });
+    return stop;
   }
 
   const { data, error } = await supabase
@@ -369,7 +379,16 @@ export async function upsertEventVenueStop(
     .select("*")
     .single();
   if (error) throw error;
-  return data as EventVenueStop;
+  const created = data as EventVenueStop;
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "itinerary",
+    recordId: created.id,
+    recordName: String(created.label_override || created.activity_kind || "itinerary stop"),
+    category: "TRIP",
+    summary: `Added itinerary stop on ${input.session_date}`,
+  });
+  return created;
 }
 
 export async function deleteEventVenueStop(id: string): Promise<void> {
@@ -381,6 +400,14 @@ export async function deleteEventVenueStop(id: string): Promise<void> {
     .delete()
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "deleted",
+    entity: "itinerary",
+    recordId: id,
+    recordName: "itinerary stop",
+    category: "TRIP",
+    summary: "Removed an itinerary stop",
+  });
 }
 
 /**
@@ -419,6 +446,14 @@ export async function reorderEventVenueStops(
   await applyOrders(parkBase);
   // Phase 2 — final order
   await applyOrders(0);
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "itinerary",
+    recordId: eventId,
+    recordName: "itinerary",
+    category: "TRIP",
+    summary: `Reordered itinerary stops on ${sessionDate}`,
+  });
 }
 
 /** Inclusive calendar dates between start and end (local timezone — §5.3). */
@@ -1170,10 +1205,26 @@ export async function updateBookingTransportModes(
         })
         .eq("id", input.booking_id);
       if (retryErr) throw retryErr;
+      void recordOfficeChangeBestEffort({
+        action: "updated",
+        entity: "booking",
+        recordId: input.booking_id,
+        recordName: "event booking",
+        category: "TRIP",
+        summary: `Set booking transport IN ${input.outbound_transport_mode} / OUT ${input.return_transport_mode}`,
+      });
       return;
     }
     throw error;
   }
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.booking_id,
+    recordName: "event booking",
+    category: "TRIP",
+    summary: `Set booking transport IN ${input.outbound_transport_mode} / OUT ${input.return_transport_mode}`,
+  });
 }
 
 // ============================================================================
@@ -1206,6 +1257,14 @@ export async function updateBookingTransportMed(
     }
     throw error;
   }
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.booking_id,
+    recordName: "event booking",
+    category: "TRIP",
+    summary: `Set transport med bag to ${input.transport_med_bag_required}`,
+  });
 }
 
 /** True when driver manifest should prompt med-bag handover on outbound pickup. */

@@ -5,6 +5,7 @@ import {
   type AccessRoleKey,
 } from "@/lib/access-roles";
 import { getActiveUserProfile, persistActiveUserProfile } from "@/lib/data-store";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import {
   resolveMenuKey,
   type AppMenuKey,
@@ -83,6 +84,17 @@ export async function upsertRoleMenuAccess(args: {
     { onConflict: "role_key,menu_key" },
   );
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "menu_access",
+    recordName: `${args.roleKey} / ${args.menuKey}`,
+    summary: `Set menu access ${args.roleKey} → ${args.menuKey} = ${args.accessLevel}`,
+    after: {
+      roleKey: args.roleKey,
+      menuKey: args.menuKey,
+      accessLevel: args.accessLevel,
+    },
+  });
 }
 
 export async function hydrateAccessRoleOnProfile(): Promise<string | null> {

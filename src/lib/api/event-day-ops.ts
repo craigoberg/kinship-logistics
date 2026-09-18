@@ -12,7 +12,7 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { sydneyWallClockToUtcDate } from "@/lib/operational-time";
@@ -1178,14 +1178,20 @@ export async function deferAccountabilityRoll(
       table,
       minutes: opts.minutes,
       reason,
+      why: reason,
       scope: isGroupDefer ? "group" : "individual",
       group_banner_note: groupBannerNote,
       affected_count: affectedIds.length,
       affected_ids: affectedIds,
+      participant_ids: targets.map((t) => t.participant_id),
+      person_names: targets
+        .map((t) => (t.participant_name ?? "").trim())
+        .filter(Boolean),
       yellows_auto_cleared: yellowsAutoCleared,
       manager_staff_id: opts.managerStaffId ?? null,
       manager_name: opts.managerName ?? null,
       operator_staff_id: staffId,
+      location: "trip",
     },
   });
 
@@ -1292,7 +1298,10 @@ export async function markAccounted(
       log_id: realId,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       notes: mergedNotes,
+      why: mergedNotes || "Accounted on roll",
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1339,6 +1348,8 @@ export async function unmarkAccounted(
       log_id: row.id,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1480,11 +1491,14 @@ export async function markAbsent(
       log_id: realId,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       disposition: params.disposition,
       safety_plan: plan,
       severity: params.severity,
       hub_issue_id: newIssueId,
       notes: mergedNotes,
+      why: plan || mergedNotes || params.disposition,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1568,7 +1582,10 @@ export async function reinstateAccountabilityAbsent(
       log_id: row.id,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       reason: trimmed,
+      why: trimmed,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1594,6 +1611,7 @@ export async function sweepAccountabilityRoll(
   const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
+  const ledgered = new Set<string>();
   const isCurfew = table === "event_curfew_log";
 
   const hubCtx = await loadRollHubContext(sessionId);
@@ -1627,7 +1645,7 @@ export async function sweepAccountabilityRoll(
       if (isRedZone) {
         try {
           await writeToLedgerOrThrow({
-            staff_id: await resolveStaffIdWithFallback(),
+            staff_id: DEFAULT_STAFF_UUID,
             category: "TRIP",
             severity: "RED",
             action_type: isCurfew ? "CURFEW_RED_AUTO_RAISED" : "MORNING_ROLL_RED_AUTO_RAISED",
@@ -1638,8 +1656,12 @@ export async function sweepAccountabilityRoll(
               session_id: sessionId,
               event_id: hubCtx.eventId,
               participant_id: r.participant_id,
+              person_name: pName,
+              location: hubCtx.eventTitle,
               mins_relative: minsRelative,
               automated: true,
+              actor_name: "System",
+              why: `Unaccounted on ${rollLabel.toLowerCase()} past deadline`,
             },
           });
         } catch {
@@ -1647,7 +1669,7 @@ export async function sweepAccountabilityRoll(
         }
       } else {
         await writeToLedger({
-          staff_id: await resolveStaffIdWithFallback(),
+          staff_id: DEFAULT_STAFF_UUID,
           category: "TRIP",
           severity: "YELLOW",
           action_type: isCurfew ? "CURFEW_YELLOW_RAISED" : "MORNING_ROLL_YELLOW_RAISED",
@@ -1658,11 +1680,16 @@ export async function sweepAccountabilityRoll(
             session_id: sessionId,
             event_id: hubCtx.eventId,
             participant_id: r.participant_id,
+            person_name: pName,
+            location: hubCtx.eventTitle,
             mins_relative: minsRelative,
             automated: true,
+            actor_name: "System",
+            why: `Not yet accounted on ${rollLabel.toLowerCase()}`,
           },
         });
       }
+      ledgered.add(`${isRedZone ? "RED" : "YELLOW"}:${r.id}`);
 
       const desc =
         insertSeverity === "red"
@@ -1707,10 +1734,11 @@ export async function sweepAccountabilityRoll(
 
     // ── Yellow issue exists → promote to RED if threshold crossed ──
     if (isRedZone && r.escalation_severity !== "red") {
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `RED:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
       try {
         await writeToLedgerOrThrow({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "TRIP",
           severity: "RED",
           action_type: isCurfew ? "CURFEW_RED_AUTO_RAISED" : "MORNING_ROLL_RED_AUTO_RAISED",
@@ -1722,13 +1750,18 @@ export async function sweepAccountabilityRoll(
             session_id: sessionId,
             event_id: hubCtx.eventId,
             participant_id: r.participant_id,
+            person_name: pName,
+            location: hubCtx.eventTitle,
             mins_relative: minsRelative,
             automated: true,
+            actor_name: "System",
+            why: `Unaccounted on ${rollLabel.toLowerCase()} past deadline`,
           },
         });
       } catch {
         continue; // ledger failed — abort RED promotion; retry next sweep
       }
+      ledgered.add(ledgerKey);
 
       await supabase
         .from("site_issues_register")

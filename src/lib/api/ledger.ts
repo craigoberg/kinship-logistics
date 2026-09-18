@@ -1,6 +1,8 @@
 import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso } from "@/lib/utils";
+import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_STAFF_UUID,
   listStaffRegistry,
   resolveStaffIdWithFallback,
   updateStaffMember,
@@ -52,10 +54,6 @@ async function toLedgerInsert(payload: LedgerWriteInput): Promise<LedgerInsert> 
   const action_type = legacy
     ? payload.actionType
     : payload.action_type;
-  const staff_id =
-    ("staff_id" in payload && payload.staff_id
-      ? payload.staff_id
-      : null) || (await resolveStaffIdWithFallback());
 
   const metadata: Record<string, unknown> = {
     ...((payload.metadata as Record<string, unknown> | null | undefined) ?? {}),
@@ -64,13 +62,32 @@ async function toLedgerInsert(payload: LedgerWriteInput): Promise<LedgerInsert> 
     metadata.description = payload.description;
   }
 
+  const automated = metadata.automated === true;
+  if (automated && !metadata.actor_name) {
+    metadata.actor_name = "System";
+  }
+
+  const staff_id =
+    ("staff_id" in payload && payload.staff_id
+      ? payload.staff_id
+      : null) ||
+    (automated ? DEFAULT_STAFF_UUID : await resolveStaffIdWithFallback());
+
+  let gps_lat = payload.gps_lat ?? null;
+  let gps_lng = payload.gps_lng ?? null;
+  if (gps_lat == null && gps_lng == null) {
+    const gps = await tryGetGps();
+    gps_lat = gps?.lat ?? null;
+    gps_lng = gps?.lng ?? null;
+  }
+
   return {
     staff_id,
     category: payload.category,
     severity: payload.severity,
     action_type,
-    gps_lat: payload.gps_lat ?? null,
-    gps_lng: payload.gps_lng ?? null,
+    gps_lat,
+    gps_lng,
     metadata: Object.keys(metadata).length > 0 ? metadata : null,
   };
 }

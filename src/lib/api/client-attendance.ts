@@ -9,7 +9,7 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
-import { loadExemptParticipantIdsForDate, resolveStaffIdWithFallback } from "@/lib/data-store";
+import { loadExemptParticipantIdsForDate, resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import {
   applyFloorDayAbsenceExemption,
   clearFloorDayAbsenceExemption,
@@ -18,6 +18,11 @@ import {
   type AfternoonHomePlacement,
 } from "@/lib/api/office-run-exemption";
 import { writeToLedger, writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
+import {
+  formatTravelHow,
+  lookupParticipantName,
+  withAuditActorMeta,
+} from "@/lib/api/office-change-log";
 import {
   getSydneyDayIndex,
   sydneyTimeTodayFromClock,
@@ -441,6 +446,8 @@ async function autoCloseYellowIssue(
       attendance_id: row.id,
       issue_id: issueId,
       participant_id: row.participantId,
+      location: "Day Centre",
+      why: reason,
       reason, // ≥10 chars — Compliance Shield receipt.
     },
   });
@@ -505,6 +512,9 @@ export async function toggleCheckIn(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(row.arrivalMethod, row.arrivalBusRunCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -512,12 +522,19 @@ export async function toggleCheckIn(
     action_type: isCheckedIn ? "ATTENDANCE_CHECKIN_UNDO" : "ATTENDANCE_CHECKIN",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       attendance_id: row.id,
       session_id: row.sessionId,
       participant_id: row.participantId,
+      person_name: who,
+      location: "Day Centre",
+      arrival_method: row.arrivalMethod,
+      arrival_bus_run_code: row.arrivalBusRunCode,
       expected_arrival_at: row.expectedArrivalAt,
-    },
+      summary: isCheckedIn
+        ? `Undid check-in for ${who} at Day Centre`
+        : `Checked in ${who} to Day Centre ${how}`.trim(),
+    }),
   });
 
   // Context-aware closure: only on the check-IN direction, never on undo.
@@ -620,6 +637,10 @@ export async function recordClientArrival(
 
   const gps = await tryGetGps();
   const checkedInNow = alsoCheckIn && row.status === "expected";
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const arrivalMethod = isSelf ? "private" : "bus";
+  const how = formatTravelHow(arrivalMethod, runCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -629,15 +650,20 @@ export async function recordClientArrival(
       : "ATTENDANCE_ARRIVAL_METHOD",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       attendance_id: row.id,
       session_id: row.sessionId,
       participant_id: row.participantId,
-      arrival_method: isSelf ? "private" : "bus",
+      person_name: who,
+      location: "Day Centre",
+      arrival_method: arrivalMethod,
       arrival_bus_run_code: runCode,
       prior_arrival_method: row.arrivalMethod,
       expected_arrival_at: row.expectedArrivalAt,
-    },
+      summary: checkedInNow
+        ? `Checked in ${who} to Day Centre ${how}`.trim()
+        : `Set arrival for ${who} at Day Centre ${how}`.trim(),
+    }),
   });
 
   let finalRow = toRow(data as DbRow);
@@ -994,7 +1020,13 @@ export async function bulkDeferGroup(
       minutes,
       affected_count: updates.length,
       affected_ids: updates.map((u) => u.id),
+      participant_ids: targets.map((t) => t.participantId),
+      person_names: (
+        await Promise.all(targets.map((t) => lookupParticipantName(t.participantId)))
+      ).filter((n): n is string => !!n),
       yellows_auto_cleared: yellowsAutoCleared,
+      location: "Day Centre",
+      why: `Deferred ${method} arrivals by ${minutes} min so overdue clocks match the late run`,
       reason: `Bulk deferred ${updates.length} ${method} passenger(s) by ${minutes} minutes.`,
     },
   });
@@ -1285,6 +1317,7 @@ export async function sweepOverdueArrivals(
   const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
+  const ledgered = new Set<string>();
 
   for (const r of roll) {
     if (r.checkedInAt || r.status === "accounted" || r.status === "absent")
@@ -1303,14 +1336,13 @@ export async function sweepOverdueArrivals(
       const descriptionPrefix = wantRed ? "[AUTOMATED_RED]" : "[ATTENDANCE]";
       const description = `${descriptionPrefix} ${pName} overdue by ${overdueMins} min (expected ${new Date(r.expectedArrivalAt).toLocaleTimeString()}).`;
       const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
-      const staffId = await resolveStaffIdWithFallback();
 
       // GUARDRAILS §1.1 — ledger write FIRST; abort if it fails so no
       // un-vouched RED row is created in site_issues_register.
       if (wantRed) {
         try {
           await writeToLedgerOrThrow({
-            staff_id: staffId,
+            staff_id: DEFAULT_STAFF_UUID,
             category: "CLIENT",
             severity: "RED",
             action_type: "ATTENDANCE_RED_ESCALATED",
@@ -1322,6 +1354,11 @@ export async function sweepOverdueArrivals(
               overdue_mins: overdueMins,
               threshold_mins: redMins,
               automated: true,
+              actor_name: "System",
+              why: "Not arrived by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} overdue by ${overdueMins} min at Day Centre`,
             },
           });
         } catch (ledgerErr) {
@@ -1330,21 +1367,27 @@ export async function sweepOverdueArrivals(
         }
       } else {
         await writeToLedger({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CLIENT",
           severity: "YELLOW",
           action_type: "ATTENDANCE_YELLOW_RAISED",
           gps_lat: null,
           gps_lng: null,
-          metadata: {
-            attendance_id: r.id,
-            participant_id: r.participantId,
-            overdue_mins: overdueMins,
-            threshold_mins: yellowMins,
-            automated: true,
-          },
+            metadata: {
+              attendance_id: r.id,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              threshold_mins: yellowMins,
+              automated: true,
+              actor_name: "System",
+              why: "Not arrived by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} overdue by ${overdueMins} min at Day Centre`,
+            },
         });
       }
+      ledgered.add(`${wantRed ? "RED" : "YELLOW"}:${r.id}`);
 
       const { data: issue, error: issueErr } = await supabase
         .from("site_issues_register")
@@ -1386,29 +1429,36 @@ export async function sweepOverdueArrivals(
 
     // ── Yellow row already exists → mutate the SAME id to RED if due. ────
     if (wantRed && r.escalationSeverity !== "red") {
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `RED:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
 
       // GUARDRAILS §1.1 — ledger write FIRST; abort RED promotion on failure.
       try {
         await writeToLedgerOrThrow({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CLIENT",
           severity: "RED",
           action_type: "ATTENDANCE_RED_ESCALATED",
           gps_lat: null,
           gps_lng: null,
-          metadata: {
-            attendance_id: r.id,
-            issue_id: r.escalationIssueId,
-            participant_id: r.participantId,
-            overdue_mins: overdueMins,
-            automated: true,
-          },
+            metadata: {
+              attendance_id: r.id,
+              issue_id: r.escalationIssueId,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              automated: true,
+              actor_name: "System",
+              why: "Not arrived by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} still missing — overdue ${overdueMins} min, escalated to Red`,
+            },
         });
-      } catch (ledgerErr) {
-        console.error("[client-attendance] RED ledger write failed — promotion aborted", ledgerErr);
-        continue; // issue stays YELLOW; will retry on next sweep
-      }
+        } catch (ledgerErr) {
+          console.error("[client-attendance] RED ledger write failed — promotion aborted", ledgerErr);
+          continue; // issue stays YELLOW; will retry on next sweep
+        }
+        ledgered.add(`RED:${r.id}`);
 
       const { error: upErr } = await supabase
         .from("site_issues_register")
@@ -1575,6 +1625,8 @@ async function autoCloseYellowDepartureIssue(
       attendance_id: row.id,
       issue_id: issueId,
       participant_id: row.participantId,
+      location: "Day Centre",
+      why: reason,
       reason, // ≥10 char Compliance Shield receipt
     },
   });
@@ -1611,6 +1663,9 @@ export async function checkOutParticipant(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(null, row.departureBusRunCode, vector);
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -1618,13 +1673,17 @@ export async function checkOutParticipant(
     action_type: "ATTENDANCE_CHECKOUT",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       attendance_id: row.id,
       session_id: row.sessionId,
       participant_id: row.participantId,
+      person_name: who,
+      location: "Day Centre",
       departure_vector: vector,
+      departure_bus_run_code: row.departureBusRunCode,
       expected_departure_at: row.expectedDepartureAt,
-    },
+      summary: `Checked out ${who} from Day Centre ${how}`.trim(),
+    }),
   });
 
   // Symmetrical auto-healing on the departure rail.
@@ -1677,6 +1736,7 @@ export async function sweepOverdueDepartures(
   const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
+  const ledgered = new Set<string>();
 
   for (const r of roll) {
     if (r.status !== "checked_in") continue;
@@ -1696,13 +1756,12 @@ export async function sweepOverdueDepartures(
       const descriptionPrefix = wantRed ? "[AUTOMATED_RED]" : "[DEPARTURE]";
       const description = `${descriptionPrefix} ${pName} overdue checkout by ${overdueMins} min (expected ${new Date(r.expectedDepartureAt).toLocaleTimeString()}).`;
       const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
-      const staffId = await resolveStaffIdWithFallback();
 
       // GUARDRAILS §1.1 — ledger write FIRST; abort if it fails.
       if (wantRed) {
         try {
           await writeToLedgerOrThrow({
-            staff_id: staffId,
+            staff_id: DEFAULT_STAFF_UUID,
             category: "CLIENT",
             severity: "RED",
             action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
@@ -1715,6 +1774,11 @@ export async function sweepOverdueDepartures(
               threshold_mins: redMins,
               rail: "departure",
               automated: true,
+              actor_name: "System",
+              why: "Not checked out by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} overdue checkout by ${overdueMins} min`,
             },
           });
         } catch (ledgerErr) {
@@ -1723,22 +1787,28 @@ export async function sweepOverdueDepartures(
         }
       } else {
         await writeToLedger({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CLIENT",
           severity: "YELLOW",
           action_type: "ATTENDANCE_DEPARTURE_YELLOW_RAISED",
           gps_lat: null,
           gps_lng: null,
-          metadata: {
-            attendance_id: r.id,
-            participant_id: r.participantId,
-            overdue_mins: overdueMins,
-            threshold_mins: yellowMins,
-            rail: "departure",
-            automated: true,
-          },
+            metadata: {
+              attendance_id: r.id,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              threshold_mins: yellowMins,
+              rail: "departure",
+              automated: true,
+              actor_name: "System",
+              why: "Not checked out by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} overdue checkout by ${overdueMins} min`,
+            },
         });
       }
+      ledgered.add(`${wantRed ? "RED" : "YELLOW"}:${r.id}`);
 
       const { data: issue, error: issueErr } = await supabase
         .from("site_issues_register")
@@ -1785,30 +1855,37 @@ export async function sweepOverdueDepartures(
 
     // YELLOW departure row already exists — mutate SAME id to RED if due.
     if (wantRed && r.departureSeverity !== "red") {
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `RED:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
 
       // GUARDRAILS §1.1 — ledger write FIRST; abort RED promotion on failure.
       try {
         await writeToLedgerOrThrow({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "CLIENT",
           severity: "RED",
           action_type: "ATTENDANCE_DEPARTURE_RED_ESCALATED",
           gps_lat: null,
           gps_lng: null,
-          metadata: {
-            attendance_id: r.id,
-            issue_id: r.departureIssueId,
-            participant_id: r.participantId,
-            overdue_mins: overdueMins,
-            rail: "departure",
-            automated: true,
-          },
+            metadata: {
+              attendance_id: r.id,
+              issue_id: r.departureIssueId,
+              participant_id: r.participantId,
+              overdue_mins: overdueMins,
+              rail: "departure",
+              automated: true,
+              actor_name: "System",
+              why: "Not checked out by expected time",
+              person_name: pName,
+              location: "Day Centre",
+              description: `${pName} still not checked out — overdue ${overdueMins} min, escalated to Red`,
+            },
         });
-      } catch (ledgerErr) {
-        console.error("[client-attendance] departure RED ledger write failed — promotion aborted", ledgerErr);
-        continue; // issue stays YELLOW; will retry on next sweep
-      }
+        } catch (ledgerErr) {
+          console.error("[client-attendance] departure RED ledger write failed — promotion aborted", ledgerErr);
+          continue; // issue stays YELLOW; will retry on next sweep
+        }
+        ledgered.add(`RED:${r.id}`);
 
       const { error: upErr } = await supabase
         .from("site_issues_register")

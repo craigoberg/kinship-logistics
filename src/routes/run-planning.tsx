@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { RunRoutePanel } from "@/components/participants/run-route-panel";
 import { RunPlanningPeopleTable } from "@/components/run-planning/run-planning-people-table";
+import { RunPlanningChangeLog } from "@/components/run-planning/run-planning-change-log";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { StaffFormSheet } from "@/components/directory/staff-form-sheet";
 import { CarerFormSheet } from "@/components/directory/carer-form-sheet";
@@ -90,6 +91,7 @@ function RunPlanningPage() {
 
       <RunPlanningPeopleTable onEdit={onEdit} />
       <RunRoutePanel />
+      <RunPlanningChangeLog />
 
       <CareProfileModal
         participant={editParticipant}

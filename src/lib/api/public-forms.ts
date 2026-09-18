@@ -3,6 +3,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 const SCHEMA_HINT =
   "Public forms tables missing — run docs/sql/2026-08-10_public_cms_and_forms.sql then hard refresh.";
@@ -214,4 +215,11 @@ export async function updateFormDefinitionFlags(
     .update(row)
     .eq("form_key", formKey);
   if (error) throwSchema(error);
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "public_form",
+    recordName: formKey,
+    summary: `Updated public form ${formKey}`,
+    after: { ...patch },
+  });
 }

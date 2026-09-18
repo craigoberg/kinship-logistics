@@ -414,6 +414,8 @@ export async function appendComplianceAssetResolveNote(
       resolution_note: trimmed,
       resolution_summary: args.resolutionSummary,
       evidence_ref: args.evidenceRef ?? null,
+      title: args.resolutionSummary,
+      ...args.metadata,
     },
   });
 }

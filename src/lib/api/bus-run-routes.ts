@@ -4,6 +4,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { recordRunPlanningChangeBestEffort } from "@/lib/api/run-planning-changelog";
 
 export type BusRunRouteDirection = "morning" | "afternoon";
 
@@ -321,4 +322,19 @@ export async function reorderBusRunDefaultRoute(input: {
 
   const { error: insErr } = await supabase.from("bus_run_default_routes").insert(rows);
   if (insErr) throw new Error(insErr.message);
+
+  const dirLabel = input.direction === "afternoon" ? "afternoon" : "morning";
+  void recordRunPlanningChangeBestEffort({
+    action: "reordered",
+    source: "run_order",
+    personKind: "run",
+    personId: null,
+    personName: `${input.busRunCode} ${dirLabel}`,
+    summary: `Reordered ${dirLabel} ${input.busRunCode} (${input.participantIds.length} stops)`,
+    afterState: {
+      busRunCode: input.busRunCode,
+      direction: input.direction,
+      personKeys: input.participantIds,
+    },
+  });
 }

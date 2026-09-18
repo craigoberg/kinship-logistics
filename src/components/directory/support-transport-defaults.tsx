@@ -28,6 +28,7 @@ import {
   normalizeDayCode,
   type WeekBoardDayCode,
 } from "@/lib/api/run-planning";
+import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
 import {
   CENTRE_HOURS_QUERY_KEY,
   DAY_CODE_LABEL,
@@ -42,6 +43,7 @@ async function invalidateTransportQueries(qc: ReturnType<typeof useQueryClient>)
   await Promise.all([
     qc.invalidateQueries({ queryKey: SUPPORT_SCHEDULES_KEY }),
     qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY }),
+    qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY }),
     qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] }),
   ]);
 }
@@ -101,7 +103,12 @@ export function SupportTransportDefaults({
       existingId?: string;
     }) => {
       if (!input.inbound && !input.outbound) {
-        if (input.existingId) await deactivateSupportSchedule(input.existingId);
+        if (input.existingId) {
+          await deactivateSupportSchedule(
+            input.existingId,
+            personKind === "carer" ? "carer_sheet" : "staff_sheet",
+          );
+        }
         return;
       }
       const hours = centreHours.find((h) => normalizeDayCode(h.dayOfWeek) === input.day);
@@ -115,6 +122,7 @@ export function SupportTransportDefaults({
         outboundTransport: input.outbound || SELF_TRANSPORT_CODE,
         expectedArrivalTime: hours?.openTime || DEFAULT_CENTRE_OPEN,
         expectedDepartureTime: hours?.closeTime || DEFAULT_CENTRE_CLOSE,
+        source: personKind === "carer" ? "carer_sheet" : "staff_sheet",
       });
     },
     onSuccess: async () => {

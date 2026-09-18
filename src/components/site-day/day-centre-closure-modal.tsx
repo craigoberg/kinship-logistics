@@ -180,6 +180,10 @@ export function DayCentreClosureModal({ open, onOpenChange, sessionId }: Props) 
               escalation_severity: u.escalationSeverity,
             })),
             justification: needsJustification ? justification.trim() : null,
+            why: needsJustification
+              ? justification.trim()
+              : "All clients accounted",
+            location: "Day Centre",
             closed_by: staffId,
             close_checks_confirmed: closeChecksConfirmed,
           },

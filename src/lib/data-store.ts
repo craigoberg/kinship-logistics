@@ -35,6 +35,98 @@ import {
   supportRosterPerson,
   type TransportRosterPerson,
 } from "@/lib/support-person";
+import type { RecordOfficeChangeInput } from "@/lib/api/office-change-log";
+
+function logOfficeChange(input: RecordOfficeChangeInput): void {
+  void import("@/lib/api/office-change-log")
+    .then((m) => m.recordOfficeChangeBestEffort(input))
+    .catch((err) => console.error("[office-change-log]", err));
+}
+
+function participantPublicFields(p: {
+  firstName: string;
+  lastName: string;
+  ndisNumber: string;
+  streetAddress: string | null;
+  regularPickupAddress: string | null;
+  iddsi: { liquids: number; foods: number };
+  supportGoals?: string | null;
+  supportStrengths?: string | null;
+  supportNeeds?: string | null;
+  supportPreferences?: string | null;
+  communicationMode?: string | null;
+  communicationStrategies?: string | null;
+  riskHazards?: string | null;
+  riskControls?: string | null;
+  dualWitnessPinHash?: string | null;
+}): Record<string, unknown> {
+  return {
+    firstName: p.firstName,
+    lastName: p.lastName,
+    ndisNumber: p.ndisNumber,
+    streetAddress: p.streetAddress,
+    regularPickupAddress: p.regularPickupAddress,
+    iddsiLiquids: p.iddsi.liquids,
+    iddsiFoods: p.iddsi.foods,
+    supportGoals: p.supportGoals ?? null,
+    supportStrengths: p.supportStrengths ?? null,
+    supportNeeds: p.supportNeeds ?? null,
+    supportPreferences: p.supportPreferences ?? null,
+    communicationMode: p.communicationMode ?? null,
+    communicationStrategies: p.communicationStrategies ?? null,
+    riskHazards: p.riskHazards ?? null,
+    riskControls: p.riskControls ?? null,
+    dualWitnessPinHash: p.dualWitnessPinHash ? "(set)" : null,
+  };
+}
+
+function staffPublicFields(p: {
+  fullName: string;
+  role: string | null;
+  personnelType: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  active: boolean;
+  notes: string | null;
+  certifications?: Array<{ name?: string | null }>;
+  pinHash?: string | null;
+}): Record<string, unknown> {
+  return {
+    fullName: p.fullName,
+    role: p.role,
+    personnelType: p.personnelType,
+    phone: p.phone,
+    email: p.email,
+    streetAddress: p.streetAddress,
+    active: p.active,
+    notes: p.notes,
+    certifications: (p.certifications ?? []).map((c) => c.name ?? ""),
+    pin: p.pinHash ? "(set)" : null,
+  };
+}
+
+function carerPublicFields(p: {
+  fullName: string;
+  relationship: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  isPrimaryContact: boolean;
+  notes: string | null;
+  participantId?: string | null;
+}): Record<string, unknown> {
+  return {
+    fullName: p.fullName,
+    relationship: p.relationship,
+    phone: p.phone,
+    email: p.email,
+    streetAddress: p.streetAddress,
+    isPrimaryContact: p.isPrimaryContact,
+    notes: p.notes,
+    participantId: p.participantId ?? null,
+  };
+}
 
 export type ParticipantKind = "client" | "guest";
 
@@ -345,7 +437,16 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     }
     throw error;
   }
-  return rowToParticipant(data as ParticipantRow);
+  const created = rowToParticipant(data as ParticipantRow);
+  logOfficeChange({
+    action: "created",
+    entity: "client",
+    recordId: created.id,
+    recordName: created.fullName,
+    category: "CLIENT",
+    after: participantPublicFields(created),
+  });
+  return created;
 }
 
 export async function updateParticipant(
@@ -376,6 +477,12 @@ export async function updateParticipant(
   if (patch.riskHazards !== undefined) row.risk_hazards = patch.riskHazards;
   if (patch.riskControls !== undefined) row.risk_controls = patch.riskControls;
 
+  const { data: beforeRow } = await supabase
+    .from("participants")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+
   const { data, error } = await supabase
     .from("participants")
     .update(row)
@@ -396,7 +503,20 @@ export async function updateParticipant(
     }
     throw error;
   }
-  return rowToParticipant(data as ParticipantRow);
+  const updated = rowToParticipant(data as ParticipantRow);
+  const before = beforeRow
+    ? rowToParticipant(beforeRow as ParticipantRow)
+    : null;
+  logOfficeChange({
+    action: "updated",
+    entity: updated.participantKind === "guest" ? "guest" : "client",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    category: "CLIENT",
+    before: before ? participantPublicFields(before) : null,
+    after: participantPublicFields(updated),
+  });
+  return updated;
 }
 
 // ---------- offline_sync_logs ----------
@@ -444,16 +564,83 @@ export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
 
 // ---------- compliance_audit_logs ----------
 
+async function ledgerMedicationDose(input: {
+  complianceLogId: string | null;
+  participantId: string;
+  actionPerformed: string;
+  medicationName: string;
+  dosage: string;
+  status?: string | null;
+  administeredByName?: string | null;
+  witnessedByName?: string | null;
+  source?: string | null;
+}): Promise<void> {
+  try {
+    const { lookupParticipantName, withAuditActorMeta } = await import(
+      "@/lib/api/office-change-log"
+    );
+    const personName = await lookupParticipantName(input.participantId);
+    const who = personName ?? "client";
+    const medLabel = [input.dosage, input.medicationName].filter(Boolean).join(" ").trim();
+    const place = (input.source ?? "").toLowerCase().includes("trip")
+      ? "on trip"
+      : "at Day Centre";
+    const action = input.actionPerformed.toUpperCase();
+    const status = (input.status ?? "").toLowerCase();
+    let summary: string;
+    if (action.includes("REFUSED") || status === "refused") {
+      summary = `${who} refused ${medLabel} ${place}`;
+    } else if (action.includes("MISSED") || status === "missed") {
+      summary = `Missed ${medLabel} for ${who} ${place}`;
+    } else if (action.includes("SOLE")) {
+      summary = `Gave ${medLabel} to ${who} ${place} (sole carer: ${input.administeredByName ?? "staff"})`;
+    } else if (action.includes("DUAL") && input.witnessedByName) {
+      summary = `Gave ${medLabel} to ${who} ${place} (dual witness: ${input.administeredByName} and ${input.witnessedByName})`;
+    } else {
+      summary = `Gave ${medLabel} to ${who} ${place}`;
+    }
+    await writeToLedger({
+      actionType: input.actionPerformed,
+      category: "CLIENT",
+      severity: "INFO",
+      metadata: await withAuditActorMeta({
+        compliance_log_id: input.complianceLogId,
+        participant_id: input.participantId,
+        person_name: who,
+        medication_name: input.medicationName,
+        dosage: input.dosage,
+        status: input.status ?? null,
+        location: place === "on trip" ? "trip" : "Day Centre",
+        source: input.source ?? null,
+        summary,
+      }),
+    });
+  } catch (err) {
+    console.warn("[ledger] medication dose", err);
+  }
+}
+
 export async function insertComplianceLog(payload: MedicationLogPayload): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: payload.participant_id,
     action_performed: payload.action_performed,
     witness_1_identity: payload.witness_1_identity,
     witness_2_identity: payload.witness_2_identity,
     timestamp: payload.timestamp,
     metadata: payload.metadata,
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: payload.participant_id,
+    actionPerformed: payload.action_performed,
+    medicationName: payload.metadata.medication_name,
+    dosage: payload.metadata.dosage,
+    administeredByName: payload.witness_1_identity,
+    witnessedByName: payload.witness_2_identity,
+    source: "medication_modal",
+  });
 }
 
 export interface QuickMedicationLog {
@@ -467,12 +654,12 @@ export interface QuickMedicationLog {
 
 /** Lightweight 1-tap administration log written from the dashboard widget. */
 export async function insertQuickAdministrationLog(input: QuickMedicationLog): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_QUICK",
     witness_1_identity: input.witnessIdentity,
     witness_2_identity: null,
-    timestamp: new Date().toISOString(),
+    timestamp: resolveOperationalNow().toISOString(),
     metadata: {
       medication_name: input.medicationName,
       dosage: input.dosage,
@@ -481,8 +668,18 @@ export async function insertQuickAdministrationLog(input: QuickMedicationLog): P
       source: "dashboard_widget",
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_QUICK",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    administeredByName: input.witnessIdentity,
+    source: "dashboard_widget",
+  });
 }
 
 export type AdministrationStatus = "Administered" | "Refused" | "Missed";
@@ -530,7 +727,7 @@ export interface SoleCarerAdministration {
 export async function insertDualWitnessAdministrationLog(
   input: DualWitnessAdministration,
 ): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_DUAL",
     witness_1_identity: input.administeredByName,
@@ -552,8 +749,20 @@ export async function insertDualWitnessAdministrationLog(
       event_day_session_id: input.eventDaySessionId ?? null,
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_DUAL",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    status: input.status,
+    administeredByName: input.administeredByName,
+    witnessedByName: input.witnessedByName,
+    source: input.source ?? "care_profile_give_dose",
+  });
 }
 
 /** Sole-carer Give Dose when only one staff is available (trips) — PIN attested. */
@@ -564,7 +773,7 @@ export async function insertSoleCarerAdministrationLog(
   if (soleNote.length < 10) {
     throw new Error("Sole-carer justification needs at least 10 characters.");
   }
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_SOLE",
     witness_1_identity: input.administeredByName,
@@ -585,8 +794,19 @@ export async function insertSoleCarerAdministrationLog(
       event_day_session_id: input.eventDaySessionId ?? null,
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_SOLE",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    status: input.status,
+    administeredByName: input.administeredByName,
+    source: input.source ?? "trip_give_dose",
+  });
 }
 
 
@@ -778,11 +998,24 @@ export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
-  return rowToStaff(data as StaffRow);
+  const created = rowToStaff(data as StaffRow);
+  logOfficeChange({
+    action: "created",
+    entity: "staff",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: staffPublicFields({ ...created, pinHash: p.pinHash }),
+  });
+  return created;
 }
 
 export async function updateStaffMember(id: string, p: StaffPayload): Promise<StaffMember> {
   assertManagerRole("update personnel");
+  const { data: beforeRow } = await supabase
+    .from("staff_registry")
+    .select(STAFF_COLS)
+    .eq("id", id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("staff_registry")
     .update(staffPayloadToRow(p, { includePin: p.pinHash !== undefined }))
@@ -790,7 +1023,20 @@ export async function updateStaffMember(id: string, p: StaffPayload): Promise<St
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
-  return rowToStaff(data as StaffRow);
+  const updated = rowToStaff(data as StaffRow);
+  const before = beforeRow ? rowToStaff(beforeRow as StaffRow) : null;
+  logOfficeChange({
+    action: "updated",
+    entity: "staff",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    before: before ? staffPublicFields(before) : null,
+    after: staffPublicFields({
+      ...updated,
+      pinHash: p.pinHash !== undefined ? p.pinHash : before?.pinHash,
+    }),
+  });
+  return updated;
 }
 
 /** True when the active session has Manager-level (coordinator) privileges. */
@@ -1158,10 +1404,23 @@ export async function insertCarer(p: CarerPayload): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const created = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "created",
+    entity: "carer",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: carerPublicFields(created),
+  });
+  return created;
 }
 
 export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
+  const { data: beforeRow } = await supabase
+    .from("carers_registry")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("carers_registry")
     .update(carerPayloadToRow(p))
@@ -1169,7 +1428,17 @@ export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const updated = rowToCarer(data as CarerRow);
+  const before = beforeRow ? rowToCarer(beforeRow as CarerRow) : null;
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    before: before ? carerPublicFields(before) : null,
+    after: carerPublicFields(updated),
+  });
+  return updated;
 }
 
 /**
@@ -1215,7 +1484,16 @@ export async function upsertPrimaryCarer(
       .select("*")
       .single();
     if (error) throw error;
-    return rowToCarer(data as CarerRow);
+    const saved = rowToCarer(data as CarerRow);
+    logOfficeChange({
+      action: "updated",
+      entity: "carer",
+      recordId: saved.id,
+      recordName: saved.fullName,
+      after: carerPublicFields(saved),
+      source: "primary_carer",
+    });
+    return saved;
   }
 
   const { data, error } = await supabase
@@ -1224,7 +1502,16 @@ export async function upsertPrimaryCarer(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const created = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "created",
+    entity: "carer",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: carerPublicFields(created),
+    source: "primary_carer",
+  });
+  return created;
 }
 
 /**
@@ -1248,10 +1535,17 @@ export async function setPrimaryCarer(carerId: string, participantId: string): P
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Set ${saved.fullName} as primary carer`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Demote a carer to secondary (no other side-effects). */
 export async function demoteCarer(carerId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1260,10 +1554,17 @@ export async function demoteCarer(carerId: string): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Demoted carer ${saved.fullName} from primary`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Attach an existing carer record to a participant (secondary by default). */
 export async function linkCarerToParticipant(carerId: string, participantId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1272,10 +1573,17 @@ export async function linkCarerToParticipant(carerId: string, participantId: str
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Linked carer ${saved.fullName} to a client`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Unlink a carer from its participant and demote in the same write. */
 export async function unlinkCarer(carerId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1284,7 +1592,16 @@ export async function unlinkCarer(carerId: string): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Unlinked carer ${saved.fullName}`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
 
 
@@ -1371,7 +1688,22 @@ export async function insertSchedule(input: NewSchedule): Promise<MedicationSche
     .select("*")
     .single();
   if (error) throw error;
-  return rowToSchedule(data as ScheduleRow);
+  const created = rowToSchedule(data as ScheduleRow);
+  logOfficeChange({
+    action: "created",
+    entity: "medication",
+    recordId: created.id,
+    recordName: created.medicationName,
+    category: "CLIENT",
+    after: {
+      medicationName: created.medicationName,
+      dosage: created.dosage,
+      expectedTime: created.expectedTime,
+      frequency: created.frequency,
+      participantId: created.participantId,
+    },
+  });
+  return created;
 }
 
 // ---------- compliance_audit_logs reads ----------
@@ -1512,6 +1844,54 @@ export async function listAttendanceSchedules(
   return rows;
 }
 
+async function logParticipantPlanningChange(input: {
+  action: "created" | "updated" | "cleared";
+  scheduleId: string;
+  participantId: string;
+  dayOfWeek: string;
+  beforeIn?: string | null;
+  beforeOut?: string | null;
+  afterIn?: string | null;
+  afterOut?: string | null;
+}): Promise<void> {
+  try {
+    const {
+      recordRunPlanningChangeBestEffort,
+      buildScheduleChangeSummary,
+      fetchParticipantDisplayName,
+    } = await import("@/lib/api/run-planning-changelog");
+    const personName = await fetchParticipantDisplayName(input.participantId);
+    await recordRunPlanningChangeBestEffort({
+      action: input.action,
+      source: "participant_schedule",
+      personKind: "participant",
+      personId: input.participantId,
+      personName,
+      dayOfWeek: input.dayOfWeek,
+      scheduleId: input.scheduleId,
+      summary: buildScheduleChangeSummary({
+        action: input.action,
+        personName,
+        dayOfWeek: input.dayOfWeek,
+        beforeIn: input.beforeIn,
+        beforeOut: input.beforeOut,
+        afterIn: input.afterIn,
+        afterOut: input.afterOut,
+      }),
+      beforeState:
+        input.beforeIn != null || input.beforeOut != null
+          ? { inbound: input.beforeIn ?? null, outbound: input.beforeOut ?? null }
+          : null,
+      afterState:
+        input.afterIn != null || input.afterOut != null
+          ? { inbound: input.afterIn ?? null, outbound: input.afterOut ?? null }
+          : { active: false },
+    });
+  } catch (err) {
+    console.error("[run-planning] participant change log failed", err);
+  }
+}
+
 export interface NewAttendanceSchedule {
   participantId: string;
   dayOfWeek: WeekDay;
@@ -1549,7 +1929,16 @@ export async function insertAttendanceSchedule(
     console.error("[insertAttendanceSchedule] supabase error", { error, payload });
     throw new Error(error.message || "Unknown Supabase error");
   }
-  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  const saved = rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  void logParticipantPlanningChange({
+    action: "created",
+    scheduleId: saved.id,
+    participantId: saved.participantId,
+    dayOfWeek: saved.dayOfWeek,
+    afterIn: saved.inboundTransport,
+    afterOut: saved.outboundTransport,
+  });
+  return saved;
 }
 
 
@@ -1780,6 +2169,13 @@ export async function updateLookupParameterColor(
     }
     throw error;
   }
+  logOfficeChange({
+    action: "updated",
+    entity: "lookup",
+    recordId: id,
+    recordName: "lookup colour",
+    after: { badgeColor },
+  });
 }
 
 function isMissingUpdateLookupRpc(
@@ -1812,7 +2208,19 @@ export async function updateLookupParameter(input: {
     p_code: code,
     p_display_name: displayName,
   });
-  if (!rpc.error) return { codeChanged };
+  const logLookup = () =>
+    logOfficeChange({
+      action: "updated",
+      entity: "lookup",
+      recordId: input.id,
+      recordName: displayName,
+      before: { code: input.previousCode },
+      after: { code, displayName },
+    });
+  if (!rpc.error) {
+    logLookup();
+    return { codeChanged };
+  }
   if (!isMissingUpdateLookupRpc(rpc.error)) throw rpc.error;
 
   if (codeChanged) {
@@ -1826,6 +2234,7 @@ export async function updateLookupParameter(input: {
     .update({ display_name: displayName })
     .eq("id", input.id);
   if (error) throw error;
+  logLookup();
   return { codeChanged: false };
 }
 
@@ -1845,7 +2254,7 @@ export async function insertLookupParameter(input: {
     .single();
   if (error) throw error;
   const r = data as LookupRow;
-  return {
+  const created = {
     id: r.id,
     category: r.category,
     code: r.code,
@@ -1854,6 +2263,14 @@ export async function insertLookupParameter(input: {
     badgeColor: r.badge_color ?? null,
     createdAt: r.created_at ?? null,
   };
+  logOfficeChange({
+    action: "created",
+    entity: "lookup",
+    recordId: created.id,
+    recordName: created.displayName,
+    after: { category: created.category, code: created.code, displayName: created.displayName },
+  });
+  return created;
 }
 
 export async function deleteLookupParameter(id: string): Promise<void> {
@@ -1861,7 +2278,7 @@ export async function deleteLookupParameter(id: string): Promise<void> {
     .from("system_lookup_parameters")
     .delete()
     .eq("id", id)
-    .select("id");
+    .select("id, category, code, display_name");
   if (error) throw error;
   // RLS with no DELETE policy returns 204 and 0 rows — not an error.
   if (!data?.length) {
@@ -1869,6 +2286,19 @@ export async function deleteLookupParameter(id: string): Promise<void> {
       "Lookup entry was not deleted. Run docs/sql/2026-08-23_lookup_parameters_delete_policy.sql in Supabase, then hard refresh.",
     );
   }
+  const row = data[0] as {
+    id: string;
+    category?: string;
+    code?: string;
+    display_name?: string | null;
+  };
+  logOfficeChange({
+    action: "deleted",
+    entity: "lookup",
+    recordId: row.id,
+    recordName: row.display_name || row.code || id,
+    before: { category: row.category, code: row.code, displayName: row.display_name },
+  });
 }
 
 /**
@@ -2203,6 +2633,13 @@ export async function updateAttendanceSchedule(
   id: string,
   patch: AttendanceSchedulePatch,
 ): Promise<AttendanceSchedule> {
+  const { data: existing, error: fetchErr } = await supabase
+    .from("participant_attendance_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+
   const row: Partial<AttendanceScheduleRow> = {};
   if (patch.dayOfWeek !== undefined) row.day_of_week = patch.dayOfWeek;
   if (patch.serviceType !== undefined) row.service_type = patch.serviceType;
@@ -2230,7 +2667,21 @@ export async function updateAttendanceSchedule(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  const saved = rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  const before = existing
+    ? rowToAttendanceSchedule(existing as AttendanceScheduleRow)
+    : null;
+  void logParticipantPlanningChange({
+    action: patch.active === false ? "cleared" : "updated",
+    scheduleId: saved.id,
+    participantId: saved.participantId,
+    dayOfWeek: saved.dayOfWeek,
+    beforeIn: before?.inboundTransport,
+    beforeOut: before?.outboundTransport,
+    afterIn: saved.inboundTransport,
+    afterOut: saved.outboundTransport,
+  });
+  return saved;
 }
 
 export interface RemoveScheduleInput {
@@ -2297,6 +2748,15 @@ export async function removeAttendanceSchedule(
       reason: input.reason.trim(),
     },
   });
+
+  void logParticipantPlanningChange({
+    action: "cleared",
+    scheduleId: input.id,
+    participantId: r.participant_id,
+    dayOfWeek: r.day_of_week,
+    beforeIn: r.inbound_transport,
+    beforeOut: r.outbound_transport,
+  });
 }
 
 /** @deprecated Use removeAttendanceSchedule() for permanent changes. */
@@ -2324,6 +2784,11 @@ export async function updateMedicationSchedule(
       patch.expectedTime.length === 5 ? `${patch.expectedTime}:00` : patch.expectedTime;
   if (patch.frequency !== undefined) row.frequency = patch.frequency;
   if (patch.active !== undefined) row.active = patch.active;
+  const { data: beforeRow } = await supabase
+    .from("participant_medication_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("participant_medication_schedules")
     .update(row)
@@ -2331,7 +2796,32 @@ export async function updateMedicationSchedule(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToSchedule(data as ScheduleRow);
+  const saved = rowToSchedule(data as ScheduleRow);
+  const before = beforeRow ? rowToSchedule(beforeRow as ScheduleRow) : null;
+  logOfficeChange({
+    action: saved.active ? "updated" : "archived",
+    entity: "medication",
+    recordId: saved.id,
+    recordName: saved.medicationName,
+    category: "CLIENT",
+    before: before
+      ? {
+          medicationName: before.medicationName,
+          dosage: before.dosage,
+          expectedTime: before.expectedTime,
+          frequency: before.frequency,
+          active: before.active,
+        }
+      : null,
+    after: {
+      medicationName: saved.medicationName,
+      dosage: saved.dosage,
+      expectedTime: saved.expectedTime,
+      frequency: saved.frequency,
+      active: saved.active,
+    },
+  });
+  return saved;
 }
 
 export async function archiveMedicationSchedule(id: string): Promise<void> {
@@ -2367,6 +2857,15 @@ export async function discontinueMedicationSchedule(
     })
     .eq("id", input.id);
   if (error) throw error;
+  logOfficeChange({
+    action: "archived",
+    entity: "medication",
+    recordId: input.id,
+    recordName: "medication schedule",
+    category: "CLIENT",
+    summary: `Discontinued medication (${input.referenceType})`,
+    after: { reason: input.reason, referenceType: input.referenceType },
+  });
 }
 
 // ---------- suspension / bulk roster exceptions ----------
@@ -2729,6 +3228,20 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
 
   const event = rowToEvent(data as EventManifestRow);
+  logOfficeChange({
+    action: "created",
+    entity: "event",
+    recordId: event.id,
+    recordName: event.title,
+    category: "TRIP",
+    after: {
+      title: event.title,
+      venue: event.venue,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      ticketPrice: event.ticketPrice,
+    },
+  });
 
   // Optional rinse-and-repeat clone of roster bookings from a prior event.
   if (input.cloneFromEventId) {
@@ -2800,7 +3313,22 @@ export async function updateEvent(input: UpdateEventInput): Promise<EventManifes
     throw new Error(parts.join(" · "));
   }
 
-  return rowToEvent(data as EventManifestRow);
+  const updated = rowToEvent(data as EventManifestRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "event",
+    recordId: updated.id,
+    recordName: updated.title,
+    category: "TRIP",
+    after: {
+      title: updated.title,
+      venue: updated.venue,
+      startDate: updated.startDate,
+      endDate: updated.endDate,
+      ticketPrice: updated.ticketPrice,
+    },
+  });
+  return updated;
 }
 
 
@@ -3230,7 +3758,24 @@ export async function insertEventBooking(
       isReconciled: true,
     });
   }
-  return rowToBooking(data as BookingRow);
+  const booking = rowToBooking(data as BookingRow);
+  if (!input.isWalkOn && !input.isGuestBooking) {
+    logOfficeChange({
+      action: "created",
+      entity: "booking",
+      recordId: booking.id,
+      recordName: booking.participantName || "booking",
+      category: "TRIP",
+      summary: `Booked ${booking.participantName || "participant"} on ${input.eventTitle ?? "event"}`,
+      after: {
+        eventId: booking.eventId,
+        bookingStatus: booking.bookingStatus,
+        outbound: booking.outboundTransportMode,
+        return: booking.returnTransportMode,
+      },
+    });
+  }
+  return booking;
 }
 
 // ---------- Compliance snapshot + event cloning ----------
@@ -3786,6 +4331,19 @@ export async function updateEventBooking(
     }
   }
 
+  logOfficeChange({
+    action: "updated",
+    entity: "booking",
+    recordId: booking.id,
+    recordName: booking.participantName || "booking",
+    category: "TRIP",
+    summary: `Updated booking for ${booking.participantName || "participant"} (${booking.bookingStatus})`,
+    after: {
+      bookingStatus: booking.bookingStatus,
+      notes: booking.notes,
+      bringsCarer: booking.bringsCarer,
+    },
+  });
   return { booking, refundLedger, priceAdjustmentLedger };
 }
 
@@ -4008,6 +4566,14 @@ export async function insertEventLedger(input: NewEventLedger): Promise<void> {
     console.error("[insertEventLedger] failed", error);
     throw error;
   }
+  logOfficeChange({
+    action: "created",
+    entity: "trip_expense",
+    recordId: input.eventId,
+    recordName: input.vendorName?.trim() || input.description,
+    category: "TRIP",
+    summary: `Added trip expense ${input.description} (${input.amount})`,
+  });
 }
 
 export interface UpdateEventLedgerInput {
@@ -4036,6 +4602,14 @@ export async function updateEventLedger(input: UpdateEventLedgerInput): Promise<
     console.error("[updateEventLedger] failed", error);
     throw error;
   }
+  logOfficeChange({
+    action: "updated",
+    entity: "trip_expense",
+    recordId: input.id,
+    recordName: input.vendorName?.trim() || input.description,
+    category: "TRIP",
+    summary: `Updated trip expense ${input.description} (${input.amount})`,
+  });
 }
 
 export async function deleteEventLedger(opts: {
@@ -4052,6 +4626,14 @@ export async function deleteEventLedger(opts: {
     console.error("[deleteEventLedger] failed", error);
     throw error;
   }
+  logOfficeChange({
+    action: "deleted",
+    entity: "trip_expense",
+    recordId: opts.id,
+    recordName: "trip expense",
+    category: "TRIP",
+    summary: "Deleted a trip expense",
+  });
 }
 
 // ============================================================================

@@ -11,6 +11,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { assertMorningRollCompleteBeforeProgramme } from "@/lib/api/event-deliver-status";
 import { operationalNowIso } from "@/lib/operational-clock";
 import {
@@ -486,13 +487,15 @@ export async function openVenueStop(
     action_type: "ACTIVITY_OPEN",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       description: `Activity started — ${stop.venueName ?? "stop"} (${stop.movementMethod})`,
+      summary: `Started trip activity ${stop.venueName ?? "stop"} (${String(stop.movementMethod ?? "").replace(/_/g, " ")})`,
       venue_stop_id: stop.id,
       event_id: stop.eventId,
       session_date: stop.sessionDate,
       movement_method: stop.movementMethod,
-    },
+      location: stop.venueName ?? "trip",
+    }),
   });
 }
 
@@ -677,11 +680,13 @@ export async function closeVenueStop(
     action_type: "ACTIVITY_CLOSE",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       description: `Activity completed — ${stop.venueName ?? "stop"} (group assumed done)`,
+      summary: `Completed trip activity ${stop.venueName ?? "stop"} (group assumed done)`,
       venue_stop_id: stop.id,
       event_id: stop.eventId,
-    },
+      location: stop.venueName ?? "trip",
+    }),
   });
 }
 
@@ -833,9 +838,12 @@ export async function markActivitySkip(
     gps_lng: null,
     metadata: {
       venue_stop_id: row.venueStopId,
+      event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
       reason: opts.reason,
       notes,
+      why: opts.reason.replace(/_/g, " "),
+      location: "trip",
     },
   });
 

@@ -14,6 +14,8 @@ export const adminOverviewTopic: HelpTopic = {
     "backup",
     "menu access",
     "operating hours",
+    "activity log",
+    "change log",
     "audit pack",
     "configuration",
   ],
@@ -52,6 +54,10 @@ export const adminOverviewTopic: HelpTopic = {
     {
       heading: "Menu Access",
       body: "Role × menu matrix (Manager-only). Ticks save to role_menu_access and hide menus the role cannot open. Manager is always granted every menu. Read-only and per-person scope come later.",
+    },
+    {
+      heading: "Activity log",
+      body: "Read-only who / what / where / when / why from the operational ledger, plus meal serves and medication doses. Type is a filter, not the place. GPS shows when captured. Check-in/out names the person and place (Day Centre or trip) and how they arrived or left. Automated Yellow/Red sweeps credit System. Date range, type filter, search. Cannot edit. Auditor USB ZIP is still NDIS Audit Pack under System Parameters.",
     },
     {
       heading: "Backup & Restore",

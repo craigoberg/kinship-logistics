@@ -124,6 +124,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { raiseUnsafeDropHubIssue } from "@/lib/api/transport-unsafe-drop";
 import { VerbalConsultationDialog, formatVerbalWorkaroundDescription } from "@/components/issue-engine/verbal-consultation-dialog";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
@@ -2316,11 +2317,13 @@ function ReturnBoardingRoll({
         action_type: "RETURN_BOARDING_CONFIRMED",
         gps_lat: null,
         gps_lng: null,
-        metadata: {
+        metadata: await withAuditActorMeta({
           trip_id: tripId,
           passenger_count: passengers.length,
           passenger_ids: passengers.map((p) => p.id),
-        },
+          passenger_names: passengers.map((p) => p.name),
+          summary: `Confirmed return boarding — ${passengers.map((p) => p.name).join(", ")} (${passengers.length} people all aboard)`,
+        }),
       });
     } catch (_) { /* best-effort */ } finally {
       setSaving(false);
@@ -2728,7 +2731,10 @@ function ArrivedChecklist({
                 leg_id: leg.id,
                 event_id: eventId ?? null,
                 participant_id: participantId,
+                person_name: participantName,
                 handover_status: medStatus,
+                location: "trip",
+                why: medStatus.replace(/_/g, " "),
               },
             }),
           )
