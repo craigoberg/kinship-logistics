@@ -251,43 +251,17 @@ export function CareProfileModal({
                   {" · Updated "}
                   {formatDate(participant.updatedAt)}
                 </DialogDescription>
-                <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
-                  {isPending && (
-                    <button
-                      type="button"
-                      onClick={scrollToMeds}
-                      title="Jump to medication scheduling"
-                      className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
-                    >
-                      <AlertTriangle className="h-3.5 w-3.5" />
-                      Scheduled Care Pending
-                    </button>
-                  )}
-                  {shown?.participantKind !== "guest" && shown?.serviceStatus !== "exited" && (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="gap-1.5"
-                      onClick={() => setExitMode("offboard")}
-                    >
-                      <Archive className="h-4 w-4" />
-                      Off-board
-                    </Button>
-                  )}
-                  {shown?.participantKind !== "guest" &&
-                    shown?.serviceStatus === "exited" &&
-                    !isDeceasedExit(shown.exitReason) && (
-                      <Button
-                        type="button"
-                        variant="secondary"
-                        className="gap-1.5"
-                        onClick={() => setExitMode("reactivate")}
-                      >
-                        <ArchiveRestore className="h-4 w-4" />
-                        Reactivate
-                      </Button>
-                    )}
-                </div>
+                {isPending && (
+                  <button
+                    type="button"
+                    onClick={scrollToMeds}
+                    title="Jump to medication scheduling"
+                    className="ml-auto flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Scheduled Care Pending
+                  </button>
+                )}
               </div>
               {participant.streetAddress && (
                 <p className="mt-1 text-xs text-muted-foreground">
@@ -330,9 +304,33 @@ export function CareProfileModal({
                     <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} className="h-9" />
                   </Field>
                   <Field label="NDIS number" className="sm:col-span-1">
-                    <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
+                    <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9" />
                   </Field>
-                  <div className="sm:col-span-3" />
+                  {shown?.participantKind !== "guest" && (
+                    <div className="flex items-end justify-end sm:col-span-3">
+                      {shown.serviceStatus !== "exited" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => setExitMode("offboard")}
+                        >
+                          <Archive className="h-4 w-4" />
+                          Off-board
+                        </Button>
+                      ) : !isDeceasedExit(shown.exitReason) ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="gap-1.5"
+                          onClick={() => setExitMode("reactivate")}
+                        >
+                          <ArchiveRestore className="h-4 w-4" />
+                          Reactivate
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
 
                 <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
