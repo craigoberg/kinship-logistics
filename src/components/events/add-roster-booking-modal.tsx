@@ -28,6 +28,7 @@ import {
   useCarersForParticipant,
 } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
+import { isOperationalParticipant } from "@/lib/service-exit";
 
 interface Props {
   open: boolean;
@@ -75,7 +76,12 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
   const available = useMemo(
     () =>
       [...participants]
-        .filter((p) => p.participantKind !== "guest" && !booked.has(p.id))
+        .filter(
+          (p) =>
+            p.participantKind !== "guest" &&
+            isOperationalParticipant(p) &&
+            !booked.has(p.id),
+        )
         .sort((a, b) => a.fullName.localeCompare(b.fullName)),
     [participants, booked],
   );

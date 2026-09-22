@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { Link } from "@tanstack/react-router";
 import {
   Pencil,
@@ -70,6 +70,7 @@ const STATUS_BADGE: Record<CertStatus, { label: string; cls: string }> = {
 export function DirectoryWorkspace() {
   const [tab, setTab] = useState<"staff" | "carers">("staff");
   const [staffQuery, setStaffQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [carerQuery, setCarerQuery] = useState("");
   const [staffOpen, setStaffOpen] = useState(false);
   const [carerOpen, setCarerOpen] = useState(false);
@@ -98,16 +99,21 @@ export function DirectoryWorkspace() {
     return m;
   }, [participants]);
 
+  const inactiveCount = staff.filter((s) => !s.active).length;
+  const listedStaff = useMemo(
+    () => (showInactive ? staff : staff.filter((s) => s.active)),
+    [staff, showInactive],
+  );
   const filteredStaff = useMemo(() => {
     const q = staffQuery.trim().toLowerCase();
-    if (!q) return staff;
-    return staff.filter((s) =>
+    if (!q) return listedStaff;
+    return listedStaff.filter((s) =>
       [s.fullName, s.role ?? "", s.email ?? "", s.phone ?? "", s.personnelType ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(q),
     );
-  }, [staff, staffQuery]);
+  }, [listedStaff, staffQuery]);
 
   const filteredCarers = useMemo(() => {
     const q = carerQuery.trim().toLowerCase();
@@ -207,6 +213,17 @@ export function DirectoryWorkspace() {
             onChange={setStaffQuery}
             placeholder="Search personnel by name, role, contact…"
             count={filteredStaff.length}
+            extra={
+              inactiveCount > 0 ? (
+                <Button
+                  type="button"
+                  variant={showInactive ? "secondary" : "outline"}
+                  onClick={() => setShowInactive((v) => !v)}
+                >
+                  {showInactive ? "Showing inactive" : "Show inactive"}
+                </Button>
+              ) : null
+            }
           />
           {staffErr && <ErrorBox message={(staffErr as Error).message} />}
           <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -386,11 +403,13 @@ function SearchBar({
   onChange,
   placeholder,
   count,
+  extra,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   count: number;
+  extra?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -403,6 +422,7 @@ function SearchBar({
           className="pl-9"
         />
       </div>
+      {extra}
       <span className="text-xs text-muted-foreground">{count} record{count === 1 ? "" : "s"}</span>
     </div>
   );

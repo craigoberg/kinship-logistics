@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useParticipants, useStaffRegistry } from "@/hooks/use-supabase-data";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   hashPin,
   insertComplianceLog,
@@ -398,7 +399,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
                   <CommandList>
                     <CommandEmpty>No participants found.</CommandEmpty>
                     <CommandGroup>
-                      {participants.map((p) => (
+                      {participants
+                        .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                        .map((p) => (
                         <CommandItem
                           key={p.id}
                           value={`${p.fullName} ${p.ndisNumber}`}

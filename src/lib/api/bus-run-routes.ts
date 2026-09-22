@@ -168,6 +168,11 @@ export async function listBusRunRouteRoster(
   direction: BusRunRouteDirection,
   todayDayCode?: string,
 ): Promise<BusRunRouteStop[]> {
+  const { loadExitedParticipantIds, loadInactiveStaffIds } = await import("@/lib/api/service-exit");
+  const [exitedIds, inactiveStaffIds] = await Promise.all([
+    loadExitedParticipantIds(),
+    loadInactiveStaffIds(),
+  ]);
   const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
@@ -181,6 +186,7 @@ export async function listBusRunRouteRoster(
   const byId = new Map<string, BusRunRouteStop>();
   for (const raw of schedRows ?? []) {
     const row = raw as unknown as ScheduleJoinRow;
+    if (exitedIds.has(row.participant_id)) continue;
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
@@ -226,6 +232,7 @@ export async function listBusRunRouteRoster(
     const { listSupportSchedules } = await import("@/lib/api/support-attendance");
     const support = await listSupportSchedules();
     for (const s of support) {
+      if (s.staffId && inactiveStaffIds.has(s.staffId)) continue;
       const transport = direction === "morning" ? s.inboundTransport : s.outboundTransport;
       if (transport !== busRunCode) continue;
       const key = s.carerId ? `c:${s.carerId}` : `s:${s.staffId}`;

@@ -28,6 +28,7 @@ import {
   isActiveUserManager,
   listParticipants,
 } from "@/lib/data-store";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   CERT_RECOMMENDED_CATEGORIES,
   declareInfectiousExclusion,
@@ -246,7 +247,9 @@ export function InfectiousExclusionSheet(props: InfectiousExclusionSheetProps) {
               <CommandList className="max-h-40">
                 <CommandEmpty>No match.</CommandEmpty>
                 <CommandGroup>
-                  {(participantsQ.data ?? []).map((p) => (
+                  {(participantsQ.data ?? [])
+                    .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                    .map((p) => (
                     <CommandItem
                       key={p.id}
                       value={`${p.fullName} ${p.ndisNumber}`}

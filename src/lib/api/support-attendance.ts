@@ -506,7 +506,10 @@ export async function seedSupportRollFromSchedules(sessionId: string): Promise<n
     (s) => WEEKDAY_INDEX[String((s as ScheduleDb).day_of_week)] === dow,
   ) as ScheduleDb[];
   const exempt = await loadExemptSupportKeysForDate(getOperationalTodayIso());
+  const { loadInactiveStaffIds } = await import("@/lib/api/service-exit");
+  const inactiveStaff = await loadInactiveStaffIds();
   const attending = todays.filter((s) => {
+    if (s.staff_id && inactiveStaff.has(s.staff_id)) return false;
     const key = s.carer_id
       ? supportPersonKey("carer", s.carer_id)
       : supportPersonKey(s.person_kind, s.staff_id ?? "");

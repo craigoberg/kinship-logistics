@@ -124,6 +124,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                         Guest
                       </Badge>
                     )}
+                    {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                      <Badge className="shrink-0 bg-slate-500 text-[10px] uppercase text-white hover:bg-slate-500">
+                        Exited
+                      </Badge>
+                    )}
                     {pending.has(p.id) && (
                       <PendingBadge
                         onClick={() =>
@@ -185,6 +190,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                       {p.participantKind === "guest" && (
                         <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                           Guest
+                        </Badge>
+                      )}
+                      {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                        <Badge className="shrink-0 bg-slate-500 text-[10px] uppercase text-white hover:bg-slate-500">
+                          Exited
                         </Badge>
                       )}
                       {pending.has(p.id) && (

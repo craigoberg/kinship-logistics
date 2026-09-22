@@ -29,6 +29,7 @@ import { enqueue } from "@/lib/sync-queue";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useQueryClient } from "@tanstack/react-query";
+import { isOperationalParticipant } from "@/lib/service-exit";
 
 interface Props {
   participants: Participant[];
@@ -195,7 +196,9 @@ export function TransportForm({
               <SelectValue placeholder="Select participant…" />
             </SelectTrigger>
             <SelectContent>
-              {participants.map((p) => (
+              {participants
+                .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                .map((p) => (
                 <SelectItem key={p.id} value={p.id}>
                   {p.fullName} <span className="text-muted-foreground">· {p.ndisNumber}</span>
                 </SelectItem>

@@ -15,6 +15,7 @@ import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import type { AccompanyingFormPayload } from "@/lib/onboarding/form-types";
 import { ACCOMPANYING_DECLARATION_BLOCKS } from "@/lib/onboarding/consent-copy";
 import type { Participant } from "@/lib/data-store";
+import { isOperationalParticipant } from "@/lib/service-exit";
 
 interface Props {
   value: AccompanyingFormPayload;
@@ -97,7 +98,11 @@ export function AccompanyingOnboardingForm({
             <SelectValue placeholder="Select client…" />
           </SelectTrigger>
           <SelectContent>
-            {participants.map((p) => (
+            {participants
+              .filter(
+                (p) => isOperationalParticipant(p) || p.id === value.linkedParticipantId,
+              )
+              .map((p) => (
               <SelectItem key={p.id} value={p.id}>
                 {p.fullName}
               </SelectItem>

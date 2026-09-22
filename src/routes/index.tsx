@@ -7,6 +7,7 @@ import { TodaysMedicationCard } from "@/components/medication/todays-medication-
 import { OperationsExceptionHub } from "@/components/dashboard/OperationsExceptionHub";
 import { EmergencyFloorAlert } from "@/components/ops/emergency-floor-alert";
 import { useFloorAnnouncement } from "@/hooks/use-floor-announcement";
+import { isOperationalParticipant } from "@/lib/service-exit";
 
 export const Route = createFileRoute("/")({
   ssr: false,
@@ -25,7 +26,8 @@ function Dashboard() {
   const emergencyActive = announcement?.kind === "emergency";
 
   const iddsiAlerts = participants.filter(
-    (p) => p.iddsi.liquids >= 3 || p.iddsi.foods <= 4,
+    (p) =>
+      isOperationalParticipant(p) && (p.iddsi.liquids >= 3 || p.iddsi.foods <= 4),
   );
 
   if (emergencyActive) {

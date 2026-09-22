@@ -28,6 +28,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   useInsertCarer,
   useUpdateCarer,
@@ -168,7 +169,9 @@ export function CarerFormSheet({
                           <Check className={cn("mr-2 h-4 w-4", !participantId ? "opacity-100" : "opacity-0")} />
                           <span className="text-muted-foreground">No participant linked</span>
                         </CommandItem>
-                        {participants.map((p) => (
+                        {participants
+                          .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                          .map((p) => (
                           <CommandItem
                             key={p.id}
                             value={`${p.fullName} ${p.ndisNumber}`}

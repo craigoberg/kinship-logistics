@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -79,6 +79,20 @@ function ParticipantsPage() {
   const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const [showExited, setShowExited] = useState(false);
+  const exitedCount = participants.filter(
+    (p) => p.participantKind !== "guest" && p.serviceStatus === "exited",
+  ).length;
+  const activeCount = participants.length - exitedCount;
+  const visibleParticipants = useMemo(
+    () =>
+      showExited
+        ? participants
+        : participants.filter(
+            (p) => p.participantKind === "guest" || p.serviceStatus !== "exited",
+          ),
+    [participants, showExited],
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -86,7 +100,9 @@ function ParticipantsPage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Participants directory</h2>
           <p className="text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
+            {isLoading
+              ? "Loading…"
+              : `${activeCount} active${exitedCount > 0 ? ` · ${exitedCount} exited` : ""} · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
             {canOpen("onboarding") ? (
               <>
                 {" "}
@@ -160,6 +176,17 @@ function ParticipantsPage() {
           </SelectContent>
         </Select>
 
+        {exitedCount > 0 && (
+          <Button
+            type="button"
+            variant={showExited ? "secondary" : "outline"}
+            className="h-11"
+            onClick={() => setShowExited((v) => !v)}
+          >
+            {showExited ? "Showing exited" : "Show exited"}
+          </Button>
+        )}
+
         <Select value={transportFilter} onValueChange={setTransportFilter}>
           <SelectTrigger className="h-11 w-48" aria-label="Filter by transport">
             <SelectValue placeholder="All transport" />
@@ -191,7 +218,7 @@ function ParticipantsPage() {
       )}
 
       <ParticipantTable
-        participants={participants}
+        participants={visibleParticipants}
         search={search}
         dayFilter={dayFilter}
         transportFilter={transportFilter}
@@ -205,6 +232,7 @@ function ParticipantsPage() {
         participant={selected}
         open={open}
         onOpenChange={setOpen}
+        onSaved={setSelected}
       />
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />

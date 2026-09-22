@@ -25,7 +25,8 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
+import { exitReasonLabel, isDeceasedExit } from "@/lib/service-exit";
 import { Checkbox } from "@/components/ui/checkbox";
 import { PinPad } from "@/components/auth/pin-pad";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
@@ -75,6 +76,13 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [email, setEmail] = useState("");
   const [streetAddress, setStreetAddress] = useState("");
   const [active, setActive] = useState(true);
+  const [exitMode, setExitMode] = useState<"offboard" | "reactivate" | null>(null);
+  const [exitSnapshot, setExitSnapshot] = useState<{
+    active: boolean;
+    exitReason: string | null;
+    exitNotes: string | null;
+    exitedAt: string | null;
+  } | null>(null);
   const [notes, setNotes] = useState("");
   const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
@@ -120,6 +128,8 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setEmail(staff?.email ?? "");
     setStreetAddress(staff?.streetAddress ?? "");
     setActive(staff?.active ?? true);
+    setExitSnapshot(null);
+    setExitMode(null);
     setNotes(staff?.notes ?? "");
     setPin("");
     setCerts(staff?.certifications ?? []);
@@ -246,7 +256,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     phone: phone.trim() || null,
     email: email.trim() || null,
     streetAddress: streetAddress.trim() || null,
-    active,
+    active: isEdit ? (exitSnapshot ? exitSnapshot.active : (staff?.active ?? active)) : true,
     notes: notes.trim() || null,
     certifications: certs
       .filter((c) => (c.requirementTypeId ?? "").trim())
@@ -304,8 +314,12 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     }
   };
 
-  return (
+  const serviceActive = exitSnapshot ? exitSnapshot.active : (staff?.active ?? active);
+  const serviceReason = exitSnapshot ? exitSnapshot.exitReason : (staff?.exitReason ?? null);
+  const serviceNotes = exitSnapshot ? exitSnapshot.exitNotes : (staff?.exitNotes ?? null);
 
+  return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
@@ -425,13 +439,27 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               </p>
             </Field>
 
-            <Field label="Active" className="sm:col-span-2">
-              <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
-                <Switch checked={active} onCheckedChange={setActive} />
-                <span className="text-sm text-muted-foreground">
-                  {active ? "Currently active and rostered" : "Inactive / archived"}
-                </span>
-              </div>
+            <Field label="Service" className="sm:col-span-2">
+              {!isEdit ? (
+                <p className="text-sm text-muted-foreground">New people are added as active.</p>
+              ) : serviceActive ? (
+                <Button type="button" variant="destructive" onClick={() => setExitMode("offboard")}>
+                  Off-board
+                </Button>
+              ) : (
+                <div className="space-y-2">
+                  <p className="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-800">
+                    Inactive
+                    {serviceReason ? ` — ${exitReasonLabel(serviceReason)}` : ""}
+                    {serviceNotes ? `. ${serviceNotes}` : ""}
+                  </p>
+                  {!isDeceasedExit(serviceReason) && (
+                    <Button type="button" variant="outline" onClick={() => setExitMode("reactivate")}>
+                      Reactivate
+                    </Button>
+                  )}
+                </div>
+              )}
             </Field>
           </section>
 
@@ -846,6 +874,28 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
       </SheetContent>
     </Sheet>
+    {staff && exitMode && (
+      <ServiceExitDialog
+        open
+        onOpenChange={(next) => {
+          if (!next) setExitMode(null);
+        }}
+        mode={exitMode}
+        subject="staff"
+        personId={staff.id}
+        displayName={staff.fullName}
+        onCompleted={(result) => {
+          setExitSnapshot({
+            active: result.mode !== "offboard",
+            exitReason: result.mode === "offboard" ? result.reason : null,
+            exitNotes: result.mode === "offboard" ? result.notes || null : null,
+            exitedAt: result.exitedAt,
+          });
+          setActive(result.mode !== "offboard");
+        }}
+      />
+    )}
+    </>
   );
 }
 

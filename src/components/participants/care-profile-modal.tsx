@@ -73,6 +73,8 @@ import { FinanceTab } from "@/components/finance/finance-tab";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 import { SupportPlanTab } from "@/components/participants/support-plan-tab";
 import { toast } from "sonner";
+import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
+import { exitReasonLabel, isDeceasedExit } from "@/lib/service-exit";
 
 interface Props {
   participant: Participant | null;
@@ -98,6 +100,8 @@ export function CareProfileModal({
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
+  const [exitMode, setExitMode] = useState<"offboard" | "reactivate" | null>(null);
+  const [exitOverlay, setExitOverlay] = useState<Partial<Participant> | null>(null);
   const [liveGuestEvents, setLiveGuestEvents] = useState<string[]>([]);
   const archiveGuest = useArchiveGuestParticipant();
   const [scheduleOpen, setScheduleOpen] = useState(false);
@@ -109,6 +113,13 @@ export function CareProfileModal({
   const pending = usePendingScheduleMap();
   const medSectionRef = useRef<HTMLDivElement | null>(null);
   const [medPulse, setMedPulse] = useState(false);
+
+  useEffect(() => {
+    setExitOverlay(null);
+    setExitMode(null);
+  }, [participant?.id, participant?.serviceStatus, open]);
+
+  const shown = participant ? { ...participant, ...exitOverlay } : null;
 
   const scrollToMeds = () => {
     medSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -233,6 +244,14 @@ export function CareProfileModal({
                 {participant.streetAddress && (
                   <p className="mt-1 text-xs text-muted-foreground">
                     📍 {participant.streetAddress}
+                  </p>
+                )}
+                {shown?.participantKind !== "guest" && shown?.serviceStatus === "exited" && (
+                  <p className="mt-2 rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-800">
+                    Left service
+                    {shown.exitedAt ? ` ${formatDateTime(shown.exitedAt)}` : ""}
+                    {shown.exitReason ? ` — ${exitReasonLabel(shown.exitReason)}` : ""}
+                    {shown.exitNotes ? `. ${shown.exitNotes}` : ""}
                   </p>
                 )}
               </div>
@@ -366,6 +385,30 @@ export function CareProfileModal({
                       Archive guest
                     </Button>
                   )}
+                  {shown?.participantKind !== "guest" && shown?.serviceStatus !== "exited" && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="gap-1.5"
+                      onClick={() => setExitMode("offboard")}
+                    >
+                      <Archive className="h-4 w-4" />
+                      Off-board
+                    </Button>
+                  )}
+                  {shown?.participantKind !== "guest" &&
+                    shown?.serviceStatus === "exited" &&
+                    !isDeceasedExit(shown.exitReason) && (
+                      <Button
+                        type="button"
+                        variant="outline"
+                        className="gap-1.5"
+                        onClick={() => setExitMode("reactivate")}
+                      >
+                        <ArchiveRestore className="h-4 w-4" />
+                        Reactivate
+                      </Button>
+                    )}
                 </div>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
@@ -499,6 +542,40 @@ export function CareProfileModal({
         participantName={participant.fullName}
         editing={editMedSchedule}
       />
+
+      {shown && exitMode && (
+        <ServiceExitDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setExitMode(null);
+          }}
+          mode={exitMode}
+          subject="client"
+          personId={shown.id}
+          displayName={shown.fullName}
+          onCompleted={(result) => {
+            const next: Participant =
+              result.mode === "offboard"
+                ? {
+                    ...shown,
+                    serviceStatus: "exited",
+                    exitReason: result.reason,
+                    exitNotes: result.notes || null,
+                    exitedAt: result.exitedAt,
+                  }
+                : {
+                    ...shown,
+                    serviceStatus: "active",
+                    exitReason: null,
+                    exitNotes: null,
+                    exitedAt: null,
+                    exitedById: null,
+                  };
+            setExitOverlay(next);
+            onSaved?.(next);
+          }}
+        />
+      )}
 
       <AlertDialog
         open={archiveOpen}

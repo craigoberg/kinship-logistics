@@ -137,6 +137,12 @@ export interface Participant {
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
   /** `guest` = event bring-a-friend; not a directory client. */
   participantKind: ParticipantKind;
+  /** Client service exit. Guests stay on archived_at. Default active when the column is absent. */
+  serviceStatus: "active" | "exited";
+  exitedAt: string | null;
+  exitedById: string | null;
+  exitReason: string | null;
+  exitNotes: string | null;
   ndisNumber: string;
   streetAddress: string | null;
   /** Coordinator-managed permanent pickup address, used by the manifest engine
@@ -292,6 +298,11 @@ interface ParticipantRow {
   first_name: string;
   last_name: string;
   participant_kind?: string | null;
+  service_status?: string | null;
+  exited_at?: string | null;
+  exited_by_id?: string | null;
+  exit_reason?: string | null;
+  exit_notes?: string | null;
   ndis_number: string;
   street_address: string | null;
   regular_pickup_address: string | null;
@@ -318,6 +329,11 @@ function rowToParticipant(r: ParticipantRow): Participant {
     lastName: r.last_name ?? "",
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     participantKind: r.participant_kind === "guest" ? "guest" : "client",
+    serviceStatus: r.service_status === "exited" ? "exited" : "active",
+    exitedAt: r.exited_at ?? null,
+    exitedById: r.exited_by_id ?? null,
+    exitReason: r.exit_reason ?? null,
+    exitNotes: r.exit_notes ?? null,
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
     regularPickupAddress: r.regular_pickup_address ?? null,
@@ -370,7 +386,8 @@ export async function listParticipants(): Promise<Participant[]> {
     .select("*")
     .order("last_name", { ascending: true });
   if (error) throw error;
-  // BL-098: archived guests stay out of normal pickers (reuse via guest list).
+  // Archived guests stay out of normal pickers (reuse via guest list).
+  // Exited clients stay in this list so the directory can show them.
   return (data ?? [])
     .filter((r) => !(r as { archived_at?: string | null }).archived_at)
     .map((r) => rowToParticipant(r as ParticipantRow));
@@ -848,6 +865,10 @@ export interface StaffMember {
   notes: string | null;
   certifications: StaffCertification[];
   createdAt: string | null;
+  exitedAt: string | null;
+  exitedById: string | null;
+  exitReason: string | null;
+  exitNotes: string | null;
 }
 
 interface StaffRow {
@@ -863,6 +884,10 @@ interface StaffRow {
   notes: string | null;
   certifications: unknown;
   created_at: string | null;
+  exited_at?: string | null;
+  exited_by_id?: string | null;
+  exit_reason?: string | null;
+  exit_notes?: string | null;
 }
 
 function rowToStaff(r: StaffRow): StaffMember {
@@ -887,25 +912,41 @@ function rowToStaff(r: StaffRow): StaffMember {
         (c as { requirementTypeId?: string | null })?.requirementTypeId ?? null,
     })),
     createdAt: r.created_at,
+    exitedAt: r.exited_at ?? null,
+    exitedById: r.exited_by_id ?? null,
+    exitReason: r.exit_reason ?? null,
+    exitNotes: r.exit_notes ?? null,
   };
 }
 
 const STAFF_COLS =
   "id, full_name, role, pin_hash, phone, email, street_address, personnel_type, active, notes, certifications, created_at";
 
+const STAFF_EXIT_COLS = "exited_at, exited_by_id, exit_reason, exit_notes";
+
 export async function listStaffRegistry(): Promise<StaffMember[]> {
-  const { data, error } = await supabase
+  const full = await supabase
     .from("staff_registry")
-    .select(`${STAFF_COLS}, auth_user_id`)
+    .select(`${STAFF_COLS}, ${STAFF_EXIT_COLS}, auth_user_id`)
     .order("full_name", { ascending: true });
-  if (error) throw error;
-  const rows = data ?? [];
-  for (const raw of rows) {
-    const r = raw as StaffRow & { auth_user_id?: string | null };
+  let data: unknown[] = [];
+  if (full.error && isSchemaMismatchError(full.error)) {
+    const fallback = await supabase
+      .from("staff_registry")
+      .select(`${STAFF_COLS}, auth_user_id`)
+      .order("full_name", { ascending: true });
+    if (fallback.error) throw fallback.error;
+    data = (fallback.data ?? []) as unknown[];
+  } else {
+    if (full.error) throw full.error;
+    data = (full.data ?? []) as unknown[];
+  }
+  const rows = data as unknown as Array<StaffRow & { auth_user_id?: string | null }>;
+  for (const r of rows) {
     rememberStaffDisplayName(r.id, r.full_name);
     rememberStaffDisplayName(r.auth_user_id, r.full_name);
   }
-  return rows.map((r) => rowToStaff(r as StaffRow));
+  return rows.map((r) => rowToStaff(r));
 }
 
 /** Personnel email for a staff_registry id (day-login / office contact). */
@@ -1016,15 +1057,18 @@ export async function updateStaffMember(id: string, p: StaffPayload): Promise<St
     .select(STAFF_COLS)
     .eq("id", id)
     .maybeSingle();
+  const before = beforeRow ? rowToStaff(beforeRow as StaffRow) : null;
+  const row = staffPayloadToRow(p, { includePin: p.pinHash !== undefined });
+  // A form save cannot silently reactivate. Off-board / Reactivate owns active.
+  if (before && before.active === false) row.active = false;
   const { data, error } = await supabase
     .from("staff_registry")
-    .update(staffPayloadToRow(p, { includePin: p.pinHash !== undefined }))
+    .update(row)
     .eq("id", id)
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
   const updated = rowToStaff(data as StaffRow);
-  const before = beforeRow ? rowToStaff(beforeRow as StaffRow) : null;
   logOfficeChange({
     action: "updated",
     entity: "staff",

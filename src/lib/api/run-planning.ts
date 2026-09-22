@@ -121,6 +121,11 @@ interface ParticipantScheduleJoin {
 }
 
 export async function listRunPlanningRows(): Promise<RunPlanningRow[]> {
+  const { loadExitedParticipantIds, loadInactiveStaffIds } = await import("@/lib/api/service-exit");
+  const [exitedIds, inactiveStaffIds] = await Promise.all([
+    loadExitedParticipantIds(),
+    loadInactiveStaffIds(),
+  ]);
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
     .select(
@@ -132,6 +137,7 @@ export async function listRunPlanningRows(): Promise<RunPlanningRow[]> {
   const rows: RunPlanningRow[] = [];
   for (const raw of data ?? []) {
     const row = raw as unknown as ParticipantScheduleJoin;
+    if (exitedIds.has(row.participant_id)) continue;
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
@@ -151,6 +157,7 @@ export async function listRunPlanningRows(): Promise<RunPlanningRow[]> {
   try {
     const support = await listSupportSchedules();
     for (const s of support) {
+      if (s.staffId && inactiveStaffIds.has(s.staffId)) continue;
       rows.push({
         id: `s:${s.id}`,
         personKey: s.carerId ? `c:${s.carerId}` : `s:${s.staffId}`,

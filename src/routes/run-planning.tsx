@@ -97,6 +97,7 @@ function RunPlanningPage() {
         participant={editParticipant}
         open={participantOpen}
         onOpenChange={setParticipantOpen}
+        onSaved={setEditParticipant}
         initialTab="attendance"
       />
       <StaffFormSheet open={staffOpen} onOpenChange={setStaffOpen} staff={editStaff} />

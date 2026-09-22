@@ -313,8 +313,11 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
       s.active === true && WEEKDAY_INDEX[String(s.day_of_week)] === dow,
   );
   const exemptIds = await loadExemptParticipantIdsForDate(getOperationalTodayIso());
+  const { loadExitedParticipantIds } = await import("@/lib/api/service-exit");
+  const exitedIds = await loadExitedParticipantIds();
   const attending = todays.filter(
-    (s: Record<string, unknown>) => !exemptIds.has(String(s.participant_id)),
+    (s: Record<string, unknown>) =>
+      !exemptIds.has(String(s.participant_id)) && !exitedIds.has(String(s.participant_id)),
   );
   if (!attending.length) return 0;
 
@@ -1191,27 +1194,46 @@ export interface EligibleAttendee {
 export async function listEligibleAddAttendees(
   sessionId: string,
 ): Promise<EligibleAttendee[]> {
-  const [{ data: parts, error: pErr }, { data: roll, error: rErr }] =
-    await Promise.all([
-      supabase
-        .from("participants")
-        .select("id, full_name, status")
-        .eq("status", "active"),
-      supabase
-        .from("client_attendance_log")
-        .select("participant_id")
-        .eq("session_id", sessionId),
-    ]);
-  if (pErr) throw pErr;
+  const { data: roll, error: rErr } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id")
+    .eq("session_id", sessionId);
   if (rErr) throw rErr;
   const taken = new Set(
     (roll ?? []).map((r) => (r as { participant_id: string }).participant_id),
   );
-  return (parts ?? [])
-    .filter((p) => !taken.has((p as { id: string }).id))
+
+  const full = await supabase
+    .from("participants")
+    .select("id, first_name, last_name, participant_kind, service_status, archived_at");
+  let parts: Array<{
+    id: string;
+    first_name?: string | null;
+    last_name?: string | null;
+    participant_kind?: string | null;
+    service_status?: string | null;
+    archived_at?: string | null;
+  }> = [];
+  if (full.error && isSchemaMismatchError(full.error)) {
+    const basic = await supabase.from("participants").select("id, first_name, last_name");
+    if (basic.error) throw basic.error;
+    parts = (basic.data ?? []) as typeof parts;
+  } else {
+    if (full.error) throw full.error;
+    parts = (full.data ?? []) as typeof parts;
+  }
+
+  return parts
+    .filter((p) => {
+      if (taken.has(p.id)) return false;
+      if (p.archived_at) return false;
+      if (p.participant_kind === "guest") return false;
+      if (p.service_status === "exited") return false;
+      return true;
+    })
     .map((p) => ({
-      id: (p as { id: string }).id,
-      fullName: (p as { full_name: string }).full_name,
+      id: p.id,
+      fullName: `${p.first_name ?? ""} ${p.last_name ?? ""}`.trim(),
     }))
     .sort((a, b) => a.fullName.localeCompare(b.fullName));
 }
