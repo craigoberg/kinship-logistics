@@ -29,6 +29,7 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -120,6 +121,8 @@ export function CareProfileModal({
   }, [participant?.id, participant?.serviceStatus, open]);
 
   const shown = participant ? { ...participant, ...exitOverlay } : null;
+  const clientOffboarded =
+    shown?.participantKind !== "guest" && shown?.serviceStatus === "exited";
 
   const scrollToMeds = () => {
     medSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -231,42 +234,75 @@ export function CareProfileModal({
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="flex max-h-[85vh] w-[min(96vw,72rem)] max-w-6xl flex-col overflow-x-auto border-border bg-card">
           <DialogHeader className="shrink-0">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <DialogTitle className="truncate">{participant.fullName || "Participant"}</DialogTitle>
-                <DialogDescription>
+            <div className="min-w-0">
+              <DialogTitle className="flex flex-wrap items-center gap-2">
+                <span className="truncate">{participant.fullName || "Participant"}</span>
+                {clientOffboarded && (
+                  <Badge variant="secondary" className="shrink-0 uppercase tracking-wide">
+                    Off-boarded
+                  </Badge>
+                )}
+              </DialogTitle>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <DialogDescription className="min-w-0">
                   {participant.participantKind === "guest"
                     ? `Event guest · ${participant.ndisNumber}`
                     : `NDIS ${participant.ndisNumber}`}
                   {" · Updated "}
                   {formatDate(participant.updatedAt)}
                 </DialogDescription>
-                {participant.streetAddress && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    📍 {participant.streetAddress}
-                  </p>
-                )}
-                {shown?.participantKind !== "guest" && shown?.serviceStatus === "exited" && (
-                  <p className="mt-2 rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-800">
-                    Left service
-                    {shown.exitedAt ? ` ${formatDateTime(shown.exitedAt)}` : ""}
-                    {shown.exitReason ? ` — ${exitReasonLabel(shown.exitReason)}` : ""}
-                    {shown.exitNotes ? `. ${shown.exitNotes}` : ""}
-                  </p>
-                )}
+                <div className="ml-auto flex shrink-0 flex-wrap items-center justify-end gap-2">
+                  {isPending && (
+                    <button
+                      type="button"
+                      onClick={scrollToMeds}
+                      title="Jump to medication scheduling"
+                      className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
+                    >
+                      <AlertTriangle className="h-3.5 w-3.5" />
+                      Scheduled Care Pending
+                    </button>
+                  )}
+                  {shown?.participantKind !== "guest" && shown?.serviceStatus !== "exited" && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="gap-1.5"
+                      onClick={() => setExitMode("offboard")}
+                    >
+                      <Archive className="h-4 w-4" />
+                      Off-board
+                    </Button>
+                  )}
+                  {shown?.participantKind !== "guest" &&
+                    shown?.serviceStatus === "exited" &&
+                    !isDeceasedExit(shown.exitReason) && (
+                      <Button
+                        type="button"
+                        variant="secondary"
+                        className="gap-1.5"
+                        onClick={() => setExitMode("reactivate")}
+                      >
+                        <ArchiveRestore className="h-4 w-4" />
+                        Reactivate
+                      </Button>
+                    )}
+                </div>
               </div>
-              {isPending && (
-                <button
-                  type="button"
-                  onClick={scrollToMeds}
-                  title="Jump to medication scheduling"
-                  className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Scheduled Care Pending
-                </button>
+              {participant.streetAddress && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  📍 {participant.streetAddress}
+                </p>
               )}
             </div>
+            {clientOffboarded && shown && (
+              <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground">
+                Off-boarded
+                {shown.exitedAt ? ` ${formatDateTime(shown.exitedAt)}` : ""}
+                {shown.exitReason ? ` — ${exitReasonLabel(shown.exitReason)}` : ""}
+                {shown.exitNotes ? `. ${shown.exitNotes}` : ""}
+              </div>
+            )}
           </DialogHeader>
 
           <Tabs
@@ -385,30 +421,6 @@ export function CareProfileModal({
                       Archive guest
                     </Button>
                   )}
-                  {shown?.participantKind !== "guest" && shown?.serviceStatus !== "exited" && (
-                    <Button
-                      type="button"
-                      variant="destructive"
-                      className="gap-1.5"
-                      onClick={() => setExitMode("offboard")}
-                    >
-                      <Archive className="h-4 w-4" />
-                      Off-board
-                    </Button>
-                  )}
-                  {shown?.participantKind !== "guest" &&
-                    shown?.serviceStatus === "exited" &&
-                    !isDeceasedExit(shown.exitReason) && (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        className="gap-1.5"
-                        onClick={() => setExitMode("reactivate")}
-                      >
-                        <ArchiveRestore className="h-4 w-4" />
-                        Reactivate
-                      </Button>
-                    )}
                 </div>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />

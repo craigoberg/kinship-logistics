@@ -253,11 +253,10 @@ export function DirectoryWorkspace() {
                     return (
                       <TableRow
                         key={s.id}
-                        className={
-                          isManager
-                            ? "cursor-pointer transition-colors hover:bg-accent/40"
-                            : undefined
-                        }
+                        className={[
+                          isManager ? "cursor-pointer transition-colors hover:bg-accent/40" : "",
+                          !s.active ? "bg-secondary/20" : "",
+                        ].join(" ")}
                         onClick={openStaff}
                       >
                         <TableCell className="font-medium">{s.fullName}</TableCell>
@@ -274,7 +273,9 @@ export function DirectoryWorkspace() {
                           {s.active ? (
                             <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Active</Badge>
                           ) : (
-                            <Badge className="bg-slate-500 text-white hover:bg-slate-500">Inactive</Badge>
+                            <Badge variant="secondary">
+                              {s.exitReason ? "Off-boarded" : "Inactive"}
+                            </Badge>
                           )}
                         </TableCell>
                         <TableCell>

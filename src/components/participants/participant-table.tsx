@@ -2,6 +2,7 @@ import { useMemo, useState } from "react";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { iddsiLevel } from "@/lib/iddsi";
 import { dayChronoIndex } from "@/lib/data-store";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -114,7 +115,10 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
             <li key={p.id}>
               <Card
                 onClick={() => onSelect(p)}
-                className="flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-accent/40"
+                className={cn(
+                  "flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-accent/40",
+                  p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                )}
               >
                 <div className="min-w-0 flex-1 space-y-2">
                   <div className="flex items-center gap-2">
@@ -125,8 +129,8 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                       </Badge>
                     )}
                     {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
-                      <Badge className="shrink-0 bg-slate-500 text-[10px] uppercase text-white hover:bg-slate-500">
-                        Exited
+                      <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                        Off-boarded
                       </Badge>
                     )}
                     {pending.has(p.id) && (
@@ -182,7 +186,10 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 <tr
                   key={p.id}
                   onClick={() => onSelect(p)}
-                  className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
+                  className={cn(
+                    "cursor-pointer border-t border-border transition-colors hover:bg-accent/40",
+                    p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                  )}
                 >
                   <td className="px-3 py-2 font-medium">
                     <div className="flex items-center gap-2">
@@ -193,8 +200,8 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                         </Badge>
                       )}
                       {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
-                        <Badge className="shrink-0 bg-slate-500 text-[10px] uppercase text-white hover:bg-slate-500">
-                          Exited
+                        <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                          Off-boarded
                         </Badge>
                       )}
                       {pending.has(p.id) && (

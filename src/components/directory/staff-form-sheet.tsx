@@ -11,6 +11,7 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -326,10 +327,38 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
       >
         <SheetHeader className="border-b border-border px-6 py-4">
-          <SheetTitle>{isEdit ? "Edit personnel" : "Add personnel"}</SheetTitle>
-          <SheetDescription>
-            Writes directly to <code>staff_registry</code>.
-          </SheetDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <SheetTitle className="flex flex-wrap items-center gap-2">
+                {isEdit ? "Edit personnel" : "Add personnel"}
+                {isEdit && !serviceActive && (
+                  <Badge variant="secondary" className="uppercase tracking-wide">
+                    {serviceReason ? "Off-boarded" : "Inactive"}
+                  </Badge>
+                )}
+              </SheetTitle>
+              <SheetDescription>
+                Writes directly to <code>staff_registry</code>.
+              </SheetDescription>
+            </div>
+            {isEdit && serviceActive && (
+              <Button type="button" variant="outline" onClick={() => setExitMode("offboard")}>
+                Off-board
+              </Button>
+            )}
+            {isEdit && !serviceActive && !isDeceasedExit(serviceReason) && (
+              <Button type="button" variant="secondary" onClick={() => setExitMode("reactivate")}>
+                Reactivate
+              </Button>
+            )}
+          </div>
+          {isEdit && !serviceActive && (
+            <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground">
+              {serviceReason ? "Off-boarded" : "Inactive"}
+              {serviceReason ? ` — ${exitReasonLabel(serviceReason)}` : ""}
+              {serviceNotes ? `. ${serviceNotes}` : ""}
+            </div>
+          )}
         </SheetHeader>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
@@ -439,28 +468,11 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               </p>
             </Field>
 
-            <Field label="Service" className="sm:col-span-2">
-              {!isEdit ? (
-                <p className="text-sm text-muted-foreground">New people are added as active.</p>
-              ) : serviceActive ? (
-                <Button type="button" variant="destructive" onClick={() => setExitMode("offboard")}>
-                  Off-board
-                </Button>
-              ) : (
-                <div className="space-y-2">
-                  <p className="rounded-md border border-slate-300 bg-slate-100 px-3 py-2 text-sm text-slate-800">
-                    Inactive
-                    {serviceReason ? ` — ${exitReasonLabel(serviceReason)}` : ""}
-                    {serviceNotes ? `. ${serviceNotes}` : ""}
-                  </p>
-                  {!isDeceasedExit(serviceReason) && (
-                    <Button type="button" variant="outline" onClick={() => setExitMode("reactivate")}>
-                      Reactivate
-                    </Button>
-                  )}
-                </div>
-              )}
-            </Field>
+            {!isEdit && (
+              <p className="text-sm text-muted-foreground sm:col-span-2">
+                New people are added as active.
+              </p>
+            )}
           </section>
 
           {dutyRoles.length > 0 && (
