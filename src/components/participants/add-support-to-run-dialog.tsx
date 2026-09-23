@@ -15,7 +15,8 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { MobileFieldButton, MobileOptionButton } from "@/components/manifest/mobile-field-button";
-import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { StopAddressChoices } from "@/components/address/stop-address-picker";
+import type { StopAddressChoice } from "@/lib/api/person-addresses";
 import { HalfHourTimeField } from "@/components/ui/half-hour-time-field";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import {
@@ -56,7 +57,7 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
   const [days, setDays] = useState<string[]>(["DAY-TUE", "DAY-THU"]);
   const [otherDirection, setOtherDirection] = useState<"bus" | "self">("bus");
   const [otherRun, setOtherRun] = useState("");
-  const [address, setAddress] = useState("");
+  const [addressChoice, setAddressChoice] = useState<StopAddressChoice>({ mode: "home" });
   const [arrive, setArrive] = useState("09:00");
   const [depart, setDepart] = useState("15:00");
 
@@ -116,7 +117,8 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
           outboundTransport: outbound,
           expectedArrivalTime: arrive,
           expectedDepartureTime: depart,
-          pickupAddressOverride: address,
+          inboundAddressId: addressChoice.mode === "saved" ? addressChoice.addressId : null,
+          outboundAddressId: addressChoice.mode === "saved" ? addressChoice.addressId : null,
           source: "add_to_run",
         });
       }
@@ -152,6 +154,7 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
                 onClick={() => {
                   setKind(k);
                   setPersonId("");
+                  setAddressChoice({ mode: "home" });
                 }}
               />
             ))}
@@ -166,7 +169,10 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
                   title={p.name}
                   subtitle={p.subtitle || undefined}
                   active={personId === p.id}
-                  onClick={() => setPersonId(p.id)}
+                  onClick={() => {
+                    setPersonId(p.id);
+                    setAddressChoice({ mode: "home" });
+                  }}
                 />
               ))}
               {people.length === 0 && (
@@ -238,14 +244,20 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
             <Label className="mb-1 block">Expected departure</Label>
             <HalfHourTimeField value={depart} onChange={setDepart} />
           </div>
-          <CharacterCountedInput
-            label="Pickup address (optional)"
-            value={address}
-            onValueChange={setAddress}
-            required={false}
-            minChars={0}
-            maxChars={160}
-          />
+          {personId ? (
+            <div className="space-y-2">
+              <Label>Pickup and drop-off place</Label>
+              <p className="text-[11px] text-muted-foreground">
+                Same place for both directions to start. Split them later on the run list.
+                Add another place on the staff or carer record.
+              </p>
+              <StopAddressChoices
+                owner={{ kind: kind === "carer" ? "carer" : "staff", id: personId }}
+                activeChoice={addressChoice}
+                onChoose={setAddressChoice}
+              />
+            </div>
+          ) : null}
 
           {missing.length > 0 && (
             <p className="text-sm text-destructive">Need: {missing.join(", ")}</p>

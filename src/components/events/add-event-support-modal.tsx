@@ -15,7 +15,12 @@ import {
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { MobileFieldButton, MobileOptionButton } from "@/components/manifest/mobile-field-button";
-import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import {
+  StopAddressChoices,
+  choiceFromOverrideText,
+} from "@/components/address/stop-address-picker";
+import { personAddressQueryKey } from "@/components/address/person-address-list";
+import { listPersonAddresses, loadHomeAddress } from "@/lib/api/person-addresses";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import {
   listStaffRegistry,
@@ -51,6 +56,20 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
   const [outRun, setOutRun] = useState("");
   const [retRun, setRetRun] = useState("");
   const [address, setAddress] = useState("");
+  const addressOwner = {
+    kind: (kind === "carer" ? "carer" : "staff") as "carer" | "staff",
+    id: personId,
+  };
+  const placesQ = useQuery({
+    queryKey: personAddressQueryKey(addressOwner),
+    queryFn: () => listPersonAddresses(addressOwner),
+    enabled: open && !!personId,
+  });
+  const homeQ = useQuery({
+    queryKey: ["home-address", addressOwner.kind, personId],
+    queryFn: () => loadHomeAddress(addressOwner),
+    enabled: open && !!personId,
+  });
 
   const staffQ = useQuery({
     queryKey: ["staff-registry-support"],
@@ -208,14 +227,29 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
                 />
               ))}
           </div>
-          <CharacterCountedInput
-            label="Pickup address (optional)"
-            value={address}
-            onValueChange={setAddress}
-            required={false}
-            minChars={0}
-            maxChars={160}
-          />
+          {personId ? (
+            <div className="space-y-2">
+              <Label>Pickup place (this event)</Label>
+              <StopAddressChoices
+                owner={addressOwner}
+                activeChoice={choiceFromOverrideText({
+                  override: address,
+                  home: homeQ.data ?? null,
+                  places: placesQ.data ?? [],
+                })}
+                allowCustom
+                customText={address}
+                onCustomText={setAddress}
+                onChoose={(choice) => {
+                  if (choice.mode === "home") setAddress((homeQ.data ?? "").trim());
+                  else if (choice.mode === "saved") {
+                    const place = (placesQ.data ?? []).find((p) => p.id === choice.addressId);
+                    setAddress(place?.address ?? "");
+                  } else setAddress(choice.text);
+                }}
+              />
+            </div>
+          ) : null}
           {missing.length > 0 && (
             <p className="text-sm text-destructive">Need: {missing.join(", ")}</p>
           )}

@@ -873,12 +873,17 @@ export function useReorderEventRosterPickupOrder() {
 export function useBusRunRouteRoster(
   busRunCode: string,
   direction: BusRunRouteDirection,
+  addressDayCode?: string,
 ) {
   useOperationalTodayIso();
   const todayDayCode = todaysSydneyDayCode();
   return useQuery({
-    queryKey: busRunRouteQueryKey(busRunCode, direction, todayDayCode),
-    queryFn: () => listBusRunRouteRoster(busRunCode, direction, todayDayCode),
+    queryKey: [
+      ...busRunRouteQueryKey(busRunCode, direction, todayDayCode),
+      addressDayCode ?? "",
+    ],
+    queryFn: () =>
+      listBusRunRouteRoster(busRunCode, direction, todayDayCode, addressDayCode),
     enabled: busRunCode.length > 0,
     staleTime: 15_000,
   });

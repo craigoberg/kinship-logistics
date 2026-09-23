@@ -70,6 +70,8 @@ export interface SupportSchedule {
   expectedArrivalTime: string;
   expectedDepartureTime: string;
   pickupAddressOverride: string | null;
+  inboundAddressId: string | null;
+  outboundAddressId: string | null;
   active: boolean;
   displayName: string;
 }
@@ -110,6 +112,8 @@ interface ScheduleDb {
   expected_arrival_time: string | null;
   expected_departure_time: string | null;
   pickup_address_override: string | null;
+  inbound_address_id?: string | null;
+  outbound_address_id?: string | null;
   active: boolean;
 }
 
@@ -194,6 +198,8 @@ function toSchedule(
     expectedArrivalTime: (r.expected_arrival_time ?? "09:00").slice(0, 5),
     expectedDepartureTime: (r.expected_departure_time ?? "15:00").slice(0, 5),
     pickupAddressOverride: r.pickup_address_override,
+    inboundAddressId: r.inbound_address_id ?? null,
+    outboundAddressId: r.outbound_address_id ?? null,
     active: r.active,
     displayName: displayNameFor(r.person_kind, r.staff_id, r.carer_id, names),
   };
@@ -272,6 +278,8 @@ export async function upsertSupportSchedule(input: {
   expectedArrivalTime: string;
   expectedDepartureTime: string;
   pickupAddressOverride?: string | null;
+  inboundAddressId?: string | null;
+  outboundAddressId?: string | null;
   source?: RunPlanningChangeSource;
 }): Promise<SupportSchedule> {
   let before: ScheduleDb | null = null;
@@ -297,8 +305,16 @@ export async function upsertSupportSchedule(input: {
     expected_departure_time: input.expectedDepartureTime.length === 5
       ? `${input.expectedDepartureTime}:00`
       : input.expectedDepartureTime,
-    pickup_address_override: (input.pickupAddressOverride ?? "").trim() || null,
     active: true,
+    ...(input.pickupAddressOverride !== undefined
+      ? { pickup_address_override: (input.pickupAddressOverride ?? "").trim() || null }
+      : {}),
+    ...(input.inboundAddressId !== undefined
+      ? { inbound_address_id: input.inboundAddressId }
+      : {}),
+    ...(input.outboundAddressId !== undefined
+      ? { outbound_address_id: input.outboundAddressId }
+      : {}),
   };
   const q = input.id
     ? supabase.from("support_attendance_schedules").update(row).eq("id", input.id)
@@ -1015,9 +1031,26 @@ export async function loadSupportFloorHomeForDate(
   return out;
 }
 
-async function supportAddressFor(s: ScheduleDb): Promise<string | null> {
-  const override = (s.pickup_address_override ?? "").trim();
-  if (override) return override;
+async function supportAddressFor(
+  s: ScheduleDb,
+  direction: "morning" | "afternoon",
+): Promise<string | null> {
+  const bookReady = s.inbound_address_id !== undefined || s.outbound_address_id !== undefined;
+  const standingId = direction === "morning" ? s.inbound_address_id : s.outbound_address_id;
+  if (standingId) {
+    const { data } = await supabase
+      .from("person_addresses")
+      .select("address, archived_at")
+      .eq("id", standingId)
+      .maybeSingle();
+    const row = data as { address?: string | null; archived_at?: string | null } | null;
+    const text = (row?.archived_at ? "" : row?.address ?? "").trim();
+    if (text) return text;
+  }
+  if (!bookReady) {
+    const override = (s.pickup_address_override ?? "").trim();
+    if (override) return override;
+  }
   if (s.staff_id) {
     const { data } = await supabase
       .from("staff_registry")
@@ -1062,7 +1095,7 @@ export async function listSupportRosterForDayCentreRun(input: {
       ? supportPersonKey("carer", s.carer_id)
       : supportPersonKey(s.person_kind, s.staff_id ?? "");
     if (exempt.has(key)) continue;
-    const address = await supportAddressFor(s);
+    const address = await supportAddressFor(s, input.direction);
     out.push(
       supportRosterPerson({
         kind: s.person_kind,

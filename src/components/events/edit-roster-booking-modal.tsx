@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Save, AlertTriangle, TrendingDown, MapPin, RefreshCw, HeartPulse } from "lucide-react";
 import {
@@ -34,6 +34,12 @@ import type { EventRosterBooking } from "@/lib/data-store";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { updateBookingTransportModes, updateBookingTransportMed, type TransportMedBagRequired } from "@/lib/api/event-outing";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import {
+  StopAddressChoices,
+  choiceFromOverrideText,
+} from "@/components/address/stop-address-picker";
+import { personAddressQueryKey } from "@/components/address/person-address-list";
+import { listPersonAddresses, loadHomeAddress } from "@/lib/api/person-addresses";
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 
 interface Props {
@@ -148,6 +154,20 @@ export function EditRosterBookingModal({
   const overpaymentDelta = Math.max(0, collected - parsedAmended);
   const isCaseB = !showRefundPanel && priceChanged && parsedAmended < collected;
 
+  const addressOwner = {
+    kind: "participant" as const,
+    id: booking?.participantId ?? "",
+  };
+  const placesQ = useQuery({
+    queryKey: personAddressQueryKey(addressOwner),
+    queryFn: () => listPersonAddresses(addressOwner),
+    enabled: !!booking?.participantId,
+  });
+  const homeQ = useQuery({
+    queryKey: ["home-address", "participant", booking?.participantId ?? ""],
+    queryFn: () => loadHomeAddress(addressOwner),
+    enabled: !!booking?.participantId,
+  });
   const profileRegularPickup = (booking?.participantRegularPickupAddress ?? "").trim();
   const profileStreetAddress = (booking?.participantStreetAddress ?? "").trim();
   const effectiveProfilePickup = profileRegularPickup || profileStreetAddress || null;
@@ -697,11 +717,8 @@ export function EditRosterBookingModal({
               <MapPin className="h-3.5 w-3.5" /> Event pickup address
             </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              <strong className="text-foreground">Event outings</strong> use the client&apos;s{" "}
-              <em>regular pickup address</em> from their profile (or home address if pickup is blank).
-              <strong className="text-foreground"> Day Centre bus runs</strong> use the weekly schedule
-              instead — edit those under Client profile → Schedules &amp; Attendance.
-              Permanent address changes belong in Client profile → Contact Information.
+              Pick Home or a saved place. That choice is stored on this event only and does
+              not change the Day Centre weekday plan. Add lasting places under Contact Information.
             </p>
 
             <div className="space-y-1">
@@ -722,23 +739,33 @@ export function EditRosterBookingModal({
               </p>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="override-addr" className="text-[11px] font-medium text-muted-foreground">
-                One-off override (this event only)
-              </Label>
-              <Input
-                id="override-addr"
-                value={tripPickupOverride}
-                placeholder="Leave blank to use the profile address above"
-                onChange={(e) => {
-                  setTripPickupOverride(e.target.value);
+            {booking?.participantId && (
+              <StopAddressChoices
+                owner={addressOwner}
+                activeChoice={choiceFromOverrideText({
+                  override: tripPickupOverride,
+                  home: homeQ.data ?? profileStreetAddress ?? null,
+                  places: placesQ.data ?? [],
+                })}
+                allowCustom
+                customText={tripPickupOverride}
+                onCustomText={(value) => {
+                  setTripPickupOverride(value);
                   setDirty(true);
                 }}
+                onChoose={(choice) => {
+                  setDirty(true);
+                  if (choice.mode === "home") {
+                    setTripPickupOverride((homeQ.data ?? profileStreetAddress ?? "").trim());
+                  } else if (choice.mode === "saved") {
+                    const place = (placesQ.data ?? []).find((p) => p.id === choice.addressId);
+                    setTripPickupOverride(place?.address ?? "");
+                  } else {
+                    setTripPickupOverride(choice.text);
+                  }
+                }}
               />
-              <p className="text-[10px] text-muted-foreground">
-                Overrides the profile for this event&apos;s manifest only — does not change the client record.
-              </p>
-            </div>
+            )}
 
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px]">
               <span className="font-semibold text-muted-foreground">Driver manifest will use: </span>

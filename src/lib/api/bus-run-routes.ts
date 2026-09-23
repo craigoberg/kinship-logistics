@@ -35,6 +35,15 @@ export interface BusRunRouteStop {
   staffId?: string | null;
   carerId?: string | null;
   roleLabel?: string | null;
+  /** Schedule row for the weekday shown on the route panel. */
+  scheduledThisDay: boolean;
+  scheduleIdForDay: string | null;
+  /** Null means Home when scheduledThisDay and the address book is on. */
+  addressId: string | null;
+  addressLabel: string | null;
+  homeAddress: string | null;
+  /** False until docs/sql/2026-09-23_person_addresses.sql is applied. */
+  addressChoiceEnabled: boolean;
 }
 
 const DAY_SHORT: Record<string, string> = {
@@ -143,6 +152,8 @@ type ScheduleJoinRow = {
   expected_departure_time: string | null;
   active: boolean;
   created_at: string;
+  inbound_address_id?: string | null;
+  outbound_address_id?: string | null;
   participants:
     | {
         first_name: string;
@@ -159,6 +170,15 @@ type ScheduleJoinRow = {
     | null;
 };
 
+const EMPTY_ADDRESS_CHOICE = {
+  scheduledThisDay: false,
+  scheduleIdForDay: null as string | null,
+  addressId: null as string | null,
+  addressLabel: null as string | null,
+  homeAddress: null as string | null,
+  addressChoiceEnabled: false,
+};
+
 /**
  * Everyone assigned to this run (any day), ordered by the saved default route.
  * People not yet on the route appear at the end (name order).
@@ -167,6 +187,7 @@ export async function listBusRunRouteRoster(
   busRunCode: string,
   direction: BusRunRouteDirection,
   todayDayCode?: string,
+  addressDayCode?: string,
 ): Promise<BusRunRouteStop[]> {
   const { loadExitedParticipantIds, loadInactiveStaffIds } = await import("@/lib/api/service-exit");
   const [exitedIds, inactiveStaffIds] = await Promise.all([
@@ -174,13 +195,27 @@ export async function listBusRunRouteRoster(
     loadInactiveStaffIds(),
   ]);
   const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
-  const { data: schedRows, error: schedErr } = await supabase
+  const baseSelect =
+    "id, participant_id, day_of_week, service_type, transport_required, inbound_transport, outbound_transport, expected_arrival_time, expected_departure_time, active, created_at, participants!inner(first_name, last_name, regular_pickup_address, street_address)";
+  const bookSelect = `${baseSelect}, inbound_address_id, outbound_address_id`;
+  let bookEnabled = true;
+  const bookQuery = await supabase
     .from("participant_attendance_schedules")
-    .select(
-      "id, participant_id, day_of_week, service_type, transport_required, inbound_transport, outbound_transport, expected_arrival_time, expected_departure_time, active, created_at, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
-    )
+    .select(bookSelect)
     .eq("active", true)
     .eq(transportCol, busRunCode);
+  let schedRows: unknown[] | null = (bookQuery.data as unknown[] | null) ?? null;
+  let schedErr = bookQuery.error;
+  if (bookQuery.error && isSchemaMismatchError(bookQuery.error)) {
+    bookEnabled = false;
+    const fallback = await supabase
+      .from("participant_attendance_schedules")
+      .select(baseSelect)
+      .eq("active", true)
+      .eq(transportCol, busRunCode);
+    schedRows = (fallback.data as unknown[] | null) ?? null;
+    schedErr = fallback.error;
+  }
   if (schedErr) throw new Error(schedErr.message);
 
   const byId = new Map<string, BusRunRouteStop>();
@@ -209,12 +244,22 @@ export async function listBusRunRouteRoster(
           }
         : null;
     const existing = byId.get(row.participant_id);
+    const dayHit = !!addressDayCode && dayCodeIsToday(row.day_of_week, addressDayCode);
+    const standingId =
+      direction === "morning" ? row.inbound_address_id ?? null : row.outbound_address_id ?? null;
     if (existing) {
       if (!existing.dayCodes.includes(row.day_of_week)) {
         existing.dayCodes.push(row.day_of_week);
       }
       if (todaySchedule && !existing.todaySchedule) {
         existing.todaySchedule = todaySchedule;
+      }
+      if (dayHit) {
+        existing.scheduledThisDay = true;
+        existing.scheduleIdForDay = row.id;
+        existing.homeAddress = street || null;
+        existing.addressId = bookEnabled ? standingId : null;
+        existing.addressChoiceEnabled = bookEnabled;
       }
       continue;
     }
@@ -225,6 +270,12 @@ export async function listBusRunRouteRoster(
       dayCodes: [row.day_of_week],
       stopOrder: null,
       todaySchedule,
+      ...EMPTY_ADDRESS_CHOICE,
+      scheduledThisDay: dayHit,
+      scheduleIdForDay: dayHit ? row.id : null,
+      homeAddress: street || null,
+      addressId: dayHit && bookEnabled ? standingId : null,
+      addressChoiceEnabled: bookEnabled,
     });
   }
 
@@ -253,15 +304,23 @@ export async function listBusRunRouteRoster(
             }
           : null;
       const existing = byId.get(key);
+      const dayHit = !!addressDayCode && dayCodeIsToday(s.dayOfWeek, addressDayCode);
+      const standingId = direction === "morning" ? s.inboundAddressId : s.outboundAddressId;
       if (existing) {
         if (!existing.dayCodes.includes(s.dayOfWeek)) existing.dayCodes.push(s.dayOfWeek);
         if (todaySchedule && !existing.todaySchedule) existing.todaySchedule = todaySchedule;
+        if (dayHit) {
+          existing.scheduledThisDay = true;
+          existing.scheduleIdForDay = s.id;
+          existing.addressId = bookEnabled ? standingId : null;
+          existing.addressChoiceEnabled = bookEnabled;
+        }
         continue;
       }
       byId.set(key, {
         participantId: key,
         name: s.displayName,
-        address: s.pickupAddressOverride,
+        address: bookEnabled ? null : s.pickupAddressOverride,
         dayCodes: [s.dayOfWeek],
         stopOrder: null,
         todaySchedule,
@@ -269,10 +328,45 @@ export async function listBusRunRouteRoster(
         staffId: s.staffId,
         carerId: s.carerId,
         roleLabel: s.personKind === "volunteer" ? "Volunteer" : s.personKind === "carer" ? "Carer" : "Staff",
+        ...EMPTY_ADDRESS_CHOICE,
+        scheduledThisDay: dayHit,
+        scheduleIdForDay: dayHit ? s.id : null,
+        addressId: dayHit && bookEnabled ? standingId : null,
+        addressChoiceEnabled: bookEnabled,
       });
     }
   } catch {
     /* table not migrated yet */
+  }
+
+  if (bookEnabled && addressDayCode) {
+    const { loadAddressBookEntries, loadHomeAddress } = await import("@/lib/api/person-addresses");
+    const book = await loadAddressBookEntries(
+      [...byId.values()].map((s) => s.addressId).filter((id): id is string => !!id),
+    );
+    for (const stop of byId.values()) {
+      if (!stop.scheduledThisDay) {
+        stop.address = null;
+        stop.addressLabel = null;
+        continue;
+      }
+      if (!stop.homeAddress) {
+        const owner = stop.carerId
+          ? { kind: "carer" as const, id: stop.carerId }
+          : stop.staffId
+            ? { kind: "staff" as const, id: stop.staffId }
+            : { kind: "participant" as const, id: stop.participantId };
+        stop.homeAddress = await loadHomeAddress(owner);
+      }
+      if (stop.addressId) {
+        const place = book.get(stop.addressId);
+        stop.addressLabel = place?.label ?? "Home";
+        stop.address = place?.address ?? stop.homeAddress;
+      } else {
+        stop.addressLabel = "Home";
+        stop.address = stop.homeAddress;
+      }
+    }
   }
 
   const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);

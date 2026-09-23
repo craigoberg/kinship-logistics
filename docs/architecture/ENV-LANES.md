@@ -2,6 +2,8 @@
 
 **Status:** Day login shipped on DEV. TEST Supabase (Australia) stood up. **App host = Vercel** (Hobby → Pro for commercial/PROD). Lovable abandoned as host.
 
+**Local disk (2026-09-23):** the working copy is `C:\Users\Craig\kinship-logistics`. Do not edit `C:\Users\Craig\OneDrive\Documents\kinship-logistics`. See `docs/LOCAL-WORKSPACE.md`. `localhost:8080` is `bun run dev` from the Users folder.
+
 ## Public vs Connect domains (BL-110 — Phase 2 cutover)
 
 | Hostname | App | Notes |

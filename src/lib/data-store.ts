@@ -5617,6 +5617,16 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   } catch (err) {
     console.warn("[startTrip:support]", err);
   }
+  try {
+    const { applyDayStopOverrides } = await import("@/lib/api/person-addresses");
+    await applyDayStopOverrides(
+      roster,
+      slotDate,
+      input.tripDirection === "return" ? "return" : "outbound",
+    );
+  } catch (err) {
+    console.warn("[startTrip:addresses]", err);
+  }
 
   // 2. Resolve event venue + kind (outing vs legacy med rules).
   const { data: eventRow, error: eventErr } = await supabase
@@ -6158,6 +6168,16 @@ export async function listBusRunRosterForDay(
     ];
   } catch (err) {
     console.warn("[listBusRunRosterForDay:support]", err);
+  }
+  try {
+    const { paintDayCentreStopAddresses } = await import("@/lib/api/person-addresses");
+    await paintDayCentreStopAddresses(present, {
+      dayCode,
+      direction,
+      serviceDate: todayLocalIso(),
+    });
+  } catch (err) {
+    console.warn("[listBusRunRosterForDay:addresses]", err);
   }
   const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
   return sortRosterByRouteOrder(present, orderMap);
@@ -6917,6 +6937,17 @@ export async function startDayCentreRun(
     roster.push(...support);
   } catch (err) {
     console.warn("[startDayCentreRun:support]", err);
+  }
+
+  try {
+    const { paintDayCentreStopAddresses } = await import("@/lib/api/person-addresses");
+    await paintDayCentreStopAddresses(roster, {
+      dayCode: input.dayCode,
+      direction,
+      serviceDate: today,
+    });
+  } catch (err) {
+    console.warn("[startDayCentreRun:addresses]", err);
   }
 
   if (input.participantOrder?.length) {

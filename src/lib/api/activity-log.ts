@@ -137,6 +137,7 @@ function titleAction(action: string): string {
 
 const ACTION_LABELS: Record<string, string> = {
   OFFICE_RECORD_CHANGED: "Record change",
+  STOP_ADDRESS_CHANGED: "Stop address",
   RUN_PLANNING_CHANGED: "Run planning change",
   ATTENDANCE_SCHEDULE_REMOVED: "Attendance schedule removed",
   ATTENDANCE_CHECKIN: "Check-in",

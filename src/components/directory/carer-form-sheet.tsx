@@ -37,6 +37,7 @@ import {
 import type { Carer, CarerPayload } from "@/lib/data-store";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
+import { PersonAddressList } from "@/components/address/person-address-list";
 
 interface Props {
   open: boolean;
@@ -236,9 +237,16 @@ export function CarerFormSheet({
             <Field label="Email" className="sm:col-span-2">
               <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
             </Field>
-            <Field label="Street address" className="sm:col-span-2">
+            <Field label="Home / street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
+            {carer?.id ? (
+              <PersonAddressList owner={{ kind: "carer", id: carer.id }} />
+            ) : (
+              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                Save this carer first, then add other pickup places.
+              </p>
+            )}
             <Field label="Primary contact" className="sm:col-span-2">
               <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
                 <Switch checked={isPrimary} onCheckedChange={setIsPrimary} />

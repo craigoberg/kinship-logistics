@@ -75,6 +75,7 @@ import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subje
 import { SupportPlanTab } from "@/components/participants/support-plan-tab";
 import { toast } from "sonner";
 import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
+import { PersonAddressList } from "@/components/address/person-address-list";
 import { exitReasonLabel, isDeceasedExit } from "@/lib/service-exit";
 
 interface Props {
@@ -465,21 +466,7 @@ export function CareProfileModal({
                       className="h-9"
                     />
                   </Field>
-                  <Field label="Regular pickup address" className="sm:col-span-2">
-                    <Input
-                      value={regularPickupAddress}
-                      onChange={(e) => { setRegularPickupAddress(e.target.value); setDirty(true); }}
-                      placeholder="Leave blank to fall back to the Home address"
-                      className="h-9"
-                    />
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {regularPickupAddress.trim().length > 0
-                        ? "Used as the default pickup on every event manifest unless an event override is set."
-                        : streetAddress.trim().length > 0
-                          ? <>Will use: <span className="font-medium text-foreground">{streetAddress.trim()}</span></>
-                          : "No address on file — manifests will leave the pickup blank."}
-                    </p>
-                  </Field>
+                  <PersonAddressList owner={{ kind: "participant", id: participant.id }} />
                 </div>
               </div>
 

@@ -3,7 +3,9 @@
  * Same drag pattern as Event Manage → Roster. Driver can still reorder on Manifest.
  */
 import { useCallback, useMemo, useState } from "react";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { CalendarOff, GripVertical, Route } from "lucide-react";
+import { toast } from "sonner";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
@@ -29,18 +31,38 @@ import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { RunLiveStatusBadge } from "@/components/attendance/run-live-status-badge";
 import { AddSupportToRunDialog } from "@/components/participants/add-support-to-run-dialog";
 import { cn } from "@/lib/utils";
+import { StopAddressSheet } from "@/components/address/stop-address-picker";
+import {
+  personKeyToOwner,
+  setStandingStopAddress,
+  type StopAddressChoice,
+} from "@/lib/api/person-addresses";
+import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
 
 export function RunRoutePanel() {
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [] } = useLookupParameters(LOOKUP_CATEGORIES.operatingDay);
   const busRunMap = useBusRunMap();
+  const qc = useQueryClient();
   const [runCode, setRunCode] = useState("");
   const [direction, setDirection] = useState<BusRunRouteDirection>("morning");
+  const [dayCode, setDayCode] = useState("");
+  const [addressStop, setAddressStop] = useState<BusRunRouteStop | null>(null);
 
   const selectedRun = runCode || busRuns[0]?.code || "";
-  const { data: stops = [], isLoading, error } = useBusRunRouteRoster(selectedRun, direction);
-  const reorder = useReorderBusRunDefaultRoute();
   useOperationalTodayIso();
   const todayDayCode = todaysSydneyDayCode();
+  const selectedDay =
+    dayCode ||
+    operatingDays.find((d) => dayCodeIsToday(d.code, todayDayCode))?.code ||
+    operatingDays[0]?.code ||
+    "";
+  const { data: stops = [], isLoading, error } = useBusRunRouteRoster(
+    selectedRun,
+    direction,
+    selectedDay,
+  );
+  const reorder = useReorderBusRunDefaultRoute();
   const { data: liveStatusMap } = useTodaysRunLiveStatus();
   const [offTodayStop, setOffTodayStop] = useState<BusRunRouteStop | null>(null);
   const [addSupportOpen, setAddSupportOpen] = useState(false);
@@ -63,7 +85,45 @@ export function RunRoutePanel() {
     [selectedRun, direction, reorder],
   );
 
+  const saveAddress = useMutation({
+    mutationFn: async (choice: StopAddressChoice) => {
+      const stop = addressStop;
+      if (!stop?.scheduleIdForDay || !stop.addressChoiceEnabled) {
+        throw new Error("This person is not on the run that day.");
+      }
+      const owner = personKeyToOwner(stop.participantId);
+      if (!owner) throw new Error("Could not tell who this stop is for.");
+      let addressId: string | null = null;
+      let placeLabel = "Home";
+      if (choice.mode === "saved") {
+        addressId = choice.addressId;
+        placeLabel = "saved place";
+      } else if (choice.mode === "custom") {
+        throw new Error("Add the place on the person’s record first.");
+      }
+      await setStandingStopAddress({
+        scheduleId: stop.scheduleIdForDay,
+        personKind: stop.personKind ?? "participant",
+        direction,
+        addressId,
+        dayOfWeek: selectedDay,
+        personName: stop.name,
+        personId: owner.id,
+        placeLabel,
+      });
+    },
+    onSuccess: async () => {
+      setAddressStop(null);
+      toast.success("Standing stop updated");
+      await qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+      await qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+
   if (busRuns.length === 0) return null;
+
+  const addressOwner = addressStop ? personKeyToOwner(addressStop.participantId) : null;
 
   return (
     <Card className="space-y-3 p-4">
@@ -73,8 +133,10 @@ export function RunRoutePanel() {
           Default run routes
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          Drag to set Manifest pickup order for each run. People not attending that
-          day are skipped. The driver can still reorder on the active run.
+          Drag to set Manifest stop order for each run. Pick the weekday, then the
+          morning pickup or afternoon drop-off place. People not attending that day
+          are skipped. The driver can still reorder, or change today’s place, on the
+          active run.
         </p>
         <Button
           type="button"
@@ -111,6 +173,29 @@ export function RunRoutePanel() {
           );
         })}
       </div>
+
+      {operatingDays.length > 0 && (
+        <div className="flex flex-wrap gap-2">
+          {operatingDays.map((day) => {
+            const selected = selectedDay === day.code;
+            return (
+              <button
+                key={day.code}
+                type="button"
+                onClick={() => setDayCode(day.code)}
+                className={cn(
+                  "rounded-full border-2 px-3 py-1 text-xs font-semibold transition",
+                  selected
+                    ? "border-foreground bg-foreground text-background"
+                    : "border-border bg-card text-foreground hover:opacity-80",
+                )}
+              >
+                {shortDayLabel(day.code)}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-2">
         {(
@@ -209,7 +294,22 @@ export function RunRoutePanel() {
                             </span>
                           ) : null}
                         </div>
-                        {stop.address ? (
+                        {stop.addressChoiceEnabled && !stop.scheduledThisDay ? (
+                          <div className="text-xs italic text-muted-foreground">
+                            Not scheduled {shortDayLabel(selectedDay)}
+                          </div>
+                        ) : stop.addressChoiceEnabled ? (
+                          <button
+                            type="button"
+                            className="text-left text-xs text-muted-foreground underline-offset-2 hover:underline"
+                            onClick={() => setAddressStop(stop)}
+                          >
+                            <span className="font-medium text-foreground">
+                              {stop.addressLabel || "Home"}
+                            </span>
+                            {stop.address ? ` · ${stop.address}` : " · No home address on file"}
+                          </button>
+                        ) : stop.address ? (
                           <div className="text-xs text-muted-foreground">{stop.address}</div>
                         ) : (
                           <div className="text-xs italic text-warning">No pickup address on file</div>
@@ -295,6 +395,26 @@ export function RunRoutePanel() {
             : undefined
         }
       />
+      {addressOwner && (
+        <StopAddressSheet
+          open={addressStop != null}
+          onOpenChange={(open) => {
+            if (!open) setAddressStop(null);
+          }}
+          title={`${addressStop?.name ?? "Stop"} · ${direction === "morning" ? "Morning pickup" : "Afternoon drop-off"}`}
+          description={`${shortDayLabel(selectedDay)} standing place. This does not change other days.`}
+          owner={addressOwner}
+          showStanding
+          standingAddressId={addressStop?.addressId ?? null}
+          activeChoice={
+            addressStop?.addressId
+              ? { mode: "saved", addressId: addressStop.addressId }
+              : { mode: "home" }
+          }
+          busy={saveAddress.isPending}
+          onChoose={(choice) => saveAddress.mutate(choice)}
+        />
+      )}
     </Card>
   );
 }

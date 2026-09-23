@@ -20,6 +20,13 @@ import {
   Bus,
 } from "lucide-react";
 
+import { StopAddressSheet } from "@/components/address/stop-address-picker";
+import {
+  changePendingStopAddress,
+  ownerFromLeg,
+  type StopAddressChoice,
+  type StopDirection,
+} from "@/lib/api/person-addresses";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1705,6 +1712,44 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
   const [walkOnOpen, setWalkOnOpen] = useState(false);
+  const [addressLeg, setAddressLeg] = useState<TripLeg | null>(null);
+  const stopDirection: StopDirection = trip.eventId
+    ? trip.tripReturn === "none"
+      ? "outbound"
+      : "return"
+    : trip.tripReturn === "none"
+      ? "morning"
+      : "afternoon";
+  const changeAddress = useMutation({
+    mutationFn: async (choice: StopAddressChoice) => {
+      const leg = addressLeg;
+      if (!leg) throw new Error("No stop selected.");
+      const owner = ownerFromLeg({
+        participantId: leg.toParticipantId,
+        staffId: leg.toStaffId,
+        carerId: leg.toCarerId,
+      });
+      if (!owner) throw new Error("This stop has no passenger.");
+      await changePendingStopAddress({
+        tripId: trip.id,
+        legId: leg.id,
+        serviceDate: trip.tripDate.slice(0, 10),
+        direction: stopDirection,
+        owner,
+        personName: leg.toLabel,
+        choice,
+        location: trip.eventId
+          ? eventTitle || "Trip"
+          : `Day Centre${trip.busRunCode ? ` ${trip.busRunCode}` : ""}`,
+      });
+    },
+    onSuccess: async () => {
+      setAddressLeg(null);
+      toast.success("Today’s stop updated");
+      await qc.invalidateQueries({ queryKey: ACTIVE_TRIP_QUERY_KEY });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   const isVenueHop = trip.tripKind === "event_venue_hop";
   const hopBoardingReady = useHopBoardingGate(isVenueHop ? trip.id : "");
@@ -1749,6 +1794,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       .map((l) => ({
         id: l.toParticipantId ?? l.toStaffId ?? l.toCarerId ?? l.id,
         name: l.toLabel,
+        address: l.targetAddress,
+        legId: l.id,
       }));
   }, [isReturnRun, legs]);
 
@@ -1925,6 +1972,11 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           legs={legs}
           startAddress={startAddressForLeg(shown)}
           onCancelPickup={canCancelPickupLeg(leg) ? () => requestCancel(leg) : undefined}
+          onChangeAddress={
+            isPassengerPickupLeg(leg) && leg.status === "pending"
+              ? () => setAddressLeg(leg)
+              : undefined
+          }
           onWalkOn={
             showWalkOn && leg.id === activeLeg?.id
               ? () => setWalkOnOpen(true)
@@ -1964,6 +2016,11 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       drag={drag}
       onCancelPickup={requestCancel}
       cancelDisabled={isCancelling || reorderPickups.isPending}
+      onChangeAddress={
+        isPassengerPickupLeg(leg) && leg.status === "pending"
+          ? () => setAddressLeg(leg)
+          : undefined
+      }
     />
   );
 
@@ -2006,6 +2063,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
             tripId={trip.id}
             passengers={returnPassengers}
             onAllBoarded={handleAllBoarded}
+            onChangeAddress={(legId) => {
+              const leg = legs.find((l) => l.id === legId);
+              if (leg) setAddressLeg(leg);
+            }}
           />
         )}
 
@@ -2118,12 +2179,43 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
               key={l.id}
               leg={l}
               onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined}
+              onChangeAddress={
+                isPassengerPickupLeg(l) && l.status === "pending"
+                  ? () => setAddressLeg(l)
+                  : undefined
+              }
               cancelDisabled={isCancelling}
             />
           ))}
       </main>
 
       {pickupCancelDialog}
+      {addressLeg &&
+        ownerFromLeg({
+          participantId: addressLeg.toParticipantId,
+          staffId: addressLeg.toStaffId,
+          carerId: addressLeg.toCarerId,
+        }) && (
+          <StopAddressSheet
+            open
+            onOpenChange={(open) => {
+              if (!open) setAddressLeg(null);
+            }}
+            title={`Change ${addressLeg.toLabel}'s stop`}
+            description="This run only. The weekday plan stays as Run Planning set it."
+            owner={
+              ownerFromLeg({
+                participantId: addressLeg.toParticipantId,
+                staffId: addressLeg.toStaffId,
+                carerId: addressLeg.toCarerId,
+              })!
+            }
+            allowCustom
+            activeChoice={{ mode: "saved", addressId: "" }}
+            busy={changeAddress.isPending}
+            onChoose={(choice) => changeAddress.mutate(choice)}
+          />
+        )}
 
       {trip.eventId && (
         <WalkOnPersonModal
@@ -2159,7 +2251,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </div>
         ) : (
           <div className="text-center text-xs text-muted-foreground">
-            Drag upcoming stops to reorder · tap Depart Stop when ready.
+            Drag upcoming stops to reorder · Address changes today’s stop only · Depart Stop when ready.
           </div>
         )}
         <div
@@ -2175,9 +2267,42 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   );
 }
 
+function ChangeStopAddressButton({
+  onClick,
+  disabled,
+  tone = "light",
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "light" | "dark";
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn(
+        "h-8 shrink-0 gap-1 px-2 text-xs font-semibold",
+        tone === "dark"
+          ? "border-blue-300/80 bg-slate-800 text-white hover:bg-slate-700 hover:text-white"
+          : "border-primary/50 text-primary hover:bg-primary/10",
+      )}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <MapPin className="h-3.5 w-3.5" />
+      Address
+    </Button>
+  );
+}
+
 function LegRow({
   leg,
   onCancelPickup,
+  onChangeAddress,
   cancelDisabled,
   stopNumber,
   drag,
@@ -2185,6 +2310,7 @@ function LegRow({
 }: {
   leg: TripLeg;
   onCancelPickup?: (leg: TripLeg) => void;
+  onChangeAddress?: () => void;
   cancelDisabled?: boolean;
   stopNumber?: number;
   drag?: PickupDragBind;
@@ -2253,14 +2379,23 @@ function LegRow({
           <CheckCircle2 className="h-4 w-4" />
           {(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0).toFixed(1)} km
         </div>
-      ) : showCancel ? (
-        <PickupCancelButton
-          size="sm"
-          onClick={() => onCancelPickup!(leg)}
-          disabled={cancelDisabled}
-        />
       ) : (
-        <div className="shrink-0 text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {onChangeAddress && (
+            <ChangeStopAddressButton onClick={onChangeAddress} disabled={cancelDisabled} />
+          )}
+          {showCancel ? (
+            <PickupCancelButton
+              size="sm"
+              onClick={() => onCancelPickup!(leg)}
+              disabled={cancelDisabled}
+            />
+          ) : (
+            !onChangeAddress && (
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
+            )
+          )}
+        </div>
       )}
     </Card>
   );
@@ -2268,7 +2403,12 @@ function LegRow({
 
 /* -------------------- Return Boarding Roll -------------------- */
 
-interface ReturnPassenger { id: string; name: string }
+interface ReturnPassenger {
+  id: string;
+  name: string;
+  address: string | null;
+  legId: string;
+}
 
 /**
  * Pre-departure boarding roll for return runs.
@@ -2279,10 +2419,12 @@ function ReturnBoardingRoll({
   tripId,
   passengers,
   onAllBoarded,
+  onChangeAddress,
 }: {
   tripId: string;
   passengers: ReturnPassenger[];
   onAllBoarded: () => void;
+  onChangeAddress?: (legId: string) => void;
 }) {
   const boardingKey = `return_boarding_${tripId}`;
 
@@ -2348,27 +2490,39 @@ function ReturnBoardingRoll({
         {passengers.map((p) => {
           const on = boarded.has(p.id);
           return (
-            <button
+            <div
               key={p.id}
-              type="button"
-              onClick={() => toggle(p.id)}
               className={cn(
-                "flex w-full touch-manipulation select-none items-center justify-between rounded-xl border-2 px-4 py-3 text-left transition active:scale-[0.99]",
+                "flex w-full items-center gap-2 rounded-xl border-2 px-3 py-2",
                 on
                   ? "border-green-500 bg-green-600/25 text-white"
                   : "border-slate-600 bg-slate-800/60 text-slate-200",
               )}
             >
-              <span className="text-base font-semibold">{p.name}</span>
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase",
-                  on ? "bg-green-600 text-white" : "bg-slate-700 text-slate-400",
-                )}
+              <button
+                type="button"
+                onClick={() => toggle(p.id)}
+                className="flex min-w-0 flex-1 touch-manipulation select-none items-center justify-between gap-2 py-1 text-left"
               >
-                {on ? "✓ On Bus" : "Not yet"}
-              </span>
-            </button>
+                <span className="min-w-0">
+                  <span className="block truncate text-base font-semibold">{p.name}</span>
+                  {p.address && (
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-300">{p.address}</span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase",
+                    on ? "bg-green-600 text-white" : "bg-slate-700 text-slate-400",
+                  )}
+                >
+                  {on ? "✓ On Bus" : "Not yet"}
+                </span>
+              </button>
+              {onChangeAddress && (
+                <ChangeStopAddressButton tone="dark" onClick={() => onChangeAddress(p.legId)} />
+              )}
+            </div>
           );
         })}
       </div>
@@ -2396,6 +2550,7 @@ function ActiveLegCard({
   legs,
   startAddress,
   onCancelPickup,
+  onChangeAddress,
   onWalkOn,
   cancelDisabled,
   drag,
@@ -2409,6 +2564,7 @@ function ActiveLegCard({
   legs: TripLeg[];
   startAddress?: string | null;
   onCancelPickup?: () => void;
+  onChangeAddress?: () => void;
   onWalkOn?: () => void;
   cancelDisabled?: boolean;
   drag?: PickupDragBind;
@@ -2499,8 +2655,11 @@ function ActiveLegCard({
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
               <Navigation className="h-3.5 w-3.5 shrink-0" /> Active leg {leg.legIndex}
             </div>
-            {(onWalkOn || onCancelPickup) && leg.status !== "en_route" && (
+            {(onWalkOn || onCancelPickup || onChangeAddress) && leg.status !== "en_route" && (
               <div className="flex shrink-0 items-center gap-1.5">
+                {onChangeAddress && leg.status === "pending" && (
+                  <ChangeStopAddressButton tone="dark" onClick={onChangeAddress} disabled={cancelDisabled} />
+                )}
                 {onWalkOn && (
                   <WalkOnStopIconButton onClick={onWalkOn} disabled={cancelDisabled} />
                 )}

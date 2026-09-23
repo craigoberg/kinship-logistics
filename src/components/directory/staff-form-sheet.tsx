@@ -49,6 +49,7 @@ import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-s
 import { ACCESS_ROLES } from "@/lib/access-roles";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
+import { PersonAddressList } from "@/components/address/person-address-list";
 import { classifyWorkforceKind } from "@/lib/support-person";
 
 
@@ -442,9 +443,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 Same email as Supabase Auth day login. Also editable in the password section below.
               </p>
             </Field>
-            <Field label="Street address" className="sm:col-span-2">
+            <Field label="Home / street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
+            {staff?.id ? (
+              <PersonAddressList owner={{ kind: "staff", id: staff.id }} />
+            ) : (
+              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                Save this person first, then add other pickup places.
+              </p>
+            )}
             <Field
               label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"}
               required={!isEdit}
