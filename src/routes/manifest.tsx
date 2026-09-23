@@ -101,6 +101,7 @@ import {
   computePickupChainEndpoints,
   resolveStaffIdWithFallback,
   pruneIneligibleReturnTripPassengers,
+  applyDriverPickupOrder,
 } from "@/lib/data-store";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 import { CloseRunCard } from "@/components/manifest/close-run-card";
@@ -1706,7 +1707,15 @@ const ACTIVE_TRIP_QUERY_KEY = ["transport_trips", "active"] as const;
 function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const bindChromeScroll = useHideChromeOnScrollRef<HTMLElement>();
   const { chromeHidden } = useChromeVisibility();
-  const { trip, legs, eventTitle } = bundle;
+  const { trip, legs: serverLegs, eventTitle } = bundle;
+  const [driverPickupOrder, setDriverPickupOrder] = useState<string[]>([]);
+  useEffect(() => {
+    setDriverPickupOrder([]);
+  }, [trip.id]);
+  const legs = useMemo(
+    () => applyDriverPickupOrder(serverLegs, driverPickupOrder),
+    [serverLegs, driverPickupOrder],
+  );
   const qc = useQueryClient();
   const reorderPickups = useReorderTripPickupLegs();
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
@@ -1892,14 +1901,37 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     );
   }, [activeLeg, legs, pendingPickupIds]);
 
-  const [localPickupOrder, setLocalPickupOrder] = useState<string[]>([]);
   const pendingPickupKey = pendingPickupIds.join("|");
+  const serverPendingKey = useMemo(
+    () =>
+      serverLegs
+        .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+        .sort((a, b) => a.legIndex - b.legIndex)
+        .map((l) => l.id)
+        .join("|"),
+    [serverLegs],
+  );
+  const pendingIdsRef = useRef(pendingPickupIds);
+  pendingIdsRef.current = pendingPickupIds;
+  const lastPersistKey = useRef("");
+  // Drop-off used to clear the drag and redraw from the stored stop numbers,
+  // so a person who had been moved up returned to the bottom. Keep that order
+  // and write the remaining stops back when the stored order is behind it.
   useEffect(() => {
-    setLocalPickupOrder([]);
-  }, [pendingPickupKey]);
-
-  const sortablePickupIds =
-    localPickupOrder.length === pendingPickupIds.length ? localPickupOrder : pendingPickupIds;
+    if (driverPickupOrder.length === 0) return;
+    if (pendingPickupKey === serverPendingKey) return;
+    if (reorderPickups.isPending) return;
+    if (lastPersistKey.current === pendingPickupKey) return;
+    lastPersistKey.current = pendingPickupKey;
+    reorderPickups.mutate({ tripId: trip.id, orderedLegIds: pendingIdsRef.current });
+  }, [
+    driverPickupOrder.length,
+    pendingPickupKey,
+    reorderPickups,
+    reorderPickups.isPending,
+    serverPendingKey,
+    trip.id,
+  ]);
 
   const displayLegForPendingOrder = (leg: TripLeg, orderedPendingIds: string[]): TripLeg => {
     const ep = computePickupChainEndpoints(trip, legs, orderedPendingIds).get(leg.id);
@@ -1908,13 +1940,15 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
   const applyPickupReorder = useCallback(
     (nextIds: string[]) => {
-      if (nextIds.join("|") === pendingPickupKey) return;
-      setLocalPickupOrder(nextIds);
+      const key = nextIds.join("|");
+      if (key === pendingPickupKey) return;
+      lastPersistKey.current = key;
+      setDriverPickupOrder(nextIds);
       reorderPickups.mutate(
         { tripId: trip.id, orderedLegIds: nextIds },
         {
           onSuccess: () => toast.success("Pickup order updated"),
-          onError: () => setLocalPickupOrder([]),
+          onError: () => setDriverPickupOrder([]),
         },
       );
     },
@@ -2084,7 +2118,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           <>
             {pendingPickups.length >= 2 ? (
               <PointerSortableList
-                itemIds={sortablePickupIds}
+                itemIds={pendingPickupIds}
                 onReorder={applyPickupReorder}
                 disabled={reorderPickups.isPending || isCancelling}
               >
@@ -2122,7 +2156,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
               Upcoming stops — drag to reorder
             </div>
             <PointerSortableList
-              itemIds={sortablePickupIds}
+              itemIds={pendingPickupIds}
               onReorder={applyPickupReorder}
               disabled={reorderPickups.isPending || isCancelling}
             >

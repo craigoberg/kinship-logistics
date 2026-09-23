@@ -1953,6 +1953,12 @@ export async function insertAttendanceSchedule(
 ): Promise<AttendanceSchedule> {
   const inbound = input.inboundTransport;
   const outbound = input.outboundTransport;
+  const { assertHomeAddressForBusAssignment } = await import("@/lib/api/person-addresses");
+  await assertHomeAddressForBusAssignment({
+    owner: { kind: "participant", id: input.participantId },
+    inbound,
+    outbound,
+  });
   const payload = {
     participant_id: input.participantId,
     day_of_week: input.dayOfWeek,
@@ -2704,6 +2710,17 @@ export async function updateAttendanceSchedule(
   if (patch.expectedDepartureTime !== undefined)
     row.expected_departure_time = patch.expectedDepartureTime;
   if (patch.active !== undefined) row.active = patch.active;
+  const before = existing
+    ? rowToAttendanceSchedule(existing as AttendanceScheduleRow)
+    : null;
+  if (patch.active !== false && before?.participantId) {
+    const { assertHomeAddressForBusAssignment } = await import("@/lib/api/person-addresses");
+    await assertHomeAddressForBusAssignment({
+      owner: { kind: "participant", id: before.participantId },
+      inbound: patch.inboundTransport ?? before.inboundTransport,
+      outbound: patch.outboundTransport ?? before.outboundTransport,
+    });
+  }
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
     .update(row)
@@ -2712,9 +2729,6 @@ export async function updateAttendanceSchedule(
     .single();
   if (error) throw error;
   const saved = rowToAttendanceSchedule(data as AttendanceScheduleRow);
-  const before = existing
-    ? rowToAttendanceSchedule(existing as AttendanceScheduleRow)
-    : null;
   void logParticipantPlanningChange({
     action: patch.active === false ? "cleared" : "updated",
     scheduleId: saved.id,
@@ -6324,6 +6338,49 @@ export function isPassengerPickupLeg(leg: TripLeg): boolean {
   );
 }
 
+/**
+ * Driver stop order with people who already left the pending list removed.
+ * Pending stops the driver has not placed keep their current order after
+ * the ones they did place. An empty driver list returns the server order.
+ */
+export function projectPendingPickupOrder(serverIds: string[], driverIds: string[]): string[] {
+  if (driverIds.length === 0 || serverIds.length === 0) return serverIds;
+  const pending = new Set(serverIds);
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const id of driverIds) {
+    if (!pending.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    kept.push(id);
+  }
+  if (kept.length === 0) return serverIds;
+  const extras = serverIds.filter((id) => !seen.has(id));
+  return [...kept, ...extras];
+}
+
+/**
+ * Show pending pickups in the driver's order without waiting for a refetch.
+ * Completed stops keep their stop numbers. Pending stops reuse the pending
+ * stop numbers, in the projected order, so the next drop-off stays put.
+ */
+export function applyDriverPickupOrder(legs: TripLeg[], driverIds: string[]): TripLeg[] {
+  if (driverIds.length === 0) return legs;
+  const pending = legs
+    .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+    .sort((a, b) => a.legIndex - b.legIndex);
+  const serverIds = pending.map((l) => l.id);
+  const projected = projectPendingPickupOrder(serverIds, driverIds);
+  if (projected.join("|") === serverIds.join("|")) return legs;
+  const slots = pending.map((l) => l.legIndex).sort((a, b) => a - b);
+  const indexById = new Map(projected.map((id, i) => [id, slots[i]!]));
+  return legs
+    .map((l) => {
+      const next = indexById.get(l.id);
+      return next == null ? l : { ...l, legIndex: next };
+    })
+    .sort((a, b) => a.legIndex - b.legIndex);
+}
+
 function busRunRosterEntryToPerson(r: BusRunRosterEntry): TransportRosterPerson {
   const parsed = parseRoutePersonKey(r.id);
   if (parsed.kind === "participant") {
@@ -6702,16 +6759,27 @@ export async function reorderTripPickupLegs(
   const pendingPickups = legs.filter((l) => isPassengerPickupLeg(l) && l.status === "pending");
   const otherLegs = legs.filter((l) => !isPassengerPickupLeg(l));
 
-  const pendingIds = new Set(pendingPickups.map((l) => l.id));
-  if (orderedPendingPickupLegIds.length !== pendingPickups.length) {
+  const pendingPickupsInOrder = [...pendingPickups].sort((a, b) => a.legIndex - b.legIndex);
+  const pendingIdSet = new Set(pendingPickupsInOrder.map((l) => l.id));
+  const legIdSet = new Set(legs.map((l) => l.id));
+  for (const id of orderedPendingPickupLegIds) {
+    if (!legIdSet.has(id)) throw new Error("Invalid pickup leg in reorder list.");
+  }
+  // A drop-off can commit while this save is in flight. Keep the relative
+  // order of stops that are still pending, and ignore the one that just left.
+  const seen = new Set<string>();
+  const requestedStillPending: string[] = [];
+  for (const id of orderedPendingPickupLegIds) {
+    if (!pendingIdSet.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    requestedStillPending.push(id);
+  }
+  if (pendingPickupsInOrder.some((l) => !seen.has(l.id))) {
     throw new Error("Pickup order must include every pending stop exactly once.");
   }
-  for (const id of orderedPendingPickupLegIds) {
-    if (!pendingIds.has(id)) throw new Error("Invalid pickup leg in reorder list.");
-  }
 
-  const pendingMap = new Map(pendingPickups.map((l) => [l.id, l]));
-  const reorderedPending = orderedPendingPickupLegIds.map((id) => pendingMap.get(id)!);
+  const pendingMap = new Map(pendingPickupsInOrder.map((l) => [l.id, l]));
+  const reorderedPending = requestedStillPending.map((id) => pendingMap.get(id)!);
   const rebuiltPending = rebuildPendingPickupChain(trip, legs, reorderedPending);
 
   // Preserve boarded + cancelled pickups in original index order, then pending.

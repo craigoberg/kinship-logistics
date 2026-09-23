@@ -124,6 +124,58 @@ export async function loadHomeAddress(owner: AddressOwner): Promise<string | nul
   return street || null;
 }
 
+export const BUS_HOME_ADDRESS_REQUIRED =
+  "Add a home street address on this person’s record before assigning them to a bus run.";
+
+/** Named bus-run lookup code, or a legacy bus/pickup code. Self, walk, and carer are not bus. */
+export function isBusTransportCode(
+  code: string | null | undefined,
+  busRunCodes: ReadonlySet<string>,
+): boolean {
+  const raw = (code ?? "").trim();
+  if (!raw) return false;
+  if (busRunCodes.has(raw)) return true;
+  const v = raw.toLowerCase();
+  return v.includes("bus") || v.includes("pickup");
+}
+
+export function assignmentNeedsHomeAddress(
+  inbound: string | null | undefined,
+  outbound: string | null | undefined,
+  busRunCodes: ReadonlySet<string>,
+): boolean {
+  return (
+    isBusTransportCode(inbound, busRunCodes) || isBusTransportCode(outbound, busRunCodes)
+  );
+}
+
+export async function loadBusRunCodes(): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("system_lookup_parameters")
+    .select("code")
+    .eq("category", "bus_runs");
+  if (error) throw new Error(error.message);
+  return new Set((data ?? []).map((r) => String((r as { code: string }).code)));
+}
+
+/** Bus assignment needs a saved home street. Self transport does not. */
+export async function assertHomeAddressForBusAssignment(input: {
+  owner: AddressOwner;
+  inbound?: string | null;
+  outbound?: string | null;
+}): Promise<void> {
+  const codes = await loadBusRunCodes();
+  if (!assignmentNeedsHomeAddress(input.inbound, input.outbound, codes)) return;
+  const { data, error } = await supabase
+    .from(homeTable(input.owner.kind))
+    .select("street_address")
+    .eq("id", input.owner.id)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  const street = ((data as { street_address?: string | null } | null)?.street_address ?? "").trim();
+  if (!street) throw new Error(BUS_HOME_ADDRESS_REQUIRED);
+}
+
 async function logAddressChange(input: {
   action: "created" | "updated" | "archived";
   owner: AddressOwner;

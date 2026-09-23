@@ -291,6 +291,15 @@ export async function upsertSupportSchedule(input: {
       .maybeSingle();
     before = (existing as ScheduleDb | null) ?? null;
   }
+  const { assertHomeAddressForBusAssignment } = await import("@/lib/api/person-addresses");
+  const ownerId = input.personKind === "carer" ? input.carerId : input.staffId;
+  if (ownerId) {
+    await assertHomeAddressForBusAssignment({
+      owner: { kind: input.personKind === "carer" ? "carer" : "staff", id: ownerId },
+      inbound: input.inboundTransport,
+      outbound: input.outboundTransport,
+    });
+  }
   const row = {
     person_kind: input.personKind,
     staff_id: input.personKind === "carer" ? null : input.staffId ?? null,

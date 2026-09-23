@@ -80,6 +80,7 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
       return (carerQ.data ?? []).map((c) => ({
         id: c.id,
         name: c.fullName,
+        street: (c.streetAddress ?? "").trim(),
         subtitle: c.streetAddress ?? c.relationship ?? "",
       }));
     }
@@ -92,12 +93,15 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
       .map((s) => ({
         id: s.id,
         name: s.fullName,
+        street: (s.streetAddress ?? "").trim(),
         subtitle: s.streetAddress ?? s.role ?? "",
       }));
   }, [kind, staffQ.data, carerQ.data]);
 
+  const selectedPerson = people.find((p) => p.id === personId);
   const missing: string[] = [];
   if (!personId) missing.push("Person");
+  if (personId && !selectedPerson?.street) missing.push("Home street address");
   if (days.length === 0) missing.push("At least one day");
   const otherCode = otherDirection === "self" ? "TRN-SELF" : otherRun || busRuns[0]?.code || busRunCode;
   if (otherDirection === "bus" && !otherCode) missing.push("Other-direction run");
@@ -260,7 +264,12 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
           ) : null}
 
           {missing.length > 0 && (
-            <p className="text-sm text-destructive">Need: {missing.join(", ")}</p>
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              Still needed: {missing.join(" · ")}
+              {personId && !selectedPerson?.street
+                ? ". Add a home street address on their record before they can go on the bus."
+                : ""}
+            </div>
           )}
         </div>
 

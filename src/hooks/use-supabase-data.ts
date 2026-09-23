@@ -1519,14 +1519,19 @@ export function useReorderTripPickupLegs() {
       orderedLegIds: string[];
     }) => reorderTripPickupLegs(tripId, orderedLegIds),
     onSuccess: (legs, { tripId }) => {
-      qc.setQueriesData(
-        { queryKey: ACTIVE_TRIP_KEY },
-        (old: ActiveTripBundle | null | undefined) => {
-          if (!old?.trip || old.trip.id !== tripId) return old;
-          return { ...old, legs };
-        },
-      );
-      invalidateTransportCaches(qc);
+      void (async () => {
+        // Drop a refetch that started during the stop-number rewrite. That read
+        // can still carry the previous order and would paint it over this save.
+        await qc.cancelQueries({ queryKey: ACTIVE_TRIP_KEY });
+        qc.setQueriesData(
+          { queryKey: ACTIVE_TRIP_KEY },
+          (old: ActiveTripBundle | null | undefined) => {
+            if (!old?.trip || old.trip.id !== tripId) return old;
+            return { ...old, legs };
+          },
+        );
+        invalidateTransportCaches(qc);
+      })();
     },
     onError: (err: Error) => showRedToast("Could not reorder pickups", err),
   });

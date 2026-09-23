@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Plus, Save, Trash2 } from "lucide-react";
 import {
@@ -33,6 +33,11 @@ import {
   ScheduleTransportPills,
   isAssignedBusRun,
 } from "@/components/transport/schedule-transport-pills";
+import {
+  BUS_HOME_ADDRESS_REQUIRED,
+  assignmentNeedsHomeAddress,
+  loadHomeAddress,
+} from "@/lib/api/person-addresses";
 
 interface Props {
   open: boolean;
@@ -109,13 +114,24 @@ export function AddAttendanceScheduleModal({
     }
   }, [open, editing]);
 
+  const busRunCodes = useMemo(() => new Set(busRuns.map((r) => r.code)), [busRuns]);
+  const needsBus = assignmentNeedsHomeAddress(inboundTransport, outboundTransport, busRunCodes);
+  const homeQ = useQuery({
+    queryKey: ["home-address", "participant", participantId],
+    queryFn: () => loadHomeAddress({ kind: "participant", id: participantId }),
+    enabled: open && participantId.length > 0,
+    staleTime: 0,
+  });
+  const homeMissing = needsBus && homeQ.isFetched && !(homeQ.data ?? "").trim();
   const valid =
     dayOfWeek.length > 0 &&
     serviceType.trim().length > 0 &&
     inboundTransport.trim().length > 0 &&
     outboundTransport.trim().length > 0 &&
     /^\d{2}:\d{2}$/.test(arrivalTime) &&
-    /^\d{2}:\d{2}$/.test(departureTime);
+    /^\d{2}:\d{2}$/.test(departureTime) &&
+    !homeMissing &&
+    !(needsBus && homeQ.isLoading);
   const canSubmit = dirty && valid && !mutation.isPending;
   const dayDisplay = dayLabel || dayOfWeek;
 
@@ -308,6 +324,11 @@ export function AddAttendanceScheduleModal({
               />
             </div>
           </div>
+          {homeMissing && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              Still needed: Home street address. {BUS_HOME_ADDRESS_REQUIRED}
+            </div>
+          )}
         </div>
 
         {/* ── Remove confirmation panel (shown in-place when triggered) ── */}

@@ -535,6 +535,14 @@ export function missingFieldsForPayload(
     if (!payload.allergiesText.trim()) missing.push("Allergies (or write None)");
     if (!payload.attendance.some((d) => d.enabled))
       missing.push("At least one attendance day");
+    if (
+      payload.attendance.some(
+        (d) => d.enabled && (d.inbound === "bus" || d.outbound === "bus"),
+      ) &&
+      !payload.streetAddress.trim()
+    ) {
+      missing.push("Home street address");
+    }
     if (phase === "confirm" || phase === "file") {
       const s = payload.support ?? emptyClientSupport();
       if (s.goals.trim().length < MIN_SUPPORT_PLAN_CHARS)

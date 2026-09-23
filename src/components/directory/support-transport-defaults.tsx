@@ -18,6 +18,11 @@ import {
   ScheduleTransportPills,
 } from "@/components/transport/schedule-transport-pills";
 import {
+  BUS_HOME_ADDRESS_REQUIRED,
+  isBusTransportCode,
+  loadHomeAddress,
+} from "@/lib/api/person-addresses";
+import {
   SUPPORT_SCHEDULES_KEY,
   deactivateSupportSchedule,
   listSupportSchedulesForPerson,
@@ -67,6 +72,24 @@ export function SupportTransportDefaults({
     LOOKUP_CATEGORIES.operatingDay,
   );
   const busRunMap = useBusRunMap();
+  const busRunCodes = useMemo(() => new Set(busRuns.map((r) => r.code)), [busRuns]);
+  const homeOwnerId = personKind === "carer" ? carerId : staffId;
+  const homeQ = useQuery({
+    queryKey: ["home-address", personKind, homeOwnerId ?? ""],
+    queryFn: () =>
+      loadHomeAddress({
+        kind: personKind === "carer" ? "carer" : "staff",
+        id: homeOwnerId!,
+      }),
+    enabled: !!homeOwnerId,
+    staleTime: 0,
+  });
+  const hasHome = !!(homeQ.data ?? "").trim();
+  const refuseBusWithoutHome = (code: string) => {
+    if (!isBusTransportCode(code, busRunCodes) || hasHome || homeQ.isLoading) return false;
+    toast.error(BUS_HOME_ADDRESS_REQUIRED);
+    return true;
+  };
   const { data: centreHours = [] } = useQuery({
     queryKey: CENTRE_HOURS_QUERY_KEY,
     queryFn: listCentreHours,
@@ -155,6 +178,11 @@ export function SupportTransportDefaults({
         </p>
       ) : (
         <div className="space-y-3">
+          {homeQ.isFetched && !hasHome && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              {BUS_HOME_ADDRESS_REQUIRED} Self transport can still be set.
+            </div>
+          )}
           {openDays.map((d) => {
             const existing = byDay.get(d.code);
             const inbound = existing?.inboundTransport ?? "";
@@ -192,14 +220,15 @@ export function SupportTransportDefaults({
                     busRuns={busRuns}
                     busRunMap={busRunMap}
                     invalid={false}
-                    onSelect={(code) =>
+                    onSelect={(code) => {
+                      if (refuseBusWithoutHome(code)) return;
                       saveDay.mutate({
                         day: d.code,
                         inbound: code,
                         outbound: outbound || code,
                         existingId: existing?.id,
-                      })
-                    }
+                      });
+                    }}
                   />
                 </div>
                 <div className="space-y-1.5">
@@ -211,14 +240,15 @@ export function SupportTransportDefaults({
                     busRuns={busRuns}
                     busRunMap={busRunMap}
                     invalid={false}
-                    onSelect={(code) =>
+                    onSelect={(code) => {
+                      if (refuseBusWithoutHome(code)) return;
                       saveDay.mutate({
                         day: d.code,
                         inbound: inbound || code,
                         outbound: code,
                         existingId: existing?.id,
-                      })
-                    }
+                      });
+                    }}
                   />
                 </div>
               </div>
