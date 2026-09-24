@@ -29,8 +29,8 @@ export function GlobalRaiseTicketDrawer() {
   }, []);
 
   const defaultClassName = onManifest
-    ? "fixed right-28 top-14 z-[60] md:right-32 md:top-[4.25rem]"
-    : "fixed bottom-40 right-4 z-[60] md:bottom-24 md:right-6";
+    ? "fixed right-28 top-14 z-[65] md:right-32 md:top-[4.25rem]"
+    : "fixed bottom-40 right-4 z-[65] md:bottom-24 md:right-6";
 
   const label = ticket.activeFormTitle
     ? `Ticket: ${ticket.activeFormTitle}`

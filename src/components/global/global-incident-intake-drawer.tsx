@@ -101,8 +101,8 @@ export function GlobalIncidentIntakeDrawer() {
   useHideGlobalFabs(open || healthSafetyOpen);
 
   const defaultClassName = onManifest
-    ? "fixed right-28 top-3 z-[60] md:right-32 md:top-4"
-    : "fixed bottom-24 right-4 z-[60] md:bottom-8 md:right-6";
+    ? "fixed right-28 top-3 z-[65] md:right-32 md:top-4"
+    : "fixed bottom-24 right-4 z-[65] md:bottom-8 md:right-6";
 
   return (
     <>

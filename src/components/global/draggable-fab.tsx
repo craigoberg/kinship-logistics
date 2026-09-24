@@ -88,6 +88,8 @@ export function DraggableFab({
 
   const onPointerDown = (e: React.PointerEvent<HTMLButtonElement>) => {
     if (e.button !== 0) return;
+    // Keep the open form from treating this as an outside press (which drops the click).
+    e.stopPropagation();
     const el = e.currentTarget;
     const rect = el.getBoundingClientRect();
     el.setPointerCapture(e.pointerId);
@@ -162,12 +164,15 @@ export function DraggableFab({
               top: pos.top,
               right: "auto",
               bottom: "auto",
+              // Modal dialogs set pointer-events:none on <body>. The initial
+              // value does not punch through that; this inline value does.
+              pointerEvents: "auto",
             }
-          : undefined
+          : { pointerEvents: "auto" }
       }
       className={cn(
-        pos ? "fixed z-[60]" : defaultClassName,
-        "touch-none select-none cursor-grab active:cursor-grabbing",
+        pos ? "fixed z-[65]" : defaultClassName,
+        "pointer-events-auto touch-none select-none cursor-grab active:cursor-grabbing",
         className,
       )}
     >
