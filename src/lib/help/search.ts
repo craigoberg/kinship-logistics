@@ -1,4 +1,5 @@
 import type { ActiveUserProfile } from "@/lib/data-store";
+import { normalizeAccessRoleKey } from "@/lib/access-roles";
 import type { HelpAreaChip, HelpTopic } from "./types";
 
 function normalizeRole(value: string | null | undefined): string {
@@ -8,6 +9,8 @@ function normalizeRole(value: string | null | undefined): string {
 /** Manager / assistant_manager (and coarse coordinator) see the full catalogue. */
 export function isHelpManagerViewer(profile: ActiveUserProfile | null): boolean {
   if (!profile) return false;
+  const access = normalizeAccessRoleKey(profile.accessRole);
+  if (access === "manager" || access === "assistant_manager") return true;
   if (profile.role === "coordinator") return true;
   const staffRole = normalizeRole(profile.staffRole);
   return staffRole === "manager" || staffRole === "assistant_manager";
@@ -24,6 +27,9 @@ export function canViewHelpTopic(
   if (topic.roles === "all") return true;
   if (!profile) return true;
   if (isHelpManagerViewer(profile)) return true;
+
+  const access = normalizeAccessRoleKey(profile.accessRole);
+  if (access && topic.roles.includes(access)) return true;
 
   const staffRole = normalizeRole(profile.staffRole);
   if (staffRole && topic.roles.includes(staffRole)) return true;

@@ -41,6 +41,14 @@ export function selectionsEqual(
   return floorSelectionKey(a) === floorSelectionKey(b);
 }
 
+/** Keep only bus runs whose codes are planned for this direction today. */
+export function filterBusRunOptions(
+  opts: EventBusRunOption[],
+  allowedCodes: ReadonlySet<string>,
+): EventBusRunOption[] {
+  return opts.filter((o) => allowedCodes.has(o.code));
+}
+
 export function busChipLabel(
   opt: EventBusRunOption,
   style: FloorBusLabelStyle,

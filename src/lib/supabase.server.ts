@@ -6,8 +6,12 @@ function normalizeSupabaseUrl(raw: string | undefined): string | null {
 }
 
 export function createPublishableServerClient(): SupabaseClient {
-  const url = normalizeSupabaseUrl(process.env.SUPABASE_URL);
-  const key = process.env.SUPABASE_PUBLISHABLE_KEY;
+  const url = normalizeSupabaseUrl(
+    process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+  );
+  const key =
+    process.env.SUPABASE_PUBLISHABLE_KEY ||
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY;
   if (!url || !key) {
     throw new Error("Supabase server env missing (SUPABASE_URL / SUPABASE_PUBLISHABLE_KEY).");
   }
@@ -17,7 +21,9 @@ export function createPublishableServerClient(): SupabaseClient {
 }
 
 export function createServiceServerClient(): SupabaseClient {
-  const url = normalizeSupabaseUrl(process.env.SUPABASE_URL);
+  const url = normalizeSupabaseUrl(
+    process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+  );
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
   if (!url || !key) {
     throw new Error(
@@ -38,7 +44,9 @@ export function createServiceServerClient(): SupabaseClient {
 }
 
 export function getServerSupabaseUrl(): string {
-  const url = normalizeSupabaseUrl(process.env.SUPABASE_URL);
+  const url = normalizeSupabaseUrl(
+    process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+  );
   if (!url) throw new Error("SUPABASE_URL is not configured.");
   return url;
 }

@@ -1,0 +1,10 @@
+﻿responsibility_owner,internal,1
+responsibility_owner,council,2
+ryge_severity,green,1
+ryge_severity,yellow,2
+ryge_severity,red,3
+site_session_status,open_pending,1
+site_session_status,active_day,2
+site_session_status,escalated_lock,3
+site_session_status,closed_orderly,4
+site_session_status,closed_no_go,5

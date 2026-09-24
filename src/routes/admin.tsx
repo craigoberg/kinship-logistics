@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import {
   Tabs,
   TabsContent,
@@ -9,41 +10,68 @@ import {
 import { AdminLookupWorkspace } from "@/components/admin/admin-lookup-workspace";
 import { SystemParameterWorkspace } from "@/components/admin/system-parameter-workspace";
 import { MenuAccessMatrix } from "@/components/admin/menu-access-matrix";
-import { CentreOperatingHoursWorkspace } from "@/components/admin/centre-operating-hours-workspace";
 import { FleetRegisterWorkspace } from "@/components/admin/fleet-register-workspace";
 import { VenuesWorkspace } from "@/components/admin/venues-workspace";
 import { VendorsWorkspace } from "@/components/admin/vendors-workspace";
+import { DutyRolesWorkspace } from "@/components/admin/duty-roles-workspace";
 import { BackupRestoreWorkspace } from "@/components/admin/backup-restore-workspace";
+import { PublicWebsiteWorkspace } from "@/components/admin/public-website-workspace";
+import { ActivityLogWorkspace } from "@/components/admin/activity-log-workspace";
 
 export const Route = createFileRoute("/admin")({
   ssr: false,
   component: AdminPage,
 });
 
-type AdminTab = "lookups" | "fleet" | "venues" | "vendors" | "parameters" | "hours" | "access" | "backup";
+type AdminTab =
+  | "lookups"
+  | "fleet"
+  | "venues"
+  | "vendors"
+  | "duty"
+  | "parameters"
+  | "website"
+  | "access"
+  | "activity"
+  | "backup";
 
 function AdminPage() {
   const [tab, setTab] = useState<AdminTab>("lookups");
+  const { canOpen, canEditMatrix } = useMenuAccess();
+  const showWebsite = canOpen("public_website");
+  const showAccess = canEditMatrix;
+
+  useEffect(() => {
+    if (tab === "website" && !showWebsite) setTab("lookups");
+    if (tab === "access" && !showAccess) setTab("lookups");
+  }, [tab, showWebsite, showAccess]);
+
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 p-4 md:p-6">
+    <div className="mx-auto w-full max-w-7xl space-y-6 p-4 md:p-6">
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">
           Admin Configuration
         </h1>
         <p className="text-sm text-muted-foreground">
-          Manage fleet vehicles, venues, vendors, lookup parameters, tunable system thresholds, role access, and database backups.
+          Manage fleet, venues, vendors, Duty roles, public website (yada.org.au), lookups, thresholds, activity log, role access, and backups.
         </p>
       </header>
 
       <Tabs value={tab} onValueChange={(v) => setTab(v as AdminTab)} className="space-y-4">
-        <TabsList>
+        <TabsList className="flex h-auto flex-wrap justify-start">
           <TabsTrigger value="lookups">Lookups</TabsTrigger>
           <TabsTrigger value="fleet">Fleet Register</TabsTrigger>
           <TabsTrigger value="venues">Venues</TabsTrigger>
           <TabsTrigger value="vendors">Vendors</TabsTrigger>
+          <TabsTrigger value="duty">Duty roles</TabsTrigger>
+          {showWebsite ? (
+            <TabsTrigger value="website">Public website</TabsTrigger>
+          ) : null}
           <TabsTrigger value="parameters">System Parameters</TabsTrigger>
-          <TabsTrigger value="hours">Centre Operating Hours</TabsTrigger>
-          <TabsTrigger value="access">Menu Access</TabsTrigger>
+          {showAccess ? (
+            <TabsTrigger value="access">Menu Access</TabsTrigger>
+          ) : null}
+          <TabsTrigger value="activity">Activity log</TabsTrigger>
           <TabsTrigger value="backup">Backup &amp; Restore</TabsTrigger>
         </TabsList>
         <TabsContent value="lookups">
@@ -58,14 +86,24 @@ function AdminPage() {
         <TabsContent value="vendors">
           <VendorsWorkspace />
         </TabsContent>
+        <TabsContent value="duty">
+          <DutyRolesWorkspace />
+        </TabsContent>
+        {showWebsite ? (
+          <TabsContent value="website">
+            <PublicWebsiteWorkspace />
+          </TabsContent>
+        ) : null}
         <TabsContent value="parameters">
           <SystemParameterWorkspace />
         </TabsContent>
-        <TabsContent value="hours">
-          <CentreOperatingHoursWorkspace />
-        </TabsContent>
-        <TabsContent value="access">
-          <MenuAccessMatrix />
+        {showAccess ? (
+          <TabsContent value="access">
+            <MenuAccessMatrix />
+          </TabsContent>
+        ) : null}
+        <TabsContent value="activity">
+          <ActivityLogWorkspace />
         </TabsContent>
         <TabsContent value="backup">
           <BackupRestoreWorkspace />

@@ -29,6 +29,16 @@ import {
   AccordionTrigger,
 } from "@/components/ui/accordion";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
+import {
+  AlertDialog,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Switch } from "@/components/ui/switch";
@@ -42,11 +52,13 @@ import {
 import { enqueue } from "@/lib/sync-queue";
 import {
   useUpdateParticipant,
+  useArchiveGuestParticipant,
   useParticipantSchedules,
   useParticipantComplianceLogs,
   useTodaysComplianceLogs,
   useUpdateMedicationSchedule,
 } from "@/hooks/use-supabase-data";
+import { listLiveGuestEventTitles } from "@/lib/api/event-guest";
 import { CarerNetworkPanel } from "./carer-network-panel";
 
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -59,16 +71,29 @@ import {
 } from "@/components/medication/give-dose-modal";
 import { AttendanceTab } from "@/components/attendance/attendance-tab";
 import { FinanceTab } from "@/components/finance/finance-tab";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
+import { SupportPlanTab } from "@/components/participants/support-plan-tab";
 import { toast } from "sonner";
+import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
+import { PersonAddressList } from "@/components/address/person-address-list";
+import { exitReasonLabel, isDeceasedExit } from "@/lib/service-exit";
 
 interface Props {
   participant: Participant | null;
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved?: (p: Participant) => void;
+  /** Open on this tab (e.g. Schedules from Run Planning). */
+  initialTab?: "profile" | "support" | "contact" | "history" | "attendance" | "finance";
 }
 
-export function CareProfileModal({ participant, open, onOpenChange, onSaved }: Props) {
+export function CareProfileModal({
+  participant,
+  open,
+  onOpenChange,
+  onSaved,
+  initialTab = "profile",
+}: Props) {
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
   const [ndisNumber, setNdisNumber] = useState("");
@@ -76,6 +101,11 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const [regularPickupAddress, setRegularPickupAddress] = useState("");
   const [iddsi, setIddsi] = useState({ liquids: 0, foods: 7 });
   const [dirty, setDirty] = useState(false);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [exitMode, setExitMode] = useState<"offboard" | "reactivate" | null>(null);
+  const [exitOverlay, setExitOverlay] = useState<Partial<Participant> | null>(null);
+  const [liveGuestEvents, setLiveGuestEvents] = useState<string[]>([]);
+  const archiveGuest = useArchiveGuestParticipant();
   const [scheduleOpen, setScheduleOpen] = useState(false);
   const [editMedSchedule, setEditMedSchedule] = useState<MedicationSchedule | null>(null);
   const [editMedOpen, setEditMedOpen] = useState(false);
@@ -85,6 +115,15 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   const pending = usePendingScheduleMap();
   const medSectionRef = useRef<HTMLDivElement | null>(null);
   const [medPulse, setMedPulse] = useState(false);
+
+  useEffect(() => {
+    setExitOverlay(null);
+    setExitMode(null);
+  }, [participant?.id, participant?.serviceStatus, open]);
+
+  const shown = participant ? { ...participant, ...exitOverlay } : null;
+  const clientOffboarded =
+    shown?.participantKind !== "guest" && shown?.serviceStatus === "exited";
 
   const scrollToMeds = () => {
     medSectionRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
@@ -103,6 +142,24 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
       setDirty(false);
     }
   }, [participant]);
+
+  useEffect(() => {
+    if (!archiveOpen || !participant || participant.participantKind !== "guest") {
+      setLiveGuestEvents([]);
+      return;
+    }
+    let cancelled = false;
+    void listLiveGuestEventTitles(participant.id)
+      .then((titles) => {
+        if (!cancelled) setLiveGuestEvents(titles);
+      })
+      .catch(() => {
+        if (!cancelled) setLiveGuestEvents([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [archiveOpen, participant]);
 
   if (!participant) return null;
 
@@ -143,40 +200,94 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
   };
 
 
+  const saveSupportPatch = async (patch: ParticipantPatch) => {
+    if (!online) {
+      enqueue("participant_update", {
+        id: participant.id,
+        patch: patch as unknown as Record<string, unknown>,
+      });
+      toast.info("Queued offline", {
+        description: "Support plan changes will sync when back online.",
+      });
+      onOpenChange(false);
+      return;
+    }
+    try {
+      const updated = await updateMutation.mutateAsync({ id: participant.id, patch });
+      toast.success("Support plan updated", {
+        description: `${updated.fullName} saved.`,
+      });
+      onSaved?.(updated);
+      onOpenChange(false);
+    } catch (err) {
+      toast.error("Could not save support plan", {
+        description: (err as Error).message,
+        className: "!bg-red-600 !text-white !border-red-700",
+        duration: 12_000,
+      });
+      throw err;
+    }
+  };
+
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[85vh] max-w-3xl overflow-x-hidden flex flex-col border-border bg-card">
+        <DialogContent className="flex max-h-[85vh] w-[min(96vw,72rem)] max-w-6xl flex-col overflow-x-auto border-border bg-card">
           <DialogHeader className="shrink-0">
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <DialogTitle className="truncate">{participant.fullName || "Participant"}</DialogTitle>
-                <DialogDescription>
-                  NDIS {participant.ndisNumber} · Updated {formatDate(participant.updatedAt)}
+            <div className="min-w-0">
+              <DialogTitle className="flex flex-wrap items-center gap-2">
+                <span className="truncate">{participant.fullName || "Participant"}</span>
+                {clientOffboarded && (
+                  <Badge variant="secondary" className="shrink-0 uppercase tracking-wide">
+                    Off-boarded
+                  </Badge>
+                )}
+              </DialogTitle>
+              <div className="mt-1 flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+                <DialogDescription className="min-w-0">
+                  {participant.participantKind === "guest"
+                    ? `Event guest · ${participant.ndisNumber}`
+                    : `NDIS ${participant.ndisNumber}`}
+                  {" · Updated "}
+                  {formatDate(participant.updatedAt)}
                 </DialogDescription>
-                {participant.streetAddress && (
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    📍 {participant.streetAddress}
-                  </p>
+                {isPending && (
+                  <button
+                    type="button"
+                    onClick={scrollToMeds}
+                    title="Jump to medication scheduling"
+                    className="ml-auto flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
+                  >
+                    <AlertTriangle className="h-3.5 w-3.5" />
+                    Scheduled Care Pending
+                  </button>
                 )}
               </div>
-              {isPending && (
-                <button
-                  type="button"
-                  onClick={scrollToMeds}
-                  title="Jump to medication scheduling"
-                  className="flex items-center gap-1.5 rounded-md border border-warning/50 bg-warning/10 px-2.5 py-1 text-xs font-medium text-warning transition-colors hover:bg-warning/20 focus:outline-none focus:ring-2 focus:ring-warning/60"
-                >
-                  <AlertTriangle className="h-3.5 w-3.5" />
-                  Scheduled Care Pending
-                </button>
+              {participant.streetAddress && (
+                <p className="mt-1 text-xs text-muted-foreground">
+                  📍 {participant.streetAddress}
+                </p>
               )}
             </div>
+            {clientOffboarded && shown && (
+              <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground">
+                Off-boarded
+                {shown.exitedAt ? ` ${formatDateTime(shown.exitedAt)}` : ""}
+                {shown.exitReason ? ` — ${exitReasonLabel(shown.exitReason)}` : ""}
+                {shown.exitNotes ? `. ${shown.exitNotes}` : ""}
+              </div>
+            )}
           </DialogHeader>
 
-          <Tabs defaultValue="profile" className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden">
+          <Tabs
+            key={`${participant?.id ?? "none"}-${initialTab}`}
+            defaultValue={initialTab}
+            className="mt-2 flex flex-col flex-1 min-h-0 overflow-hidden"
+          >
             <TabsList className="w-full justify-start h-auto flex-wrap gap-2 flex-shrink-0 min-h-[44px]">
               <TabsTrigger value="profile" className="h-10 py-2 px-3">Care Profile</TabsTrigger>
+              <TabsTrigger value="support" className="h-10 py-2 px-3">Support &amp; risk</TabsTrigger>
               <TabsTrigger value="contact" className="h-10 py-2 px-3">Contact Information</TabsTrigger>
               <TabsTrigger value="history" className="h-10 py-2 px-3">Care &amp; Medication History</TabsTrigger>
               <TabsTrigger value="attendance" className="h-10 py-2 px-3">Schedules &amp; Attendance</TabsTrigger>
@@ -194,9 +305,33 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                     <Input value={lastName} onChange={(e) => { setLastName(e.target.value); setDirty(true); }} className="h-9" />
                   </Field>
                   <Field label="NDIS number" className="sm:col-span-1">
-                    <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9 max-w-[180px]" />
+                    <Input value={ndisNumber} onChange={(e) => { setNdisNumber(e.target.value); setDirty(true); }} className="h-9" />
                   </Field>
-                  <div className="sm:col-span-3" />
+                  {shown?.participantKind !== "guest" && (
+                    <div className="flex items-end justify-end sm:col-span-3">
+                      {shown.serviceStatus !== "exited" ? (
+                        <Button
+                          type="button"
+                          variant="outline"
+                          className="gap-1.5"
+                          onClick={() => setExitMode("offboard")}
+                        >
+                          <Archive className="h-4 w-4" />
+                          Off-board
+                        </Button>
+                      ) : !isDeceasedExit(shown.exitReason) ? (
+                        <Button
+                          type="button"
+                          variant="secondary"
+                          className="gap-1.5"
+                          onClick={() => setExitMode("reactivate")}
+                        >
+                          <ArchiveRestore className="h-4 w-4" />
+                          Reactivate
+                        </Button>
+                      ) : null}
+                    </div>
+                  )}
                 </div>
 
                 <p className="rounded-md border border-dashed border-border bg-muted/30 px-3 py-2 text-[11px] text-muted-foreground">
@@ -207,6 +342,13 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                 <CarerNetworkPanel
                   participantId={participant.id}
                   participantName={participant.fullName}
+                />
+
+                <OnboardingSubjectPanel
+                  subjectTable="participants"
+                  subjectId={participant.id}
+                  defaultPack="client"
+                  seedName={participant.fullName}
                 />
 
                 <div
@@ -265,12 +407,35 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
               </div>
 
               <DialogFooter className="mt-1 shrink-0 flex-col-reverse gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>Close</Button>
+                  {participant.participantKind === "guest" && (
+                    <Button
+                      type="button"
+                      variant="destructive"
+                      className="gap-1.5"
+                      onClick={() => setArchiveOpen(true)}
+                    >
+                      <Archive className="h-4 w-4" />
+                      Archive guest
+                    </Button>
+                  )}
+                </div>
                 <Button onClick={save} disabled={!dirty || updateMutation.isPending} className="gap-1.5">
                   <Save className="h-4 w-4" />
                   {updateMutation.isPending ? "Saving…" : online ? "Save changes" : "Queue offline"}
                 </Button>
               </DialogFooter>
+            </TabsContent>
+
+            <TabsContent value="support" className="flex flex-col overflow-hidden">
+              <SupportPlanTab
+                participant={participant}
+                online={online}
+                saving={updateMutation.isPending}
+                onSave={saveSupportPatch}
+                onClose={() => onOpenChange(false)}
+              />
             </TabsContent>
 
             {/* TAB — Contact Information */}
@@ -301,21 +466,7 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
                       className="h-9"
                     />
                   </Field>
-                  <Field label="Regular pickup address" className="sm:col-span-2">
-                    <Input
-                      value={regularPickupAddress}
-                      onChange={(e) => { setRegularPickupAddress(e.target.value); setDirty(true); }}
-                      placeholder="Leave blank to fall back to the Home address"
-                      className="h-9"
-                    />
-                    <p className="mt-1 text-[11px] text-muted-foreground">
-                      {regularPickupAddress.trim().length > 0
-                        ? "Used as the default pickup on every event manifest unless an event override is set."
-                        : streetAddress.trim().length > 0
-                          ? <>Will use: <span className="font-medium text-foreground">{streetAddress.trim()}</span></>
-                          : "No address on file — manifests will leave the pickup blank."}
-                    </p>
-                  </Field>
+                  <PersonAddressList owner={{ kind: "participant", id: participant.id }} />
                 </div>
               </div>
 
@@ -388,6 +539,87 @@ export function CareProfileModal({ participant, open, onOpenChange, onSaved }: P
         participantName={participant.fullName}
         editing={editMedSchedule}
       />
+
+      {shown && exitMode && (
+        <ServiceExitDialog
+          open
+          onOpenChange={(next) => {
+            if (!next) setExitMode(null);
+          }}
+          mode={exitMode}
+          subject="client"
+          personId={shown.id}
+          displayName={shown.fullName}
+          onCompleted={(result) => {
+            const next: Participant =
+              result.mode === "offboard"
+                ? {
+                    ...shown,
+                    serviceStatus: "exited",
+                    exitReason: result.reason,
+                    exitNotes: result.notes || null,
+                    exitedAt: result.exitedAt,
+                  }
+                : {
+                    ...shown,
+                    serviceStatus: "active",
+                    exitReason: null,
+                    exitNotes: null,
+                    exitedAt: null,
+                    exitedById: null,
+                  };
+            setExitOverlay(next);
+            onSaved?.(next);
+          }}
+        />
+      )}
+
+      <AlertDialog
+        open={archiveOpen}
+        onOpenChange={setArchiveOpen}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Archive guest “{participant.fullName}”?</AlertDialogTitle>
+            <AlertDialogDescription>
+              This hides them from the Participants directory. They stay an event guest
+              and can be reused from Add guest. The carer record is not changed.
+              {liveGuestEvents.length > 0 && (
+                <>
+                  {" "}
+                  Still booked on {liveGuestEvents.join(", ")}. Close that event when
+                  the trip is finished.
+                </>
+              )}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <Button
+              variant="destructive"
+              disabled={archiveGuest.isPending}
+              onClick={async () => {
+                try {
+                  await archiveGuest.mutateAsync(participant.id);
+                  toast.success("Guest archived", {
+                    description: `${participant.fullName} is hidden from Participants.`,
+                  });
+                  setArchiveOpen(false);
+                  onOpenChange(false);
+                } catch (err) {
+                  toast.error("Could not archive guest", {
+                    description: (err as Error).message,
+                    className: "!bg-red-600 !text-white !border-red-700",
+                    duration: 12_000,
+                  });
+                }
+              }}
+            >
+              {archiveGuest.isPending ? "Archiving…" : "Archive guest"}
+            </Button>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </>
   );
 }

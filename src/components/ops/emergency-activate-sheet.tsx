@@ -77,7 +77,12 @@ export function EmergencyActivateSheet(props: EmergencyActivateSheetProps) {
       void qc.invalidateQueries({ queryKey: ["operational-emergencies"] });
       toast.success(
         mode === "drill" ? "Drill activated" : "LIVE emergency activated",
-        { description: "Banner and light muster are live." },
+        {
+          description:
+            severity === "red"
+              ? "Evacuate to muster point — use Muster for the care roll."
+              : "Banner and standby muster are live.",
+        },
       );
       onOpenChange(false);
     },

@@ -1,0 +1,1880 @@
+[
+  {
+    "constraint_name": "asset_checkpoints_impact_level_check",
+    "type": "c",
+    "table_name": "asset_checkpoints",
+    "definition": "CHECK (impact_level = ANY (ARRAY['critical_no_go'::text, 'conditional_warning'::text, 'minor_log_only'::text]))"
+  },
+  {
+    "constraint_name": "asset_checkpoints_vehicle_category_check",
+    "type": "c",
+    "table_name": "asset_checkpoints",
+    "definition": "CHECK (vehicle_category = ANY (ARRAY['all'::text, 'bus'::text, 'van'::text, 'sedan'::text]))"
+  },
+  {
+    "constraint_name": "asset_checkpoints_asset_id_fkey",
+    "type": "f",
+    "table_name": "asset_checkpoints",
+    "definition": "FOREIGN KEY (asset_id) REFERENCES transport_assets(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "asset_checkpoints_pkey",
+    "type": "p",
+    "table_name": "asset_checkpoints",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "asset_clearance_items_severity_check",
+    "type": "c",
+    "table_name": "asset_clearance_items",
+    "definition": "CHECK (severity = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "asset_clearance_items_checkpoint_id_fkey",
+    "type": "f",
+    "table_name": "asset_clearance_items",
+    "definition": "FOREIGN KEY (checkpoint_id) REFERENCES asset_checkpoints(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "asset_clearance_items_clearance_id_fkey",
+    "type": "f",
+    "table_name": "asset_clearance_items",
+    "definition": "FOREIGN KEY (clearance_id) REFERENCES asset_daily_clearance(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "asset_clearance_items_pkey",
+    "type": "p",
+    "table_name": "asset_clearance_items",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "asset_daily_clearance_status_check",
+    "type": "c",
+    "table_name": "asset_daily_clearance",
+    "definition": "CHECK (status = ANY (ARRAY['passed'::text, 'failed'::text, 'awaiting_manager_review'::text, 'authorized_override'::text]))"
+  },
+  {
+    "constraint_name": "asset_daily_clearance_asset_id_fkey",
+    "type": "f",
+    "table_name": "asset_daily_clearance",
+    "definition": "FOREIGN KEY (asset_id) REFERENCES transport_assets(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "asset_daily_clearance_driver_auth_staff_id_fkey",
+    "type": "f",
+    "table_name": "asset_daily_clearance",
+    "definition": "FOREIGN KEY (driver_auth_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "asset_daily_clearance_manager_auth_staff_id_fkey",
+    "type": "f",
+    "table_name": "asset_daily_clearance",
+    "definition": "FOREIGN KEY (manager_auth_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "asset_daily_clearance_pkey",
+    "type": "p",
+    "table_name": "asset_daily_clearance",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "unique_asset_daily_clearance",
+    "type": "u",
+    "table_name": "asset_daily_clearance",
+    "definition": "UNIQUE (asset_id, clearance_date)"
+  },
+  {
+    "constraint_name": "asset_maintenance_logs_asset_id_fkey",
+    "type": "f",
+    "table_name": "asset_maintenance_logs",
+    "definition": "FOREIGN KEY (asset_id) REFERENCES assets(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "asset_maintenance_logs_logged_by_id_fkey",
+    "type": "f",
+    "table_name": "asset_maintenance_logs",
+    "definition": "FOREIGN KEY (logged_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "asset_maintenance_logs_pkey",
+    "type": "p",
+    "table_name": "asset_maintenance_logs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "assets_pkey",
+    "type": "p",
+    "table_name": "assets",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "attendance_roster_logs_billing_state_check",
+    "type": "c",
+    "table_name": "attendance_roster_logs",
+    "definition": "CHECK (billing_state = ANY (ARRAY['pending'::text, 'audited_ready_for_billing'::text, 'exported'::text]))"
+  },
+  {
+    "constraint_name": "attendance_roster_logs_participant_id_fkey",
+    "type": "f",
+    "table_name": "attendance_roster_logs",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "attendance_roster_logs_pkey",
+    "type": "p",
+    "table_name": "attendance_roster_logs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "carers_registry_participant_id_fkey",
+    "type": "f",
+    "table_name": "carers_registry",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "carers_registry_pkey",
+    "type": "p",
+    "table_name": "carers_registry",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "centre_operating_hours_day_of_week_check",
+    "type": "c",
+    "table_name": "centre_operating_hours",
+    "definition": "CHECK (day_of_week = ANY (ARRAY['DAY-MON'::text, 'DAY-TUE'::text, 'DAY-WED'::text, 'DAY-THU'::text, 'DAY-FRI'::text, 'DAY-SAT'::text, 'DAY-SUN'::text]))"
+  },
+  {
+    "constraint_name": "centre_operating_hours_pkey",
+    "type": "p",
+    "table_name": "centre_operating_hours",
+    "definition": "PRIMARY KEY (day_of_week)"
+  },
+  {
+    "constraint_name": "charge_codes_pkey",
+    "type": "p",
+    "table_name": "charge_codes",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "charge_codes_code_key",
+    "type": "u",
+    "table_name": "charge_codes",
+    "definition": "UNIQUE (code)"
+  },
+  {
+    "constraint_name": "checklist_items_pkey",
+    "type": "p",
+    "table_name": "checklist_items",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "checklist_responses_status_check",
+    "type": "c",
+    "table_name": "checklist_responses",
+    "definition": "CHECK (status = ANY (ARRAY['pass'::text, 'fail'::text, 'na'::text]))"
+  },
+  {
+    "constraint_name": "checklist_responses_item_id_fkey",
+    "type": "f",
+    "table_name": "checklist_responses",
+    "definition": "FOREIGN KEY (item_id) REFERENCES checklist_items(id)"
+  },
+  {
+    "constraint_name": "checklist_responses_ledger_id_fkey",
+    "type": "f",
+    "table_name": "checklist_responses",
+    "definition": "FOREIGN KEY (ledger_id) REFERENCES operational_ledger(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "checklist_responses_pkey",
+    "type": "p",
+    "table_name": "checklist_responses",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "client_attendance_log_arrival_method_check",
+    "type": "c",
+    "table_name": "client_attendance_log",
+    "definition": "CHECK (arrival_method = ANY (ARRAY['bus'::text, 'private'::text, 'walk_in'::text, 'other'::text]))"
+  },
+  {
+    "constraint_name": "client_attendance_log_departure_severity_check",
+    "type": "c",
+    "table_name": "client_attendance_log",
+    "definition": "CHECK (departure_severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "client_attendance_log_escalation_severity_check",
+    "type": "c",
+    "table_name": "client_attendance_log",
+    "definition": "CHECK (escalation_severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "client_attendance_log_status_check",
+    "type": "c",
+    "table_name": "client_attendance_log",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'checked_in'::text, 'checked_out'::text, 'absent'::text, 'accounted'::text]))"
+  },
+  {
+    "constraint_name": "client_attendance_log_departure_issue_id_fkey",
+    "type": "f",
+    "table_name": "client_attendance_log",
+    "definition": "FOREIGN KEY (departure_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "client_attendance_log_escalation_issue_id_fkey",
+    "type": "f",
+    "table_name": "client_attendance_log",
+    "definition": "FOREIGN KEY (escalation_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "client_attendance_log_session_id_fkey",
+    "type": "f",
+    "table_name": "client_attendance_log",
+    "definition": "FOREIGN KEY (session_id) REFERENCES site_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "client_attendance_log_pkey",
+    "type": "p",
+    "table_name": "client_attendance_log",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "client_attendance_log_session_id_participant_id_key",
+    "type": "u",
+    "table_name": "client_attendance_log",
+    "definition": "UNIQUE (session_id, participant_id)"
+  },
+  {
+    "constraint_name": "compliance_assets_status_check",
+    "type": "c",
+    "table_name": "compliance_assets",
+    "definition": "CHECK (status = ANY (ARRAY['active'::text, 'archived'::text]))"
+  },
+  {
+    "constraint_name": "compliance_assets_pkey",
+    "type": "p",
+    "table_name": "compliance_assets",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "compliance_audit_logs_participant_id_fkey",
+    "type": "f",
+    "table_name": "compliance_audit_logs",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id)"
+  },
+  {
+    "constraint_name": "compliance_audit_logs_pkey",
+    "type": "p",
+    "table_name": "compliance_audit_logs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_activity_rolls_status_check",
+    "type": "c",
+    "table_name": "event_activity_rolls",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'checked_in'::text, 'absent'::text]))"
+  },
+  {
+    "constraint_name": "event_activity_rolls_checked_in_by_id_fkey",
+    "type": "f",
+    "table_name": "event_activity_rolls",
+    "definition": "FOREIGN KEY (checked_in_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_activity_rolls_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_activity_rolls",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_activity_rolls_marked_absent_by_id_fkey",
+    "type": "f",
+    "table_name": "event_activity_rolls",
+    "definition": "FOREIGN KEY (marked_absent_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_activity_rolls_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_activity_rolls",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_activity_rolls_venue_stop_id_fkey",
+    "type": "f",
+    "table_name": "event_activity_rolls",
+    "definition": "FOREIGN KEY (venue_stop_id) REFERENCES event_venue_stops(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_activity_rolls_pkey",
+    "type": "p",
+    "table_name": "event_activity_rolls",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_activity_rolls_unique_person_per_stop",
+    "type": "u",
+    "table_name": "event_activity_rolls",
+    "definition": "UNIQUE (venue_stop_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_attendance_log_arrival_method_check",
+    "type": "c",
+    "table_name": "event_attendance_log",
+    "definition": "CHECK (arrival_method = ANY (ARRAY['bus'::text, 'private'::text, 'walk_in'::text, 'other'::text]))"
+  },
+  {
+    "constraint_name": "event_attendance_log_escalation_severity_check",
+    "type": "c",
+    "table_name": "event_attendance_log",
+    "definition": "CHECK (escalation_severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "event_attendance_log_return_transport_check",
+    "type": "c",
+    "table_name": "event_attendance_log",
+    "definition": "CHECK (return_transport = ANY (ARRAY['bus'::text, 'self'::text]))"
+  },
+  {
+    "constraint_name": "event_attendance_log_status_check",
+    "type": "c",
+    "table_name": "event_attendance_log",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'checked_in'::text, 'checked_out'::text, 'absent'::text]))"
+  },
+  {
+    "constraint_name": "event_attendance_log_escalation_issue_id_fkey",
+    "type": "f",
+    "table_name": "event_attendance_log",
+    "definition": "FOREIGN KEY (escalation_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_attendance_log_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_attendance_log",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_attendance_log_pkey",
+    "type": "p",
+    "table_name": "event_attendance_log",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_attendance_log_event_day_session_id_participant_id_key",
+    "type": "u",
+    "table_name": "event_attendance_log",
+    "definition": "UNIQUE (event_day_session_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_bus_manifest_check",
+    "type": "c",
+    "table_name": "event_bus_manifest",
+    "definition": "CHECK (participant_id IS NOT NULL OR carer_id IS NOT NULL)"
+  },
+  {
+    "constraint_name": "event_bus_manifest_status_check",
+    "type": "c",
+    "table_name": "event_bus_manifest",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'on_bus'::text, 'not_travelling'::text]))"
+  },
+  {
+    "constraint_name": "event_bus_manifest_carer_id_fkey",
+    "type": "f",
+    "table_name": "event_bus_manifest",
+    "definition": "FOREIGN KEY (carer_id) REFERENCES carers_registry(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_bus_manifest_checked_on_by_fkey",
+    "type": "f",
+    "table_name": "event_bus_manifest",
+    "definition": "FOREIGN KEY (checked_on_by) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_bus_manifest_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_bus_manifest",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_bus_manifest_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_bus_manifest",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_bus_manifest_transport_trip_id_fkey",
+    "type": "f",
+    "table_name": "event_bus_manifest",
+    "definition": "FOREIGN KEY (transport_trip_id) REFERENCES transport_trips(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_bus_manifest_pkey",
+    "type": "p",
+    "table_name": "event_bus_manifest",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_curfew_log_escalation_severity_check",
+    "type": "c",
+    "table_name": "event_curfew_log",
+    "definition": "CHECK (escalation_severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "event_curfew_log_status_check",
+    "type": "c",
+    "table_name": "event_curfew_log",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'accounted'::text, 'absent'::text]))"
+  },
+  {
+    "constraint_name": "event_curfew_log_accounted_by_fkey",
+    "type": "f",
+    "table_name": "event_curfew_log",
+    "definition": "FOREIGN KEY (accounted_by) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_curfew_log_escalation_issue_id_fkey",
+    "type": "f",
+    "table_name": "event_curfew_log",
+    "definition": "FOREIGN KEY (escalation_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_curfew_log_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_curfew_log",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_curfew_log_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_curfew_log",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_curfew_log_pkey",
+    "type": "p",
+    "table_name": "event_curfew_log",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_curfew_log_event_day_session_id_participant_id_key",
+    "type": "u",
+    "table_name": "event_curfew_log",
+    "definition": "UNIQUE (event_day_session_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_day_med_alternate_plans_attested_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_day_med_alternate_plans",
+    "definition": "FOREIGN KEY (attested_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_day_med_alternate_plans_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_day_med_alternate_plans",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_day_med_alternate_plans_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_day_med_alternate_plans",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_day_med_alternate_plans_pkey",
+    "type": "p",
+    "table_name": "event_day_med_alternate_plans",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_day_med_alternate_plans_event_day_session_id_particip_key",
+    "type": "u",
+    "table_name": "event_day_med_alternate_plans",
+    "definition": "UNIQUE (event_day_session_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_day_sessions_phase_check",
+    "type": "c",
+    "table_name": "event_day_sessions",
+    "definition": "CHECK (phase = ANY (ARRAY['planning'::text, 'pre_departure'::text, 'active'::text, 'in_transit'::text, 'at_base'::text, 'closed_orderly'::text, 'closed_incident'::text]))"
+  },
+  {
+    "constraint_name": "event_day_sessions_programme_suspend_severity_check",
+    "type": "c",
+    "table_name": "event_day_sessions",
+    "definition": "CHECK (programme_suspend_severity IS NULL OR (programme_suspend_severity = ANY (ARRAY['yellow'::text, 'red'::text])))"
+  },
+  {
+    "constraint_name": "event_day_sessions_closed_by_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (closed_by_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_day_sessions_event_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_day_sessions_manager_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (manager_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_day_sessions_opened_by_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (opened_by_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_day_sessions_programme_suspend_hub_issue_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (programme_suspend_hub_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_day_sessions_programme_suspended_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_day_sessions",
+    "definition": "FOREIGN KEY (programme_suspended_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_day_sessions_pkey",
+    "type": "p",
+    "table_name": "event_day_sessions",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_day_sessions_event_id_session_date_key",
+    "type": "u",
+    "table_name": "event_day_sessions",
+    "definition": "UNIQUE (event_id, session_date)"
+  },
+  {
+    "constraint_name": "event_financial_ledger_event_id_fkey",
+    "type": "f",
+    "table_name": "event_financial_ledger",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_financial_ledger_pkey",
+    "type": "p",
+    "table_name": "event_financial_ledger",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_manifest_event_kind_check",
+    "type": "c",
+    "table_name": "event_manifest",
+    "definition": "CHECK (event_kind = ANY (ARRAY['legacy'::text, 'single_day_outing'::text, 'multi_day_tour'::text]))"
+  },
+  {
+    "constraint_name": "event_manifest_base_hotel_venue_id_fkey",
+    "type": "f",
+    "table_name": "event_manifest",
+    "definition": "FOREIGN KEY (base_hotel_venue_id) REFERENCES venues(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_manifest_closed_by_id_fkey",
+    "type": "f",
+    "table_name": "event_manifest",
+    "definition": "FOREIGN KEY (closed_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_manifest_default_charge_code_id_fkey",
+    "type": "f",
+    "table_name": "event_manifest",
+    "definition": "FOREIGN KEY (default_charge_code_id) REFERENCES charge_codes(id)"
+  },
+  {
+    "constraint_name": "event_manifest_primary_venue_id_fkey",
+    "type": "f",
+    "table_name": "event_manifest",
+    "definition": "FOREIGN KEY (primary_venue_id) REFERENCES venues(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_manifest_pkey",
+    "type": "p",
+    "table_name": "event_manifest",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_status_check",
+    "type": "c",
+    "table_name": "event_meal_service_rolls",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'served'::text, 'modified'::text, 'own_order'::text, 'declined'::text, 'na'::text]))"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_meal_service_rolls",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_updated_by_id_fkey",
+    "type": "f",
+    "table_name": "event_meal_service_rolls",
+    "definition": "FOREIGN KEY (updated_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_venue_stop_id_fkey",
+    "type": "f",
+    "table_name": "event_meal_service_rolls",
+    "definition": "FOREIGN KEY (venue_stop_id) REFERENCES event_venue_stops(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_pkey",
+    "type": "p",
+    "table_name": "event_meal_service_rolls",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_meal_service_rolls_venue_stop_id_participant_id_key",
+    "type": "u",
+    "table_name": "event_meal_service_rolls",
+    "definition": "UNIQUE (venue_stop_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_morning_log_escalation_severity_check",
+    "type": "c",
+    "table_name": "event_morning_log",
+    "definition": "CHECK (escalation_severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "event_morning_log_status_check",
+    "type": "c",
+    "table_name": "event_morning_log",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'accounted'::text, 'absent'::text]))"
+  },
+  {
+    "constraint_name": "event_morning_log_accounted_by_fkey",
+    "type": "f",
+    "table_name": "event_morning_log",
+    "definition": "FOREIGN KEY (accounted_by) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_morning_log_escalation_issue_id_fkey",
+    "type": "f",
+    "table_name": "event_morning_log",
+    "definition": "FOREIGN KEY (escalation_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_morning_log_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "event_morning_log",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_morning_log_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_morning_log",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_morning_log_pkey",
+    "type": "p",
+    "table_name": "event_morning_log",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_morning_log_event_day_session_id_participant_id_key",
+    "type": "u",
+    "table_name": "event_morning_log",
+    "definition": "UNIQUE (event_day_session_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_roster_bookings_outbound_transport_mode_check",
+    "type": "c",
+    "table_name": "event_roster_bookings",
+    "definition": "CHECK (outbound_transport_mode = ANY (ARRAY['bus'::text, 'self'::text]))"
+  },
+  {
+    "constraint_name": "event_roster_bookings_return_transport_mode_check",
+    "type": "c",
+    "table_name": "event_roster_bookings",
+    "definition": "CHECK (return_transport_mode = ANY (ARRAY['bus'::text, 'self'::text]))"
+  },
+  {
+    "constraint_name": "event_roster_bookings_transport_med_bag_required_check",
+    "type": "c",
+    "table_name": "event_roster_bookings",
+    "definition": "CHECK (transport_med_bag_required = ANY (ARRAY['yes'::text, 'no'::text, 'not_set'::text]))"
+  },
+  {
+    "constraint_name": "event_roster_bookings_carer_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (carer_id) REFERENCES carers_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_roster_bookings_charge_code_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (charge_code_id) REFERENCES charge_codes(id)"
+  },
+  {
+    "constraint_name": "event_roster_bookings_companion_carer_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (companion_carer_id) REFERENCES carers_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_roster_bookings_event_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_roster_bookings_host_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (host_participant_id) REFERENCES participants(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_roster_bookings_participant_id_fkey",
+    "type": "f",
+    "table_name": "event_roster_bookings",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_roster_bookings_pkey",
+    "type": "p",
+    "table_name": "event_roster_bookings",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_roster_bookings_event_id_participant_id_key",
+    "type": "u",
+    "table_name": "event_roster_bookings",
+    "definition": "UNIQUE (event_id, participant_id)"
+  },
+  {
+    "constraint_name": "event_venue_reconfirmations_event_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_reconfirmations",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_venue_reconfirmations_reconfirmed_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_reconfirmations",
+    "definition": "FOREIGN KEY (reconfirmed_by_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "event_venue_reconfirmations_venue_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_reconfirmations",
+    "definition": "FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_venue_reconfirmations_pkey",
+    "type": "p",
+    "table_name": "event_venue_reconfirmations",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_venue_reconfirmations_event_id_venue_id_key",
+    "type": "u",
+    "table_name": "event_venue_reconfirmations",
+    "definition": "UNIQUE (event_id, venue_id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_activity_kind_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (activity_kind = ANY (ARRAY['venue'::text, 'meal'::text, 'medication_round'::text]))"
+  },
+  {
+    "constraint_name": "event_venue_stops_meal_slot_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (meal_slot IS NULL OR (meal_slot = ANY (ARRAY['breakfast'::text, 'morning_tea'::text, 'lunch'::text, 'dinner'::text])))"
+  },
+  {
+    "constraint_name": "event_venue_stops_meal_source_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (meal_source IS NULL OR (meal_source = ANY (ARRAY['delivered_by_us'::text, 'own_food'::text, 'venue_provided'::text, 'packed'::text, 'purchase'::text])))"
+  },
+  {
+    "constraint_name": "event_venue_stops_movement_method_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (movement_method = ANY (ARRAY['bus'::text, 'walk'::text, 'on_site'::text]))"
+  },
+  {
+    "constraint_name": "event_venue_stops_phase_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (phase = ANY (ARRAY['pending'::text, 'active'::text, 'completed'::text]))"
+  },
+  {
+    "constraint_name": "event_venue_stops_prep_attestation_mode_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (prep_attestation_mode IS NULL OR (prep_attestation_mode = ANY (ARRAY['preparer_pin'::text, 'manager_guest_override'::text])))"
+  },
+  {
+    "constraint_name": "event_venue_stops_preparer_cert_status_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (preparer_cert_status IS NULL OR (preparer_cert_status = ANY (ARRAY['ok'::text, 'warn_missing'::text, 'warn_expired'::text, 'na'::text])))"
+  },
+  {
+    "constraint_name": "event_venue_stops_stop_order_check",
+    "type": "c",
+    "table_name": "event_venue_stops",
+    "definition": "CHECK (stop_order >= 0)"
+  },
+  {
+    "constraint_name": "event_venue_stops_event_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "event_venue_stops_opened_by_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (opened_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_prep_attested_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (prep_attested_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_prepared_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (prepared_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_sfh_approved_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (sfh_approved_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_venue_id_fkey",
+    "type": "f",
+    "table_name": "event_venue_stops",
+    "definition": "FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE RESTRICT"
+  },
+  {
+    "constraint_name": "event_venue_stops_pkey",
+    "type": "p",
+    "table_name": "event_venue_stops",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "event_venue_stops_event_id_session_date_stop_order_key",
+    "type": "u",
+    "table_name": "event_venue_stops",
+    "definition": "UNIQUE (event_id, session_date, stop_order)"
+  },
+  {
+    "constraint_name": "hub_issue_notes_kind_check",
+    "type": "c",
+    "table_name": "hub_issue_notes",
+    "definition": "CHECK (kind = ANY (ARRAY['append'::text, 'defer'::text, 'escalate'::text, 'resolve'::text]))"
+  },
+  {
+    "constraint_name": "hub_issue_notes_source_check",
+    "type": "c",
+    "table_name": "hub_issue_notes",
+    "definition": "CHECK (source = ANY (ARRAY['day_centre'::text, 'event'::text, 'incident'::text, 'escalation'::text, 'renewal'::text]))"
+  },
+  {
+    "constraint_name": "hub_issue_notes_pkey",
+    "type": "p",
+    "table_name": "hub_issue_notes",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "maintenance_items_severity_check",
+    "type": "c",
+    "table_name": "maintenance_items",
+    "definition": "CHECK (severity = ANY (ARRAY['green'::text, 'yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "maintenance_items_source_check",
+    "type": "c",
+    "table_name": "maintenance_items",
+    "definition": "CHECK (source = ANY (ARRAY['venue_issue'::text, 'centre_issue'::text, 'vehicle_issue'::text, 'incident_fault'::text, 'manual'::text]))"
+  },
+  {
+    "constraint_name": "maintenance_items_status_check",
+    "type": "c",
+    "table_name": "maintenance_items",
+    "definition": "CHECK (status = ANY (ARRAY['open'::text, 'in_progress'::text, 'deferred'::text, 'resolved'::text, 'closed'::text]))"
+  },
+  {
+    "constraint_name": "maintenance_items_pkey",
+    "type": "p",
+    "table_name": "maintenance_items",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "maintenance_notes_item_id_fkey",
+    "type": "f",
+    "table_name": "maintenance_notes",
+    "definition": "FOREIGN KEY (item_id) REFERENCES maintenance_items(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "maintenance_notes_pkey",
+    "type": "p",
+    "table_name": "maintenance_notes",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "medication_administration_log_administered_by_id_fkey",
+    "type": "f",
+    "table_name": "medication_administration_log",
+    "definition": "FOREIGN KEY (administered_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "medication_administration_log_participant_id_fkey",
+    "type": "f",
+    "table_name": "medication_administration_log",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "medication_administration_log_schedule_id_fkey",
+    "type": "f",
+    "table_name": "medication_administration_log",
+    "definition": "FOREIGN KEY (schedule_id) REFERENCES participant_attendance_schedules(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "medication_administration_log_witnessed_by_id_fkey",
+    "type": "f",
+    "table_name": "medication_administration_log",
+    "definition": "FOREIGN KEY (witnessed_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "medication_administration_log_pkey",
+    "type": "p",
+    "table_name": "medication_administration_log",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "myob_export_batches_exported_by_fkey",
+    "type": "f",
+    "table_name": "myob_export_batches",
+    "definition": "FOREIGN KEY (exported_by) REFERENCES auth.users(id)"
+  },
+  {
+    "constraint_name": "myob_export_batches_pkey",
+    "type": "p",
+    "table_name": "myob_export_batches",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "offline_sync_logs_pkey",
+    "type": "p",
+    "table_name": "offline_sync_logs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "operational_emergencies_mode_check",
+    "type": "c",
+    "table_name": "operational_emergencies",
+    "definition": "CHECK (mode = ANY (ARRAY['drill'::text, 'live'::text]))"
+  },
+  {
+    "constraint_name": "operational_emergencies_severity_check",
+    "type": "c",
+    "table_name": "operational_emergencies",
+    "definition": "CHECK (severity = ANY (ARRAY['yellow'::text, 'red'::text]))"
+  },
+  {
+    "constraint_name": "operational_emergencies_status_check",
+    "type": "c",
+    "table_name": "operational_emergencies",
+    "definition": "CHECK (status = ANY (ARRAY['active'::text, 'stood_down'::text]))"
+  },
+  {
+    "constraint_name": "operational_emergencies_surface_check",
+    "type": "c",
+    "table_name": "operational_emergencies",
+    "definition": "CHECK (surface = ANY (ARRAY['centre'::text, 'trip'::text, 'manifest'::text]))"
+  },
+  {
+    "constraint_name": "operational_emergencies_activated_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergencies",
+    "definition": "FOREIGN KEY (activated_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_emergencies_hub_issue_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergencies",
+    "definition": "FOREIGN KEY (hub_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "operational_emergencies_site_day_session_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergencies",
+    "definition": "FOREIGN KEY (site_day_session_id) REFERENCES site_day_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "operational_emergencies_stood_down_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergencies",
+    "definition": "FOREIGN KEY (stood_down_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_emergencies_pkey",
+    "type": "p",
+    "table_name": "operational_emergencies",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_state_check",
+    "type": "c",
+    "table_name": "operational_emergency_muster",
+    "definition": "CHECK (state = ANY (ARRAY['expected'::text, 'accounted'::text, 'missing'::text]))"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_emergency_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergency_muster",
+    "definition": "FOREIGN KEY (emergency_id) REFERENCES operational_emergencies(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_participant_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergency_muster",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_updated_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "operational_emergency_muster",
+    "definition": "FOREIGN KEY (updated_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_pkey",
+    "type": "p",
+    "table_name": "operational_emergency_muster",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "operational_emergency_muster_emergency_id_participant_id_key",
+    "type": "u",
+    "table_name": "operational_emergency_muster",
+    "definition": "UNIQUE (emergency_id, participant_id)"
+  },
+  {
+    "constraint_name": "operational_escalations_claimed_by_fkey",
+    "type": "f",
+    "table_name": "operational_escalations",
+    "definition": "FOREIGN KEY (claimed_by) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_escalations_clearance_id_fkey",
+    "type": "f",
+    "table_name": "operational_escalations",
+    "definition": "FOREIGN KEY (clearance_id) REFERENCES asset_daily_clearance(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "operational_escalations_operator_acknowledged_by_fkey",
+    "type": "f",
+    "table_name": "operational_escalations",
+    "definition": "FOREIGN KEY (operator_acknowledged_by) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_escalations_raised_by_fkey",
+    "type": "f",
+    "table_name": "operational_escalations",
+    "definition": "FOREIGN KEY (raised_by) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "operational_escalations_resolved_by_fkey",
+    "type": "f",
+    "table_name": "operational_escalations",
+    "definition": "FOREIGN KEY (resolved_by) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "operational_escalations_pkey",
+    "type": "p",
+    "table_name": "operational_escalations",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "operational_incidents_incident_type_check",
+    "type": "c",
+    "table_name": "operational_incidents",
+    "definition": "CHECK (incident_type = ANY (ARRAY['mechanical'::text, 'human_operational'::text]))"
+  },
+  {
+    "constraint_name": "operational_incidents_severity_check",
+    "type": "c",
+    "table_name": "operational_incidents",
+    "definition": "CHECK (severity = ANY (ARRAY['sev1'::text, 'sev2'::text, 'sev3'::text]))"
+  },
+  {
+    "constraint_name": "operational_incidents_status_check",
+    "type": "c",
+    "table_name": "operational_incidents",
+    "definition": "CHECK (status = ANY (ARRAY['pending'::text, 'resolved'::text]))"
+  },
+  {
+    "constraint_name": "operational_incidents_assisting_staff_id_fkey",
+    "type": "f",
+    "table_name": "operational_incidents",
+    "definition": "FOREIGN KEY (assisting_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "operational_incidents_pkey",
+    "type": "p",
+    "table_name": "operational_incidents",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "operational_ledger_category_check",
+    "type": "c",
+    "table_name": "operational_ledger",
+    "definition": "CHECK (category = ANY (ARRAY['VEHICLE'::text, 'CENTRE'::text, 'CLIENT'::text, 'TRIP'::text]))"
+  },
+  {
+    "constraint_name": "operational_ledger_severity_check",
+    "type": "c",
+    "table_name": "operational_ledger",
+    "definition": "CHECK (severity = ANY (ARRAY['RED'::text, 'YELLOW'::text, 'GREEN'::text, 'INFO'::text]))"
+  },
+  {
+    "constraint_name": "operational_ledger_pkey",
+    "type": "p",
+    "table_name": "operational_ledger",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participant_attendance_schedules_archive_witnessed_by_id_fkey",
+    "type": "f",
+    "table_name": "participant_attendance_schedules",
+    "definition": "FOREIGN KEY (archive_witnessed_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "participant_attendance_schedules_archived_by_id_fkey",
+    "type": "f",
+    "table_name": "participant_attendance_schedules",
+    "definition": "FOREIGN KEY (archived_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "participant_attendance_schedules_participant_id_fkey",
+    "type": "f",
+    "table_name": "participant_attendance_schedules",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "participant_attendance_schedules_pkey",
+    "type": "p",
+    "table_name": "participant_attendance_schedules",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participant_compliance_and_alerts_participant_id_fkey",
+    "type": "f",
+    "table_name": "participant_compliance_and_alerts",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "participant_compliance_and_alerts_pkey",
+    "type": "p",
+    "table_name": "participant_compliance_and_alerts",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participant_financial_ledger_event_id_fkey",
+    "type": "f",
+    "table_name": "participant_financial_ledger",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "participant_financial_ledger_participant_id_fkey",
+    "type": "f",
+    "table_name": "participant_financial_ledger",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "participant_financial_ledger_pkey",
+    "type": "p",
+    "table_name": "participant_financial_ledger",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_category_check",
+    "type": "c",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "CHECK (category = ANY (ARRAY['respiratory'::text, 'gi'::text, 'skin_parasite'::text, 'other'::text]))"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_clearance_method_check",
+    "type": "c",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "CHECK (clearance_method IS NULL OR (clearance_method = ANY (ARRAY['carer_attestation'::text, 'medical_cert'::text])))"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_home_safe_disposition_check",
+    "type": "c",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "CHECK (home_safe_disposition IS NULL OR (home_safe_disposition = ANY (ARRAY['family_carer'::text, 'staff_escorted'::text, 'transport_taxi'::text, 'other'::text])))"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_status_check",
+    "type": "c",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "CHECK (status = ANY (ARRAY['active'::text, 'cleared'::text]))"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_cleared_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (cleared_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_declared_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (declared_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_event_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_home_safe_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (home_safe_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_hub_issue_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (hub_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_participant_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_site_day_session_id_fkey",
+    "type": "f",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "FOREIGN KEY (site_day_session_id) REFERENCES site_day_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "participant_infectious_exclusions_pkey",
+    "type": "p",
+    "table_name": "participant_infectious_exclusions",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participant_medication_schedules_participant_id_fkey",
+    "type": "f",
+    "table_name": "participant_medication_schedules",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "participant_medication_schedules_pkey",
+    "type": "p",
+    "table_name": "participant_medication_schedules",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participants_iddsi_level_liquids_check",
+    "type": "c",
+    "table_name": "participants",
+    "definition": "CHECK (iddsi_level_liquids >= 0 AND iddsi_level_liquids <= 7)"
+  },
+  {
+    "constraint_name": "participants_iddsi_level_solids_check",
+    "type": "c",
+    "table_name": "participants",
+    "definition": "CHECK (iddsi_level_solids >= 3 AND iddsi_level_solids <= 7)"
+  },
+  {
+    "constraint_name": "participants_participant_kind_check",
+    "type": "c",
+    "table_name": "participants",
+    "definition": "CHECK (participant_kind = ANY (ARRAY['client'::text, 'guest'::text]))"
+  },
+  {
+    "constraint_name": "participants_pkey",
+    "type": "p",
+    "table_name": "participants",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "participants_ndis_number_key",
+    "type": "u",
+    "table_name": "participants",
+    "definition": "UNIQUE (ndis_number)"
+  },
+  {
+    "constraint_name": "site_day_activities_activity_kind_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (activity_kind = ANY (ARRAY['meal'::text, 'medication_round'::text, 'other'::text]))"
+  },
+  {
+    "constraint_name": "site_day_activities_meal_slot_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (meal_slot IS NULL OR (meal_slot = ANY (ARRAY['breakfast'::text, 'morning_tea'::text, 'lunch'::text, 'dinner'::text])))"
+  },
+  {
+    "constraint_name": "site_day_activities_meal_source_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (meal_source IS NULL OR (meal_source = ANY (ARRAY['delivered_by_us'::text, 'own_food'::text, 'venue_provided'::text, 'packed'::text, 'purchase'::text])))"
+  },
+  {
+    "constraint_name": "site_day_activities_phase_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (phase = ANY (ARRAY['pending'::text, 'active'::text, 'completed'::text]))"
+  },
+  {
+    "constraint_name": "site_day_activities_prep_attestation_mode_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (prep_attestation_mode IS NULL OR (prep_attestation_mode = ANY (ARRAY['preparer_pin'::text, 'manager_guest_override'::text])))"
+  },
+  {
+    "constraint_name": "site_day_activities_preparer_cert_status_check",
+    "type": "c",
+    "table_name": "site_day_activities",
+    "definition": "CHECK (preparer_cert_status IS NULL OR (preparer_cert_status = ANY (ARRAY['ok'::text, 'warn_missing'::text, 'warn_expired'::text, 'na'::text])))"
+  },
+  {
+    "constraint_name": "site_day_activities_closed_by_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (closed_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_activities_opened_by_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (opened_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_activities_prep_attested_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (prep_attested_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_activities_prepared_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (prepared_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_activities_session_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (session_id) REFERENCES site_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "site_day_activities_sfh_approved_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_activities",
+    "definition": "FOREIGN KEY (sfh_approved_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_activities_pkey",
+    "type": "p",
+    "table_name": "site_day_activities",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_status_check",
+    "type": "c",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "CHECK (status = ANY (ARRAY['expected'::text, 'served'::text, 'modified'::text, 'own_order'::text, 'declined'::text, 'na'::text]))"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_activity_id_fkey",
+    "type": "f",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "FOREIGN KEY (activity_id) REFERENCES site_day_activities(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_participant_id_fkey",
+    "type": "f",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_updated_by_id_fkey",
+    "type": "f",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "FOREIGN KEY (updated_by_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_pkey",
+    "type": "p",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "site_day_meal_service_rolls_activity_id_participant_id_key",
+    "type": "u",
+    "table_name": "site_day_meal_service_rolls",
+    "definition": "UNIQUE (activity_id, participant_id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_leader_decision_check",
+    "type": "c",
+    "table_name": "site_day_sessions",
+    "definition": "CHECK (leader_decision = ANY (ARRAY['go'::text, 'no_go'::text]))"
+  },
+  {
+    "constraint_name": "site_day_sessions_lockdown_severity_check",
+    "type": "c",
+    "table_name": "site_day_sessions",
+    "definition": "CHECK (lockdown_severity IS NULL OR (lockdown_severity = ANY (ARRAY['yellow'::text, 'red'::text])))"
+  },
+  {
+    "constraint_name": "site_day_sessions_manager_decision_check",
+    "type": "c",
+    "table_name": "site_day_sessions",
+    "definition": "CHECK (manager_decision = ANY (ARRAY['go'::text, 'no_go'::text]))"
+  },
+  {
+    "constraint_name": "site_day_sessions_closed_by_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (closed_by_id) REFERENCES auth.users(id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_leader_auth_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (leader_auth_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_lockdown_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (lockdown_by_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_lockdown_hub_issue_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (lockdown_hub_issue_id) REFERENCES site_issues_register(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "site_day_sessions_manager_auth_staff_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (manager_auth_staff_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_opened_by_id_fkey",
+    "type": "f",
+    "table_name": "site_day_sessions",
+    "definition": "FOREIGN KEY (opened_by_id) REFERENCES auth.users(id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_pkey",
+    "type": "p",
+    "table_name": "site_day_sessions",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "site_day_sessions_session_date_key",
+    "type": "u",
+    "table_name": "site_day_sessions",
+    "definition": "UNIQUE (session_date)"
+  },
+  {
+    "constraint_name": "site_day_visitors_kind_check",
+    "type": "c",
+    "table_name": "site_day_visitors",
+    "definition": "CHECK (kind = ANY (ARRAY['trial'::text, 'friend_family'::text, 'site'::text, 'other'::text]))"
+  },
+  {
+    "constraint_name": "site_day_visitors_linked_participant_id_fkey",
+    "type": "f",
+    "table_name": "site_day_visitors",
+    "definition": "FOREIGN KEY (linked_participant_id) REFERENCES participants(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "site_day_visitors_session_id_fkey",
+    "type": "f",
+    "table_name": "site_day_visitors",
+    "definition": "FOREIGN KEY (session_id) REFERENCES site_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "site_day_visitors_pkey",
+    "type": "p",
+    "table_name": "site_day_visitors",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "site_issues_register_issue_area_check",
+    "type": "c",
+    "table_name": "site_issues_register",
+    "definition": "CHECK (issue_area IS NULL OR (issue_area = ANY (ARRAY['general'::text, 'health_safety'::text])))"
+  },
+  {
+    "constraint_name": "site_issues_register_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "site_issues_register",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "site_issues_register_event_id_fkey",
+    "type": "f",
+    "table_name": "site_issues_register",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "site_issues_register_session_id_fkey",
+    "type": "f",
+    "table_name": "site_issues_register",
+    "definition": "FOREIGN KEY (session_id) REFERENCES site_day_sessions(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "site_issues_register_pkey",
+    "type": "p",
+    "table_name": "site_issues_register",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "staff_compliance_and_certs_staff_id_fkey",
+    "type": "f",
+    "table_name": "staff_compliance_and_certs",
+    "definition": "FOREIGN KEY (staff_id) REFERENCES staff_registry(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "staff_compliance_and_certs_pkey",
+    "type": "p",
+    "table_name": "staff_compliance_and_certs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "staff_registry_auth_user_id_fkey",
+    "type": "f",
+    "table_name": "staff_registry",
+    "definition": "FOREIGN KEY (auth_user_id) REFERENCES auth.users(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "staff_registry_pkey",
+    "type": "p",
+    "table_name": "staff_registry",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "system_lookup_parameters_pkey",
+    "type": "p",
+    "table_name": "system_lookup_parameters",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "system_lookup_parameters_code_key",
+    "type": "u",
+    "table_name": "system_lookup_parameters",
+    "definition": "UNIQUE (code)"
+  },
+  {
+    "constraint_name": "system_operational_settings_updated_by_fkey",
+    "type": "f",
+    "table_name": "system_operational_settings",
+    "definition": "FOREIGN KEY (updated_by) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "system_operational_settings_value_uuid_fkey",
+    "type": "f",
+    "table_name": "system_operational_settings",
+    "definition": "FOREIGN KEY (value_uuid) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "system_operational_settings_pkey",
+    "type": "p",
+    "table_name": "system_operational_settings",
+    "definition": "PRIMARY KEY (key)"
+  },
+  {
+    "constraint_name": "system_parameters_pkey",
+    "type": "p",
+    "table_name": "system_parameters",
+    "definition": "PRIMARY KEY (key)"
+  },
+  {
+    "constraint_name": "transport_assets_last_service_odo_check",
+    "type": "c",
+    "table_name": "transport_assets",
+    "definition": "CHECK (last_service_odo IS NULL OR last_service_odo >= 0)"
+  },
+  {
+    "constraint_name": "transport_assets_service_interval_km_check",
+    "type": "c",
+    "table_name": "transport_assets",
+    "definition": "CHECK (service_interval_km IS NULL OR service_interval_km > 0)"
+  },
+  {
+    "constraint_name": "transport_assets_vehicle_category_check",
+    "type": "c",
+    "table_name": "transport_assets",
+    "definition": "CHECK (vehicle_category = ANY (ARRAY['all'::text, 'bus'::text, 'van'::text, 'sedan'::text]))"
+  },
+  {
+    "constraint_name": "transport_assets_pkey",
+    "type": "p",
+    "table_name": "transport_assets",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "transport_assets_name_key",
+    "type": "u",
+    "table_name": "transport_assets",
+    "definition": "UNIQUE (name)"
+  },
+  {
+    "constraint_name": "transport_assets_rego_plate_key",
+    "type": "u",
+    "table_name": "transport_assets",
+    "definition": "UNIQUE (rego_plate)"
+  },
+  {
+    "constraint_name": "transport_requests_status_check",
+    "type": "c",
+    "table_name": "transport_requests",
+    "definition": "CHECK (status = ANY (ARRAY['requested'::text, 'assigned'::text, 'in_progress'::text, 'completed'::text, 'cancelled'::text]))"
+  },
+  {
+    "constraint_name": "transport_requests_assigned_asset_id_fkey",
+    "type": "f",
+    "table_name": "transport_requests",
+    "definition": "FOREIGN KEY (assigned_asset_id) REFERENCES transport_assets(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_requests_assigned_driver_staff_id_fkey",
+    "type": "f",
+    "table_name": "transport_requests",
+    "definition": "FOREIGN KEY (assigned_driver_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_requests_created_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "transport_requests",
+    "definition": "FOREIGN KEY (created_by_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_requests_participant_id_fkey",
+    "type": "f",
+    "table_name": "transport_requests",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "transport_requests_pkey",
+    "type": "p",
+    "table_name": "transport_requests",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "transport_trips_trip_kind_check",
+    "type": "c",
+    "table_name": "transport_trips",
+    "definition": "CHECK (trip_kind IS NULL OR (trip_kind = ANY (ARRAY['day_centre'::text, 'event'::text, 'event_venue_hop'::text, 'transport_request'::text])))"
+  },
+  {
+    "constraint_name": "transport_trips_trip_origin_check",
+    "type": "c",
+    "table_name": "transport_trips",
+    "definition": "CHECK (trip_origin = ANY (ARRAY['depot'::text, 'day_centre'::text]))"
+  },
+  {
+    "constraint_name": "transport_trips_trip_return_check",
+    "type": "c",
+    "table_name": "transport_trips",
+    "definition": "CHECK (trip_return = ANY (ARRAY['depot'::text, 'day_centre'::text, 'none'::text]))"
+  },
+  {
+    "constraint_name": "transport_trips_asset_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (asset_id) REFERENCES transport_assets(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_trips_driver_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (driver_id) REFERENCES staff_registry(id)"
+  },
+  {
+    "constraint_name": "transport_trips_event_day_session_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (event_day_session_id) REFERENCES event_day_sessions(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_trips_event_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (event_id) REFERENCES event_manifest(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_trips_venue_stop_from_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (venue_stop_from_id) REFERENCES event_venue_stops(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_trips_venue_stop_to_id_fkey",
+    "type": "f",
+    "table_name": "transport_trips",
+    "definition": "FOREIGN KEY (venue_stop_to_id) REFERENCES event_venue_stops(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "transport_trips_pkey",
+    "type": "p",
+    "table_name": "transport_trips",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "trip_legs_medication_handover_status_check",
+    "type": "c",
+    "table_name": "trip_legs",
+    "definition": "CHECK (medication_handover_status = ANY (ARRAY['collected_intact'::text, 'collected_damaged'::text, 'expected_not_provided'::text, 'not_required'::text]))"
+  },
+  {
+    "constraint_name": "trip_legs_participant_id_fkey",
+    "type": "f",
+    "table_name": "trip_legs",
+    "definition": "FOREIGN KEY (participant_id) REFERENCES participants(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "trip_legs_trip_id_fkey",
+    "type": "f",
+    "table_name": "trip_legs",
+    "definition": "FOREIGN KEY (trip_id) REFERENCES transport_trips(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "trip_legs_pkey",
+    "type": "p",
+    "table_name": "trip_legs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "vendors_status_check",
+    "type": "c",
+    "table_name": "vendors",
+    "definition": "CHECK (status = ANY (ARRAY['active'::text, 'archived'::text]))"
+  },
+  {
+    "constraint_name": "vendors_pkey",
+    "type": "p",
+    "table_name": "vendors",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "venue_safety_answers_field_id_fkey",
+    "type": "f",
+    "table_name": "venue_safety_answers",
+    "definition": "FOREIGN KEY (field_id) REFERENCES venue_template_fields(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "venue_safety_answers_signoff_id_fkey",
+    "type": "f",
+    "table_name": "venue_safety_answers",
+    "definition": "FOREIGN KEY (signoff_id) REFERENCES venue_safety_baseline_signoffs(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "venue_safety_answers_pkey",
+    "type": "p",
+    "table_name": "venue_safety_answers",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "venue_safety_answers_signoff_id_field_id_key",
+    "type": "u",
+    "table_name": "venue_safety_answers",
+    "definition": "UNIQUE (signoff_id, field_id)"
+  },
+  {
+    "constraint_name": "venue_safety_baseline_signoffs_signed_off_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "venue_safety_baseline_signoffs",
+    "definition": "FOREIGN KEY (signed_off_by_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "venue_safety_baseline_signoffs_venue_id_fkey",
+    "type": "f",
+    "table_name": "venue_safety_baseline_signoffs",
+    "definition": "FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "venue_safety_baseline_signoffs_pkey",
+    "type": "p",
+    "table_name": "venue_safety_baseline_signoffs",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "venue_template_fields_answer_type_check",
+    "type": "c",
+    "table_name": "venue_template_fields",
+    "definition": "CHECK (answer_type = ANY (ARRAY['yes_no'::text, 'text'::text, 'number'::text, 'select'::text]))"
+  },
+  {
+    "constraint_name": "venue_template_fields_venue_id_fkey",
+    "type": "f",
+    "table_name": "venue_template_fields",
+    "definition": "FOREIGN KEY (venue_id) REFERENCES venues(id) ON DELETE CASCADE"
+  },
+  {
+    "constraint_name": "venue_template_fields_pkey",
+    "type": "p",
+    "table_name": "venue_template_fields",
+    "definition": "PRIMARY KEY (id)"
+  },
+  {
+    "constraint_name": "venues_risk_tier_check",
+    "type": "c",
+    "table_name": "venues",
+    "definition": "CHECK (risk_tier = ANY (ARRAY['low'::text, 'medium'::text, 'high'::text]))"
+  },
+  {
+    "constraint_name": "venues_status_check",
+    "type": "c",
+    "table_name": "venues",
+    "definition": "CHECK (status = ANY (ARRAY['active'::text, 'archived'::text]))"
+  },
+  {
+    "constraint_name": "venues_cloned_from_venue_id_fkey",
+    "type": "f",
+    "table_name": "venues",
+    "definition": "FOREIGN KEY (cloned_from_venue_id) REFERENCES venues(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "venues_created_by_staff_id_fkey",
+    "type": "f",
+    "table_name": "venues",
+    "definition": "FOREIGN KEY (created_by_staff_id) REFERENCES staff_registry(id) ON DELETE SET NULL"
+  },
+  {
+    "constraint_name": "venues_pkey",
+    "type": "p",
+    "table_name": "venues",
+    "definition": "PRIMARY KEY (id)"
+  }
+]

@@ -5,8 +5,14 @@ import {
   listComplianceAssets,
   type ComplianceAsset,
 } from "@/lib/api/compliance-assets";
-import { resolveStaffIdWithFallback, resolveStaffDisplayName } from "@/lib/data-store";
+import {
+  resolveStaffIdWithFallback,
+  resolveStaffDisplayName,
+  primeStaffDisplayNames,
+} from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
+import { publicFormHubDisplay } from "@/lib/governance/public-form-hub";
 
 export type UnifiedIssueSource =
   | "day_centre"
@@ -112,6 +118,20 @@ function occurredAtFromRow(
   return createdAt;
 }
 
+function incidentListDisplay(
+  description: string,
+  opts?: { deferred?: boolean },
+): { title: string; sourceLabel: string } {
+  return (
+    publicFormHubDisplay(description, opts) ?? {
+      title: (description || "Operational incident").slice(0, 120),
+      sourceLabel: opts?.deferred
+        ? `${SOURCE_LABELS.incident} · Deferred`
+        : SOURCE_LABELS.incident,
+    }
+  );
+}
+
 export type UnifiedIssueTab = "active" | "deferred" | "resolved";
 
 /**
@@ -133,6 +153,9 @@ export async function listOpenUnifiedIssues(
   // Prefer ms; fall back to legacy days param if caller hasn't migrated yet.
   const deferRewarnMs =
     (options.deferRewarnMs ?? ((options.deferRewarnDays ?? 0) * 86_400_000)) || 3_600_000;
+
+  // Resolve reported_by UUIDs (staff id or auth user id) before cards render.
+  await primeStaffDisplayNames();
 
   // Combined note-state: latest defer + latest activity per issue.
   const { deferState, activityAt } = await fetchNoteStateMaps();
@@ -275,15 +298,17 @@ export async function listOpenUnifiedIssues(
       for (const r of (incRes.data ?? []) as Array<Record<string, unknown>>) {
         const sev = incidentSevToUnified(r.severity as string | null);
         const key = `incident:${String(r.id)}`;
+        const description = String(r.description ?? "");
+        const display = incidentListDisplay(description);
         out.push({
           key,
           source: "incident",
-          sourceLabel: SOURCE_LABELS.incident,
+          sourceLabel: display.sourceLabel,
           category: String(r.incident_type ?? "incident").replace("_", " "),
           subCategory: (r.event_id as string | null) ?? null,
           severity: sev,
-          title: String(r.description ?? "Operational incident").slice(0, 120),
-          description: String(r.description ?? ""),
+          title: display.title,
+          description,
           status: "resolved",
           createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
@@ -418,15 +443,17 @@ export async function listOpenUnifiedIssues(
       const sev = incidentSevToUnified(r.severity as string | null);
       const key = `incident:${String(r.id)}`;
       const deferEntry = deferState.get(key);
+      const description = String(r.description ?? "");
+      const display = incidentListDisplay(description);
       out.push({
         key,
         source: "incident",
-        sourceLabel: SOURCE_LABELS.incident,
+        sourceLabel: display.sourceLabel,
         category: String(r.incident_type ?? "incident").replace("_", " "),
         subCategory: (r.event_id as string | null) ?? null,
         severity: sev,
-        title: String(r.description ?? "Operational incident").slice(0, 120),
-        description: String(r.description ?? ""),
+        title: display.title,
+        description,
         status: String(r.status ?? "pending"),
         createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
@@ -646,15 +673,17 @@ async function fetchDeferredNonDayCentreIssues(
     const sev = incidentSevToUnified(r.severity as string | null);
     const key = `incident:${String(r.id)}`;
     const meta = deferState.get(key)!;
+    const description = String(r.description ?? "");
+    const display = incidentListDisplay(description, { deferred: true });
     out.push({
       key,
       source: "incident",
-      sourceLabel: `${SOURCE_LABELS.incident} · Deferred`,
+      sourceLabel: display.sourceLabel,
       category: String(r.incident_type ?? "incident").replace("_", " "),
       subCategory: `Deferred until ${fmt(meta.deferredUntil)}`,
       severity: sev,
-      title: String(r.description ?? "Operational incident").slice(0, 120),
-      description: String(r.description ?? ""),
+      title: display.title,
+      description,
       status: String(r.status ?? "pending"),
       createdAt: String(r.created_at ?? new Date().toISOString()),
           occurredAt: occurredAtFromRow(r, String(r.created_at ?? new Date().toISOString())),
@@ -746,7 +775,7 @@ export async function resolveUnifiedIssue(
   }
 
 
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
 
@@ -918,17 +947,23 @@ async function insertHubNote(args: {
   note: string;
   kind: HubIssueNote["kind"];
   metadata?: Record<string, unknown> | null;
-}): Promise<void> {
+}): Promise<string | null> {
   const staffId = await resolveStaffIdWithFallback().catch(() => null);
-  const { error } = await supabase.from("hub_issue_notes").insert({
-    source: args.source,
-    source_row_id: args.sourceRowId,
-    note: args.note.trim(),
-    kind: args.kind,
-    staff_id: staffId,
-    metadata: args.metadata ?? null,
-  });
+  const { data, error } = await supabase
+    .from("hub_issue_notes")
+    .insert({
+      source: args.source,
+      source_row_id: args.sourceRowId,
+      note: args.note.trim(),
+      kind: args.kind,
+      staff_id: staffId,
+      stamped_at: operationalNowIso(),
+      metadata: args.metadata ?? null,
+    })
+    .select("id")
+    .single();
   if (error) throw error;
+  return (data as { id?: string } | null)?.id ?? null;
 }
 
 /**
@@ -991,11 +1026,30 @@ export async function appendUpdateNote(
     throw new Error("Update note must be at least 10 characters.");
   }
 
-  await insertHubNote({
+  const hubNoteId = await insertHubNote({
     source: issue.source,
     sourceRowId: issue.sourceRowId,
     note: trimmed,
     kind: "append",
+  });
+
+  const staffId = await resolveStaffIdWithFallback();
+  const gps = await tryGetGps();
+  await writeToLedger({
+    staff_id: staffId,
+    category: issue.source === "renewal" || issue.source === "escalation" ? "VEHICLE" : "CENTRE",
+    severity: severityToLedger(issue.severity),
+    action_type: "governance.issue_noted",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: {
+      source: issue.source,
+      source_row_id: issue.sourceRowId,
+      hub_note_id: hubNoteId,
+      title: issue.title,
+      note: trimmed,
+      kind: "append",
+    },
   });
 
   // Backward-compat mirror for day_centre's existing column.
@@ -1039,7 +1093,7 @@ export async function forceAckEscalation(
   if (reason.length < 10) {
     throw new Error("Force-ack reason must be at least 10 characters.");
   }
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const staffId = await resolveStaffIdWithFallback();
 
   await insertHubNote({
@@ -1124,6 +1178,7 @@ export async function deferUnifiedIssue(
       source_row_id: issue.sourceRowId,
       deferred_until: args.untilIso,
       note,
+      title: issue.title,
     },
   });
 }
@@ -1178,6 +1233,7 @@ export async function escalateUnifiedIssueToCouncil(
       source_row_id: issue.sourceRowId,
       council_severity: args.councilSeverity,
       note,
+      title: issue.title,
     },
   });
 }

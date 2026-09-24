@@ -1,6 +1,8 @@
 import { useMemo, useState } from "react";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
 import { iddsiLevel } from "@/lib/iddsi";
 import { dayChronoIndex } from "@/lib/data-store";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -111,31 +113,45 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
           const ind = getInd(p.id);
           return (
             <li key={p.id}>
-              <button onClick={() => onSelect(p)} className="w-full text-left">
-                <Card className="flex items-start justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-semibold">{p.fullName}</span>
-                      {pending.has(p.id) && (
-                        <PendingBadge
-                          onClick={() =>
-                            setVerifying({
-                              schedule: pending.get(p.id)!,
-                              participantName: p.fullName,
-                            })
-                          }
-                        />
-                      )}
-                    </div>
-                    <DailyTransportSummary ind={ind} />
-                    <div className="flex flex-wrap gap-1.5">
-                      <MedDayChips ind={ind} />
-                      <IddsiChips p={p} />
-                    </div>
+              <Card
+                onClick={() => onSelect(p)}
+                className={cn(
+                  "flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-accent/40",
+                  p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                )}
+              >
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate font-semibold">{p.fullName}</span>
+                    {p.participantKind === "guest" && (
+                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                        Guest
+                      </Badge>
+                    )}
+                    {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                        Off-boarded
+                      </Badge>
+                    )}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                </Card>
-              </button>
+                  <DailyTransportSummary ind={ind} />
+                  <div className="flex flex-wrap gap-1.5">
+                    <MedDayChips ind={ind} />
+                    <IddsiChips p={p} />
+                  </div>
+                </div>
+                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              </Card>
             </li>
           );
         })}
@@ -170,11 +186,24 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 <tr
                   key={p.id}
                   onClick={() => onSelect(p)}
-                  className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
+                  className={cn(
+                    "cursor-pointer border-t border-border transition-colors hover:bg-accent/40",
+                    p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                  )}
                 >
                   <td className="px-3 py-2 font-medium">
                     <div className="flex items-center gap-2">
                       <span className="truncate">{p.fullName}</span>
+                      {p.participantKind === "guest" && (
+                        <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
+                          Guest
+                        </Badge>
+                      )}
+                      {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                        <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                          Off-boarded
+                        </Badge>
+                      )}
                       {pending.has(p.id) && (
                         <PendingBadge
                           onClick={() =>

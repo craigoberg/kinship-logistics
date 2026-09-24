@@ -9,7 +9,9 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -252,7 +254,7 @@ export async function createMaintenanceItem(
     location_label: item.locationLabel ?? null,
     reported_by: item.reportedBy ?? null,
     defer_count: 0,
-    occurred_at: item.occurredAt ?? new Date().toISOString(),
+    occurred_at: item.occurredAt ?? operationalNowIso(),
   };
 
   let { data, error } = await supabase
@@ -275,7 +277,15 @@ export async function createMaintenanceItem(
 
   if (error) throw error;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return rowToItem(data as Record<string, any>);
+  const created = rowToItem(data as Record<string, any>);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "maintenance",
+    recordId: created.id,
+    recordName: created.title,
+    summary: `Logged maintenance item ${created.title}`,
+  });
+  return created;
 }
 
 export async function addMaintenanceNote(
@@ -291,7 +301,7 @@ export async function addMaintenanceNote(
   if (error) throw error;
 
   // Touch last_note_at so the list-view urgency staleness timer resets.
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   await supabase
     .from("maintenance_items")
     .update({ last_note_at: nowIso })
@@ -310,13 +320,20 @@ export async function updateMaintenanceStatus(
   const patch: Record<string, unknown> = { status };
   if (resolutionNotes !== undefined) patch.resolution_notes = resolutionNotes;
   if (status === "resolved" || status === "closed") {
-    patch.resolved_at = new Date().toISOString();
+    patch.resolved_at = operationalNowIso();
   }
   const { error } = await supabase
     .from("maintenance_items")
     .update(patch)
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Set maintenance status to ${status}`,
+  });
 }
 
 export async function deferMaintenanceItem(
@@ -352,6 +369,13 @@ export async function deferMaintenanceItem(
     `Deferred to ${formatDate(untilDate)}. Reason: ${reason}`,
     author,
   );
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Deferred maintenance to ${untilDate}`,
+  });
 }
 
 export async function assignMaintenanceItem(
@@ -363,6 +387,13 @@ export async function assignMaintenanceItem(
     .update({ assigned_to: assignedTo, status: "in_progress" })
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Assigned maintenance to ${assignedTo}`,
+  });
 }
 
 // ── Query key ─────────────────────────────────────────────────────────────────

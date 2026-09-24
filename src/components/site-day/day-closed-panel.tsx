@@ -127,6 +127,17 @@ export function DayClosedPanel({ session }: Props) {
               <Button
                 size="sm"
                 variant="outline"
+                onClick={() => {
+                  document
+                    .getElementById("day-centre-end-of-day-report")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                View End of Day Report
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
                 className="gap-1.5 border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
                 onClick={() => {
                   setAttempted(false);

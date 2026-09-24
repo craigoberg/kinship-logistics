@@ -7,6 +7,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
+import { listEventSupportAttendance } from "@/lib/api/event-support";
 import {
   listAccountabilityRoll,
   listBusManifest,
@@ -432,9 +433,16 @@ export async function assertMorningRollCompleteBeforeProgramme(opts: {
   if (progress.complete) return;
 
   if (progress.total === 0) {
-    const attendance = await listEventAttendanceRoll(opts.sessionId);
-    const pendingArrival = attendance.filter((r) => r.status === "expected").length;
-    const checkedIn = attendance.filter((r) => r.status === "checked_in").length;
+    const [attendance, support] = await Promise.all([
+      listEventAttendanceRoll(opts.sessionId),
+      listEventSupportAttendance(opts.sessionId).catch(() => []),
+    ]);
+    const pendingArrival =
+      attendance.filter((r) => r.status === "expected").length +
+      support.filter((r) => r.status === "expected").length;
+    const checkedIn =
+      attendance.filter((r) => r.status === "checked_in").length +
+      support.filter((r) => r.status === "checked_in").length;
     if (pendingArrival === 0 && checkedIn === 0) return;
     throw new Error(
       "Complete Morning Roll Call before starting the programme (Morning Roll tab).",
@@ -470,7 +478,12 @@ async function fetchActiveTripLegSummary(tripId: string) {
     .order("leg_index", { ascending: true });
   if (error) throw error;
   const legs = data ?? [];
-  const pickupLegs = legs.filter((l) => l.to_participant_id != null);
+  const pickupLegs = legs.filter(
+    (l) =>
+      l.to_participant_id != null ||
+      (l as { to_staff_id?: string | null }).to_staff_id != null ||
+      (l as { to_carer_id?: string | null }).to_carer_id != null,
+  );
   const onBoard = pickupLegs.filter(
     (l) =>
       l.status === "en_route" ||
@@ -546,12 +559,17 @@ export async function fetchEventDeliverGroupStatus(opts: {
     todayVenues[todayVenues.length - 1] ?? baseStop;
   const overnightEndName = stopLabel(overnightEndStop, baseName);
 
-  const totalOnTrip = attendance.length;
-  const checkedInCount = attendance.filter((r) => r.status === "checked_in").length;
-  const checkedInOrOut = attendance.filter(
-    (r) => r.status === "checked_in" || r.status === "checked_out",
-  ).length;
-  const pendingArrival = attendance.filter((r) => r.status === "expected").length;
+  const support = await listEventSupportAttendance(opts.sessionId).catch(() => []);
+  const totalOnTrip = attendance.length + support.length;
+  const checkedInCount =
+    attendance.filter((r) => r.status === "checked_in").length +
+    support.filter((r) => r.status === "checked_in").length;
+  const checkedInOrOut =
+    attendance.filter((r) => r.status === "checked_in" || r.status === "checked_out").length +
+    support.filter((r) => r.status === "checked_in" || r.status === "checked_out").length;
+  const pendingArrival =
+    attendance.filter((r) => r.status === "expected").length +
+    support.filter((r) => r.status === "expected").length;
   const allCheckedIn = totalOnTrip > 0 && pendingArrival === 0;
 
   const [morning, evening] = await Promise.all([
@@ -770,7 +788,8 @@ export async function fetchEventDeliverGroupStatus(opts: {
     const fromName = stopLabel(item.from);
     const toName = stopLabel(item.to);
     const toPhase = (item.to.phase ?? "pending") as StopPhase;
-    const movement = item.to.movement_method ?? "bus";
+    const movement = item.to.movement_method ?? null;
+    const methodUnset = movement == null;
     const isBus = movement === "bus";
 
     const trip =
@@ -807,10 +826,18 @@ export async function fetchEventDeliverGroupStatus(opts: {
       }
     }
 
+    const leaveStepId = `hop-${item.hopIndex}-leave`;
     const departStepId = `hop-${item.hopIndex}-depart`;
     const atStepId = `hop-${item.hopIndex}-at`;
 
-    if (isBus) {
+    if (methodUnset) {
+      steps.push({
+        id: leaveStepId,
+        label: `Leave for ${toName}`,
+        detail: "Choose Bus / Walk / Other / On-site on Programme",
+        state: "upcoming",
+      });
+    } else if (isBus) {
       steps.push({
         id: departStepId,
         label: `Board bus — depart ${fromName} for ${toName}`,
@@ -823,18 +850,23 @@ export async function fetchEventDeliverGroupStatus(opts: {
 
     steps.push({
       id: atStepId,
-      label: isBus ? `At ${toName}` : `Activity at ${toName}`,
+      label: isBus || methodUnset ? `At ${toName}` : `Activity at ${toName}`,
       detail:
         movement === "walk"
           ? "Individual activity check-in"
           : movement === "on_site"
             ? "On-site activity check-in"
-            : undefined,
+            : movement === "other"
+              ? "Other transport — individual activity check-in"
+              : undefined,
       state: "upcoming",
     });
 
     const hopComplete = toPhase === "completed";
     const hopActive = toPhase === "active";
+    const tripDone = trip?.status === "completed";
+    // Destination `active` alone must not skip boarding — only hop arrive does.
+    const arrivedAtDest = isBus ? tripDone : hopActive;
 
     if (hopComplete) {
       if (isBus) {
@@ -845,6 +877,8 @@ export async function fetchEventDeliverGroupStatus(opts: {
           departStep.detail = "Delivered · hop complete";
         }
       }
+      const leaveStep = steps.find((s) => s.id === leaveStepId);
+      if (leaveStep) leaveStep.state = "complete";
       const atStep = steps.find((s) => s.id === atStepId);
       if (atStep) atStep.state = "complete";
       continue;
@@ -854,15 +888,22 @@ export async function fetchEventDeliverGroupStatus(opts: {
     if (currentAssigned) continue;
 
     currentAssigned = true;
-    if (isBus) {
+    if (methodUnset) {
+      const leaveStep = steps.find((s) => s.id === leaveStepId)!;
+      leaveStep.state = "current";
+    } else if (isBus) {
       const departStep = steps.find((s) => s.id === departStepId)!;
       const atStep = steps.find((s) => s.id === atStepId)!;
-      if (hopActive || inTransit) {
+      if (arrivedAtDest || (tripDone && hopActive)) {
         departStep.state = "complete";
         atStep.state = "current";
-        atStep.label = inTransit && !hopActive ? `In transit to ${toName}` : `At ${toName}`;
+        atStep.label = `At ${toName}`;
+      } else if (inTransit) {
+        departStep.state = "complete";
+        atStep.state = "current";
+        atStep.label = `In transit to ${toName}`;
       } else {
-        // Destination still pending — board / leave for this hop.
+        // Not released, boarding, or active at origin — stay on Board bus.
         departStep.state = "current";
       }
     } else {

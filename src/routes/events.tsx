@@ -9,7 +9,7 @@ import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils"
 import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
 import type { EventManifest } from "@/lib/data-store";
 import { CreateEventModal } from "@/components/events/create-event-modal";
-import { ManageEventModal } from "@/components/events/manage-event-modal";
+import { ManageEventModal, type ManageEventTabKey } from "@/components/events/manage-event-modal";
 
 export const Route = createFileRoute("/events")({
   ssr: false,
@@ -21,6 +21,7 @@ export const Route = createFileRoute("/events")({
       s.tab === "details" ||
       s.tab === "itinerary" ||
       s.tab === "days" ||
+      s.tab === "live" ||
       s.tab === "report"
         ? s.tab
         : undefined,
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/events")({
       { title: "Event Manage — Yada Connect" },
       {
         name: "description",
-        content: "Office event setup — roster, milestones, finance, and Trip Report for the Yada operations team.",
+        content: "Office event setup — roster, milestones, finance, Live watch, and Trip Report for the Yada operations team.",
       },
     ],
   }),
@@ -110,9 +111,7 @@ function EventsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<EventManifest | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [manageTab, setManageTab] = useState<
-    "roster" | "finance" | "details" | "itinerary" | "days" | "report" | undefined
-  >(undefined);
+  const [manageTab, setManageTab] = useState<ManageEventTabKey | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<EventStatus>>(
     () => new Set(DEFAULT_STATUS_FILTER),

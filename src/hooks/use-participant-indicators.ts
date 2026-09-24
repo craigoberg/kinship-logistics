@@ -1,5 +1,8 @@
 import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
+import { busRunEffectiveColor } from "@/lib/bus-run-palette";
+
+export { BUS_RUN_PALETTE } from "@/lib/bus-run-palette";
 
 export type TransportMethod = "run" | "bus" | "private" | "walk_in" | "other";
 
@@ -43,16 +46,6 @@ export const EMPTY_INDICATORS: ParticipantIndicators = {
   hasSchedule: false,
   hasMeds: false,
 };
-
-/** Default palette cycled for named bus runs that have no configured color. */
-export const BUS_RUN_PALETTE = [
-  "#7c3aed", // violet  — run 1
-  "#d97706", // amber   — run 2
-  "#0891b2", // cyan    — run 3
-  "#e11d48", // rose    — run 4
-  "#059669", // emerald — run 5
-  "#7c2d12", // deep-orange — run 6
-];
 
 /**
  * Classify a raw transport code into a broad category, display label and badge color.
@@ -110,30 +103,38 @@ export function useParticipantDirectoryIndicators() {
           .eq("active", true),
         supabase
           .from("system_lookup_parameters")
-          .select("code, display_name, badge_color")
+          .select("id, code, display_name, badge_color, created_at")
           .eq("category", "bus_runs"),
       ]);
       if (schedRes.error) throw schedRes.error;
       if (medRes.error) throw medRes.error;
       // runRes errors are non-fatal — degrade gracefully if table is empty.
 
-      // Build run lookup sets from system_lookup_parameters.
-      // Runs are sorted alphabetically so palette assignment is stable across
-      // sessions (R1 → palette[0], R2 → palette[1], …) even before the
-      // badge_color migration has been applied.
+      // Default colours follow creation order so a rename does not swap colours.
       const runCodes = new Set<string>();
       const runLabels = new Map<string, string>();
       const runColors = new Map<string, string>();
-      const sortedRuns = [...(runRes.data ?? [])].sort((a, b) =>
-        ((a as { code: string }).code).localeCompare((b as { code: string }).code),
-      );
-      sortedRuns.forEach((r, idx) => {
-        const row = r as { code: string; display_name: string; badge_color?: string | null };
-        runCodes.add(row.code);
-        runLabels.set(row.code, row.display_name);
-        // Use the configured color if available, otherwise fall back to palette.
-        runColors.set(row.code, row.badge_color ?? BUS_RUN_PALETTE[idx % BUS_RUN_PALETTE.length]);
+      const paletteRows = (runRes.data ?? []).map((r) => {
+        const row = r as {
+          id: string;
+          code: string;
+          display_name: string;
+          badge_color?: string | null;
+          created_at?: string | null;
+        };
+        return {
+          id: row.id,
+          code: row.code,
+          displayName: row.display_name,
+          createdAt: row.created_at ?? null,
+          badgeColor: row.badge_color ?? null,
+        };
       });
+      for (const row of paletteRows) {
+        runCodes.add(row.code);
+        runLabels.set(row.code, row.displayName);
+        runColors.set(row.code, busRunEffectiveColor(paletteRows, row));
+      }
 
       const map = new Map<string, ParticipantIndicators>();
       const ensure = (id: string) => {

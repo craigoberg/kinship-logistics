@@ -2,12 +2,15 @@ import { useState, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { cn, formatDate } from "@/lib/utils";
 import {
+  CENTRE_HOURS_QUERY_KEY,
   listCentreHours,
   dayCodeFromSydneyIndex,
+  isKnownDayCode,
   type CentreHourRow,
   type DayCode,
 } from "@/lib/api/centre-hours";
-import { listEvents, type EventManifest } from "@/lib/data-store";
+import { LOOKUP_CATEGORIES, listEvents, type EventManifest } from "@/lib/data-store";
+import { useLookupParameters } from "@/hooks/use-supabase-data";
 import { ManageEventModal } from "@/components/events/manage-event-modal";
 import { useSiteSession } from "@/hooks/use-site-session";
 
@@ -65,7 +68,7 @@ interface CalCell {
   iso: string;
   isToday: boolean;
   isPast: boolean;
-  /** From centre_operating_hours — this day-of-week is a scheduled operating day. */
+  /** From Lookups → Operating days — this weekday is a scheduled operating day. */
   isCentreScheduled: boolean;
   centreHours: CentreHourRow | undefined;
   /** True only when the site_day_session for this date has phase === 'active_day'. */
@@ -104,6 +107,7 @@ const EVENT_STATUS_CLS: Record<string, string> = {
 function buildRollingGrid(
   today: Date,
   centreMap: Map<DayCode, CentreHourRow>,
+  operatingCodes: Set<string>,
   events: EventManifest[],
   /** ISO date of the day whose session is currently active_day, or null. */
   liveOpenDate: string | null,
@@ -130,7 +134,7 @@ function buildRollingGrid(
         iso,
         isToday: iso === todayIso,
         isPast: current < today,
-        isCentreScheduled: centreHours !== undefined,
+        isCentreScheduled: operatingCodes.has(dayCode),
         centreHours,
         isLiveOpen: liveOpenDate === iso,
         isWeekday,
@@ -256,8 +260,9 @@ export function WallCalendar() {
   const [selectedEvent, setSelectedEvent] = useState<EventManifest | null>(null);
   const [modalOpen, setModalOpen] = useState(false);
 
+  const { data: operatingDays = [] } = useLookupParameters(LOOKUP_CATEGORIES.operatingDay);
   const centreHoursQ = useQuery({
-    queryKey: ["centre-hours"],
+    queryKey: CENTRE_HOURS_QUERY_KEY,
     queryFn: listCentreHours,
     staleTime: 300_000,
   });
@@ -277,6 +282,15 @@ export function WallCalendar() {
     return m;
   }, [centreHoursQ.data]);
 
+  const operatingCodes = useMemo(() => {
+    const s = new Set<string>();
+    for (const d of operatingDays) {
+      const code = d.code.trim().toUpperCase();
+      if (isKnownDayCode(code)) s.add(code);
+    }
+    return s;
+  }, [operatingDays]);
+
   // Include ALL non-Closed events (Planning, Confirmed, Open) so nothing is missed
   const activeEvents = useMemo<EventManifest[]>(
     () => (eventsQ.data ?? []).filter((e) => e.status !== "Closed"),
@@ -290,8 +304,8 @@ export function WallCalendar() {
   }, [sessionQ.data]);
 
   const weeks = useMemo(
-    () => buildRollingGrid(today, centreMap, activeEvents, liveOpenDate),
-    [today, centreMap, activeEvents, liveOpenDate],
+    () => buildRollingGrid(today, centreMap, operatingCodes, activeEvents, liveOpenDate),
+    [today, centreMap, operatingCodes, activeEvents, liveOpenDate],
   );
 
   const handleEventClick = (e: EventManifest) => {

@@ -17,8 +17,9 @@
 
 import { supabase } from "@/integrations/supabase/client";
 import { writeToLedgerOrThrow, tryGetGps } from "@/lib/api/ledger";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import { getTodaySession } from "@/lib/api/site-day-sessions";
+import { operationalRowStamps } from "@/lib/operational-clock";
 
 export type UnexpectedMedContext = "transport" | "centre";
 
@@ -97,7 +98,7 @@ export async function raiseUnexpectedMedBagIssue(
     (args.notes?.trim() ? ` · Notes: ${args.notes.trim()}` : "");
 
   const reportedBy = (await supabase.auth.getUser()).data.user?.id ?? null;
-  const staffId = await resolveStaffIdWithFallback();
+  const staffId = DEFAULT_STAFF_UUID;
   const gps = await tryGetGps();
 
   // GUARDRAILS §1.1 — ledger write FIRST. Throws on failure so caller must
@@ -123,8 +124,15 @@ export async function raiseUnexpectedMedBagIssue(
         participantLabel,
         args.referenceId,
       ),
+      actor_name: "System",
       source: "raise_unexpected_med_bag",
       automated: true,
+      location: args.context === "transport" ? "trip" : "Day Centre",
+      why: justificationText(
+        args.context,
+        participantLabel,
+        args.referenceId,
+      ),
     },
   });
 
@@ -144,6 +152,7 @@ export async function raiseUnexpectedMedBagIssue(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();

@@ -31,6 +31,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { getSydneyIsoDate } from "@/lib/operational-time";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
 
 function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries();
@@ -107,16 +108,21 @@ function DevOperationalClockBarInner() {
   };
 
   const laneBadge = getAppLaneBadge();
+  const { chromeHidden } = useChromeVisibility();
 
   return (
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-1.5 opacity-100",
           override || simOffline
             ? "border-amber-600/60 bg-amber-500 text-amber-950"
             : "border-dashed border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",
         )}
+        aria-hidden={chromeHidden}
       >
         <button
           type="button"
@@ -170,7 +176,7 @@ function DevOperationalClockBarInner() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         title="DEV operational clock"
-        description="Sydney date + time for multi-day and YELLOW/RED testing. Ledger timestamps stay real."
+        description="Sydney date + time for this sitting only. Kept across refresh the same calendar day. Cleared at Sydney midnight, and when you day-login or PIN on the sign-in screen (not idle unlock). Ledger timestamps stay real."
       >
         <div className="space-y-4 pb-4">
           <div className="grid gap-2">

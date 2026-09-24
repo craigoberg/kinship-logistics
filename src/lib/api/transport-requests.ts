@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import { getStaffId } from "@/lib/data-store";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 export type TransportRequestStatus =
   | "requested"
@@ -156,7 +157,22 @@ export async function upsertTransportRequest(
       )
       .single();
     if (error) throw error;
-    return rowToRequest(data as TransportRequestRow);
+    const updated = rowToRequest(data as TransportRequestRow);
+    void recordOfficeChangeBestEffort({
+      action: "updated",
+      entity: "transport_request",
+      recordId: updated.id,
+      recordName: updated.destinationLabel,
+      category: "CENTRE",
+      summary: `Updated transport request to ${updated.destinationLabel} (${updated.status})`,
+      after: {
+        requestDate: updated.requestDate,
+        pickupAddress: updated.pickupAddress,
+        destination: updated.destinationLabel,
+        status: updated.status,
+      },
+    });
+    return updated;
   }
 
   const { data, error } = await supabase
@@ -167,7 +183,20 @@ export async function upsertTransportRequest(
     )
     .single();
   if (error) throw error;
-  return rowToRequest(data as TransportRequestRow);
+  const created = rowToRequest(data as TransportRequestRow);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "transport_request",
+    recordId: created.id,
+    recordName: created.destinationLabel,
+    summary: `Created transport request to ${created.destinationLabel}`,
+    after: {
+      requestDate: created.requestDate,
+      pickupAddress: created.pickupAddress,
+      destination: created.destinationLabel,
+    },
+  });
+  return created;
 }
 
 export async function completeTransportRequest(
@@ -195,6 +224,13 @@ export async function cancelTransportRequest(requestId: string): Promise<void> {
     })
     .eq("id", requestId);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "transport_request",
+    recordId: requestId,
+    recordName: "transport request",
+    summary: "Cancelled a transport request",
+  });
 }
 
 export function todayDateStr(): string {

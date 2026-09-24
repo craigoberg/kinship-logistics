@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
-import { KeyRound, Plus, Trash2, Save } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { KeyRound, Pencil, Plus, Trash2, Save } from "lucide-react";
 import { toast } from "sonner";
 import {
   Sheet,
@@ -10,12 +11,14 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { IconActionButton } from "@/components/ui/icon-action-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { DatePicker } from "@/components/ui/date-picker";
-import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
+import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import {
   Select,
   SelectContent,
@@ -23,7 +26,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
+import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
+import { exitReasonLabel, isDeceasedExit } from "@/lib/service-exit";
+import { Checkbox } from "@/components/ui/checkbox";
 import { PinPad } from "@/components/auth/pin-pad";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
@@ -32,10 +37,20 @@ import {
   useUpdateStaffMember,
 } from "@/hooks/use-supabase-data";
 import { setStaffDayLoginPassword } from "@/lib/api/staff-auth";
+import {
+  listDutyRoles,
+  listRequirementTypes,
+  listStaffDutyRoleIds,
+  replaceStaffDutyRoles,
+} from "@/lib/api/duty-roles";
+import { evaluateRequirementHolds, requirementTypeMatchesName } from "@/lib/duty-roles";
 import { getActiveUserProfile, hashPin } from "@/lib/data-store";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 import { ACCESS_ROLES } from "@/lib/access-roles";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
+import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
+import { PersonAddressList } from "@/components/address/person-address-list";
+import { classifyWorkforceKind } from "@/lib/support-person";
 
 
 
@@ -46,7 +61,13 @@ interface Props {
   staff: StaffMember | null;
 }
 
-const EMPTY_CERT: StaffCertification = { name: "", number: "", expiry: null, deferredUntil: null };
+const EMPTY_CERT: StaffCertification = {
+  name: "",
+  number: "",
+  expiry: null,
+  deferredUntil: null,
+  requirementTypeId: null,
+};
 
 export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const isEdit = !!staff;
@@ -57,9 +78,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [email, setEmail] = useState("");
   const [streetAddress, setStreetAddress] = useState("");
   const [active, setActive] = useState(true);
+  const [exitMode, setExitMode] = useState<"offboard" | "reactivate" | null>(null);
+  const [exitSnapshot, setExitSnapshot] = useState<{
+    active: boolean;
+    exitReason: string | null;
+    exitNotes: string | null;
+    exitedAt: string | null;
+  } | null>(null);
   const [notes, setNotes] = useState("");
   const [pin, setPin] = useState("");
   const [certs, setCerts] = useState<StaffCertification[]>([]);
+  const [editingCert, setEditingCert] = useState<number | null>(null);
+  const [dutyRoleIds, setDutyRoleIds] = useState<string[]>([]);
   const [dayPassword, setDayPassword] = useState("");
   const [dayPasswordConfirm, setDayPasswordConfirm] = useState("");
   const [passwordPinOpen, setPasswordPinOpen] = useState(false);
@@ -68,6 +98,28 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const insert = useInsertStaffMember();
   const update = useUpdateStaffMember();
   const busy = insert.isPending || update.isPending || passwordBusy;
+
+  const reqTypesQ = useQuery({
+    queryKey: ["duty-roles", "types"],
+    queryFn: () => listRequirementTypes(true),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const dutyRolesQ = useQuery({
+    queryKey: ["duty-roles", "roles"],
+    queryFn: () => listDutyRoles(false),
+    staleTime: 30_000,
+    enabled: open,
+  });
+  const assignedQ = useQuery({
+    queryKey: ["staff-duty-roles", staff?.id ?? "new"],
+    queryFn: () => listStaffDutyRoleIds(staff!.id),
+    enabled: open && !!staff?.id,
+    staleTime: 15_000,
+  });
+  const catalogue = reqTypesQ.data ?? [];
+  const activeCatalogue = catalogue.filter((t) => t.active);
+  const dutyRoles = dutyRolesQ.data ?? [];
 
   useEffect(() => {
     if (!open) return;
@@ -78,13 +130,22 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     setEmail(staff?.email ?? "");
     setStreetAddress(staff?.streetAddress ?? "");
     setActive(staff?.active ?? true);
+    setExitSnapshot(null);
+    setExitMode(null);
     setNotes(staff?.notes ?? "");
     setPin("");
     setCerts(staff?.certifications ?? []);
+    setEditingCert(null);
+    setDutyRoleIds([]);
     setDayPassword("");
     setDayPasswordConfirm("");
     setPasswordPinOpen(false);
   }, [open, staff]);
+
+  useEffect(() => {
+    if (!open || !staff?.id || !assignedQ.data) return;
+    setDutyRoleIds(assignedQ.data);
+  }, [open, staff?.id, assignedQ.data]);
 
   const updateCert = (i: number, patch: Partial<StaffCertification>) => {
     setCerts((prev) => prev.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -132,13 +193,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
       }
       const payload = buildStaffPayload(pinHash);
       console.log("[staff-form] sending mutation", payload);
-      if (isEdit && staff) {
-        await update.mutateAsync({ id: staff.id, payload });
-        toast.success("Personnel updated", { description: payload.fullName });
-      } else {
-        await insert.mutateAsync(payload);
-        toast.success("Personnel added", { description: payload.fullName });
+      const saved =
+        isEdit && staff
+          ? await update.mutateAsync({ id: staff.id, payload })
+          : await insert.mutateAsync(payload);
+      try {
+        await replaceStaffDutyRoles(saved.id, dutyRoleIds);
+      } catch (dutyErr) {
+        console.warn("[staff-form] duty roles save skipped", dutyErr);
       }
+      toast.success(isEdit ? "Personnel updated" : "Personnel added", {
+        description: payload.fullName,
+      });
       onOpenChange(false);
     } catch (err) {
       console.error("[staff-form] save failed", err);
@@ -158,7 +224,15 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const personnelTypeMissing = !isEdit && !personnelType;
   const pinMissing = !isEdit && !pinValidLive;
   const pinBadFormat = isEdit && trimmedPinLive.length > 0 && !pinValidLive;
-  const canSave = !busy && !nameMissing && !roleMissing && !personnelTypeMissing && !pinMissing && !pinBadFormat;
+  const certTypeMissing = certs.some((c) => !(c.requirementTypeId ?? "").trim());
+  const canSave =
+    !busy &&
+    !nameMissing &&
+    !roleMissing &&
+    !personnelTypeMissing &&
+    !pinMissing &&
+    !pinBadFormat &&
+    !certTypeMissing;
 
   const formEmail = email.trim().toLowerCase();
   const formEmailValid = formEmail.includes("@");
@@ -184,14 +258,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     phone: phone.trim() || null,
     email: email.trim() || null,
     streetAddress: streetAddress.trim() || null,
-    active,
+    active: isEdit ? (exitSnapshot ? exitSnapshot.active : (staff?.active ?? active)) : true,
     notes: notes.trim() || null,
     certifications: certs
-      .filter((c) => c.name.trim() || c.number.trim() || c.expiry)
+      .filter((c) => (c.requirementTypeId ?? "").trim())
       .map((c) => ({
         name: c.name.trim(),
         number: c.number.trim(),
         expiry: c.expiry || null,
+        deferredUntil: c.deferredUntil || null,
+        requirementTypeId: c.requirementTypeId ?? null,
       })),
     ...(pinHash !== undefined ? { pinHash } : {}),
   });
@@ -240,21 +316,76 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     }
   };
 
-  return (
+  const serviceActive = exitSnapshot ? exitSnapshot.active : (staff?.active ?? active);
+  const serviceReason = exitSnapshot ? exitSnapshot.exitReason : (staff?.exitReason ?? null);
+  const serviceNotes = exitSnapshot ? exitSnapshot.exitNotes : (staff?.exitNotes ?? null);
 
+  return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
       >
         <SheetHeader className="border-b border-border px-6 py-4">
-          <SheetTitle>{isEdit ? "Edit personnel" : "Add personnel"}</SheetTitle>
-          <SheetDescription>
-            Writes directly to <code>staff_registry</code>.
-          </SheetDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <SheetTitle className="flex flex-wrap items-center gap-2">
+                {isEdit ? "Edit personnel" : "Add personnel"}
+                {isEdit && !serviceActive && (
+                  <Badge variant="secondary" className="uppercase tracking-wide">
+                    {serviceReason ? "Off-boarded" : "Inactive"}
+                  </Badge>
+                )}
+              </SheetTitle>
+              <SheetDescription>
+                Writes directly to <code>staff_registry</code>.
+              </SheetDescription>
+            </div>
+            {isEdit && serviceActive && (
+              <Button type="button" variant="outline" onClick={() => setExitMode("offboard")}>
+                Off-board
+              </Button>
+            )}
+            {isEdit && !serviceActive && !isDeceasedExit(serviceReason) && (
+              <Button type="button" variant="secondary" onClick={() => setExitMode("reactivate")}>
+                Reactivate
+              </Button>
+            )}
+          </div>
+          {isEdit && !serviceActive && (
+            <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground">
+              {serviceReason ? "Off-boarded" : "Inactive"}
+              {serviceReason ? ` — ${exitReasonLabel(serviceReason)}` : ""}
+              {serviceNotes ? `. ${serviceNotes}` : ""}
+            </div>
+          )}
         </SheetHeader>
 
         <div className="flex-1 space-y-5 overflow-y-auto px-6 py-5">
+          {isEdit && staff ? (
+            <OnboardingSubjectPanel
+              subjectTable="staff_registry"
+              subjectId={staff.id}
+              defaultPack={
+                /volunteer/i.test(staff.personnelType ?? staff.role ?? "")
+                  ? "volunteer"
+                  : "staff"
+              }
+              seedName={staff.fullName}
+            />
+          ) : null}
+          {isEdit && staff ? (
+            <SupportTransportDefaults
+              personKind={classifyWorkforceKind(personnelType, role)}
+              staffId={staff.id}
+              personName={fullName.trim() || staff.fullName}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              Save this person first, then set their Centre run (how they get in and out).
+            </p>
+          )}
           <section className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" required className="sm:col-span-2">
               <Input
@@ -312,9 +443,16 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 Same email as Supabase Auth day login. Also editable in the password section below.
               </p>
             </Field>
-            <Field label="Street address" className="sm:col-span-2">
+            <Field label="Home / street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
+            {staff?.id ? (
+              <PersonAddressList owner={{ kind: "staff", id: staff.id }} />
+            ) : (
+              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                Save this person first, then add other pickup places.
+              </p>
+            )}
             <Field
               label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"}
               required={!isEdit}
@@ -338,54 +476,195 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               </p>
             </Field>
 
-            <Field label="Active" className="sm:col-span-2">
-              <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
-                <Switch checked={active} onCheckedChange={setActive} />
-                <span className="text-sm text-muted-foreground">
-                  {active ? "Currently active and rostered" : "Inactive / archived"}
-                </span>
-              </div>
-            </Field>
+            {!isEdit && (
+              <p className="text-sm text-muted-foreground sm:col-span-2">
+                New people are added as active.
+              </p>
+            )}
           </section>
+
+          {dutyRoles.length > 0 && (
+            <section className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                Duty roles
+              </Label>
+              <p className="text-[11px] text-muted-foreground">
+                Jobs this person can be asked to do. Separate from System access.
+                Requirements still have to be on file below.
+              </p>
+              <div className="space-y-2">
+                {dutyRoles.map((d) => {
+                  const checked = dutyRoleIds.includes(d.id);
+                  const reqs = catalogue.filter((t) => d.requirementIds.includes(t.id));
+                  const gap = evaluateRequirementHolds(
+                    { certifications: certs } as StaffMember,
+                    reqs,
+                  );
+                  const gapText =
+                    gap.overall === "ok"
+                      ? "Requirements current"
+                      : gap.missingNames.length
+                        ? `Missing ${gap.missingNames.join(", ")}`
+                        : `Expired ${gap.expiredNames.join(", ")}`;
+                  return (
+                    <label
+                      key={d.id}
+                      className="flex items-start gap-2 rounded-md border border-border px-3 py-2 text-sm"
+                    >
+                      <Checkbox
+                        className="mt-0.5"
+                        checked={checked}
+                        onCheckedChange={(v) => {
+                          setDutyRoleIds((prev) =>
+                            v ? [...prev, d.id] : prev.filter((id) => id !== d.id),
+                          );
+                        }}
+                      />
+                      <span className="min-w-0">
+                        <span className="font-medium">{d.name}</span>
+                        <span
+                          className={cn(
+                            "mt-0.5 block text-[11px]",
+                            gap.overall === "ok"
+                              ? "text-muted-foreground"
+                              : "text-destructive",
+                          )}
+                        >
+                          {gapText}
+                        </span>
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            </section>
+          )}
 
           <section className="space-y-2">
             <div className="flex items-center justify-between">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                Certifications
+                Certificates &amp; orientations
               </Label>
               <Button
                 type="button"
                 size="sm"
                 variant="outline"
-                onClick={() => setCerts((p) => [...p, { ...EMPTY_CERT }])}
+                disabled={activeCatalogue.length === 0}
+                onClick={() => {
+                  setEditingCert(certs.length);
+                  setCerts((p) => [...p, { ...EMPTY_CERT }]);
+                }}
                 className="h-7 gap-1.5"
               >
                 <Plus className="h-3.5 w-3.5" />
-                Add certification
+                Add record
               </Button>
             </div>
+            {activeCatalogue.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                Add official names in Admin → Lookups → Certificates &amp; orientations
+                first.
+              </p>
+            )}
             {certs.length === 0 ? (
               <p className="rounded-md border border-dashed border-border px-3 py-4 text-center text-xs text-muted-foreground">
-                No certifications recorded.
+                No certificates or orientations recorded.
               </p>
             ) : (
               <div className="space-y-2">
-                {certs.map((c, i) => (
+                {certs.map((c, i) => {
+                  const isEditing = editingCert === i;
+                  return (
                   <div
                     key={i}
                     className="space-y-3 rounded-md border border-border bg-card/40 p-3"
                   >
+                    {!isEditing ? (
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0 space-y-1">
+                          <p className="truncate text-sm font-semibold">
+                            {c.name.trim() || "Untitled certification"}
+                          </p>
+                          <p className="text-xs text-muted-foreground">
+                            {c.number.trim() ? `# ${c.number.trim()}` : "No certification number"}
+                            {" · "}
+                            {c.expiry
+                              ? `Expires ${formatDate(c.expiry)}`
+                              : "No expiry"}
+                            {c.deferredUntil
+                              ? ` · Deferred until ${formatDate(c.deferredUntil)}`
+                              : ""}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 items-center gap-1">
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            className="h-8 gap-1.5"
+                            onClick={() => setEditingCert(i)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                            Edit
+                          </Button>
+                          <IconActionButton
+                            type="button"
+                            onClick={() => {
+                              setCerts((p) => p.filter((_, idx) => idx !== i));
+                              setEditingCert((cur) =>
+                                cur === i ? null : cur != null && cur > i ? cur - 1 : cur,
+                              );
+                            }}
+                            tooltip="Remove certification"
+                          >
+                            <Trash2 className="h-4 w-4 text-destructive" />
+                          </IconActionButton>
+                        </div>
+                      </div>
+                    ) : (
+                    <>
                     <div className="grid gap-2 sm:grid-cols-2">
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                          Certificate name
+                          Certificate / orientation
                         </Label>
-                        <Input
-                          placeholder="e.g. First Aid / CPR"
-                          value={c.name}
-                          onChange={(e) => updateCert(i, { name: e.target.value })}
-                          className="h-9"
-                        />
+                        <Select
+                          value={
+                            c.requirementTypeId ||
+                            catalogue.find((t) =>
+                              requirementTypeMatchesName(t, c.name),
+                            )?.id ||
+                            ""
+                          }
+                          onValueChange={(id) => {
+                            const type = catalogue.find((t) => t.id === id);
+                            updateCert(i, {
+                              requirementTypeId: id,
+                              name: type?.name ?? c.name,
+                            });
+                          }}
+                        >
+                          <SelectTrigger
+                            className={requiredFieldOutline(
+                              !(c.requirementTypeId ?? "").trim(),
+                              "h-9",
+                            )}
+                            autoFocus
+                          >
+                            <SelectValue placeholder="Pick from Lookups list" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {catalogue
+                              .filter(
+                                (t) => t.active || t.id === (c.requirementTypeId ?? ""),
+                              )
+                              .map((t) => (
+                                <SelectItem key={t.id} value={t.id}>
+                                  {t.name} ({t.kind})
+                                </SelectItem>
+                              ))}
+                          </SelectContent>
+                        </Select>
                       </div>
                       <div className="grid gap-1">
                         <Label className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -435,18 +714,37 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                         </p>
                       </div>
                     </div>
-                    <div className="flex justify-end">
+                    <div className="flex items-center justify-end gap-2">
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setEditingCert(null)}
+                      >
+                        Done
+                      </Button>
                       <IconActionButton
                         type="button"
-                        onClick={() => setCerts((p) => p.filter((_, idx) => idx !== i))}
+                        onClick={() => {
+                          setCerts((p) => p.filter((_, idx) => idx !== i));
+                          setEditingCert(null);
+                        }}
                         tooltip="Remove certification"
                       >
                         <Trash2 className="h-4 w-4 text-destructive" />
                       </IconActionButton>
                     </div>
+                    </>
+                    )}
                   </div>
-                ))}
+                  );
+                })}
               </div>
+            )}
+            {certs.length > 0 && (
+              <p className="text-[11px] text-muted-foreground">
+                Use Edit to correct a name or number, then Save changes at the bottom.
+              </p>
             )}
           </section>
 
@@ -560,6 +858,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                   personnelTypeMissing && "System access level",
                   pinMissing && "4-digit PIN",
                   pinBadFormat && "PIN must be exactly 4 digits",
+                  certTypeMissing && "Certificate / orientation type",
                 ]
                   .filter(Boolean)
                   .join(", ")}
@@ -595,6 +894,28 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
       </SheetContent>
     </Sheet>
+    {staff && exitMode && (
+      <ServiceExitDialog
+        open
+        onOpenChange={(next) => {
+          if (!next) setExitMode(null);
+        }}
+        mode={exitMode}
+        subject="staff"
+        personId={staff.id}
+        displayName={staff.fullName}
+        onCompleted={(result) => {
+          setExitSnapshot({
+            active: result.mode !== "offboard",
+            exitReason: result.mode === "offboard" ? result.reason : null,
+            exitNotes: result.mode === "offboard" ? result.notes || null : null,
+            exitedAt: result.exitedAt,
+          });
+          setActive(result.mode !== "offboard");
+        }}
+      />
+    )}
+    </>
   );
 }
 

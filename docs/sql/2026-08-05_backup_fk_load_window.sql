@@ -64,7 +64,9 @@ BEGIN
     RETURN v_stashed;
   END IF;
 
-  DELETE FROM public._backup_fk_restore_stash;
+  -- WHERE true: Supabase safeupdate blocks bare DELETE without a WHERE clause
+  -- WHERE true: Supabase safeupdate blocks bare DELETE without a WHERE clause
+  DELETE FROM public._backup_fk_restore_stash WHERE true;
 
   FOR r IN
     SELECT
@@ -143,7 +145,8 @@ BEGIN
     END;
   END LOOP;
 
-  DELETE FROM public._backup_fk_restore_stash;
+  -- WHERE true: Supabase safeupdate
+  DELETE FROM public._backup_fk_restore_stash WHERE true;
   RETURN n;
 END;
 $$;

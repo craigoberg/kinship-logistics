@@ -4,21 +4,31 @@ import {
   type JsonValue,
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
+import { useAuthReady } from "@/hooks/use-auth-ready";
 import type { UrgencyParams } from "@/lib/governance/hub-workflow-status";
 import { DEFAULT_COUNCIL_EMAIL_TEMPLATE } from "@/lib/governance/council-email";
 import {
   listCheckpointsForAsset,
   type AssetCheckpoint,
 } from "@/lib/data-store";
+import {
+  AUTH_IDLE_LOCK_MINUTES_KEY,
+  DEFAULT_AUTH_IDLE_LOCK_MINUTES,
+  clampIdleLockMinutes,
+} from "@/lib/auth/idle-lock";
 
 export const SYSTEM_PARAMETERS_QUERY_KEY = ["system-parameters"] as const;
 
 export function useSystemParameters() {
+  const { user, isReady } = useAuthReady();
   return useQuery<SystemParameterRow[]>({
     queryKey: SYSTEM_PARAMETERS_QUERY_KEY,
     queryFn: listSystemParameters,
     staleTime: 60_000,
     refetchOnWindowFocus: true,
+    // system_parameters is authenticated-only after day-login RLS. Fire only
+    // once the publishable client has a JWT, or the first paint 401s.
+    enabled: isReady && !!user,
   });
 }
 
@@ -240,6 +250,16 @@ export function useCouncilEmailFrom(): string {
   return useSystemParameter<string>("site_management.council_email_from", "");
 }
 
+/** Comma-separated office inbox for App ticket Postmark notify. */
+export function useAppTicketNotifyTo(): string {
+  return useSystemParameter<string>("app_tickets.notify_to", "");
+}
+
+/** Optional From for App ticket notify (blank = POSTMARK_FROM env). */
+export function useAppTicketNotifyFrom(): string {
+  return useSystemParameter<string>("app_tickets.notify_from", "");
+}
+
 /** Default bus depot street address (Admin → Day Centre Bus Runs). */
 export function useDepotAddress(): string {
   return useSystemParameter<string>("depot_address", "");
@@ -263,6 +283,16 @@ export function useDefaultMorningRollCallTime(): string {
   return useSystemParameter<string>(
     "default_morning_roll_call_time",
     "07:00",
+  );
+}
+
+/** Idle PIN lock minutes after last tap/key. 0 = off. Default 15. */
+export function useAuthIdleLockMinutes(): number {
+  return clampIdleLockMinutes(
+    useSystemParameter<number>(
+      AUTH_IDLE_LOCK_MINUTES_KEY,
+      DEFAULT_AUTH_IDLE_LOCK_MINUTES,
+    ),
   );
 }
 
@@ -324,6 +354,19 @@ export function useAttendanceNoShowRedHours(): number {
  */
 export function useRollCallGraceMinutes(): number {
   return useSystemParameter<number>("roll_call_grace_minutes", 30);
+}
+
+/** Annual onboarding review tile / Hub Review due windows. Red 0 = due date. */
+export function useOnboardingReviewParams(): {
+  yellowDays: number;
+  redDays: number;
+} {
+  const yellowDays = useSystemParameter<number>(
+    "onboarding_review_yellow_days",
+    30,
+  );
+  const redDays = useSystemParameter<number>("onboarding_review_red_days", 0);
+  return { yellowDays, redDays };
 }
 
 /** Urgency thresholds for the Compliance Assets tab. */

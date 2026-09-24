@@ -15,10 +15,12 @@ import {
   Siren,
   Split,
   Stethoscope,
+  Ticket,
   Truck,
   UserCheck,
   UserX,
   Wrench,
+  ClipboardList,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 
@@ -42,6 +44,8 @@ import {
   useHubHumanIncidentsFeed,
   useInfectiousExclusionsFeed,
   useOperationalEmergencyFeed,
+  useAppTicketsTileFeed,
+  useOnboardingReviewTileFeed,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
@@ -49,6 +53,7 @@ import {
   useAttendanceNoShowRedHours,
   useRollCallGraceMinutes,
   useIssueUrgencyParams,
+  useOnboardingReviewParams,
 } from "@/hooks/use-system-parameters";
 
 function todayStr(): string {
@@ -130,6 +135,7 @@ export function OperationsExceptionHub() {
   const issueUrgency        = useIssueUrgencyParams();
   const noShowRedHours      = useAttendanceNoShowRedHours();
   const rollCallGraceMinutes = useRollCallGraceMinutes();
+  const onboardingReviewSla = useOnboardingReviewParams();
 
   const { data: maintenanceRows = [] }    = useMaintenanceTileFeed();
   const { data: noShowRows = [] }         = useNoShowTileFeed({ redHours: noShowRedHours });
@@ -141,6 +147,8 @@ export function OperationsExceptionHub() {
   });
   const { data: infectiousRows = [] }     = useInfectiousExclusionsFeed();
   const { data: emergencyOpsRows = [] }   = useOperationalEmergencyFeed();
+  const { data: appTicketRows = [] }      = useAppTicketsTileFeed();
+  const { data: onboardingReviewRows = [] } = useOnboardingReviewTileFeed(onboardingReviewSla);
 
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
@@ -167,9 +175,13 @@ export function OperationsExceptionHub() {
   }));
 
 
-  const hubLink = (icon: React.ReactNode, label: string) => (
+  const hubLink = (
+    icon: React.ReactNode,
+    label: string,
+    search?: { tab?: "issues" | "maintenance" | "assets" | "app_tickets" | "onboarding" },
+  ) => (
     <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
-      <Link to="/governance">{icon}{label}</Link>
+      <Link to="/governance" search={search ?? {}}>{icon}{label}</Link>
     </Button>
   );
 
@@ -296,6 +308,38 @@ export function OperationsExceptionHub() {
       })),
     },
     {
+      id: "app-tickets",
+      anchorId: "exception-section-app-tickets",
+      label: "App tickets",
+      icon: Ticket,
+      isLive: false,
+      rows: appTicketRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<Ticket className="mr-1 h-3.5 w-3.5" />, "Open in Hub", {
+          tab: "app_tickets",
+        }),
+      })),
+    },
+    {
+      id: "onboarding-review",
+      anchorId: "exception-section-onboarding-review",
+      label: "Onboarding review",
+      icon: ClipboardList,
+      isLive: false,
+      rows: onboardingReviewRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: hubLink(<ClipboardList className="mr-1 h-3.5 w-3.5" />, "Open in Hub", {
+          tab: "onboarding",
+        }),
+      })),
+    },
+    {
       id: "maintenance",
       anchorId: "exception-section-maintenance",
       label: "Maintenance",
@@ -361,7 +405,7 @@ export function OperationsExceptionHub() {
     "medication",
     "on-road",
   ]);
-  const BAND3_IDS = new Set(["hub-human"]);
+  const BAND3_IDS = new Set(["hub-human", "app-tickets", "onboarding-review"]);
 
   const band1 = buckets.filter((b) => BAND1_IDS.has(b.id));
   const band2 = buckets.filter((b) => BAND2_IDS.has(b.id));
@@ -412,7 +456,7 @@ export function OperationsExceptionHub() {
       />
       <BandSection
         label="Band 3 — Support Quality"
-        description="Incident response and Hub follow-up"
+        description="Incident follow-up, onboarding reviews, and open app tickets"
         dotCls="bg-sky-500"
         headerCls="bg-sky-50 dark:bg-sky-950/40"
         borderCls="border-sky-300 dark:border-sky-800"

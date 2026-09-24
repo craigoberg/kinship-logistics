@@ -7,6 +7,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { writeToLedger } from "@/lib/api/ledger";
 import {
   getOrCreateEventHopTrip,
+  insertBusManifestRows,
   listBusManifest,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
@@ -36,6 +37,7 @@ import {
   transportRunKeysForDirection,
 } from "@/lib/event-bus-runs";
 import { listLookupParameters, LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 export type EventTransportRunKind = "outbound" | "venue_hop" | "return";
 
@@ -100,22 +102,53 @@ async function fetchTripsForSession(sessionId: string, eventId: string, sessionD
 }
 
 function isHopTrip(row: Record<string, unknown>): boolean {
-  return row.trip_kind === "event_venue_hop";
+  return row.trip_kind === "event_venue_hop" || row.hop_index != null;
+}
+
+function isCancelledTrip(row: Record<string, unknown>): boolean {
+  return String(row.status ?? "").toLowerCase() === "cancelled";
 }
 
 function isOutboundTrip(row: Record<string, unknown>): boolean {
-  if (isHopTrip(row)) return false;
+  if (isHopTrip(row) || isCancelledTrip(row)) return false;
   const ret = row.trip_return as string | null | undefined;
   return ret === "none" || ret == null;
 }
 
 function isReturnTrip(row: Record<string, unknown>): boolean {
-  if (isHopTrip(row)) return false;
+  if (isHopTrip(row) || isCancelledTrip(row)) return false;
   return row.trip_return === "depot" || row.trip_return === "day_centre";
 }
 
 function tripStatus(row: Record<string, unknown>): string {
   return String(row.status ?? "").toLowerCase();
+}
+
+/** Prefer the Manifest run in progress over an older planned/released leftover. */
+export function pickTripForRun(
+  trips: Record<string, unknown>[],
+  runCode: string | null,
+): Record<string, unknown> | undefined {
+  const matches = trips.filter((t) => {
+    if (isCancelledTrip(t)) return false;
+    const code = String(t.bus_run_code ?? "").trim() || null;
+    return matchesEventBusRun(code, runCode);
+  });
+  if (matches.length === 0) return undefined;
+  const rank = (t: Record<string, unknown>) => {
+    const s = tripStatus(t);
+    // A leftover draft must not hide the run that was actually closed.
+    if (s === "completed") return 0;
+    if (s === "active") return 1;
+    return 2;
+  };
+  return [...matches].sort((a, b) => {
+    const d = rank(a) - rank(b);
+    if (d !== 0) return d;
+    const at = String(a.started_at ?? a.created_at ?? "");
+    const bt = String(b.started_at ?? b.created_at ?? "");
+    return bt.localeCompare(at);
+  })[0];
 }
 
 export async function listEventTransportRuns(opts: {
@@ -195,13 +228,7 @@ export async function listEventTransportRuns(opts: {
   const findTripForRun = (
     trips: Record<string, unknown>[],
     runCode: string | null,
-  ): Record<string, unknown> | undefined => {
-    const match = trips.find((t) => {
-      const code = String(t.bus_run_code ?? "").trim() || null;
-      return matchesEventBusRun(code, runCode);
-    });
-    return match;
-  };
+  ): Record<string, unknown> | undefined => pickTripForRun(trips, runCode);
 
   const handoverStartedForRun = (runCode: string | null) =>
     attRows.some(
@@ -284,12 +311,23 @@ export async function listEventTransportRuns(opts: {
         : "waiting";
 
   // ── Venue hops (programme pairs + omitted-hotel wake hop; bus only) ───────
+  // Walk / on-site destinations are skipped. Unset movement still appears as a
+  // potential bus hop (waiting for trip leader to choose Bus + Release).
   for (const hop of programmeHops) {
     const from = hop.from;
     const to = hop.to;
     const i = hop.hopIndex;
-    const movement = (to as EventVenueStop & { movement_method?: string }).movement_method ?? "bus";
-    if (movement !== "bus") continue;
+    const movementRaw = (
+      to as EventVenueStop & { movement_method?: string | null }
+    ).movement_method;
+    // Only bus hops appear on Manifest. walk / on_site / other skip.
+    if (
+      movementRaw === "walk" ||
+      movementRaw === "on_site" ||
+      movementRaw === "other"
+    ) {
+      continue;
+    }
 
     const fromName = stopLabel(from);
     const toName = stopLabel(to);
@@ -311,14 +349,13 @@ export async function listEventTransportRuns(opts: {
         : hopTrips.some(
             (t) => Number(t.hop_index) === i - 1 && tripStatus(t) === "completed",
           );
+    const busPlanned = movementRaw === "bus";
 
     if (hopTrip) {
       const st = tripStatus(hopTrip);
       if (st === "completed") hopStatus = "completed";
       else if (st === "active") hopStatus = "active";
       else hopStatus = "released";
-    } else if (priorHopDone && locationOpen && allCheckedIn) {
-      hopStatus = "ready";
     } else if (!locationOpen) {
       hopStatus = "blocked";
       hopDetail = "Open location on Event Deliver before in-day hops";
@@ -331,6 +368,15 @@ export async function listEventTransportRuns(opts: {
     } else if (!priorHopDone) {
       hopStatus = "waiting";
       hopDetail = "Waiting — complete the previous hop first";
+    } else if (!busPlanned) {
+      hopStatus = "waiting";
+      hopDetail =
+        "Waiting — trip leader chooses By Bus and Releases on Programme";
+    } else {
+      // Destination still pending; Release unlocks Manifest (not Open).
+      hopStatus = "ready";
+      hopDetail =
+        "Ready for trip leader Release on Programme — then start here";
     }
 
     cards.push({
@@ -412,7 +458,18 @@ export async function listEventTransportRuns(opts: {
   return cards;
 }
 
-/** Seed boarding roll from checked-in event-floor attendees only. */
+function hopManifestPersonKey(row: {
+  participant_id?: unknown;
+  staff_id?: unknown;
+  carer_id?: unknown;
+}): string | null {
+  if (typeof row.participant_id === "string" && row.participant_id) return `p:${row.participant_id}`;
+  if (typeof row.staff_id === "string" && row.staff_id) return `s:${row.staff_id}`;
+  if (typeof row.carer_id === "string" && row.carer_id) return `c:${row.carer_id}`;
+  return null;
+}
+
+/** Everyone still with the group on this hop — not clients only (§11.10). */
 export async function seedBusManifestForHop(opts: {
   eventId: string;
   eventDaySessionId: string;
@@ -428,58 +485,104 @@ export async function seedBusManifestForHop(opts: {
   const participantIds = (attendance ?? []).map(
     (r) => (r as { participant_id: string }).participant_id,
   );
-  if (!participantIds.length) return 0;
-
-  const { data: bookings } = await supabase
-    .from("event_roster_bookings")
-    .select("participant_id, carer_id, brings_carer, carer_transport_required")
-    .eq("event_id", opts.eventId)
-    .neq("booking_status", "Cancelled")
-    .in("participant_id", participantIds);
 
   const rows: Record<string, unknown>[] = [];
+  const seen = new Set<string>();
+  const pushRow = (row: Record<string, unknown>) => {
+    const key = hopManifestPersonKey(row);
+    if (!key || seen.has(key)) return;
+    seen.add(key);
+    rows.push(row);
+  };
+
   for (const pid of participantIds) {
-    rows.push({
+    pushRow({
       event_day_session_id: opts.eventDaySessionId,
       transport_trip_id: opts.tripId,
       participant_id: pid,
+      staff_id: null,
       carer_id: null,
       expected_on_bus: true,
       status: "expected",
     });
   }
-  for (const bk of bookings ?? []) {
-    const b = bk as {
-      participant_id: string;
-      carer_id?: string | null;
-      brings_carer?: boolean;
-      carer_transport_required?: boolean;
-    };
-    if (b.brings_carer && b.carer_transport_required && b.carer_id) {
-      rows.push({
+
+  if (participantIds.length) {
+    const { data: bookings } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, carer_id, brings_carer")
+      .eq("event_id", opts.eventId)
+      .neq("booking_status", "Cancelled")
+      .in("participant_id", participantIds);
+
+    for (const bk of bookings ?? []) {
+      const b = bk as {
+        carer_id?: string | null;
+        brings_carer?: boolean;
+      };
+      if (b.brings_carer && b.carer_id) {
+        pushRow({
+          event_day_session_id: opts.eventDaySessionId,
+          transport_trip_id: opts.tripId,
+          participant_id: null,
+          staff_id: null,
+          carer_id: b.carer_id,
+          expected_on_bus: true,
+          status: "expected",
+        });
+      }
+    }
+  }
+
+  try {
+    const { listEventSupportBookings, listEventSupportAttendance } = await import(
+      "@/lib/api/event-support"
+    );
+    const [support, supportAtt] = await Promise.all([
+      listEventSupportBookings(opts.eventId),
+      listEventSupportAttendance(opts.eventDaySessionId),
+    ]);
+    const attStatus = new Map<string, string>();
+    for (const a of supportAtt) {
+      const key = a.staffId ? `s:${a.staffId}` : a.carerId ? `c:${a.carerId}` : null;
+      if (key) attStatus.set(key, a.status);
+    }
+    for (const s of support.filter((b) => b.bookingStatus !== "Cancelled")) {
+      const key = s.staffId ? `s:${s.staffId}` : s.carerId ? `c:${s.carerId}` : null;
+      if (!key) continue;
+      const status = attStatus.get(key);
+      if (status === "absent" || status === "checked_out") continue;
+      pushRow({
         event_day_session_id: opts.eventDaySessionId,
         transport_trip_id: opts.tripId,
         participant_id: null,
-        carer_id: b.carer_id,
+        staff_id: s.staffId,
+        carer_id: s.carerId,
         expected_on_bus: true,
         status: "expected",
       });
     }
+  } catch {
+    /* BL-125 tables not migrated yet */
   }
 
-  if (!rows.length) return 0;
-
-  for (const batch of [rows.filter((r) => r.participant_id), rows.filter((r) => r.carer_id && !r.participant_id)]) {
-    if (!batch.length) continue;
-    const { error } = await supabase.from("event_bus_manifest").insert(batch);
-    if (error && error.code !== "23505") throw error;
+  if (rows.length) {
+    const existing = await listBusManifest(opts.tripId);
+    const have = new Set(
+      existing.map((r) => hopManifestPersonKey(r)).filter((k): k is string => !!k),
+    );
+    const missing = rows.filter((r) => {
+      const key = hopManifestPersonKey(r);
+      return key != null && !have.has(key);
+    });
+    if (missing.length) await insertBusManifestRows(missing);
   }
 
   const manifest = await listBusManifest(opts.tripId);
   return manifest.length;
 }
 
-/** Trip leader or system prepares a hop before the driver opens Manifest. */
+/** Trip leader prepares a hop before the driver opens Manifest (Release only). */
 export async function prepareEventHopManifest(opts: {
   eventId: string;
   eventDaySessionId: string;
@@ -502,6 +605,36 @@ export async function prepareEventHopManifest(opts: {
     );
   }
 
+  const { data: toStop, error: toErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, movement_method")
+    .eq("id", opts.toStopId)
+    .maybeSingle();
+  if (toErr) throw toErr;
+  if (!toStop) throw new Error("Destination stop not found.");
+  const toPhase = (toStop as { phase?: string | null }).phase ?? "pending";
+  const toMovement = (toStop as { movement_method?: string | null }).movement_method;
+  if (toPhase !== "pending") {
+    throw new Error(
+      "Destination is already open or completed — Release is only before the hop arrives.",
+    );
+  }
+  if (toMovement !== "bus") {
+    throw new Error(
+      "Choose By Bus on Programme before releasing the group to the bus.",
+    );
+  }
+
+  const { countOutstandingActivityExpected } = await import(
+    "@/lib/api/event-activity-roll"
+  );
+  const outstandingFrom = await countOutstandingActivityExpected(opts.fromStopId);
+  if (outstandingFrom > 0) {
+    throw new Error(
+      `${outstandingFrom} person${outstandingFrom === 1 ? "" : "s"} still outstanding on the activity check-in. Confirm or mark Not at activity before releasing to the bus.`,
+    );
+  }
+
   const tripId = await getOrCreateEventHopTrip({
     eventId: opts.eventId,
     eventDaySessionId: opts.eventDaySessionId,
@@ -511,20 +644,37 @@ export async function prepareEventHopManifest(opts: {
     hopIndex: opts.hopIndex,
   });
 
-  const existing = await listBusManifest(tripId);
-  if (existing.length === 0) {
-    await seedBusManifestForHop({
-      eventId: opts.eventId,
-      eventDaySessionId: opts.eventDaySessionId,
-      tripId,
-    });
-  }
+  await seedBusManifestForHop({
+    eventId: opts.eventId,
+    eventDaySessionId: opts.eventDaySessionId,
+    tripId,
+  });
 
   await supabase
     .from("event_day_sessions")
-    .update({ phase: "in_transit", updated_at: new Date().toISOString() })
+    .update({ phase: "in_transit", updated_at: operationalNowIso() })
     .eq("id", opts.eventDaySessionId)
     .in("phase", ["active", "at_base"]);
+
+  // Leave-from-current: Release completes the origin stop (custody handed to bus).
+  const { closeVenueStop } = await import("@/lib/api/event-activity-roll");
+  const { data: fromRow } = await supabase
+    .from("event_venue_stops")
+    .select("id, label_override, venues(name)")
+    .eq("id", opts.fromStopId)
+    .maybeSingle();
+  const fromVenues = (
+    fromRow as { venues?: { name?: string } | null } | null
+  )?.venues;
+  await closeVenueStop({
+    id: opts.fromStopId,
+    eventId: opts.eventId,
+    venueName:
+      (fromRow as { label_override?: string | null } | null)?.label_override ??
+      fromVenues?.name ??
+      null,
+    sessionDate: opts.sessionDate,
+  });
 
   const staffId = await resolveStaffIdWithFallback();
   await writeToLedger({
@@ -539,6 +689,13 @@ export async function prepareEventHopManifest(opts: {
       event_id: opts.eventId,
       session_id: opts.eventDaySessionId,
       hop_index: opts.hopIndex,
+      from_stop_id: opts.fromStopId,
+      to_stop_id: opts.toStopId,
+      from_label:
+        (fromRow as { label_override?: string | null } | null)?.label_override ??
+        fromVenues?.name ??
+        null,
+      location: "trip",
     },
   });
 
@@ -697,7 +854,17 @@ export async function startEventVenueHop(
     };
   }
   if (st === "active") {
-    throw new Error("Another driver already has this hop active.");
+    const otherId = row.driver_staff_id as string | null;
+    let who = "Someone";
+    if (otherId) {
+      const { data: staff } = await supabase
+        .from("staff_registry")
+        .select("full_name")
+        .eq("id", otherId)
+        .maybeSingle();
+      who = ((staff as { full_name?: string | null } | null)?.full_name ?? "").trim() || "Someone";
+    }
+    throw new Error(`${who} already has this hop open. Join that run, or a manager must cancel it first.`);
   }
 
   const { data: activeOther } = await supabase
@@ -711,14 +878,11 @@ export async function startEventVenueHop(
     throw new Error("You already have an active manifest. Complete or cancel it first.");
   }
 
-  const manifest = await listBusManifest(input.tripId);
-  if (manifest.length === 0) {
-    await seedBusManifestForHop({
-      eventId: row.event_id as string,
-      eventDaySessionId: row.event_day_session_id as string,
-      tripId: input.tripId,
-    });
-  }
+  await seedBusManifestForHop({
+    eventId: row.event_id as string,
+    eventDaySessionId: row.event_day_session_id as string,
+    tripId: input.tripId,
+  });
 
   // Create leg first so a CHECK failure cannot leave an active trip with 0 legs.
   await ensureVenueHopLeg({
@@ -737,7 +901,7 @@ export async function startEventVenueHop(
     trip_origin: "depot",
     trip_return: "none",
     origin_address: labels.fromAddress,
-    updated_at: new Date().toISOString(),
+    updated_at: operationalNowIso(),
   };
   let { data: updatedTrip, error: updErr } = await supabase
     .from("transport_trips")
@@ -774,6 +938,9 @@ export async function startEventVenueHop(
       event_id: row.event_id,
       hop_index: row.hop_index,
       driver_staff_id: input.driverStaffId,
+      from_label: labels.fromLabel,
+      to_label: labels.toLabel,
+      location: "trip",
     },
   });
 
@@ -802,13 +969,13 @@ export async function finalizeEventVenueHop(trip: TransportTrip): Promise<void> 
   if (trip.tripKind !== "event_venue_hop") return;
   if (!trip.eventDaySessionId) return;
 
+  const now = operationalNowIso();
   await supabase
     .from("event_day_sessions")
-    .update({ phase: "active", updated_at: new Date().toISOString() })
+    .update({ phase: "active", updated_at: now })
     .eq("id", trip.eventDaySessionId)
     .eq("phase", "in_transit");
 
-  const now = new Date().toISOString();
   if (trip.venueStopFromId) {
     await supabase
       .from("event_venue_stops")

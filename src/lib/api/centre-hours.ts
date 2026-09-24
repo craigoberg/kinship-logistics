@@ -1,12 +1,23 @@
-// centre_operating_hours — facility-wide Monday→Sunday open/close defaults.
-// Tier 2 of the daily attendance seeder priority ladder:
+// centre_operating_hours — open/close clock values for days the centre operates.
+// Which days are open comes from Lookups → Operating days (`operating_days`).
+// Times stay here (Tier 2 of the daily attendance seeder ladder):
 //   1. participant_attendance_schedules.expected_*_time  (override)
 //   2. centre_operating_hours.{open|close}_time          (master default)
 //   3. 09:00 / 15:00 system baseline                     (final fallback)
 
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback, dayChronoIndex } from "@/lib/data-store";
+import {
+  LOOKUP_CATEGORIES,
+  dayChronoIndex,
+  listLookupParameters,
+  resolveStaffIdWithFallback,
+} from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { operationalNowIso } from "@/lib/operational-clock";
+
+export const CENTRE_HOURS_QUERY_KEY = ["centre-operating-hours"] as const;
+export const DEFAULT_CENTRE_OPEN = "09:00";
+export const DEFAULT_CENTRE_CLOSE = "15:00";
 
 export type DayCode =
   | "DAY-MON" | "DAY-TUE" | "DAY-WED" | "DAY-THU"
@@ -35,6 +46,18 @@ const SUN_TO_SAT_TO_CODE: Record<number, DayCode> = {
 
 export function dayCodeFromSydneyIndex(idx: number): DayCode {
   return SUN_TO_SAT_TO_CODE[idx] ?? "DAY-MON";
+}
+
+export function isKnownDayCode(code: string): code is DayCode {
+  return (DAY_CODE_ORDER as readonly string[]).includes(code);
+}
+
+/** Days the centre is open — Lookups → Operating days, not leftover hours rows. */
+export async function listOperatingDayCodes(): Promise<DayCode[]> {
+  const rows = await listLookupParameters(LOOKUP_CATEGORIES.operatingDay);
+  const codes = rows.map((r) => r.code.trim().toUpperCase()).filter(isKnownDayCode);
+  codes.sort((a, b) => DAY_CODE_ORDER.indexOf(a) - DAY_CODE_ORDER.indexOf(b));
+  return codes;
 }
 
 export interface CentreHourRow {
@@ -86,20 +109,31 @@ export async function listCentreHours(): Promise<CentreHourRow[]> {
 }
 
 /**
- * Fetch today's row (Sydney-local weekday). Returns null if the table is
- * empty (seeder should fall back to Tier 3 system baseline).
+ * Fetch today's open/close (Sydney-local weekday).
+ * Returns null when today is not an Operating Day (or none are configured),
+ * so the seeder falls back to the Tier 3 09:00 / 15:00 baseline.
  */
 export async function getTodayCentreHours(
   todayIdx: number,
 ): Promise<CentreHourRow | null> {
   const code = dayCodeFromSydneyIndex(todayIdx);
+  const operating = await listOperatingDayCodes();
+  if (!operating.includes(code)) return null;
+
   const { data, error } = await supabase
     .from("centre_operating_hours")
     .select("day_of_week, open_time, close_time, updated_at, updated_by_staff_id")
     .eq("day_of_week", code)
     .maybeSingle();
   if (error) throw error;
-  return data ? toRow(data as DbRow) : null;
+  if (data) return toRow(data as DbRow);
+  return {
+    dayOfWeek: code,
+    openTime: DEFAULT_CENTRE_OPEN,
+    closeTime: DEFAULT_CENTRE_CLOSE,
+    updatedAt: "",
+    updatedByStaffId: null,
+  };
 }
 
 export interface UpdateCentreHoursInput {
@@ -124,7 +158,7 @@ export async function updateCentreHours(
   }
 
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   // HH:MM is enough for Postgres `time` and bootstrap `text` columns.
   const payload = {
     day_of_week: input.dayOfWeek,

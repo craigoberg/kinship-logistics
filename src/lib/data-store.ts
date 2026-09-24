@@ -10,20 +10,139 @@
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { assessEventReturnTransport, resolveReturnHomeBusEligibleIds } from "@/lib/api/event-transport";
-import { matchesEventBusRun } from "@/lib/event-bus-runs";
+import { assertTransportRunSlotStartable } from "@/lib/api/transport-run-exclusivity";
+import { effectiveReturnBusRun, matchesEventBusRun } from "@/lib/event-bus-runs";
 import {
   getSydneyTimeTodayIso,
   resolveOperationalNow,
+  sydneyWallClockToUtcDate,
+  todaysSydneyDayCode,
 } from "@/lib/operational-time";
 import { todayLocalIso, eventSpansDate } from "@/lib/utils";
+import { writeToLedger } from "@/lib/api/ledger";
+import {
+  loadBusRunRouteOrderMap,
+  sortRosterByRouteOrder,
+} from "@/lib/api/bus-run-routes";
+import {
+  clientRosterPerson,
+  parseRoutePersonKey,
+  rosterParticipantIds,
+  rosterPersonRefs,
+  supportPersonKey,
+  supportRosterPerson,
+  type TransportRosterPerson,
+} from "@/lib/support-person";
+import type { RecordOfficeChangeInput } from "@/lib/api/office-change-log";
+
+function logOfficeChange(input: RecordOfficeChangeInput): void {
+  void import("@/lib/api/office-change-log")
+    .then((m) => m.recordOfficeChangeBestEffort(input))
+    .catch((err) => console.error("[office-change-log]", err));
+}
+
+function participantPublicFields(p: {
+  firstName: string;
+  lastName: string;
+  ndisNumber: string;
+  streetAddress: string | null;
+  regularPickupAddress: string | null;
+  iddsi: { liquids: number; foods: number };
+  supportGoals?: string | null;
+  supportStrengths?: string | null;
+  supportNeeds?: string | null;
+  supportPreferences?: string | null;
+  communicationMode?: string | null;
+  communicationStrategies?: string | null;
+  riskHazards?: string | null;
+  riskControls?: string | null;
+  dualWitnessPinHash?: string | null;
+}): Record<string, unknown> {
+  return {
+    firstName: p.firstName,
+    lastName: p.lastName,
+    ndisNumber: p.ndisNumber,
+    streetAddress: p.streetAddress,
+    regularPickupAddress: p.regularPickupAddress,
+    iddsiLiquids: p.iddsi.liquids,
+    iddsiFoods: p.iddsi.foods,
+    supportGoals: p.supportGoals ?? null,
+    supportStrengths: p.supportStrengths ?? null,
+    supportNeeds: p.supportNeeds ?? null,
+    supportPreferences: p.supportPreferences ?? null,
+    communicationMode: p.communicationMode ?? null,
+    communicationStrategies: p.communicationStrategies ?? null,
+    riskHazards: p.riskHazards ?? null,
+    riskControls: p.riskControls ?? null,
+    dualWitnessPinHash: p.dualWitnessPinHash ? "(set)" : null,
+  };
+}
+
+function staffPublicFields(p: {
+  fullName: string;
+  role: string | null;
+  personnelType: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  active: boolean;
+  notes: string | null;
+  certifications?: Array<{ name?: string | null }>;
+  pinHash?: string | null;
+}): Record<string, unknown> {
+  return {
+    fullName: p.fullName,
+    role: p.role,
+    personnelType: p.personnelType,
+    phone: p.phone,
+    email: p.email,
+    streetAddress: p.streetAddress,
+    active: p.active,
+    notes: p.notes,
+    certifications: (p.certifications ?? []).map((c) => c.name ?? ""),
+    pin: p.pinHash ? "(set)" : null,
+  };
+}
+
+function carerPublicFields(p: {
+  fullName: string;
+  relationship: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  isPrimaryContact: boolean;
+  notes: string | null;
+  participantId?: string | null;
+}): Record<string, unknown> {
+  return {
+    fullName: p.fullName,
+    relationship: p.relationship,
+    phone: p.phone,
+    email: p.email,
+    streetAddress: p.streetAddress,
+    isPrimaryContact: p.isPrimaryContact,
+    notes: p.notes,
+    participantId: p.participantId ?? null,
+  };
+}
+
+export type ParticipantKind = "client" | "guest";
 
 export interface Participant {
   id: string;
   firstName: string;
   lastName: string;
   fullName: string; // derived: `${firstName} ${lastName}`.trim()
+  /** `guest` = event bring-a-friend; not a directory client. */
+  participantKind: ParticipantKind;
+  /** Client service exit. Guests stay on archived_at. Default active when the column is absent. */
+  serviceStatus: "active" | "exited";
+  exitedAt: string | null;
+  exitedById: string | null;
+  exitReason: string | null;
+  exitNotes: string | null;
   ndisNumber: string;
   streetAddress: string | null;
   /** Coordinator-managed permanent pickup address, used by the manifest engine
@@ -32,6 +151,15 @@ export interface Participant {
   iddsi: { liquids: number; foods: number };
   /** BL-076 — free-text allergies / alerts (guests + clients). */
   allergiesNotes: string | null;
+  /** BL-114 — organisational support plan (day centre / community / transport). */
+  supportGoals: string | null;
+  supportStrengths: string | null;
+  supportNeeds: string | null;
+  supportPreferences: string | null;
+  communicationMode: string | null;
+  communicationStrategies: string | null;
+  riskHazards: string | null;
+  riskControls: string | null;
   dualWitnessPinHash: string | null;
   createdAt: string;
   updatedAt: string;
@@ -169,12 +297,26 @@ interface ParticipantRow {
   id: string;
   first_name: string;
   last_name: string;
+  participant_kind?: string | null;
+  service_status?: string | null;
+  exited_at?: string | null;
+  exited_by_id?: string | null;
+  exit_reason?: string | null;
+  exit_notes?: string | null;
   ndis_number: string;
   street_address: string | null;
   regular_pickup_address: string | null;
   iddsi_level_liquids: number | null;
   iddsi_level_solids: number | null;
   allergies_notes?: string | null;
+  support_goals?: string | null;
+  support_strengths?: string | null;
+  support_needs?: string | null;
+  support_preferences?: string | null;
+  communication_mode?: string | null;
+  communication_strategies?: string | null;
+  risk_hazards?: string | null;
+  risk_controls?: string | null;
   dual_witness_pin_hash: string | null;
   created_at: string;
   updated_at: string;
@@ -186,6 +328,12 @@ function rowToParticipant(r: ParticipantRow): Participant {
     firstName: r.first_name ?? "",
     lastName: r.last_name ?? "",
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
+    participantKind: r.participant_kind === "guest" ? "guest" : "client",
+    serviceStatus: r.service_status === "exited" ? "exited" : "active",
+    exitedAt: r.exited_at ?? null,
+    exitedById: r.exited_by_id ?? null,
+    exitReason: r.exit_reason ?? null,
+    exitNotes: r.exit_notes ?? null,
     ndisNumber: r.ndis_number,
     streetAddress: r.street_address ?? null,
     regularPickupAddress: r.regular_pickup_address ?? null,
@@ -194,6 +342,14 @@ function rowToParticipant(r: ParticipantRow): Participant {
       foods: r.iddsi_level_solids ?? 7,
     },
     allergiesNotes: r.allergies_notes ?? null,
+    supportGoals: r.support_goals ?? null,
+    supportStrengths: r.support_strengths ?? null,
+    supportNeeds: r.support_needs ?? null,
+    supportPreferences: r.support_preferences ?? null,
+    communicationMode: r.communication_mode ?? null,
+    communicationStrategies: r.communication_strategies ?? null,
+    riskHazards: r.risk_hazards ?? null,
+    riskControls: r.risk_controls ?? null,
     dualWitnessPinHash: r.dual_witness_pin_hash,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
@@ -230,7 +386,8 @@ export async function listParticipants(): Promise<Participant[]> {
     .select("*")
     .order("last_name", { ascending: true });
   if (error) throw error;
-  // BL-098: archived guests stay out of normal pickers (reuse via guest list).
+  // Archived guests stay out of normal pickers (reuse via guest list).
+  // Exited clients stay in this list so the directory can show them.
   return (data ?? [])
     .filter((r) => !(r as { archived_at?: string | null }).archived_at)
     .map((r) => rowToParticipant(r as ParticipantRow));
@@ -244,6 +401,14 @@ export interface ParticipantPatch {
   regularPickupAddress?: string | null;
   iddsi?: { liquids: number; foods: number };
   dualWitnessPinHash?: string | null;
+  supportGoals?: string | null;
+  supportStrengths?: string | null;
+  supportNeeds?: string | null;
+  supportPreferences?: string | null;
+  communicationMode?: string | null;
+  communicationStrategies?: string | null;
+  riskHazards?: string | null;
+  riskControls?: string | null;
 }
 
 export interface NewParticipant {
@@ -289,7 +454,16 @@ export async function insertParticipant(input: NewParticipant): Promise<Particip
     }
     throw error;
   }
-  return rowToParticipant(data as ParticipantRow);
+  const created = rowToParticipant(data as ParticipantRow);
+  logOfficeChange({
+    action: "created",
+    entity: "client",
+    recordId: created.id,
+    recordName: created.fullName,
+    category: "CLIENT",
+    after: participantPublicFields(created),
+  });
+  return created;
 }
 
 export async function updateParticipant(
@@ -308,6 +482,23 @@ export async function updateParticipant(
     row.iddsi_level_solids = patch.iddsi.foods;
   }
   if (patch.dualWitnessPinHash !== undefined) row.dual_witness_pin_hash = patch.dualWitnessPinHash;
+  if (patch.supportGoals !== undefined) row.support_goals = patch.supportGoals;
+  if (patch.supportStrengths !== undefined) row.support_strengths = patch.supportStrengths;
+  if (patch.supportNeeds !== undefined) row.support_needs = patch.supportNeeds;
+  if (patch.supportPreferences !== undefined)
+    row.support_preferences = patch.supportPreferences;
+  if (patch.communicationMode !== undefined)
+    row.communication_mode = patch.communicationMode;
+  if (patch.communicationStrategies !== undefined)
+    row.communication_strategies = patch.communicationStrategies;
+  if (patch.riskHazards !== undefined) row.risk_hazards = patch.riskHazards;
+  if (patch.riskControls !== undefined) row.risk_controls = patch.riskControls;
+
+  const { data: beforeRow } = await supabase
+    .from("participants")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
 
   const { data, error } = await supabase
     .from("participants")
@@ -315,8 +506,34 @@ export async function updateParticipant(
     .eq("id", id)
     .select("*")
     .single();
-  if (error) throw error;
-  return rowToParticipant(data as ParticipantRow);
+  if (error) {
+    const msg = error.message ?? "";
+    if (
+      isSchemaMismatchError(error) &&
+      /support_|communication_mode|communication_strategies|risk_hazards|risk_controls/i.test(
+        msg,
+      )
+    ) {
+      throw new Error(
+        "Support plan columns missing — run docs/sql/2026-08-21_client_support_plan.sql then hard refresh.",
+      );
+    }
+    throw error;
+  }
+  const updated = rowToParticipant(data as ParticipantRow);
+  const before = beforeRow
+    ? rowToParticipant(beforeRow as ParticipantRow)
+    : null;
+  logOfficeChange({
+    action: "updated",
+    entity: updated.participantKind === "guest" ? "guest" : "client",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    category: "CLIENT",
+    before: before ? participantPublicFields(before) : null,
+    after: participantPublicFields(updated),
+  });
+  return updated;
 }
 
 // ---------- offline_sync_logs ----------
@@ -364,16 +581,83 @@ export async function insertSyncLog(log: NewSyncLog): Promise<SyncLog> {
 
 // ---------- compliance_audit_logs ----------
 
+async function ledgerMedicationDose(input: {
+  complianceLogId: string | null;
+  participantId: string;
+  actionPerformed: string;
+  medicationName: string;
+  dosage: string;
+  status?: string | null;
+  administeredByName?: string | null;
+  witnessedByName?: string | null;
+  source?: string | null;
+}): Promise<void> {
+  try {
+    const { lookupParticipantName, withAuditActorMeta } = await import(
+      "@/lib/api/office-change-log"
+    );
+    const personName = await lookupParticipantName(input.participantId);
+    const who = personName ?? "client";
+    const medLabel = [input.dosage, input.medicationName].filter(Boolean).join(" ").trim();
+    const place = (input.source ?? "").toLowerCase().includes("trip")
+      ? "on trip"
+      : "at Day Centre";
+    const action = input.actionPerformed.toUpperCase();
+    const status = (input.status ?? "").toLowerCase();
+    let summary: string;
+    if (action.includes("REFUSED") || status === "refused") {
+      summary = `${who} refused ${medLabel} ${place}`;
+    } else if (action.includes("MISSED") || status === "missed") {
+      summary = `Missed ${medLabel} for ${who} ${place}`;
+    } else if (action.includes("SOLE")) {
+      summary = `Gave ${medLabel} to ${who} ${place} (sole carer: ${input.administeredByName ?? "staff"})`;
+    } else if (action.includes("DUAL") && input.witnessedByName) {
+      summary = `Gave ${medLabel} to ${who} ${place} (dual witness: ${input.administeredByName} and ${input.witnessedByName})`;
+    } else {
+      summary = `Gave ${medLabel} to ${who} ${place}`;
+    }
+    await writeToLedger({
+      actionType: input.actionPerformed,
+      category: "CLIENT",
+      severity: "INFO",
+      metadata: await withAuditActorMeta({
+        compliance_log_id: input.complianceLogId,
+        participant_id: input.participantId,
+        person_name: who,
+        medication_name: input.medicationName,
+        dosage: input.dosage,
+        status: input.status ?? null,
+        location: place === "on trip" ? "trip" : "Day Centre",
+        source: input.source ?? null,
+        summary,
+      }),
+    });
+  } catch (err) {
+    console.warn("[ledger] medication dose", err);
+  }
+}
+
 export async function insertComplianceLog(payload: MedicationLogPayload): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: payload.participant_id,
     action_performed: payload.action_performed,
     witness_1_identity: payload.witness_1_identity,
     witness_2_identity: payload.witness_2_identity,
     timestamp: payload.timestamp,
     metadata: payload.metadata,
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: payload.participant_id,
+    actionPerformed: payload.action_performed,
+    medicationName: payload.metadata.medication_name,
+    dosage: payload.metadata.dosage,
+    administeredByName: payload.witness_1_identity,
+    witnessedByName: payload.witness_2_identity,
+    source: "medication_modal",
+  });
 }
 
 export interface QuickMedicationLog {
@@ -387,12 +671,12 @@ export interface QuickMedicationLog {
 
 /** Lightweight 1-tap administration log written from the dashboard widget. */
 export async function insertQuickAdministrationLog(input: QuickMedicationLog): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_QUICK",
     witness_1_identity: input.witnessIdentity,
     witness_2_identity: null,
-    timestamp: new Date().toISOString(),
+    timestamp: resolveOperationalNow().toISOString(),
     metadata: {
       medication_name: input.medicationName,
       dosage: input.dosage,
@@ -401,8 +685,18 @@ export async function insertQuickAdministrationLog(input: QuickMedicationLog): P
       source: "dashboard_widget",
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_QUICK",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    administeredByName: input.witnessIdentity,
+    source: "dashboard_widget",
+  });
 }
 
 export type AdministrationStatus = "Administered" | "Refused" | "Missed";
@@ -450,7 +744,7 @@ export interface SoleCarerAdministration {
 export async function insertDualWitnessAdministrationLog(
   input: DualWitnessAdministration,
 ): Promise<void> {
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_DUAL",
     witness_1_identity: input.administeredByName,
@@ -472,8 +766,20 @@ export async function insertDualWitnessAdministrationLog(
       event_day_session_id: input.eventDaySessionId ?? null,
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_DUAL",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    status: input.status,
+    administeredByName: input.administeredByName,
+    witnessedByName: input.witnessedByName,
+    source: input.source ?? "care_profile_give_dose",
+  });
 }
 
 /** Sole-carer Give Dose when only one staff is available (trips) — PIN attested. */
@@ -484,7 +790,7 @@ export async function insertSoleCarerAdministrationLog(
   if (soleNote.length < 10) {
     throw new Error("Sole-carer justification needs at least 10 characters.");
   }
-  const { error } = await supabase.from("compliance_audit_logs").insert({
+  const { data, error } = await supabase.from("compliance_audit_logs").insert({
     participant_id: input.participantId,
     action_performed: "MEDICATION_ADMIN_SOLE",
     witness_1_identity: input.administeredByName,
@@ -505,8 +811,19 @@ export async function insertSoleCarerAdministrationLog(
       event_day_session_id: input.eventDaySessionId ?? null,
       device_uuid: getDeviceUuid(),
     },
-  });
+  }).select("id").single();
   if (error) throw error;
+  const logId = (data as { id?: string } | null)?.id;
+  await ledgerMedicationDose({
+    complianceLogId: logId ?? null,
+    participantId: input.participantId,
+    actionPerformed: "MEDICATION_ADMIN_SOLE",
+    medicationName: input.medicationName,
+    dosage: input.dosage,
+    status: input.status,
+    administeredByName: input.administeredByName,
+    source: input.source ?? "trip_give_dose",
+  });
 }
 
 
@@ -531,6 +848,8 @@ export interface StaffCertification {
    * Persisted inside the staff_registry.certifications JSONB array.
    */
   deferredUntil?: string | null;
+  /** BL-126 catalogue id — preferred match over free-text name. */
+  requirementTypeId?: string | null;
 }
 
 export interface StaffMember {
@@ -546,6 +865,10 @@ export interface StaffMember {
   notes: string | null;
   certifications: StaffCertification[];
   createdAt: string | null;
+  exitedAt: string | null;
+  exitedById: string | null;
+  exitReason: string | null;
+  exitNotes: string | null;
 }
 
 interface StaffRow {
@@ -561,6 +884,10 @@ interface StaffRow {
   notes: string | null;
   certifications: unknown;
   created_at: string | null;
+  exited_at?: string | null;
+  exited_by_id?: string | null;
+  exit_reason?: string | null;
+  exit_notes?: string | null;
 }
 
 function rowToStaff(r: StaffRow): StaffMember {
@@ -581,21 +908,88 @@ function rowToStaff(r: StaffRow): StaffMember {
       number: c?.number ?? "",
       expiry: c?.expiry ?? null,
       deferredUntil: (c as { deferredUntil?: string | null })?.deferredUntil ?? null,
+      requirementTypeId:
+        (c as { requirementTypeId?: string | null })?.requirementTypeId ?? null,
     })),
     createdAt: r.created_at,
+    exitedAt: r.exited_at ?? null,
+    exitedById: r.exited_by_id ?? null,
+    exitReason: r.exit_reason ?? null,
+    exitNotes: r.exit_notes ?? null,
   };
 }
 
 const STAFF_COLS =
   "id, full_name, role, pin_hash, phone, email, street_address, personnel_type, active, notes, certifications, created_at";
 
+const STAFF_EXIT_COLS = "exited_at, exited_by_id, exit_reason, exit_notes";
+
 export async function listStaffRegistry(): Promise<StaffMember[]> {
+  const full = await supabase
+    .from("staff_registry")
+    .select(`${STAFF_COLS}, ${STAFF_EXIT_COLS}, auth_user_id`)
+    .order("full_name", { ascending: true });
+  let data: unknown[] = [];
+  if (full.error && isSchemaMismatchError(full.error)) {
+    const fallback = await supabase
+      .from("staff_registry")
+      .select(`${STAFF_COLS}, auth_user_id`)
+      .order("full_name", { ascending: true });
+    if (fallback.error) throw fallback.error;
+    data = (fallback.data ?? []) as unknown[];
+  } else {
+    if (full.error) throw full.error;
+    data = (full.data ?? []) as unknown[];
+  }
+  const rows = data as unknown as Array<StaffRow & { auth_user_id?: string | null }>;
+  for (const r of rows) {
+    rememberStaffDisplayName(r.id, r.full_name);
+    rememberStaffDisplayName(r.auth_user_id, r.full_name);
+  }
+  return rows.map((r) => rowToStaff(r));
+}
+
+/** Personnel email for a staff_registry id (day-login / office contact). */
+export async function getStaffEmailById(
+  id: string | null | undefined,
+): Promise<string | null> {
+  const staffId = (id ?? "").trim();
+  if (!staffId) return null;
   const { data, error } = await supabase
     .from("staff_registry")
-    .select(STAFF_COLS)
-    .order("full_name", { ascending: true });
-  if (error) throw error;
-  return (data ?? []).map((r) => rowToStaff(r as StaffRow));
+    .select("email")
+    .eq("id", staffId)
+    .maybeSingle();
+  if (error) {
+    console.error("[getStaffEmailById]", error);
+    return null;
+  }
+  const email = String((data as { email?: string | null } | null)?.email ?? "").trim();
+  return email.includes("@") ? email : null;
+}
+
+/** Fallback when the ticket has a name but no staff id. */
+export async function getStaffEmailByFullName(
+  fullName: string | null | undefined,
+): Promise<string | null> {
+  const name = (fullName ?? "").trim();
+  if (!name) return null;
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("email")
+    .ilike("full_name", name);
+  if (error) {
+    console.error("[getStaffEmailByFullName]", error);
+    return null;
+  }
+  const emails = [
+    ...new Set(
+      (data ?? [])
+        .map((r) => String((r as { email?: string | null }).email ?? "").trim())
+        .filter((e) => e.includes("@")),
+    ),
+  ];
+  return emails.length === 1 ? emails[0]! : null;
 }
 
 export interface StaffPayload {
@@ -645,19 +1039,48 @@ export async function insertStaffMember(p: StaffPayload): Promise<StaffMember> {
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
-  return rowToStaff(data as StaffRow);
+  const created = rowToStaff(data as StaffRow);
+  logOfficeChange({
+    action: "created",
+    entity: "staff",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: staffPublicFields({ ...created, pinHash: p.pinHash }),
+  });
+  return created;
 }
 
 export async function updateStaffMember(id: string, p: StaffPayload): Promise<StaffMember> {
   assertManagerRole("update personnel");
+  const { data: beforeRow } = await supabase
+    .from("staff_registry")
+    .select(STAFF_COLS)
+    .eq("id", id)
+    .maybeSingle();
+  const before = beforeRow ? rowToStaff(beforeRow as StaffRow) : null;
+  const row = staffPayloadToRow(p, { includePin: p.pinHash !== undefined });
+  // A form save cannot silently reactivate. Off-board / Reactivate owns active.
+  if (before && before.active === false) row.active = false;
   const { data, error } = await supabase
     .from("staff_registry")
-    .update(staffPayloadToRow(p, { includePin: p.pinHash !== undefined }))
+    .update(row)
     .eq("id", id)
     .select(STAFF_COLS)
     .single();
   if (error) throw error;
-  return rowToStaff(data as StaffRow);
+  const updated = rowToStaff(data as StaffRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "staff",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    before: before ? staffPublicFields(before) : null,
+    after: staffPublicFields({
+      ...updated,
+      pinHash: p.pinHash !== undefined ? p.pinHash : before?.pinHash,
+    }),
+  });
+  return updated;
 }
 
 /** True when the active session has Manager-level (coordinator) privileges. */
@@ -678,8 +1101,12 @@ export interface ActiveUserProfile {
   fullName: string;
   role: UserRole;
   staffRole: string | null;
+  /** SYSTEM ACCESS LEVEL (`staff_registry.personnel_type`) — Menu Access matrix. */
+  accessRole?: string | null;
   vehicleId?: string | null;
   vehicleName?: string | null;
+  /** Day-login auth.users.id when linked — used to resolve reported_by UUIDs. */
+  authUserId?: string | null;
 }
 
 /**
@@ -793,23 +1220,32 @@ export async function loginWithPin(
     }
   }
 
+  const authUserId = (await supabase.auth.getUser()).data.user?.id ?? null;
   const profile: ActiveUserProfile = {
     staffId: record.id,
     fullName: record.full_name || "Staff Member",
     role,
     staffRole: record.role,
+    accessRole: accessKey || null,
     vehicleId,
     vehicleName,
+    authUserId,
   };
 
   if (typeof localStorage !== "undefined") {
-    localStorage.setItem(USER_ROLE_KEY, role);
-    localStorage.setItem(WORKFLOW_MODE_KEY, role);
     localStorage.setItem(STAFF_KEY, record.id);
-    localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+    persistActiveUserProfile(profile);
   }
 
   return profile;
+}
+
+/** Write the floor profile used by Menu Access and attribution. */
+export function persistActiveUserProfile(profile: ActiveUserProfile): void {
+  if (typeof localStorage === "undefined") return;
+  localStorage.setItem(USER_ROLE_KEY, profile.role);
+  localStorage.setItem(WORKFLOW_MODE_KEY, profile.role);
+  localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
 }
 
 export function getActiveUserRole(): UserRole | null {
@@ -829,21 +1265,66 @@ export function getActiveUserProfile(): ActiveUserProfile | null {
   }
 }
 
+const staffDisplayNameById = new Map<string, string>();
+let staffDisplayNamesPrimedAt = 0;
+const STAFF_DISPLAY_NAME_TTL_MS = 60_000;
+
+/** Cache a staff id or auth.users.id → display name (Hub "Reported by"). */
+export function rememberStaffDisplayName(
+  id: string | null | undefined,
+  name: string | null | undefined,
+): void {
+  const key = String(id ?? "").trim();
+  const label = String(name ?? "").trim();
+  if (key && label) staffDisplayNameById.set(key, label);
+}
+
+/** Load staff_registry names so Hub cards do not fall back to the viewer. */
+export async function primeStaffDisplayNames(): Promise<void> {
+  if (
+    staffDisplayNameById.size > 0 &&
+    Date.now() - staffDisplayNamesPrimedAt < STAFF_DISPLAY_NAME_TTL_MS
+  ) {
+    return;
+  }
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id, full_name, auth_user_id");
+  if (error) {
+    console.warn("[staff] display-name prime failed", error);
+    return;
+  }
+  for (const raw of data ?? []) {
+    const r = raw as { id: string; full_name?: string | null; auth_user_id?: string | null };
+    rememberStaffDisplayName(r.id, r.full_name);
+    rememberStaffDisplayName(r.auth_user_id, r.full_name);
+  }
+  staffDisplayNamesPrimedAt = Date.now();
+}
+
 /**
- * Resolve a staff member's display name for HUB / audit fields.
- * Prefers the PIN-login profile (staff_registry), then the static dev directory.
+ * Resolve a staff member's display name for Hub / audit fields.
+ * Only returns the signed-in profile when the id is that person (or omitted).
+ * Other UUIDs come from staff_registry (id or auth_user_id), never the viewer.
  */
 export function resolveStaffDisplayName(staffId?: string | null): string {
-  const id = staffId ?? getStaffId();
+  const requested = String(staffId ?? "").trim();
+  const id = requested || getStaffId();
   const profile = getActiveUserProfile();
   if (profile?.fullName) {
-    if (!id || id === DEFAULT_STAFF_UUID || profile.staffId === id) {
-      return profile.fullName;
-    }
+    const isSelf =
+      !requested ||
+      !id ||
+      id === DEFAULT_STAFF_UUID ||
+      profile.staffId === id ||
+      profile.authUserId === id;
+    if (isSelf) return profile.fullName;
   }
+  const cached = staffDisplayNameById.get(id);
+  if (cached) return cached;
   const fromDir = STAFF_DIRECTORY.find((s) => s.id === id)?.name;
   if (fromDir) return fromDir;
-  return profile?.fullName ?? "Unknown staff";
+  return "Unknown staff";
 }
 
 export function clearActiveUserSession(): void {
@@ -896,7 +1377,14 @@ function rowToCarer(r: CarerRow): Carer {
   };
 }
 
+/** carers_registry is authenticated-only (BL-117). Skip the REST call with no JWT. */
+async function hasDayLoginSession(): Promise<boolean> {
+  const { data } = await supabase.auth.getSession();
+  return !!data.session;
+}
+
 export async function listCarersRegistry(): Promise<Carer[]> {
+  if (!(await hasDayLoginSession())) return [];
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -906,6 +1394,7 @@ export async function listCarersRegistry(): Promise<Carer[]> {
 }
 
 export async function listCarersForParticipant(participantId: string): Promise<Carer[]> {
+  if (!(await hasDayLoginSession())) return [];
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -917,6 +1406,7 @@ export async function listCarersForParticipant(participantId: string): Promise<C
 }
 
 export async function getPrimaryCarer(participantId: string): Promise<Carer | null> {
+  if (!(await hasDayLoginSession())) return null;
   const { data, error } = await supabase
     .from("carers_registry")
     .select("*")
@@ -958,10 +1448,23 @@ export async function insertCarer(p: CarerPayload): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const created = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "created",
+    entity: "carer",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: carerPublicFields(created),
+  });
+  return created;
 }
 
 export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
+  const { data: beforeRow } = await supabase
+    .from("carers_registry")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("carers_registry")
     .update(carerPayloadToRow(p))
@@ -969,7 +1472,17 @@ export async function updateCarer(id: string, p: CarerPayload): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const updated = rowToCarer(data as CarerRow);
+  const before = beforeRow ? rowToCarer(beforeRow as CarerRow) : null;
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    before: before ? carerPublicFields(before) : null,
+    after: carerPublicFields(updated),
+  });
+  return updated;
 }
 
 /**
@@ -1015,7 +1528,16 @@ export async function upsertPrimaryCarer(
       .select("*")
       .single();
     if (error) throw error;
-    return rowToCarer(data as CarerRow);
+    const saved = rowToCarer(data as CarerRow);
+    logOfficeChange({
+      action: "updated",
+      entity: "carer",
+      recordId: saved.id,
+      recordName: saved.fullName,
+      after: carerPublicFields(saved),
+      source: "primary_carer",
+    });
+    return saved;
   }
 
   const { data, error } = await supabase
@@ -1024,7 +1546,16 @@ export async function upsertPrimaryCarer(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const created = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "created",
+    entity: "carer",
+    recordId: created.id,
+    recordName: created.fullName,
+    after: carerPublicFields(created),
+    source: "primary_carer",
+  });
+  return created;
 }
 
 /**
@@ -1048,10 +1579,17 @@ export async function setPrimaryCarer(carerId: string, participantId: string): P
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Set ${saved.fullName} as primary carer`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Demote a carer to secondary (no other side-effects). */
 export async function demoteCarer(carerId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1060,10 +1598,17 @@ export async function demoteCarer(carerId: string): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Demoted carer ${saved.fullName} from primary`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Attach an existing carer record to a participant (secondary by default). */
 export async function linkCarerToParticipant(carerId: string, participantId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1072,10 +1617,17 @@ export async function linkCarerToParticipant(carerId: string, participantId: str
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Linked carer ${saved.fullName} to a client`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
-
-/** Unlink a carer from its participant and demote in the same write. */
 export async function unlinkCarer(carerId: string): Promise<Carer> {
   const { data, error } = await supabase
     .from("carers_registry")
@@ -1084,7 +1636,16 @@ export async function unlinkCarer(carerId: string): Promise<Carer> {
     .select("*")
     .single();
   if (error) throw error;
-  return rowToCarer(data as CarerRow);
+  const saved = rowToCarer(data as CarerRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "carer",
+    recordId: saved.id,
+    recordName: saved.fullName,
+    summary: `Unlinked carer ${saved.fullName}`,
+    after: carerPublicFields(saved),
+  });
+  return saved;
 }
 
 
@@ -1171,7 +1732,22 @@ export async function insertSchedule(input: NewSchedule): Promise<MedicationSche
     .select("*")
     .single();
   if (error) throw error;
-  return rowToSchedule(data as ScheduleRow);
+  const created = rowToSchedule(data as ScheduleRow);
+  logOfficeChange({
+    action: "created",
+    entity: "medication",
+    recordId: created.id,
+    recordName: created.medicationName,
+    category: "CLIENT",
+    after: {
+      medicationName: created.medicationName,
+      dosage: created.dosage,
+      expectedTime: created.expectedTime,
+      frequency: created.frequency,
+      participantId: created.participantId,
+    },
+  });
+  return created;
 }
 
 // ---------- compliance_audit_logs reads ----------
@@ -1312,6 +1888,54 @@ export async function listAttendanceSchedules(
   return rows;
 }
 
+async function logParticipantPlanningChange(input: {
+  action: "created" | "updated" | "cleared";
+  scheduleId: string;
+  participantId: string;
+  dayOfWeek: string;
+  beforeIn?: string | null;
+  beforeOut?: string | null;
+  afterIn?: string | null;
+  afterOut?: string | null;
+}): Promise<void> {
+  try {
+    const {
+      recordRunPlanningChangeBestEffort,
+      buildScheduleChangeSummary,
+      fetchParticipantDisplayName,
+    } = await import("@/lib/api/run-planning-changelog");
+    const personName = await fetchParticipantDisplayName(input.participantId);
+    await recordRunPlanningChangeBestEffort({
+      action: input.action,
+      source: "participant_schedule",
+      personKind: "participant",
+      personId: input.participantId,
+      personName,
+      dayOfWeek: input.dayOfWeek,
+      scheduleId: input.scheduleId,
+      summary: buildScheduleChangeSummary({
+        action: input.action,
+        personName,
+        dayOfWeek: input.dayOfWeek,
+        beforeIn: input.beforeIn,
+        beforeOut: input.beforeOut,
+        afterIn: input.afterIn,
+        afterOut: input.afterOut,
+      }),
+      beforeState:
+        input.beforeIn != null || input.beforeOut != null
+          ? { inbound: input.beforeIn ?? null, outbound: input.beforeOut ?? null }
+          : null,
+      afterState:
+        input.afterIn != null || input.afterOut != null
+          ? { inbound: input.afterIn ?? null, outbound: input.afterOut ?? null }
+          : { active: false },
+    });
+  } catch (err) {
+    console.error("[run-planning] participant change log failed", err);
+  }
+}
+
 export interface NewAttendanceSchedule {
   participantId: string;
   dayOfWeek: WeekDay;
@@ -1329,6 +1953,12 @@ export async function insertAttendanceSchedule(
 ): Promise<AttendanceSchedule> {
   const inbound = input.inboundTransport;
   const outbound = input.outboundTransport;
+  const { assertHomeAddressForBusAssignment } = await import("@/lib/api/person-addresses");
+  await assertHomeAddressForBusAssignment({
+    owner: { kind: "participant", id: input.participantId },
+    inbound,
+    outbound,
+  });
   const payload = {
     participant_id: input.participantId,
     day_of_week: input.dayOfWeek,
@@ -1349,7 +1979,16 @@ export async function insertAttendanceSchedule(
     console.error("[insertAttendanceSchedule] supabase error", { error, payload });
     throw new Error(error.message || "Unknown Supabase error");
   }
-  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  const saved = rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  void logParticipantPlanningChange({
+    action: "created",
+    scheduleId: saved.id,
+    participantId: saved.participantId,
+    dayOfWeek: saved.dayOfWeek,
+    afterIn: saved.inboundTransport,
+    afterOut: saved.outboundTransport,
+  });
+  return saved;
 }
 
 
@@ -1477,6 +2116,8 @@ export interface LookupParameter {
   sortOrder: number | null;
   /** Optional hex badge color (e.g. "#7c3aed") — null means use the category default. */
   badgeColor: string | null;
+  /** Row insert time — used to keep default bus-run colours stable across renames. */
+  createdAt: string | null;
 }
 
 interface LookupRow {
@@ -1486,6 +2127,7 @@ interface LookupRow {
   display_name: string | null;
   sort_order: number | null;
   badge_color: string | null;
+  created_at?: string | null;
 }
 
 const DAY_ORDER: Record<string, number> = {
@@ -1508,7 +2150,7 @@ export async function listLookupParameters(
   const fetchWithColor = async () => {
     const base = supabase
       .from("system_lookup_parameters")
-      .select("id, category, code, display_name, sort_order, badge_color")
+      .select("id, category, code, display_name, sort_order, badge_color, created_at")
       .eq("category", category);
     return category === "operating_days"
       ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
@@ -1518,7 +2160,7 @@ export async function listLookupParameters(
   const fetchWithoutColor = async () => {
     const base = supabase
       .from("system_lookup_parameters")
-      .select("id, category, code, display_name, sort_order")
+      .select("id, category, code, display_name, sort_order, created_at")
       .eq("category", category);
     return category === "operating_days"
       ? base.order("sort_order", { ascending: true, nullsFirst: false }).order("display_name", { ascending: true })
@@ -1549,6 +2191,7 @@ export async function listLookupParameters(
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
     badgeColor: (r as LookupRow).badge_color ?? null,
+    createdAt: r.created_at ?? null,
   }));
 
   if (category === "operating_days") {
@@ -1576,6 +2219,73 @@ export async function updateLookupParameterColor(
     }
     throw error;
   }
+  logOfficeChange({
+    action: "updated",
+    entity: "lookup",
+    recordId: id,
+    recordName: "lookup colour",
+    after: { badgeColor },
+  });
+}
+
+function isMissingUpdateLookupRpc(
+  error: { code?: string | null; message?: string | null } | null,
+): boolean {
+  if (!error) return false;
+  if (error.code === "PGRST202" || error.code === "42883") return true;
+  const msg = (error.message ?? "").toLowerCase();
+  return msg.includes("could not find the function public.update_lookup_parameter");
+}
+
+/**
+ * Update a lookup code and/or display name.
+ * Bus run code changes cascade to client schedules, Manifest trips, default
+ * routes, and event bookings so assignments are not lost.
+ */
+export async function updateLookupParameter(input: {
+  id: string;
+  code: string;
+  displayName: string;
+  previousCode: string;
+}): Promise<{ codeChanged: boolean }> {
+  const code = input.code.trim();
+  const displayName = input.displayName.trim() || code;
+  if (!code) throw new Error("Code is required.");
+  const codeChanged = code !== input.previousCode.trim();
+
+  const rpc = await supabase.rpc("update_lookup_parameter", {
+    p_id: input.id,
+    p_code: code,
+    p_display_name: displayName,
+  });
+  const logLookup = () =>
+    logOfficeChange({
+      action: "updated",
+      entity: "lookup",
+      recordId: input.id,
+      recordName: displayName,
+      before: { code: input.previousCode },
+      after: { code, displayName },
+    });
+  if (!rpc.error) {
+    logLookup();
+    return { codeChanged };
+  }
+  if (!isMissingUpdateLookupRpc(rpc.error)) throw rpc.error;
+
+  if (codeChanged) {
+    throw new Error(
+      "Run docs/sql/2026-08-21_update_lookup_parameter.sql in Supabase first to rename lookup codes (keeps clients on the same run).",
+    );
+  }
+
+  const { error } = await supabase
+    .from("system_lookup_parameters")
+    .update({ display_name: displayName })
+    .eq("id", input.id);
+  if (error) throw error;
+  logLookup();
+  return { codeChanged: false };
 }
 
 export async function insertLookupParameter(input: {
@@ -1590,26 +2300,55 @@ export async function insertLookupParameter(input: {
       code: input.code,
       display_name: input.displayName,
     })
-    .select("id, category, code, display_name, sort_order, badge_color")
+    .select("id, category, code, display_name, sort_order, badge_color, created_at")
     .single();
   if (error) throw error;
   const r = data as LookupRow;
-  return {
+  const created = {
     id: r.id,
     category: r.category,
     code: r.code,
     displayName: r.display_name ?? r.code,
     sortOrder: r.sort_order ?? null,
     badgeColor: r.badge_color ?? null,
+    createdAt: r.created_at ?? null,
   };
+  logOfficeChange({
+    action: "created",
+    entity: "lookup",
+    recordId: created.id,
+    recordName: created.displayName,
+    after: { category: created.category, code: created.code, displayName: created.displayName },
+  });
+  return created;
 }
 
 export async function deleteLookupParameter(id: string): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("system_lookup_parameters")
     .delete()
-    .eq("id", id);
+    .eq("id", id)
+    .select("id, category, code, display_name");
   if (error) throw error;
+  // RLS with no DELETE policy returns 204 and 0 rows — not an error.
+  if (!data?.length) {
+    throw new Error(
+      "Lookup entry was not deleted. Run docs/sql/2026-08-23_lookup_parameters_delete_policy.sql in Supabase, then hard refresh.",
+    );
+  }
+  const row = data[0] as {
+    id: string;
+    category?: string;
+    code?: string;
+    display_name?: string | null;
+  };
+  logOfficeChange({
+    action: "deleted",
+    entity: "lookup",
+    recordId: row.id,
+    recordName: row.display_name || row.code || id,
+    before: { category: row.category, code: row.code, displayName: row.display_name },
+  });
 }
 
 /**
@@ -1625,6 +2364,8 @@ export const LOOKUP_CATEGORIES = {
   operatingDay: "operating_days",
   eventType: "event_types",
   busRun: "bus_runs",
+  /** Sentinel for Lookups special panel — not a lookup_parameters category. */
+  certificateType: "certificate_types",
 } as const;
 
 
@@ -1641,7 +2382,7 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     category: LOOKUP_CATEGORIES.operatingDay,
     label: "Operating days",
     description:
-      "Calendar days the centre operates. Add Saturday/Sunday to open weekend rosters.",
+      "Days the centre is open, plus facility-wide open/close times (used when a person has no per-client schedule override). Add Saturday/Sunday to open weekend rosters.",
   },
   {
     category: LOOKUP_CATEGORIES.serviceType,
@@ -1667,7 +2408,13 @@ export const ADMIN_LOOKUP_CATEGORIES: ReadonlyArray<{
     category: LOOKUP_CATEGORIES.busRun,
     label: "Day Centre Bus Runs",
     description:
-      "Named recurring bus runs (e.g. Run 1, Run 2). Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
+      "Named recurring bus runs (e.g. Run 1, Run 2). Edit code or display name in place — clients stay assigned. Set the Depot and Day Centre addresses above, then assign clients to a run in their attendance schedule.",
+  },
+  {
+    category: LOOKUP_CATEGORIES.certificateType,
+    label: "Certificates & orientations",
+    description:
+      "Official ticket names (Safe Food Handler, WWCC, Kitchen orientation). Duty roles and Staff pick from this list — they cannot invent a spelling.",
   },
 ];
 
@@ -1688,29 +2435,93 @@ export interface NewAttendanceLog {
   ndisCancellationReason?: string | null;
 }
 
-export async function insertAttendanceLog(
+/**
+ * Live DEV/TEST may not have this column yet (PGRST204). Stay off until a
+ * write without it succeeds and a later migration adds the column — sending
+ * it first paints a 400 in the browser console even when we retry.
+ */
+let attendanceRosterLogsHasScheduleId = false;
+
+function attendanceLogInsertPayload(
   input: NewAttendanceLog,
-): Promise<AttendanceLog> {
+  includeScheduleId: boolean,
+): Record<string, unknown> {
   const insertPayload: Record<string, unknown> = {
     participant_id: input.participantId,
-    schedule_id: input.scheduleId ?? null,
     roster_date: input.rosterDate,
     expected_service: input.expectedService,
     actual_status: input.actualStatus,
     driver_notes: input.driverNotes ?? null,
+    created_at: resolveOperationalNow().toISOString(),
   };
+  if (includeScheduleId) {
+    insertPayload.schedule_id = input.scheduleId ?? null;
+  }
   // Only include the NDIS reason column when set, so legacy installs without
   // the column still accept the insert.
   if (input.ndisCancellationReason !== undefined && input.ndisCancellationReason !== null) {
     insertPayload.ndis_cancellation_reason = input.ndisCancellationReason;
   }
+  return insertPayload;
+}
+
+async function findAttendanceLogForDate(
+  participantId: string,
+  rosterDate: string,
+): Promise<AttendanceLogRow | null> {
   const { data, error } = await supabase
     .from("attendance_roster_logs")
-    .insert(insertPayload)
+    .select("*")
+    .eq("participant_id", participantId)
+    .eq("roster_date", rosterDate)
+    .order("created_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (error) {
+    if (isSchemaMismatchError(error)) return null;
+    throw error;
+  }
+  return (data as AttendanceLogRow | null) ?? null;
+}
+
+async function updateAttendanceLogRow(
+  id: string,
+  input: NewAttendanceLog,
+): Promise<AttendanceLog> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .update({
+      actual_status: input.actualStatus,
+      driver_notes: input.driverNotes ?? null,
+      expected_service: input.expectedService,
+      ...(input.ndisCancellationReason
+        ? { ndis_cancellation_reason: input.ndisCancellationReason }
+        : {}),
+    })
+    .eq("id", id)
     .select("*")
     .single();
   if (error) throw error;
   return rowToAttendanceLog(data as AttendanceLogRow);
+}
+
+export async function insertAttendanceLog(
+  input: NewAttendanceLog,
+): Promise<AttendanceLog> {
+  const existing = await findAttendanceLogForDate(input.participantId, input.rosterDate);
+  if (existing) return updateAttendanceLogRow(existing.id, input);
+
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .insert(attendanceLogInsertPayload(input, attendanceRosterLogsHasScheduleId))
+    .select("*")
+    .single();
+  if (!error) return rowToAttendanceLog(data as AttendanceLogRow);
+  if (isDuplicateKeyError(error)) {
+    const again = await findAttendanceLogForDate(input.participantId, input.rosterDate);
+    if (again) return updateAttendanceLogRow(again.id, input);
+  }
+  throw error;
 }
 
 // ---------- daily roster engine ----------
@@ -1872,6 +2683,13 @@ export async function updateAttendanceSchedule(
   id: string,
   patch: AttendanceSchedulePatch,
 ): Promise<AttendanceSchedule> {
+  const { data: existing, error: fetchErr } = await supabase
+    .from("participant_attendance_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (fetchErr) throw fetchErr;
+
   const row: Partial<AttendanceScheduleRow> = {};
   if (patch.dayOfWeek !== undefined) row.day_of_week = patch.dayOfWeek;
   if (patch.serviceType !== undefined) row.service_type = patch.serviceType;
@@ -1892,6 +2710,17 @@ export async function updateAttendanceSchedule(
   if (patch.expectedDepartureTime !== undefined)
     row.expected_departure_time = patch.expectedDepartureTime;
   if (patch.active !== undefined) row.active = patch.active;
+  const before = existing
+    ? rowToAttendanceSchedule(existing as AttendanceScheduleRow)
+    : null;
+  if (patch.active !== false && before?.participantId) {
+    const { assertHomeAddressForBusAssignment } = await import("@/lib/api/person-addresses");
+    await assertHomeAddressForBusAssignment({
+      owner: { kind: "participant", id: before.participantId },
+      inbound: patch.inboundTransport ?? before.inboundTransport,
+      outbound: patch.outboundTransport ?? before.outboundTransport,
+    });
+  }
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
     .update(row)
@@ -1899,7 +2728,18 @@ export async function updateAttendanceSchedule(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  const saved = rowToAttendanceSchedule(data as AttendanceScheduleRow);
+  void logParticipantPlanningChange({
+    action: patch.active === false ? "cleared" : "updated",
+    scheduleId: saved.id,
+    participantId: saved.participantId,
+    dayOfWeek: saved.dayOfWeek,
+    beforeIn: before?.inboundTransport,
+    beforeOut: before?.outboundTransport,
+    afterIn: saved.inboundTransport,
+    afterOut: saved.outboundTransport,
+  });
+  return saved;
 }
 
 export interface RemoveScheduleInput {
@@ -1919,7 +2759,7 @@ export interface RemoveScheduleInput {
 export async function removeAttendanceSchedule(
   input: RemoveScheduleInput,
 ): Promise<void> {
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const staffId = input.staffId ?? (await resolveStaffIdWithFallback());
 
   const { data: row, error: fetchErr } = await supabase
@@ -1966,6 +2806,15 @@ export async function removeAttendanceSchedule(
       reason: input.reason.trim(),
     },
   });
+
+  void logParticipantPlanningChange({
+    action: "cleared",
+    scheduleId: input.id,
+    participantId: r.participant_id,
+    dayOfWeek: r.day_of_week,
+    beforeIn: r.inbound_transport,
+    beforeOut: r.outbound_transport,
+  });
 }
 
 /** @deprecated Use removeAttendanceSchedule() for permanent changes. */
@@ -1993,6 +2842,11 @@ export async function updateMedicationSchedule(
       patch.expectedTime.length === 5 ? `${patch.expectedTime}:00` : patch.expectedTime;
   if (patch.frequency !== undefined) row.frequency = patch.frequency;
   if (patch.active !== undefined) row.active = patch.active;
+  const { data: beforeRow } = await supabase
+    .from("participant_medication_schedules")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
   const { data, error } = await supabase
     .from("participant_medication_schedules")
     .update(row)
@@ -2000,7 +2854,32 @@ export async function updateMedicationSchedule(
     .select("*")
     .single();
   if (error) throw error;
-  return rowToSchedule(data as ScheduleRow);
+  const saved = rowToSchedule(data as ScheduleRow);
+  const before = beforeRow ? rowToSchedule(beforeRow as ScheduleRow) : null;
+  logOfficeChange({
+    action: saved.active ? "updated" : "archived",
+    entity: "medication",
+    recordId: saved.id,
+    recordName: saved.medicationName,
+    category: "CLIENT",
+    before: before
+      ? {
+          medicationName: before.medicationName,
+          dosage: before.dosage,
+          expectedTime: before.expectedTime,
+          frequency: before.frequency,
+          active: before.active,
+        }
+      : null,
+    after: {
+      medicationName: saved.medicationName,
+      dosage: saved.dosage,
+      expectedTime: saved.expectedTime,
+      frequency: saved.frequency,
+      active: saved.active,
+    },
+  });
+  return saved;
 }
 
 export async function archiveMedicationSchedule(id: string): Promise<void> {
@@ -2028,7 +2907,7 @@ export async function discontinueMedicationSchedule(
     .update({
       active: false,
       status: "Archived",
-      archived_at: new Date().toISOString(),
+      archived_at: resolveOperationalNow().toISOString(),
       archived_by_id: input.authorizedById,
       archive_witnessed_by_id: input.witnessedById,
       archive_reference_type: input.referenceType,
@@ -2036,6 +2915,15 @@ export async function discontinueMedicationSchedule(
     })
     .eq("id", input.id);
   if (error) throw error;
+  logOfficeChange({
+    action: "archived",
+    entity: "medication",
+    recordId: input.id,
+    recordName: "medication schedule",
+    category: "CLIENT",
+    summary: `Discontinued medication (${input.referenceType})`,
+    after: { reason: input.reason, referenceType: input.referenceType },
+  });
 }
 
 // ---------- suspension / bulk roster exceptions ----------
@@ -2059,23 +2947,29 @@ export async function insertAttendanceLogsBulk(
   rows: NewAttendanceLog[],
 ): Promise<AttendanceLog[]> {
   if (rows.length === 0) return [];
-  const payload = rows.map((r) => ({
-    participant_id: r.participantId,
-    schedule_id: r.scheduleId ?? null,
-    roster_date: r.rosterDate,
-    expected_service: r.expectedService,
-    actual_status: r.actualStatus,
-    driver_notes: r.driverNotes ?? null,
-  }));
-  const { data, error } = await supabase
-    .from("attendance_roster_logs")
-    .insert(payload)
-    .select("*");
-  if (error) {
-    console.error("[insertAttendanceLogsBulk] supabase error", { error, payload });
-    throw new Error(error.message || "Bulk insert failed");
+  const firstPayload = rows.map((r) =>
+    attendanceLogInsertPayload(r, attendanceRosterLogsHasScheduleId),
+  );
+  let result = await supabase.from("attendance_roster_logs").insert(firstPayload).select("*");
+  if (
+    result.error &&
+    attendanceRosterLogsHasScheduleId &&
+    isSchemaMismatchError(result.error)
+  ) {
+    attendanceRosterLogsHasScheduleId = false;
+    result = await supabase
+      .from("attendance_roster_logs")
+      .insert(rows.map((r) => attendanceLogInsertPayload(r, false)))
+      .select("*");
   }
-  return (data ?? []).map((r) => rowToAttendanceLog(r as AttendanceLogRow));
+  if (result.error) {
+    console.error("[insertAttendanceLogsBulk] supabase error", {
+      error: result.error,
+      payload: firstPayload,
+    });
+    throw new Error(result.error.message || "Bulk insert failed");
+  }
+  return (result.data ?? []).map((r) => rowToAttendanceLog(r as AttendanceLogRow));
 }
 
 // ---------- ledger reconciliation on absence ----------
@@ -2392,6 +3286,20 @@ export async function insertEvent(input: NewEvent): Promise<EventManifest> {
   }
 
   const event = rowToEvent(data as EventManifestRow);
+  logOfficeChange({
+    action: "created",
+    entity: "event",
+    recordId: event.id,
+    recordName: event.title,
+    category: "TRIP",
+    after: {
+      title: event.title,
+      venue: event.venue,
+      startDate: event.startDate,
+      endDate: event.endDate,
+      ticketPrice: event.ticketPrice,
+    },
+  });
 
   // Optional rinse-and-repeat clone of roster bookings from a prior event.
   if (input.cloneFromEventId) {
@@ -2463,7 +3371,22 @@ export async function updateEvent(input: UpdateEventInput): Promise<EventManifes
     throw new Error(parts.join(" · "));
   }
 
-  return rowToEvent(data as EventManifestRow);
+  const updated = rowToEvent(data as EventManifestRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "event",
+    recordId: updated.id,
+    recordName: updated.title,
+    category: "TRIP",
+    after: {
+      title: updated.title,
+      venue: updated.venue,
+      startDate: updated.startDate,
+      endDate: updated.endDate,
+      ticketPrice: updated.ticketPrice,
+    },
+  });
+  return updated;
 }
 
 
@@ -2540,6 +3463,16 @@ export interface EventRosterBooking {
   hostParticipantId: string | null;
   /** BL-098 — ticket / room / capacity note. */
   guestOpsNote: string | null;
+  /** BL-122 — accepted on the night, not a planned office add. */
+  isWalkOn: boolean;
+  /** BL-122 — `manifest` (pickup stop) or `venue` (self at Event Deliver). */
+  walkOnSource: "manifest" | "venue" | null;
+  /** BL-122 — trip_legs.id they boarded at (companion; no new stop). */
+  walkOnBoardedLegId: string | null;
+  /** BL-122 — YELLOW Hub issue for office follow-up. */
+  walkOnIssueId: string | null;
+  /** BL-122 — carer attached on the night to a planned host booking. */
+  carerIsWalkOn: boolean;
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: string;
   updatedAt: string;
@@ -2571,6 +3504,11 @@ interface BookingRow {
   is_guest_booking?: boolean | null;
   host_participant_id?: string | null;
   guest_ops_note?: string | null;
+  is_walk_on?: boolean | null;
+  walk_on_source?: string | null;
+  walk_on_boarded_leg_id?: string | null;
+  walk_on_issue_id?: string | null;
+  carer_is_walk_on?: boolean | null;
   // NDIS billing pipeline
   funding_claim_type: string | null;
   charge_code_id: string | null;
@@ -2633,6 +3571,14 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     isGuestBooking: r.is_guest_booking === true,
     hostParticipantId: r.host_participant_id ?? null,
     guestOpsNote: r.guest_ops_note ?? null,
+    isWalkOn: r.is_walk_on === true,
+    walkOnSource:
+      r.walk_on_source === "manifest" || r.walk_on_source === "venue"
+        ? r.walk_on_source
+        : null,
+    walkOnBoardedLegId: r.walk_on_boarded_leg_id ?? null,
+    walkOnIssueId: r.walk_on_issue_id ?? null,
+    carerIsWalkOn: r.carer_is_walk_on === true,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -2741,6 +3687,12 @@ export interface NewEventBooking {
   hostParticipantId?: string | null;
   guestOpsNote?: string | null;
   fundingClaimType?: string | null;
+  /** BL-122 */
+  isWalkOn?: boolean;
+  walkOnSource?: "manifest" | "venue" | null;
+  walkOnBoardedLegId?: string | null;
+  walkOnIssueId?: string | null;
+  carerIsWalkOn?: boolean;
 }
 
 export async function insertEventBooking(
@@ -2801,6 +3753,17 @@ export async function insertEventBooking(
       input.fundingClaimType?.trim() || "Private";
   } else if (input.fundingClaimType) {
     insertPayload.funding_claim_type = input.fundingClaimType;
+  } else if (input.hostParticipantId) {
+    insertPayload.host_participant_id = input.hostParticipantId.trim();
+  }
+  if (input.isWalkOn) {
+    insertPayload.is_walk_on = true;
+    insertPayload.walk_on_source = input.walkOnSource ?? null;
+    insertPayload.walk_on_boarded_leg_id = input.walkOnBoardedLegId ?? null;
+    insertPayload.walk_on_issue_id = input.walkOnIssueId ?? null;
+  }
+  if (input.carerIsWalkOn) {
+    insertPayload.carer_is_walk_on = true;
   }
   // pickup_order starts at 0; coordinator drag reorders via reorderEventRosterPickupOrder.
 
@@ -2816,6 +3779,11 @@ export async function insertEventBooking(
     delete legacy.is_guest_booking;
     delete legacy.host_participant_id;
     delete legacy.guest_ops_note;
+    delete legacy.is_walk_on;
+    delete legacy.walk_on_source;
+    delete legacy.walk_on_boarded_leg_id;
+    delete legacy.walk_on_issue_id;
+    delete legacy.carer_is_walk_on;
     delete legacy.outbound_bus_run_code;
     delete legacy.return_bus_run_code;
     delete legacy.transport_med_bag_required;
@@ -2848,7 +3816,24 @@ export async function insertEventBooking(
       isReconciled: true,
     });
   }
-  return rowToBooking(data as BookingRow);
+  const booking = rowToBooking(data as BookingRow);
+  if (!input.isWalkOn && !input.isGuestBooking) {
+    logOfficeChange({
+      action: "created",
+      entity: "booking",
+      recordId: booking.id,
+      recordName: booking.participantName || "booking",
+      category: "TRIP",
+      summary: `Booked ${booking.participantName || "participant"} on ${input.eventTitle ?? "event"}`,
+      after: {
+        eventId: booking.eventId,
+        bookingStatus: booking.bookingStatus,
+        outbound: booking.outboundTransportMode,
+        return: booking.returnTransportMode,
+      },
+    });
+  }
+  return booking;
 }
 
 // ---------- Compliance snapshot + event cloning ----------
@@ -3049,24 +4034,10 @@ export interface PaymentMilestoneResult {
 export async function recordEventPaymentMilestone(
   input: PaymentMilestoneInput,
 ): Promise<PaymentMilestoneResult> {
+  await assertEventFinanceWritable(input.eventId);
   if (!Number.isFinite(input.paymentAmount) || input.paymentAmount <= 0) {
     throw new Error("Payment amount must be greater than zero.");
   }
-  const newTotal = Number((input.currentAmountPaid + input.paymentAmount).toFixed(2));
-  const fullyPaid = input.ticketPrice > 0 && newTotal >= input.ticketPrice;
-
-  const { data: bookingData, error: bookingErr } = await supabase
-    .from("event_roster_bookings")
-    .update({ amount_paid: newTotal, is_fully_paid: fullyPaid })
-    .eq("id", input.bookingId)
-    .select(BOOKING_PARTICIPANT_SELECT)
-    .single();
-  if (bookingErr) {
-    console.error("[recordEventPaymentMilestone] booking update failed", bookingErr);
-    throw bookingErr;
-  }
-
-  const booking = rowToBooking(bookingData as BookingRow);
 
   const ledger = await insertLedgerEntry({
     participantId: input.participantId,
@@ -3077,7 +4048,184 @@ export async function recordEventPaymentMilestone(
     isReconciled: true,
   });
 
+  const paid = await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+
+  const { data: bookingData, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .eq("id", input.bookingId)
+    .single();
+  if (bookingErr) {
+    console.error("[recordEventPaymentMilestone] booking reload failed", bookingErr);
+    throw bookingErr;
+  }
+
+  const booking = rowToBooking(bookingData as BookingRow);
+  booking.amountPaid = paid.amountPaid;
+  booking.isFullyPaid = paid.isFullyPaid;
   return { booking, ledger };
+}
+
+export interface EventRefundMilestoneInput {
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  ticketPrice: number;
+  refundAmount: number;
+  refundDate: string;
+  reason?: string | null;
+}
+
+export async function recordEventRefundMilestone(
+  input: EventRefundMilestoneInput,
+): Promise<PaymentMilestoneResult> {
+  await assertEventFinanceWritable(input.eventId);
+  if (!Number.isFinite(input.refundAmount) || input.refundAmount <= 0) {
+    throw new Error("Refund amount must be greater than zero.");
+  }
+
+  const current = await listEventPaymentLedger(input.participantId, input.eventId);
+  const netPaid = Number(current.reduce((s, e) => s + e.amount, 0).toFixed(2));
+  if (input.refundAmount > netPaid + 0.001) {
+    throw new Error(
+      `Refund cannot exceed amount paid ($${Math.max(0, netPaid).toFixed(2)}).`,
+    );
+  }
+
+  const reason = (input.reason ?? "").trim() || "Refund";
+  const ledger = await insertLedgerEntry({
+    participantId: input.participantId,
+    transactionDate: input.refundDate,
+    financialCode: "EVENT_REFUND",
+    description: `${reason} — ${input.eventTitle} [event:${input.eventId}]`,
+    amount: -Math.abs(input.refundAmount),
+    isReconciled: true,
+  });
+
+  const paid = await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+
+  const { data: bookingData, error: bookingErr } = await supabase
+    .from("event_roster_bookings")
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .eq("id", input.bookingId)
+    .single();
+  if (bookingErr) throw bookingErr;
+
+  const booking = rowToBooking(bookingData as BookingRow);
+  booking.amountPaid = paid.amountPaid;
+  booking.isFullyPaid = paid.isFullyPaid;
+  return { booking, ledger };
+}
+
+export interface UpdateEventPaymentMilestoneInput {
+  ledgerId: string;
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  participantId: string;
+  ticketPrice: number;
+  transactionDate: string;
+  amount: number;
+  /** Absolute dollars; sign derived from financial code. */
+  financialCode: "EVENT_PMT" | "EVENT_REFUND";
+  description: string;
+}
+
+export async function updateEventPaymentMilestone(
+  input: UpdateEventPaymentMilestoneInput,
+): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("Amount must be greater than zero.");
+  }
+
+  const marker = `[event:${input.eventId}]`;
+  const { data: existing, error: loadErr } = await supabase
+    .from("participant_financial_ledger")
+    .select("id, description, financial_code")
+    .eq("id", input.ledgerId)
+    .eq("participant_id", input.participantId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existing) throw new Error("Payment milestone not found.");
+  const desc = String((existing as { description?: string }).description ?? "");
+  if (!desc.includes(marker)) {
+    throw new Error("Ledger row is not tagged to this event.");
+  }
+
+  const signed =
+    input.financialCode === "EVENT_REFUND"
+      ? -Math.abs(input.amount)
+      : Math.abs(input.amount);
+  const clean = input.description.trim().replace(/\s*\[event:[^\]]+\]\s*$/i, "");
+  const { error } = await supabase
+    .from("participant_financial_ledger")
+    .update({
+      transaction_date: input.transactionDate,
+      financial_code: input.financialCode,
+      amount: signed,
+      description: `${clean || "Event payment"} ${marker}`,
+    })
+    .eq("id", input.ledgerId);
+  if (error) throw error;
+
+  await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
+}
+
+export interface DeleteEventPaymentMilestoneInput {
+  ledgerId: string;
+  bookingId: string;
+  eventId: string;
+  participantId: string;
+  ticketPrice: number;
+}
+
+export async function deleteEventPaymentMilestone(
+  input: DeleteEventPaymentMilestoneInput,
+): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  const marker = `[event:${input.eventId}]`;
+  const { data: existing, error: loadErr } = await supabase
+    .from("participant_financial_ledger")
+    .select("id, description")
+    .eq("id", input.ledgerId)
+    .eq("participant_id", input.participantId)
+    .maybeSingle();
+  if (loadErr) throw loadErr;
+  if (!existing) throw new Error("Payment milestone not found.");
+  const desc = String((existing as { description?: string }).description ?? "");
+  if (!desc.includes(marker)) {
+    throw new Error("Ledger row is not tagged to this event.");
+  }
+
+  const { error } = await supabase
+    .from("participant_financial_ledger")
+    .delete()
+    .eq("id", input.ledgerId);
+  if (error) throw error;
+
+  await recomputeBookingPaidFromEventLedger({
+    bookingId: input.bookingId,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: input.ticketPrice,
+  });
 }
 
 // ---------- update booking (status + notes, optional cancellation refund) ----------
@@ -3129,6 +4277,16 @@ export async function updateEventBooking(
     !!input.refund &&
     Number.isFinite(input.refund.amount) &&
     input.refund.amount > 0;
+  const moneyTouch =
+    issueRefund ||
+    (input.amendedPrice != null && Number.isFinite(input.amendedPrice));
+  const lockEventId = input.refund?.eventId ?? input.eventId;
+  if (moneyTouch) {
+    if (!lockEventId) {
+      throw new Error("Event id required for financial booking changes.");
+    }
+    await assertEventFinanceWritable(lockEventId);
+  }
 
   const updatePayload: Record<string, unknown> = {
     booking_status: input.bookingStatus,
@@ -3231,6 +4389,19 @@ export async function updateEventBooking(
     }
   }
 
+  logOfficeChange({
+    action: "updated",
+    entity: "booking",
+    recordId: booking.id,
+    recordName: booking.participantName || "booking",
+    category: "TRIP",
+    summary: `Updated booking for ${booking.participantName || "participant"} (${booking.bookingStatus})`,
+    after: {
+      bookingStatus: booking.bookingStatus,
+      notes: booking.notes,
+      bringsCarer: booking.bringsCarer,
+    },
+  });
   return { booking, refundLedger, priceAdjustmentLedger };
 }
 
@@ -3392,7 +4563,54 @@ export interface NewEventLedger {
   vendorName?: string | null;
 }
 
+export function isEventFinanceLocked(
+  event: Pick<EventManifest, "status" | "billingLocked">,
+): boolean {
+  return event.billingLocked || event.status === "Closed";
+}
+
+/** Load event and throw if Closed / billing_locked. */
+export async function assertEventFinanceWritable(
+  eventId: string,
+): Promise<EventManifest> {
+  const { data, error } = await supabase
+    .from("event_manifest")
+    .select("*")
+    .eq("id", eventId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Event not found.");
+  const event = rowToEvent(data as EventManifestRow);
+  if (isEventFinanceLocked(event)) {
+    throw new Error(
+      "Billing locked — this event is Closed. No further financial edits are permitted.",
+    );
+  }
+  return event;
+}
+
+/** Net paid from event-tagged ledger rows → booking amount_paid / is_fully_paid. */
+export async function recomputeBookingPaidFromEventLedger(opts: {
+  bookingId: string;
+  participantId: string;
+  eventId: string;
+  ticketBaseline: number;
+}): Promise<{ amountPaid: number; isFullyPaid: boolean }> {
+  const entries = await listEventPaymentLedger(opts.participantId, opts.eventId);
+  const net = Number(entries.reduce((s, e) => s + e.amount, 0).toFixed(2));
+  const amountPaid = Math.max(0, net);
+  const baseline = Number(opts.ticketBaseline) || 0;
+  const isFullyPaid = baseline > 0 && amountPaid + 0.001 >= baseline;
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update({ amount_paid: amountPaid, is_fully_paid: isFullyPaid })
+    .eq("id", opts.bookingId);
+  if (error) throw error;
+  return { amountPaid, isFullyPaid };
+}
+
 export async function insertEventLedger(input: NewEventLedger): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
   const row: Record<string, unknown> = {
     event_id: input.eventId,
     transaction_date: input.transactionDate,
@@ -3406,6 +4624,74 @@ export async function insertEventLedger(input: NewEventLedger): Promise<void> {
     console.error("[insertEventLedger] failed", error);
     throw error;
   }
+  logOfficeChange({
+    action: "created",
+    entity: "trip_expense",
+    recordId: input.eventId,
+    recordName: input.vendorName?.trim() || input.description,
+    category: "TRIP",
+    summary: `Added trip expense ${input.description} (${input.amount})`,
+  });
+}
+
+export interface UpdateEventLedgerInput {
+  id: string;
+  eventId: string;
+  transactionDate: string;
+  description: string;
+  amount: number;
+  financialCode: string;
+  vendorName?: string | null;
+}
+
+export async function updateEventLedger(input: UpdateEventLedgerInput): Promise<void> {
+  await assertEventFinanceWritable(input.eventId);
+  const { error } = await supabase
+    .from("event_financial_ledger")
+    .update({
+      transaction_date: input.transactionDate,
+      description: formatEventLedgerDescription(input.description, input.vendorName),
+      amount: input.amount,
+      financial_code: input.financialCode,
+    })
+    .eq("id", input.id)
+    .eq("event_id", input.eventId);
+  if (error) {
+    console.error("[updateEventLedger] failed", error);
+    throw error;
+  }
+  logOfficeChange({
+    action: "updated",
+    entity: "trip_expense",
+    recordId: input.id,
+    recordName: input.vendorName?.trim() || input.description,
+    category: "TRIP",
+    summary: `Updated trip expense ${input.description} (${input.amount})`,
+  });
+}
+
+export async function deleteEventLedger(opts: {
+  id: string;
+  eventId: string;
+}): Promise<void> {
+  await assertEventFinanceWritable(opts.eventId);
+  const { error } = await supabase
+    .from("event_financial_ledger")
+    .delete()
+    .eq("id", opts.id)
+    .eq("event_id", opts.eventId);
+  if (error) {
+    console.error("[deleteEventLedger] failed", error);
+    throw error;
+  }
+  logOfficeChange({
+    action: "deleted",
+    entity: "trip_expense",
+    recordId: opts.id,
+    recordName: "trip expense",
+    category: "TRIP",
+    summary: "Deleted a trip expense",
+  });
 }
 
 // ============================================================================
@@ -3533,6 +4819,10 @@ export interface TripLeg {
   toLabel: string;
   fromParticipantId: string | null;
   toParticipantId: string | null;
+  fromStaffId: string | null;
+  toStaffId: string | null;
+  fromCarerId: string | null;
+  toCarerId: string | null;
   status: LegStatus;
   startLat: number | null;
   startLng: number | null;
@@ -3571,6 +4861,10 @@ interface LegRow {
   to_label: string;
   from_participant_id: string | null;
   to_participant_id: string | null;
+  from_staff_id?: string | null;
+  to_staff_id?: string | null;
+  from_carer_id?: string | null;
+  to_carer_id?: string | null;
   status: LegStatus;
   start_lat: number | string | null;
   start_lng: number | string | null;
@@ -3603,6 +4897,10 @@ function rowToLeg(r: LegRow): TripLeg {
     toLabel: r.to_label,
     fromParticipantId: r.from_participant_id,
     toParticipantId: r.to_participant_id,
+    fromStaffId: r.from_staff_id ?? null,
+    toStaffId: r.to_staff_id ?? null,
+    fromCarerId: r.from_carer_id ?? null,
+    toCarerId: r.to_carer_id ?? null,
     status: r.status,
     startLat: numOrNull(r.start_lat),
     startLng: numOrNull(r.start_lng),
@@ -3624,6 +4922,54 @@ function rowToLeg(r: LegRow): TripLeg {
   };
 }
 
+/** Map roster people onto trip_legs from_/to_ columns — never send bare carer_id. */
+function tripLegPersonColumns(
+  from: TransportRosterPerson | null,
+  to: TransportRosterPerson | null,
+) {
+  const fromRefs = rosterPersonRefs(from);
+  const toRefs = rosterPersonRefs(to);
+  return {
+    from_participant_id: fromRefs.participant_id,
+    to_participant_id: toRefs.participant_id,
+    from_staff_id: fromRefs.staff_id,
+    to_staff_id: toRefs.staff_id,
+    from_carer_id: fromRefs.carer_id,
+    to_carer_id: toRefs.carer_id,
+  };
+}
+
+type TripLegInsertRow = Record<string, unknown>;
+
+function omitUnmappedTripLegPersonColumns(row: TripLegInsertRow): TripLegInsertRow {
+  const {
+    from_staff_id: _fromStaff,
+    to_staff_id: _toStaff,
+    from_carer_id: _fromCarer,
+    to_carer_id: _toCarer,
+    staff_id: _staff,
+    carer_id: _carer,
+    participant_id: _participant,
+    ...rest
+  } = row;
+  return rest;
+}
+
+async function insertTripLegRows(legPayload: TripLegInsertRow[]) {
+  const first = await supabase
+    .from("trip_legs")
+    .insert(legPayload)
+    .select("*")
+    .order("leg_index", { ascending: true });
+  if (!first.error || !isSchemaMismatchError(first.error)) return first;
+  const stripped = legPayload.map(omitUnmappedTripLegPersonColumns);
+  return supabase
+    .from("trip_legs")
+    .insert(stripped)
+    .select("*")
+    .order("leg_index", { ascending: true });
+}
+
 export interface ActiveTripBundle {
   trip: TransportTrip;
   legs: TripLeg[];
@@ -3642,6 +4988,35 @@ async function fetchEventTitle(eventId: string | null): Promise<string | null> {
     return null;
   }
   return (data?.title as string | undefined) ?? null;
+}
+
+async function fetchBusRunDisplayName(code: string): Promise<string> {
+  const { data, error } = await supabase
+    .from("system_lookup_parameters")
+    .select("display_name")
+    .eq("category", "bus_runs")
+    .eq("code", code)
+    .maybeSingle();
+  if (error) {
+    console.warn("[fetchBusRunDisplayName]", error);
+    return code;
+  }
+  const name = ((data as { display_name?: string } | null)?.display_name ?? "").trim();
+  return name || code;
+}
+
+/** Sticky Manifest header: event title, or Daily Run — {run} · Morning/Afternoon. */
+export async function fetchTripBannerTitle(trip: TransportTrip): Promise<string> {
+  if (trip.eventId) {
+    const title = await fetchEventTitle(trip.eventId);
+    if (title) return title;
+  }
+  if (trip.busRunCode) {
+    const run = await fetchBusRunDisplayName(trip.busRunCode);
+    const dir = trip.tripReturn !== "none" ? "Afternoon Return" : "Morning";
+    return `Daily Run — ${run} · ${dir}`;
+  }
+  return "Daily Run";
 }
 
 function throwPg(prefix: string, error: { message: string; details?: string | null; hint?: string | null; code?: string | null }): never {
@@ -3696,8 +5071,15 @@ export async function getActiveTripForDriver(
     }
   }
 
-  const eventTitle = await fetchEventTitle(trip.eventId);
-  return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
+  let legs = (legRows ?? []).map((r) => rowToLeg(r as LegRow));
+  try {
+    legs = await reseatPendingAfternoonDayCentreLegs(trip, legs);
+  } catch (e) {
+    console.error("[getActiveTripForDriver] afternoon reseat failed", e);
+  }
+
+  const eventTitle = await fetchTripBannerTitle(trip);
+  return { trip, legs, eventTitle };
 }
 
 export interface MedicationExceptionRow {
@@ -4008,31 +5390,35 @@ async function fetchLastItineraryStopForReturn(
 }
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
-  // 0. Defensive guard: if an active (not completed/cancelled) trip already
-  //    exists for this driver + event, return it instead of inserting again.
-  //    Prevents unique-key violations from double-clicks or double-mounts.
-  const { data: existingTrip, error: existingErr } = await supabase
-    .from("transport_trips")
-    .select("*")
-    .eq("event_id", input.eventId)
-    .eq("driver_staff_id", input.driverStaffId)
-    .not("status", "in", "(completed,cancelled)")
-    .order("created_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throwPg("[startTrip:existingLookup]", existingErr);
-  if (existingTrip) {
-    const existingKind = (existingTrip as { trip_kind?: string | null }).trip_kind;
-    // Venue hops use startEventVenueHop — never reuse via startTrip.
-    if (existingKind !== "event_venue_hop") {
+  const slotDate =
+    input.tripDirection === "return"
+      ? input.returnSessionDate?.slice(0, 10) ?? todayLocalIso()
+      : todayLocalIso();
+  const slotDirection =
+    input.tripDirection === "return"
+      ? "return"
+      : input.tripDirection === "outbound"
+        ? "outbound"
+        : "legacy";
+  const slotGate = await assertTransportRunSlotStartable({
+    slot: {
+      kind: "event",
+      eventId: input.eventId,
+      tripDate: slotDate,
+      busRunCode: (input.busRunCode ?? "").trim() || null,
+      direction: slotDirection,
+    },
+    actorStaffId: input.driverStaffId,
+  });
+  if (slotGate.reuseTripId) {
+    const { data: existingTrip, error: existingErr } = await supabase
+      .from("transport_trips")
+      .select("*")
+      .eq("id", slotGate.reuseTripId)
+      .maybeSingle();
+    if (existingErr) throwPg("[startTrip:reuseLookup]", existingErr);
+    if (existingTrip) {
       const existing = rowToTrip(existingTrip as TripRow);
-      const wantRun = (input.busRunCode ?? "").trim() || null;
-      const haveRun = (existing.busRunCode ?? "").trim() || null;
-      // Different multi-bus run → do not reuse this driver's other active trip.
-      if (wantRun !== haveRun && (wantRun != null || haveRun != null)) {
-        // fall through to create
-      } else {
-      // Heal stale return rosters (e.g. Left-trip still on booking bus mode).
       if (existing.tripReturn !== "none") {
         try {
           await pruneIneligibleReturnTripPassengers(existing);
@@ -4045,14 +5431,13 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         .select("*")
         .eq("trip_id", existing.id)
         .order("leg_index", { ascending: true });
-      if (legErr) throwPg("[startTrip:existingLegs]", legErr);
-      const eventTitle = await fetchEventTitle(existing.eventId);
+      if (legErr) throwPg("[startTrip:reuseLegs]", legErr);
+      const eventTitle = await fetchTripBannerTitle(existing);
       return {
         trip: existing,
         legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
         eventTitle,
       };
-      }
     }
   }
 
@@ -4168,12 +5553,11 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         eligible.ids.has(r.participant_id),
       );
     }
-    // Prefer floor return_bus_run_code when present (eligible map values).
+    // Floor run when handed over; fall back to roster if floor bus has no run.
     const floorRunByPid = eligible?.runs ?? null;
     resolvedBookingRows = resolvedBookingRows.filter((r) => {
       const floorRun = floorRunByPid?.get(r.participant_id);
-      const personRun =
-        floorRun !== undefined ? floorRun : r.return_bus_run_code;
+      const personRun = effectiveReturnBusRun(floorRun, r.return_bus_run_code);
       return matchesEventBusRun(personRun, tripBusRunCode);
     });
   }
@@ -4185,13 +5569,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     return (a.created_at ?? "").localeCompare(b.created_at ?? "");
   });
 
-  type RosterEntry = {
-    id: string;
-    name: string;
-    /** Strict 3-tier fallback: override → permanent → street → null. */
-    address: string | null;
-  };
-  const roster: RosterEntry[] = (resolvedBookingRows ?? []).map((r) => {
+  const roster: TransportRosterPerson[] = (resolvedBookingRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
       trip_pickup_address_override: string | null;
@@ -4214,8 +5592,8 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     const override = (row.trip_pickup_address_override ?? "").trim();
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return {
-      id: row.participant_id,
+    return clientRosterPerson({
+      participantId: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
       address:
         override.length > 0
@@ -4225,8 +5603,44 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
             : street.length > 0
               ? street
               : null,
-    };
+    });
   });
+
+  try {
+    const { listSupportRosterForEventTrip, listLegacyCarerRosterForEventTrip } =
+      await import("@/lib/api/event-support");
+    const dir = input.tripDirection === "return" ? "return" : "outbound";
+    const sessionDate =
+      input.tripDirection === "return"
+        ? input.returnSessionDate?.slice(0, 10)
+        : undefined;
+    const [support, legacyCarers] = await Promise.all([
+      listSupportRosterForEventTrip({
+        eventId: input.eventId,
+        direction: dir,
+        busRunCode: tripBusRunCode,
+        sessionDate,
+      }),
+      listLegacyCarerRosterForEventTrip({
+        eventId: input.eventId,
+        direction: dir,
+        busRunCode: tripBusRunCode,
+      }),
+    ]);
+    roster.push(...support, ...legacyCarers);
+  } catch (err) {
+    console.warn("[startTrip:support]", err);
+  }
+  try {
+    const { applyDayStopOverrides } = await import("@/lib/api/person-addresses");
+    await applyDayStopOverrides(
+      roster,
+      slotDate,
+      input.tripDirection === "return" ? "return" : "outbound",
+    );
+  } catch (err) {
+    console.warn("[startTrip:addresses]", err);
+  }
 
   // 2. Resolve event venue + kind (outing vs legacy med rules).
   const { data: eventRow, error: eventErr } = await supabase
@@ -4273,7 +5687,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   //    • Legacy events: any active participant_medication_schedules row (unchanged).
   //    • Return runs: always false (set below on seeds).
   //    Day Centre runs use startDayCentreRun + schedules — not this path.
-  const participantIds = roster.map((p) => p.id);
+  const participantIds = rosterParticipantIds(roster);
   const medSet = new Set<string>();
   const eventKind = eventMeta.event_kind ?? "legacy";
   const isOutingEvent =
@@ -4394,6 +5808,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     to_label: string;
     from_participant_id: string | null;
     to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
     medication_expected: boolean;
     target_address: string | null;
   };
@@ -4407,21 +5825,19 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: returnAddress,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
-        const from = i === 0 ? null : roster[i - 1];
+        const from = i === 0 ? null : roster[i - 1]!;
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : venueLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: false,
           target_address: to.address,
         });
@@ -4431,8 +5847,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: originLabel,
-        from_participant_id: last.id,
-        to_participant_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -4444,22 +5859,20 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: venueLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: null,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
         const to = roster[i]!;
-        const from = i === 0 ? null : roster[i - 1];
+        const from = i === 0 ? null : roster[i - 1]!;
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
-          medication_expected: medSet.has(to.id),
+          ...tripLegPersonColumns(from, to),
+          medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
@@ -4468,8 +5881,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: venueLabel,
-        from_participant_id: last.id,
-        to_participant_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: null,
       });
@@ -4480,8 +5892,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         leg_kind: "venue_to_depot",
         from_label: venueLabel,
         to_label: originLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: returnAddress,
       });
@@ -4499,14 +5910,10 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     ...s,
   }));
 
-  const { data: legRows, error: legErr } = await supabase
-    .from("trip_legs")
-    .insert(legPayload)
-    .select("*")
-    .order("leg_index", { ascending: true });
+  const { data: legRows, error: legErr } = await insertTripLegRows(legPayload);
   if (legErr) throwPg("[startTrip:legs]", legErr);
 
-  const eventTitle = await fetchEventTitle(trip.eventId);
+  const eventTitle = await fetchTripBannerTitle(trip);
   return { trip, legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)), eventTitle };
 }
 
@@ -4521,16 +5928,59 @@ export interface BusRunSummary {
   runLabel: string;
   /** "morning" = inbound pickup run; "afternoon" = outbound return run. */
   direction: "morning" | "afternoon";
-  /** Number of active participants assigned to this run today. */
+  /** Number of people on the weekly plan for this run today. */
   passengerCount: number;
+}
+
+function scheduledBusRunCode(
+  primary: string | null | undefined,
+  fallback: string | null | undefined,
+  knownRunCodes: Set<string>,
+): string {
+  const code = (primary ?? "").trim() || (fallback ?? "").trim();
+  return code && knownRunCodes.has(code) ? code : "";
+}
+
+/** True when a stored schedule weekday is the same day as `dayCode` (DAY-THU or Thursday). */
+function scheduleDayMatches(stored: string | null | undefined, dayCode: string): boolean {
+  const canon = (raw: string) => {
+    const v = raw.trim().toLowerCase();
+    if (v === "day-mon" || v === "monday" || v === "mon") return "mon";
+    if (v === "day-tue" || v === "tuesday" || v === "tue") return "tue";
+    if (v === "day-wed" || v === "wednesday" || v === "wed") return "wed";
+    if (v === "day-thu" || v === "thursday" || v === "thu") return "thu";
+    if (v === "day-fri" || v === "friday" || v === "fri") return "fri";
+    if (v === "day-sat" || v === "saturday" || v === "sat") return "sat";
+    if (v === "day-sun" || v === "sunday" || v === "sun") return "sun";
+    return v;
+  };
+  const a = canon(stored ?? "");
+  const b = canon(dayCode);
+  return a.length > 0 && a === b;
+}
+
+function scheduleMatchesBusRun(
+  inbound: string | null | undefined,
+  outbound: string | null | undefined,
+  transportRequired: string | null | undefined,
+  busRunCode: string,
+  direction: "morning" | "afternoon",
+): boolean {
+  const primary = direction === "morning" ? inbound : outbound;
+  const code = (primary ?? "").trim() || (transportRequired ?? "").trim();
+  return code === busRunCode;
 }
 
 /**
  * Return all Day Centre bus runs (morning AND afternoon) that have at least
- * one active participant scheduled for the given day-of-week code.
+ * one active participant or support person scheduled for the given day.
  *
  * Fetches the authoritative set of bus run codes from system_lookup_parameters
  * so any code naming convention works (BUSRUN-1, R1, RUN-A, etc.).
+ *
+ * The Manifest picker uses the weekly plan for this weekday only (minus Off today).
+ * A run assigned on another weekday is not offered. Floor home method can add
+ * someone onto a run already planned today; it cannot add another day's run.
  */
 export async function listTodaysBusRunSummaries(
   dayCode: string,
@@ -4555,20 +6005,81 @@ export async function listTodaysBusRunSummaries(
 
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
-    .select("inbound_transport, outbound_transport")
-    .eq("day_of_week", dayCode)
+    .select("participant_id, day_of_week, inbound_transport, outbound_transport, transport_required")
     .eq("active", true);
   if (error) throw error;
 
+  const today = todayLocalIso();
+  const exemptIds = await loadExemptParticipantIdsForDate(today);
+  const floorHome = await loadFloorHomeTransportForDate(today);
+  const morningIds: Record<string, Set<string>> = {};
+  const afternoonIds: Record<string, Set<string>> = {};
+  const addId = (bag: Record<string, Set<string>>, run: string, pid: string) => {
+    if (!bag[run]) bag[run] = new Set();
+    bag[run]!.add(pid);
+  };
+  for (const row of data ?? []) {
+    const r = row as {
+      participant_id: string;
+      day_of_week: string | null;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+      transport_required: string | null;
+    };
+    if (!scheduleDayMatches(r.day_of_week, dayCode)) continue;
+    if (exemptIds.has(r.participant_id)) continue;
+    const inb = scheduledBusRunCode(r.inbound_transport, r.transport_required, knownRunCodes);
+    const outb = scheduledBusRunCode(r.outbound_transport, r.transport_required, knownRunCodes);
+    if (inb) addId(morningIds, inb, r.participant_id);
+    if (outb) addId(afternoonIds, outb, r.participant_id);
+  }
+  try {
+    const { data: supportRows, error: supportErr } = await supabase
+      .from("support_attendance_schedules")
+      .select("person_kind, staff_id, carer_id, day_of_week, inbound_transport, outbound_transport")
+      .eq("active", true);
+    if (supportErr) {
+      if (!isSchemaMismatchError(supportErr)) {
+        console.warn("[listTodaysBusRunSummaries:support]", supportErr.message);
+      }
+    } else {
+      const { loadExemptSupportKeysForDate } = await import("@/lib/api/support-attendance");
+      const exemptSupport = await loadExemptSupportKeysForDate(today);
+      for (const raw of supportRows ?? []) {
+        const s = raw as {
+          person_kind: "staff" | "volunteer" | "carer";
+          staff_id: string | null;
+          carer_id: string | null;
+          day_of_week: string | null;
+          inbound_transport: string | null;
+          outbound_transport: string | null;
+        };
+        if (!scheduleDayMatches(s.day_of_week, dayCode)) continue;
+        const key = s.carer_id
+          ? supportPersonKey("carer", s.carer_id)
+          : supportPersonKey(s.person_kind, s.staff_id ?? "");
+        if (!key || key.endsWith(":") || exemptSupport.has(key)) continue;
+        const inb = scheduledBusRunCode(s.inbound_transport, null, knownRunCodes);
+        const outb = scheduledBusRunCode(s.outbound_transport, null, knownRunCodes);
+        if (inb) addId(morningIds, inb, key);
+        if (outb) addId(afternoonIds, outb, key);
+      }
+    }
+  } catch (err) {
+    console.warn("[listTodaysBusRunSummaries:support]", err);
+  }
+  const plannedToday = new Set([...Object.keys(morningIds), ...Object.keys(afternoonIds)]);
+  for (const [pid, f] of floorHome) {
+    if (exemptIds.has(pid)) continue;
+    if (f.status === "absent" || f.status === "checked_out") continue;
+    if (f.departureVector !== "bus" || !f.departureBusRunCode) continue;
+    if (!plannedToday.has(f.departureBusRunCode)) continue;
+    addId(afternoonIds, f.departureBusRunCode, pid);
+  }
   const morningCounts: Record<string, number> = {};
   const afternoonCounts: Record<string, number> = {};
-  for (const row of data ?? []) {
-    const r = row as { inbound_transport: string | null; outbound_transport: string | null };
-    const inb = r.inbound_transport ?? "";
-    const outb = r.outbound_transport ?? "";
-    if (inb && knownRunCodes.has(inb)) morningCounts[inb] = (morningCounts[inb] ?? 0) + 1;
-    if (outb && knownRunCodes.has(outb)) afternoonCounts[outb] = (afternoonCounts[outb] ?? 0) + 1;
-  }
+  for (const [run, ids] of Object.entries(morningIds)) morningCounts[run] = ids.size;
+  for (const [run, ids] of Object.entries(afternoonIds)) afternoonCounts[run] = ids.size;
 
   const summaries: BusRunSummary[] = [];
   for (const [runCode, passengerCount] of Object.entries(morningCounts)) {
@@ -4619,42 +6130,382 @@ export async function listBusRunRosterForDay(
   dayCode: string,
   direction: "morning" | "afternoon",
 ): Promise<BusRunRosterEntry[]> {
-  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
     .select(
-      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "participant_id, inbound_transport, outbound_transport, transport_required, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("day_of_week", dayCode)
-    .eq(transportCol, busRunCode)
     .eq("active", true)
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[listBusRunRosterForDay:schedules]", schedErr);
 
-  return (schedRows ?? []).map((r) => {
+  const exemptIds = await loadExemptParticipantIdsForDate(todayLocalIso());
+  const roster: BusRunRosterEntry[] = (schedRows ?? []).flatMap((r) => {
     const row = r as unknown as {
       participant_id: string;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+      transport_required: string | null;
       participants:
         | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
         | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
         | null;
     };
+    if (
+      !scheduleMatchesBusRun(
+        row.inbound_transport,
+        row.outbound_transport,
+        row.transport_required,
+        busRunCode,
+        direction,
+      )
+    ) {
+      return [];
+    }
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
+    return [
+      {
+        id: row.participant_id,
+        name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+        address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+      },
+    ];
+  });
+  let present = roster.filter((p) => !exemptIds.has(p.id));
+  if (direction === "afternoon") {
+    present = await applyAfternoonFloorHomeTransport(
+      present,
+      busRunCode,
+      todayLocalIso(),
+    );
+  }
+  try {
+    const { listSupportRosterForDayCentreRun, applyAfternoonSupportHomeTransport } =
+      await import("@/lib/api/support-attendance");
+    let support = await listSupportRosterForDayCentreRun({
+      busRunCode,
+      dayCode,
+      direction,
+    });
+    if (direction === "afternoon") {
+      support = await applyAfternoonSupportHomeTransport(
+        support,
+        busRunCode,
+        todayLocalIso(),
+      );
+    }
+    present = [
+      ...present,
+      ...support.map((s) => ({ id: s.id, name: s.name, address: s.address })),
+    ];
+  } catch (err) {
+    console.warn("[listBusRunRosterForDay:support]", err);
+  }
+  try {
+    const { paintDayCentreStopAddresses } = await import("@/lib/api/person-addresses");
+    await paintDayCentreStopAddresses(present, {
+      dayCode,
+      direction,
+      serviceDate: todayLocalIso(),
+    });
+  } catch (err) {
+    console.warn("[listBusRunRosterForDay:addresses]", err);
+  }
+  const orderMap = await loadBusRunRouteOrderMap(busRunCode, direction);
+  return sortRosterByRouteOrder(present, orderMap);
+}
+
+export async function loadExemptParticipantIdsForDate(dateIso: string): Promise<Set<string>> {
+  const { data, error } = await supabase
+    .from("attendance_roster_logs")
+    .select("participant_id, actual_status")
+    .eq("roster_date", dateIso);
+  if (error) return new Set();
+  const out = new Set<string>();
+  for (const raw of data ?? []) {
+    const row = raw as { participant_id: string; actual_status: string };
+    if (NON_CHARGEABLE_STATUSES.includes(row.actual_status as AttendanceStatus)) {
+      out.add(row.participant_id);
+    }
+  }
+  return out;
+}
+
+/** Floor Check-Out / walk-in home method for today's Day Centre session. */
+export type FloorHomeTransport = {
+  participantId: string;
+  status: string;
+  departureVector: "bus" | "family" | "independent" | null;
+  departureBusRunCode: string | null;
+};
+
+export async function loadFloorHomeTransportForDate(
+  dateIso: string,
+): Promise<Map<string, FloorHomeTransport>> {
+  const out = new Map<string, FloorHomeTransport>();
+  const { data: session, error: sessErr } = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", dateIso)
+    .maybeSingle();
+  if (sessErr || !session) return out;
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, status, departure_vector, departure_bus_run_code")
+    .eq("session_id", (session as { id: string }).id);
+  if (error) {
+    if (isSchemaMismatchError(error)) return out;
+    return out;
+  }
+  for (const raw of data ?? []) {
+    const row = raw as {
+      participant_id: string;
+      status: string;
+      departure_vector?: string | null;
+      departure_bus_run_code?: string | null;
+    };
+    const vector =
+      row.departure_vector === "bus" ||
+      row.departure_vector === "family" ||
+      row.departure_vector === "independent"
+        ? row.departure_vector
+        : null;
+    out.set(row.participant_id, {
+      participantId: row.participant_id,
+      status: row.status,
+      departureVector: vector,
+      departureBusRunCode: (row.departure_bus_run_code ?? "").trim() || null,
+    });
+  }
+  return out;
+}
+
+async function fetchBusRunRosterEntries(
+  participantIds: string[],
+): Promise<BusRunRosterEntry[]> {
+  if (participantIds.length === 0) return [];
+  const { data, error } = await supabase
+    .from("participants")
+    .select("id, first_name, last_name, regular_pickup_address, street_address")
+    .in("id", participantIds);
+  if (error) return [];
+  return (data ?? []).map((r) => {
+    const row = r as {
+      id: string;
+      first_name: string;
+      last_name: string;
+      regular_pickup_address: string | null;
+      street_address: string | null;
+    };
+    const regular = (row.regular_pickup_address ?? "").trim();
+    const street = (row.street_address ?? "").trim();
     return {
-      id: row.participant_id,
-      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+      id: row.id,
+      name: `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "(participant)",
       address: regular.length > 0 ? regular : street.length > 0 ? street : null,
     };
   });
 }
 
+/**
+ * Afternoon home-run roster: weekly outbound minus Off-today / floor Absent,
+ * minus people who will go home with family/independent, plus walk-ins assigned
+ * to this bus.
+ *
+ * Floor checkout does **not** drop someone whose home method is this bus.
+ * Check-Out means they left the floor to go home; the afternoon Manifest is
+ * how the bus takes them. Treating checked_out like Absent emptied the run.
+ */
+export async function applyAfternoonFloorHomeTransport(
+  roster: BusRunRosterEntry[],
+  busRunCode: string,
+  dateIso: string,
+): Promise<BusRunRosterEntry[]> {
+  const floor = await loadFloorHomeTransportForDate(dateIso);
+  if (floor.size === 0) return roster;
+  const byId = new Map(roster.map((r) => [r.id, r]));
+  const extras: string[] = [];
+  for (const [pid, f] of floor) {
+    if (f.status === "absent") {
+      byId.delete(pid);
+      continue;
+    }
+    if (f.departureVector === "family" || f.departureVector === "independent") {
+      byId.delete(pid);
+      continue;
+    }
+    if (f.departureVector === "bus" && f.departureBusRunCode) {
+      if (f.departureBusRunCode === busRunCode) {
+        if (!byId.has(pid)) extras.push(pid);
+      } else {
+        byId.delete(pid);
+      }
+    }
+  }
+  const extraRows = await fetchBusRunRosterEntries(extras);
+  for (const row of extraRows) byId.set(row.id, row);
+  return [...byId.values()];
+}
+
 export function isPassengerPickupLeg(leg: TripLeg): boolean {
+  const hasPerson =
+    leg.toParticipantId != null || leg.toStaffId != null || leg.toCarerId != null;
   return (
-    leg.toParticipantId != null &&
+    hasPerson &&
     (leg.legKind === "depot_to_client" || leg.legKind === "client_to_client")
   );
+}
+
+/**
+ * Driver stop order with people who already left the pending list removed.
+ * Pending stops the driver has not placed keep their current order after
+ * the ones they did place. An empty driver list returns the server order.
+ */
+export function projectPendingPickupOrder(serverIds: string[], driverIds: string[]): string[] {
+  if (driverIds.length === 0 || serverIds.length === 0) return serverIds;
+  const pending = new Set(serverIds);
+  const seen = new Set<string>();
+  const kept: string[] = [];
+  for (const id of driverIds) {
+    if (!pending.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    kept.push(id);
+  }
+  if (kept.length === 0) return serverIds;
+  const extras = serverIds.filter((id) => !seen.has(id));
+  return [...kept, ...extras];
+}
+
+/**
+ * Show pending pickups in the driver's order without waiting for a refetch.
+ * Completed stops keep their stop numbers. Pending stops reuse the pending
+ * stop numbers, in the projected order, so the next drop-off stays put.
+ */
+export function applyDriverPickupOrder(legs: TripLeg[], driverIds: string[]): TripLeg[] {
+  if (driverIds.length === 0) return legs;
+  const pending = legs
+    .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+    .sort((a, b) => a.legIndex - b.legIndex);
+  const serverIds = pending.map((l) => l.id);
+  const projected = projectPendingPickupOrder(serverIds, driverIds);
+  if (projected.join("|") === serverIds.join("|")) return legs;
+  const slots = pending.map((l) => l.legIndex).sort((a, b) => a - b);
+  const indexById = new Map(projected.map((id, i) => [id, slots[i]!]));
+  return legs
+    .map((l) => {
+      const next = indexById.get(l.id);
+      return next == null ? l : { ...l, legIndex: next };
+    })
+    .sort((a, b) => a.legIndex - b.legIndex);
+}
+
+function busRunRosterEntryToPerson(r: BusRunRosterEntry): TransportRosterPerson {
+  const parsed = parseRoutePersonKey(r.id);
+  if (parsed.kind === "participant") {
+    return clientRosterPerson({
+      participantId: r.id,
+      name: r.name,
+      address: r.address,
+    });
+  }
+  return supportRosterPerson({
+    kind: parsed.kind === "carer" ? "carer" : parsed.kind,
+    staffId: parsed.kind === "carer" ? null : parsed.id,
+    carerId: parsed.kind === "carer" ? parsed.id : null,
+    name: r.name,
+    address: r.address,
+  });
+}
+
+/**
+ * Open afternoon Manifest that was seeded empty because floor checkout had
+ * already fired: replace still-pending legs with the current home-run roster.
+ */
+async function reseatPendingAfternoonDayCentreLegs(
+  trip: TransportTrip,
+  legs: TripLeg[],
+): Promise<TripLeg[]> {
+  if (trip.eventId) return legs;
+  if (!trip.busRunCode) return legs;
+  if (trip.tripReturn === "none") return legs;
+  if (legs.length === 0) return legs;
+  if (legs.some((l) => l.status !== "pending")) return legs;
+
+  const dayCode = todaysSydneyDayCode(sydneyWallClockToUtcDate(trip.tripDate, "12:00"));
+  const rosterEntries = await listBusRunRosterForDay(trip.busRunCode, dayCode, "afternoon");
+  const pickupCount = legs.filter(isPassengerPickupLeg).length;
+  if (rosterEntries.length === pickupCount) return legs;
+
+  const roster = rosterEntries.map(busRunRosterEntryToPerson);
+  const startLabel = legs[0]?.fromLabel || "Day Centre";
+  const depotAddr =
+    legs.find((l) => l.legKind === "venue_to_depot")?.targetAddress ??
+    trip.originAddress;
+  const seeds: Array<{
+    leg_kind: LegKind;
+    from_label: string;
+    to_label: string;
+    from_participant_id: string | null;
+    to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
+    medication_expected: boolean;
+    target_address: string | null;
+  }> = [];
+
+  if (roster.length === 0) {
+    seeds.push({
+      leg_kind: "venue_to_depot",
+      from_label: startLabel,
+      to_label: "Depot",
+      ...tripLegPersonColumns(null, null),
+      medication_expected: false,
+      target_address: depotAddr,
+    });
+  } else {
+    for (let i = 0; i < roster.length; i++) {
+      const to = roster[i]!;
+      const from = i === 0 ? null : roster[i - 1]!;
+      seeds.push({
+        leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
+        from_label: i === 0 ? startLabel : from!.name,
+        to_label: to.name,
+        ...tripLegPersonColumns(from, to),
+        medication_expected: false,
+        target_address: to.address,
+      });
+    }
+    const last = roster[roster.length - 1]!;
+    seeds.push({
+      leg_kind: "venue_to_depot",
+      from_label: last.name,
+      to_label: "Depot",
+      ...tripLegPersonColumns(last, null),
+      medication_expected: false,
+      target_address: depotAddr,
+    });
+  }
+
+  const { error: delErr } = await supabase.from("trip_legs").delete().eq("trip_id", trip.id);
+  if (delErr) throwPg("[reseatPendingAfternoonDayCentreLegs:delete]", delErr);
+
+  const legPayload = seeds.map((s, i) => ({
+    trip_id: trip.id,
+    leg_index: i + 1,
+    status: "pending" as LegStatus,
+    medication_handover_status: "not_required" as MedicationHandoverStatus,
+    medication_handover_confirmed: false,
+    unexpected_medication_logged: false,
+    ...s,
+  }));
+  const { data, error } = await insertTripLegRows(legPayload);
+  if (error) throwPg("[reseatPendingAfternoonDayCentreLegs:insert]", error);
+  return (data ?? []).map((r) => rowToLeg(r as LegRow));
 }
 
 /** Completed pickup where the passenger was skipped — bus never visited. */
@@ -4704,6 +6555,10 @@ export type PickupChainEndpoint = {
   toLabel: string;
   fromParticipantId: string | null;
   toParticipantId: string | null;
+  fromStaffId: string | null;
+  toStaffId: string | null;
+  fromCarerId: string | null;
+  toCarerId: string | null;
   legKind: LegKind;
 };
 
@@ -4725,11 +6580,18 @@ export function computePickupChainEndpoints(
     .filter((l): l is TripLeg => l != null);
 
   const out = new Map<string, PickupChainEndpoint>();
-  let chainTail: { toLabel: string; toParticipantId: string | null } | null =
+  let chainTail: {
+    toLabel: string;
+    toParticipantId: string | null;
+    toStaffId: string | null;
+    toCarerId: string | null;
+  } | null =
     locked.length > 0
       ? {
           toLabel: locked[locked.length - 1]!.toLabel,
           toParticipantId: locked[locked.length - 1]!.toParticipantId,
+          toStaffId: locked[locked.length - 1]!.toStaffId,
+          toCarerId: locked[locked.length - 1]!.toCarerId,
         }
       : null;
   const originLabel = tripStartLabelForPickups(trip, legs);
@@ -4737,15 +6599,26 @@ export function computePickupChainEndpoints(
   for (const leg of orderedPending) {
     const fromLabel = chainTail ? chainTail.toLabel : originLabel;
     const fromParticipantId = chainTail ? chainTail.toParticipantId : null;
+    const fromStaffId = chainTail ? chainTail.toStaffId : null;
+    const fromCarerId = chainTail ? chainTail.toCarerId : null;
     const legKind: LegKind = chainTail ? "client_to_client" : "depot_to_client";
     out.set(leg.id, {
       fromLabel,
       toLabel: leg.toLabel,
       fromParticipantId,
       toParticipantId: leg.toParticipantId,
+      fromStaffId,
+      toStaffId: leg.toStaffId,
+      fromCarerId,
+      toCarerId: leg.toCarerId,
       legKind,
     });
-    chainTail = { toLabel: leg.toLabel, toParticipantId: leg.toParticipantId };
+    chainTail = {
+      toLabel: leg.toLabel,
+      toParticipantId: leg.toParticipantId,
+      toStaffId: leg.toStaffId,
+      toCarerId: leg.toCarerId,
+    };
   }
   return out;
 }
@@ -4769,6 +6642,10 @@ function rebuildPendingPickupChain(
       toLabel: ep.toLabel,
       fromParticipantId: ep.fromParticipantId,
       toParticipantId: ep.toParticipantId,
+      fromStaffId: ep.fromStaffId,
+      toStaffId: ep.toStaffId,
+      fromCarerId: ep.fromCarerId,
+      toCarerId: ep.toCarerId,
     };
   });
 }
@@ -4815,6 +6692,10 @@ export async function rebuildTripPickupChain(tripId: string): Promise<TripLeg[]>
         to_label: ep.toLabel,
         from_participant_id: ep.fromParticipantId,
         to_participant_id: ep.toParticipantId,
+        from_staff_id: ep.fromStaffId,
+        to_staff_id: ep.toStaffId,
+        from_carer_id: ep.fromCarerId,
+        to_carer_id: ep.toCarerId,
         updated_at: new Date().toISOString(),
       })
       .eq("id", leg.id);
@@ -4899,16 +6780,27 @@ export async function reorderTripPickupLegs(
   const pendingPickups = legs.filter((l) => isPassengerPickupLeg(l) && l.status === "pending");
   const otherLegs = legs.filter((l) => !isPassengerPickupLeg(l));
 
-  const pendingIds = new Set(pendingPickups.map((l) => l.id));
-  if (orderedPendingPickupLegIds.length !== pendingPickups.length) {
+  const pendingPickupsInOrder = [...pendingPickups].sort((a, b) => a.legIndex - b.legIndex);
+  const pendingIdSet = new Set(pendingPickupsInOrder.map((l) => l.id));
+  const legIdSet = new Set(legs.map((l) => l.id));
+  for (const id of orderedPendingPickupLegIds) {
+    if (!legIdSet.has(id)) throw new Error("Invalid pickup leg in reorder list.");
+  }
+  // A drop-off can commit while this save is in flight. Keep the relative
+  // order of stops that are still pending, and ignore the one that just left.
+  const seen = new Set<string>();
+  const requestedStillPending: string[] = [];
+  for (const id of orderedPendingPickupLegIds) {
+    if (!pendingIdSet.has(id) || seen.has(id)) continue;
+    seen.add(id);
+    requestedStillPending.push(id);
+  }
+  if (pendingPickupsInOrder.some((l) => !seen.has(l.id))) {
     throw new Error("Pickup order must include every pending stop exactly once.");
   }
-  for (const id of orderedPendingPickupLegIds) {
-    if (!pendingIds.has(id)) throw new Error("Invalid pickup leg in reorder list.");
-  }
 
-  const pendingMap = new Map(pendingPickups.map((l) => [l.id, l]));
-  const reorderedPending = orderedPendingPickupLegIds.map((id) => pendingMap.get(id)!);
+  const pendingMap = new Map(pendingPickupsInOrder.map((l) => [l.id, l]));
+  const reorderedPending = requestedStillPending.map((id) => pendingMap.get(id)!);
   const rebuiltPending = rebuildPendingPickupChain(trip, legs, reorderedPending);
 
   // Preserve boarded + cancelled pickups in original index order, then pending.
@@ -4957,10 +6849,13 @@ export async function reorderTripPickupLegs(
   const finalLegs = [...orderedPickups, ...updatedOtherLegs];
 
   // Two-phase leg_index update to satisfy UNIQUE (trip_id, leg_index).
+  // Use an ascending negative block so a mid-save read (realtime refetch)
+  // still returns the intended order — `-(i+1)` sorted ASC reverses the list.
+  const tempBase = -(finalLegs.length + 1);
   for (let i = 0; i < finalLegs.length; i++) {
     const { error } = await supabase
       .from("trip_legs")
-      .update({ leg_index: -(i + 1), updated_at: new Date().toISOString() })
+      .update({ leg_index: tempBase + i, updated_at: new Date().toISOString() })
       .eq("id", finalLegs[i].id);
     if (error) throwPg("[reorderTripPickupLegs:temp]", error);
   }
@@ -4977,6 +6872,10 @@ export async function reorderTripPickupLegs(
       patch.to_label = leg.toLabel;
       patch.from_participant_id = leg.fromParticipantId;
       patch.to_participant_id = leg.toParticipantId;
+      patch.from_staff_id = leg.fromStaffId;
+      patch.to_staff_id = leg.toStaffId;
+      patch.from_carer_id = leg.fromCarerId;
+      patch.to_carer_id = leg.toCarerId;
     } else if (
       leg.legKind === "client_to_venue" ||
       (leg.legKind === "venue_to_depot" && leg.fromParticipantId != null)
@@ -5007,83 +6906,151 @@ export async function startDayCentreRun(
 ): Promise<ActiveTripBundle> {
   const centreLabel = input.centreLabel ?? "Day Centre";
   const direction = input.direction ?? "morning";
-
-  // 0. Guard: reuse any existing active run for this driver + run code today.
   const today = todayLocalIso();
-  const { data: existingTrip, error: existingErr } = await supabase
-    .from("transport_trips")
-    .select("*")
-    .eq("bus_run_code", input.busRunCode)
-    .eq("driver_staff_id", input.driverStaffId)
-    .not("status", "in", "(completed,cancelled)")
-    .order("started_at", { ascending: false })
-    .limit(1)
-    .maybeSingle();
-  if (existingErr) throwPg("[startDayCentreRun:existingLookup]", existingErr);
-  if (existingTrip) {
-    const existing = rowToTrip(existingTrip as TripRow);
-    const { data: legRows, error: legErr } = await supabase
-      .from("trip_legs")
-      .select("*")
-      .eq("trip_id", existing.id)
-      .order("leg_index", { ascending: true });
-    if (legErr) throwPg("[startDayCentreRun:existingLegs]", legErr);
-    if ((legRows ?? []).length > 0) {
-      return {
-        trip: existing,
-        legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-        eventTitle: `${centreLabel} — ${input.busRunLabel}`,
-      };
-    }
-    // Orphan trip from a failed leg insert (e.g. NOT NULL booleans) — cancel and recreate.
-    await supabase
+  const slotGate = await assertTransportRunSlotStartable({
+    slot: {
+      kind: "day_centre",
+      tripDate: today,
+      busRunCode: input.busRunCode,
+      direction,
+    },
+    actorStaffId: input.driverStaffId,
+  });
+  if (slotGate.reuseTripId) {
+    const { data: existingTrip, error: existingErr } = await supabase
       .from("transport_trips")
-      .update({ status: "cancelled", updated_at: new Date().toISOString() })
-      .eq("id", existing.id);
+      .select("*")
+      .eq("id", slotGate.reuseTripId)
+      .maybeSingle();
+    if (existingErr) throwPg("[startDayCentreRun:reuseLookup]", existingErr);
+    if (existingTrip) {
+      const existing = rowToTrip(existingTrip as TripRow);
+      const { data: legRows, error: legErr } = await supabase
+        .from("trip_legs")
+        .select("*")
+        .eq("trip_id", existing.id)
+        .order("leg_index", { ascending: true });
+      if (legErr) throwPg("[startDayCentreRun:reuseLegs]", legErr);
+      if ((legRows ?? []).length > 0) {
+        return {
+          trip: existing,
+          legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
+          eventTitle: await fetchTripBannerTitle(existing),
+        };
+      }
+      await supabase
+        .from("transport_trips")
+        .update({ status: "cancelled", updated_at: new Date().toISOString() })
+        .eq("id", existing.id);
+    }
   }
 
   // 1. Build roster from participant_attendance_schedules.
-  // Morning runs match inbound_transport; afternoon/return runs match outbound_transport.
-  const transportCol = direction === "morning" ? "inbound_transport" : "outbound_transport";
+  // Morning matches inbound (legacy fallback: transport_required); afternoon matches outbound.
   const { data: schedRows, error: schedErr } = await supabase
     .from("participant_attendance_schedules")
     .select(
-      "participant_id, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
+      "participant_id, inbound_transport, outbound_transport, transport_required, participants!inner(first_name, last_name, regular_pickup_address, street_address)",
     )
     .eq("day_of_week", input.dayCode)
-    .eq(transportCol, input.busRunCode)
     .eq("active", true)
     .order("created_at", { ascending: true });
   if (schedErr) throwPg("[startDayCentreRun:schedules]", schedErr);
 
-  type RosterEntry = { id: string; name: string; address: string | null };
-  const roster: RosterEntry[] = (schedRows ?? []).map((r) => {
+  const roster: TransportRosterPerson[] = (schedRows ?? []).flatMap((r) => {
     const row = r as unknown as {
       participant_id: string;
+      inbound_transport: string | null;
+      outbound_transport: string | null;
+      transport_required: string | null;
       participants:
         | { first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }
         | Array<{ first_name: string; last_name: string; regular_pickup_address: string | null; street_address: string | null }>
         | null;
     };
+    if (
+      !scheduleMatchesBusRun(
+        row.inbound_transport,
+        row.outbound_transport,
+        row.transport_required,
+        input.busRunCode,
+        direction,
+      )
+    ) {
+      return [];
+    }
     const p = Array.isArray(row.participants) ? row.participants[0] : row.participants;
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
-    return {
-      id: row.participant_id,
-      name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
-      address: regular.length > 0 ? regular : street.length > 0 ? street : null,
-    };
+    return [
+      clientRosterPerson({
+        participantId: row.participant_id,
+        name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
+        address: regular.length > 0 ? regular : street.length > 0 ? street : null,
+      }),
+    ];
   });
+  const exemptIds = await loadExemptParticipantIdsForDate(today);
+  for (let i = roster.length - 1; i >= 0; i--) {
+    if (exemptIds.has(roster[i]!.id)) roster.splice(i, 1);
+  }
+  if (direction === "afternoon") {
+    const adjusted = await applyAfternoonFloorHomeTransport(
+      roster,
+      input.busRunCode,
+      today,
+    );
+    roster.splice(
+      0,
+      roster.length,
+      ...adjusted.map((r) =>
+        clientRosterPerson({
+          participantId: r.id,
+          name: r.name,
+          address: r.address,
+        }),
+      ),
+    );
+  }
+  try {
+    const { listSupportRosterForDayCentreRun, applyAfternoonSupportHomeTransport } =
+      await import("@/lib/api/support-attendance");
+    let support = await listSupportRosterForDayCentreRun({
+      busRunCode: input.busRunCode,
+      dayCode: input.dayCode,
+      direction,
+    });
+    if (direction === "afternoon") {
+      support = await applyAfternoonSupportHomeTransport(support, input.busRunCode, today);
+    }
+    roster.push(...support);
+  } catch (err) {
+    console.warn("[startDayCentreRun:support]", err);
+  }
+
+  try {
+    const { paintDayCentreStopAddresses } = await import("@/lib/api/person-addresses");
+    await paintDayCentreStopAddresses(roster, {
+      dayCode: input.dayCode,
+      direction,
+      serviceDate: today,
+    });
+  } catch (err) {
+    console.warn("[startDayCentreRun:addresses]", err);
+  }
 
   if (input.participantOrder?.length) {
     const orderMap = new Map(input.participantOrder.map((id, idx) => [id, idx]));
     roster.sort(
       (a, b) => (orderMap.get(a.id) ?? 9999) - (orderMap.get(b.id) ?? 9999),
     );
+  } else {
+    const routeMap = await loadBusRunRouteOrderMap(input.busRunCode, direction);
+    roster.sort((a, b) => (routeMap.get(a.id) ?? 9999) - (routeMap.get(b.id) ?? 9999));
   }
 
-  // 2. Medication flags.
-  const participantIds = roster.map((p) => p.id);
+  // 2. Medication flags — participants only (staff / carer keys are not UUIDs).
+  const participantIds = rosterParticipantIds(roster);
   const medSet = new Set<string>();
   if (participantIds.length) {
     const { data: medRows } = await supabase
@@ -5152,6 +7119,10 @@ export async function startDayCentreRun(
     to_label: string;
     from_participant_id: string | null;
     to_participant_id: string | null;
+    from_staff_id: string | null;
+    to_staff_id: string | null;
+    from_carer_id: string | null;
+    to_carer_id: string | null;
     medication_expected: boolean;
     target_address: string | null;
   };
@@ -5167,32 +7138,29 @@ export async function startDayCentreRun(
         leg_kind: "depot_to_client",
         from_label: startLabel,
         to_label: centreLabel,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: centreAddr,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
-        const to = roster[i];
-        const from = i === 0 ? null : roster[i - 1];
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1]!;
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: from ? from.name : startLabel,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
-          medication_expected: medSet.has(to.id),
+          ...tripLegPersonColumns(from, to),
+          medication_expected: medSet.has(to.participantId ?? ""),
           target_address: to.address,
         });
       }
-      const last = roster[roster.length - 1];
+      const last = roster[roster.length - 1]!;
       seeds.push({
         leg_kind: "client_to_venue",
         from_label: last.name,
         to_label: centreLabel,
-        from_participant_id: last.id,
-        to_participant_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: centreAddr,
       });
@@ -5205,32 +7173,29 @@ export async function startDayCentreRun(
         leg_kind: "venue_to_depot",
         from_label: startLabel,
         to_label: DEPOT,
-        from_participant_id: null,
-        to_participant_id: null,
+        ...tripLegPersonColumns(null, null),
         medication_expected: false,
         target_address: depotAddr,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
-        const to = roster[i];
-        const from = i === 0 ? null : roster[i - 1];
+        const to = roster[i]!;
+        const from = i === 0 ? null : roster[i - 1]!;
         seeds.push({
           leg_kind: i === 0 ? "depot_to_client" : "client_to_client",
           from_label: i === 0 ? startLabel : from!.name,
           to_label: to.name,
-          from_participant_id: from ? from.id : null,
-          to_participant_id: to.id,
+          ...tripLegPersonColumns(from, to),
           medication_expected: false,
           target_address: to.address,
         });
       }
-      const last = roster[roster.length - 1];
+      const last = roster[roster.length - 1]!;
       seeds.push({
         leg_kind: "venue_to_depot",
         from_label: last.name,
         to_label: DEPOT,
-        from_participant_id: last.id,
-        to_participant_id: null,
+        ...tripLegPersonColumns(last, null),
         medication_expected: false,
         target_address: depotAddr,
       });
@@ -5248,11 +7213,7 @@ export async function startDayCentreRun(
     ...s,
   }));
 
-  const { data: legRows, error: legErr } = await supabase
-    .from("trip_legs")
-    .insert(legPayload)
-    .select("*")
-    .order("leg_index", { ascending: true });
+  const { data: legRows, error: legErr } = await insertTripLegRows(legPayload);
   if (legErr) {
     // Don't leave a leg-less active trip for the next Start Run reuse.
     await supabase
@@ -5262,11 +7223,10 @@ export async function startDayCentreRun(
     throwPg("[startDayCentreRun:legs]", legErr);
   }
 
-  const dirLabel = direction === "afternoon" ? "Return" : "Morning";
   return {
     trip,
     legs: (legRows ?? []).map((r) => rowToLeg(r as LegRow)),
-    eventTitle: `${centreLabel} — ${input.busRunLabel} (${dirLabel})`,
+    eventTitle: await fetchTripBannerTitle(trip),
   };
 }
 
@@ -5307,7 +7267,7 @@ export async function patchTripLeg(legId: string, patch: LegPatch): Promise<Trip
   if (patch.unexpectedMedicationLogged !== undefined) map.unexpected_medication_logged = patch.unexpectedMedicationLogged;
   if (patch.unexpectedMedicationNotes !== undefined) map.unexpected_medication_notes = patch.unexpectedMedicationNotes;
   if (patch.completedAt !== undefined) map.completed_at = patch.completedAt;
-  map.updated_at = new Date().toISOString();
+  map.updated_at = resolveOperationalNow().toISOString();
   const { data, error } = await supabase
     .from("trip_legs")
     .update(map)
@@ -5324,8 +7284,8 @@ export async function completeTrip(tripId: string, endOdometerKm: number): Promi
     .update({
       end_odometer_km: endOdometerKm,
       status: "completed",
-      completed_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
+      completed_at: resolveOperationalNow().toISOString(),
+      updated_at: resolveOperationalNow().toISOString(),
     })
     .eq("id", tripId)
     .select("*")
@@ -5365,20 +7325,38 @@ export async function pruneIneligibleReturnTripPassengers(
 
   const legs = (legRows ?? []).map((r) => rowToLeg(r as LegRow));
   const tripRun = (trip.busRunCode ?? "").trim() || null;
+  const rosterRuns = new Map<string, string | null>();
+  {
+    const { data: bookings, error: bookErr } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, return_bus_run_code")
+      .eq("event_id", trip.eventId)
+      .neq("booking_status", "Cancelled");
+    if (bookErr && !isSchemaMismatchError(bookErr)) {
+      throwPg("[pruneIneligibleReturnTripPassengers:roster]", bookErr);
+    }
+    for (const row of bookings ?? []) {
+      const r = row as { participant_id: string; return_bus_run_code?: string | null };
+      rosterRuns.set(r.participant_id, (r.return_bus_run_code ?? "").trim() || null);
+    }
+  }
   const toPrune = legs.filter((l) => {
     if (!isPassengerPickupLeg(l) || l.status !== "pending" || !l.toParticipantId) {
       return false;
     }
     if (!eligible.ids.has(l.toParticipantId)) return true;
     const floorRun = eligible.runs.get(l.toParticipantId);
-    // checked_in (no floor run yet) — keep unless we know they're wrong run via roster only;
-    // floor map omit means use roster; we only prune known floor mismatches + absents.
+    // checked_in (no floor run yet) — keep; floor omit means still with the group.
     if (floorRun === undefined) return false;
-    return !matchesEventBusRun(floorRun, tripRun);
+    const personRun = effectiveReturnBusRun(
+      floorRun,
+      rosterRuns.get(l.toParticipantId),
+    );
+    return !matchesEventBusRun(personRun, tripRun);
   });
   if (toPrune.length === 0) return 0;
 
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   for (const leg of toPrune) {
     await patchTripLeg(leg.id, {
       status: "completed",
@@ -5725,6 +7703,18 @@ export async function listCheckpointsForAsset(
 
 export type ClearanceIssueSeverity = "green" | "yellow" | "red";
 
+/** Local walk-around sentinel — never persist; CHECK allows green|yellow|red|NULL only. */
+function persistClearanceItemSeverity(
+  value: string | null | undefined,
+): ClearanceIssueSeverity | null {
+  if (value == null) return null;
+  const n = value.trim().toLowerCase();
+  if (!n) return null;
+  if (n === "red-verbal-cleared" || n === "red_verbal_cleared") return "red";
+  if (n === "green" || n === "yellow" || n === "red") return n;
+  return null;
+}
+
 export interface AssetClearanceItem {
   id: string;
   clearanceId: string;
@@ -5841,7 +7831,7 @@ export async function insertAssetClearanceWithItems(input: {
     checkpoint_id: i.checkpointId,
     is_passed: i.passed,
     notes: i.notes ?? null,
-    severity: i.severity ?? null,
+    severity: persistClearanceItemSeverity(i.severity),
     workaround_text: i.workaroundText ?? null,
   }));
   const { data, error } = await supabase
@@ -5913,7 +7903,14 @@ export async function verifyCoordinatorPin(
     Array.isArray(data) ? data : data ? [data] : []
   ) as Array<{ id: string; role: string | null; personnel_type?: string | null }>;
   const row = rows.find((r) => r.id === staffId);
-  if (!row) return false;
+  if (!row) {
+    if (rows.length > 0) {
+      throw new Error(
+        "That PIN belongs to a different staff member. This action needs the assigned trip leader’s PIN.",
+      );
+    }
+    return false;
+  }
   const role =
     classifyRole(row.personnel_type ?? null) ?? classifyRole(row.role ?? null);
   if (role !== "coordinator") {
@@ -5936,7 +7933,7 @@ export async function submitManagerAuthorization(
     .from("asset_daily_clearance")
     .update({
       manager_auth_staff_id: managerStaffId,
-      manager_auth_pin_verified_at: new Date().toISOString(),
+      manager_auth_pin_verified_at: resolveOperationalNow().toISOString(),
     })
     .eq("id", clearanceId)
     .select("*")
@@ -5975,7 +7972,7 @@ export async function submitDriverAuthorization(
     );
   }
 
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const nextStatus: ClearanceStatus = currentClearance.requiresManagerReview
     ? "authorized_override"
     : currentClearance.status;
@@ -6464,6 +8461,7 @@ export async function raiseOperationalEscalation(input: {
         source_kind: input.sourceKind ?? "bus_walkaround",
         source_issue_id: input.sourceIssueId ?? null,
         raised_by: raisedBy,
+        created_at: resolveOperationalNow().toISOString(),
       },
     ])
     .select("*")
@@ -6610,7 +8608,7 @@ export async function supersedeOlderGroundedForVehicle(
     .from("operational_escalations")
     .update({
       status: "resolved_superseded",
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
     })
     .eq("vehicle_info", vehicleInfo)
     .eq("status", "resolved_denied")
@@ -6759,7 +8757,7 @@ export async function resolveOperationalEscalation(args: {
     .update({
       status: args.approved ? "resolved_approved" : "resolved_denied",
       resolved_by: args.managerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
       resolution_notes: args.notes,
     })
     .eq("id", args.id)
@@ -6822,7 +8820,7 @@ export async function rejectEscalationProposal(args: {
     .update({
       status: "resolved_denied",
       resolved_by: args.openerStaffId,
-      resolved_at: new Date().toISOString(),
+      resolved_at: resolveOperationalNow().toISOString(),
       resolution_notes: newNotes,
     })
     .eq("id", args.escalationId);
@@ -6861,7 +8859,7 @@ export async function acceptEscalationWorkaround(args: {
       .update({
         status: "workaround_accepted",
         workaround_plan: trimmedPlan || null,
-        workaround_accepted_at: new Date().toISOString(),
+        workaround_accepted_at: resolveOperationalNow().toISOString(),
       })
       .eq("id", args.sourceIssueId)
       .select("id, status, workaround_plan");
@@ -6877,7 +8875,7 @@ export async function acceptEscalationWorkaround(args: {
   // the operator acknowledgment (the opener is the on-site operator). Write
   // operator_acknowledged_* in the SAME update so the Hub does not leave a
   // residual "awaiting operator ack" row that would lock the centre.
-  const nowIso = new Date().toISOString();
+  const nowIso = resolveOperationalNow().toISOString();
   const { error: escErr } = await supabase
     .from("operational_escalations")
     .update({

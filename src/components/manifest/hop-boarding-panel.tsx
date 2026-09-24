@@ -1,6 +1,7 @@
 /**
  * HopBoardingPanel — §11 boarding roll for event_venue_hop trips (§12.4.3).
  */
+import { useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -9,6 +10,7 @@ import { cn } from "@/lib/utils";
 import {
   hopBoardingComplete,
   hopBoardingCounts,
+  seedBusManifestForHop,
 } from "@/lib/api/event-hop-transport";
 import {
   listBusManifest,
@@ -21,6 +23,7 @@ import {
 } from "@/lib/manifest-offline";
 import { isAppOnline } from "@/lib/simulated-offline";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { supabase } from "@/integrations/supabase/client";
 
 const manifestKey = (tripId: string) => ["event-bus-manifest", tripId] as const;
 
@@ -47,6 +50,33 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
   });
 
   const invalidate = () => qc.invalidateQueries({ queryKey: manifestKey(tripId) });
+
+  useEffect(() => {
+    if (!tripId) return;
+    let cancelled = false;
+    void (async () => {
+      const { data } = await supabase
+        .from("transport_trips")
+        .select("event_id, event_day_session_id")
+        .eq("id", tripId)
+        .maybeSingle();
+      if (cancelled || !data?.event_id || !data?.event_day_session_id) return;
+      try {
+        await seedBusManifestForHop({
+          eventId: data.event_id as string,
+          eventDaySessionId: data.event_day_session_id as string,
+          tripId,
+        });
+        if (!cancelled) invalidate();
+      } catch {
+        /* seed is best-effort; boarding still shows existing rows */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tripId]);
 
   const toggleMut = useMutation({
     mutationFn: (row: EventBusManifestRow) => markOnBusOfflineAware(tripId, row),
@@ -91,7 +121,7 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
   if (!manifest.length) {
     return (
       <Card className="border-dashed p-4 text-center text-sm text-muted-foreground">
-        No passengers on this hop — check in attendees on Event Deliver first.
+        No one on this hop yet — check in attendees on Event Deliver first.
       </Card>
     );
   }
@@ -105,11 +135,13 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
     >
       <div className="flex items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-amber-800 dark:text-amber-200">
         <Users className="h-3.5 w-3.5" />
-        Board passengers{originLabel ? ` at ${originLabel}` : ""}
+        Board everyone{originLabel ? ` at ${originLabel}` : ""}
       </div>
       {!compact && (
         <p className="mt-1.5 text-sm text-muted-foreground">
-          Tap each person when they are on the bus. Mark &quot;Not travelling&quot; if they stay behind.
+          Tap each person when they are on the bus — participants, staff,
+          volunteers and carers. Mark &quot;Not travelling&quot; if they stay
+          behind (same as a participant).
         </p>
       )}
       <div className="mt-3 space-y-2">
@@ -142,7 +174,9 @@ function HopBoardingRow({
   onToggle: () => void;
   onNotTravelling: () => void;
 }) {
-  const name = row.participant_name ?? (row.carer_id ? "Carer" : "Passenger");
+  const name =
+    row.participant_name ??
+    (row.carer_id ? "Carer" : row.staff_id ? "Staff" : "Passenger");
   const on = row.status === "on_bus";
   const absent = row.status === "not_travelling";
 

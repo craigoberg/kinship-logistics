@@ -45,11 +45,28 @@ import {
   CouncilEmailAdminPanel,
   COUNCIL_EMAIL_PARAM_KEYS,
 } from "./council-email-admin-panel";
+import {
+  AppTicketNotifyAdminPanel,
+  APP_TICKET_NOTIFY_PARAM_KEYS,
+} from "./app-ticket-notify-admin-panel";
 import { TourRollCallDefaultsPanel } from "./tour-roll-call-defaults-panel";
+import { MotdAdminPanel, MOTD_PARAM_KEYS } from "./motd-admin-panel";
+import {
+  OnboardingReviewSlaPanel,
+  ONBOARDING_REVIEW_PARAM_KEYS,
+} from "./onboarding-review-sla-panel";
+import {
+  IdleLockAdminPanel,
+  IDLE_LOCK_PARAM_KEYS,
+} from "./idle-lock-admin-panel";
 
 const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...MANDATED_CHECK_PARAM_KEYS,
   ...COUNCIL_EMAIL_PARAM_KEYS,
+  ...APP_TICKET_NOTIFY_PARAM_KEYS,
+  ...MOTD_PARAM_KEYS,
+  ...ONBOARDING_REVIEW_PARAM_KEYS,
+  ...IDLE_LOCK_PARAM_KEYS,
 ]);
 
 function isManagerRole(staffRole: string | null | undefined): boolean {
@@ -94,30 +111,38 @@ export function SystemParameterWorkspace() {
 
   return (
     <div className="space-y-4">
+      <MotdAdminPanel />
+
       <TourRollCallDefaultsPanel />
+
+      <OnboardingReviewSlaPanel />
+
+      <IdleLockAdminPanel />
 
       <MandatedChecksAdminPanel />
 
       <CouncilEmailAdminPanel />
 
+      <AppTicketNotifyAdminPanel />
+
       <div className="flex items-center justify-between">
         <p className="text-sm text-muted-foreground">
           Tunable operational thresholds. Every change is appended to the operational ledger with
-          the Managers justification. Walkthrough checklists and Council email are edited above
-          (not as JSON).
+          the Managers justification. Walkthrough checklists, idle lock, onboarding review windows,
+          Council email, and App ticket notify are edited above (not as JSON).
         </p>
         {!canEdit && <Badge variant="secondary">Read-only · Managers can edit</Badge>}
       </div>
 
       <div className="rounded-md border">
-        <Table>
+        <Table className="table-fixed">
           <TableHeader>
             <TableRow>
-              <TableHead>Key</TableHead>
-              <TableHead>Value</TableHead>
-              <TableHead>Description</TableHead>
-              <TableHead>Updated</TableHead>
-              <TableHead className="w-20" />
+              <TableHead className="w-[22%]">Key</TableHead>
+              <TableHead className="w-[12%]">Value</TableHead>
+              <TableHead className="w-[42%]">Description</TableHead>
+              <TableHead className="w-[14%]">Updated</TableHead>
+              <TableHead className="w-[10%] text-right">Actions</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -130,14 +155,19 @@ export function SystemParameterWorkspace() {
             ) : (
               rows.map((r) => (
                 <TableRow key={r.key}>
-                  <TableCell className="font-mono text-xs">{r.key}</TableCell>
-                  <TableCell className="font-mono">{formatValue(r.value)}</TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{r.description}</TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
+                  <TableCell className="align-top font-mono text-xs break-all">
+                    {r.key}
+                  </TableCell>
+                  <TableCell className="align-top font-mono text-xs whitespace-pre-wrap break-words">
+                    {formatValue(r.value)}
+                  </TableCell>
+                  <TableCell className="align-top text-sm text-muted-foreground whitespace-normal break-words">
+                    {r.description}
+                  </TableCell>
+                  <TableCell className="align-top text-xs text-muted-foreground whitespace-nowrap">
                     <ClientTime iso={r.updated_at} />
                   </TableCell>
-
-                  <TableCell>
+                  <TableCell className="align-top text-right">
                     {canEdit && (
                       <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
                         <Pencil className="mr-1 h-3 w-3" /> Edit

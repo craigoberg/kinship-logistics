@@ -1,5 +1,17 @@
-import { useEffect, useMemo, useState } from "react";
-import { Pencil, Search, UserPlus, Mail, Phone, BadgeCheck, AlertTriangle, Lock } from "lucide-react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { Link } from "@tanstack/react-router";
+import {
+  Pencil,
+  Search,
+  UserPlus,
+  Mail,
+  Phone,
+  BadgeCheck,
+  AlertTriangle,
+  Lock,
+  ClipboardList,
+  HeartHandshake,
+} from "lucide-react";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
@@ -19,9 +31,14 @@ import {
   useParticipants,
 } from "@/hooks/use-supabase-data";
 import { isActiveUserManager } from "@/lib/data-store";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
 import { CarerFormSheet } from "./carer-form-sheet";
+import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
+import { type OnboardingCase } from "@/lib/api/onboarding";
+import type { OnboardingPackType } from "@/lib/onboarding/form-types";
 
 const EXPIRY_WARN_DAYS = 30;
 
@@ -53,13 +70,24 @@ const STATUS_BADGE: Record<CertStatus, { label: string; cls: string }> = {
 export function DirectoryWorkspace() {
   const [tab, setTab] = useState<"staff" | "carers">("staff");
   const [staffQuery, setStaffQuery] = useState("");
+  const [showInactive, setShowInactive] = useState(false);
   const [carerQuery, setCarerQuery] = useState("");
   const [staffOpen, setStaffOpen] = useState(false);
   const [carerOpen, setCarerOpen] = useState(false);
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
   const [editCarer, setEditCarer] = useState<Carer | null>(null);
   const [isManager, setIsManager] = useState(false);
+  const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const [onboardingPack, setOnboardingPack] = useState<OnboardingPackType>("staff");
+  const { canOpen } = useMenuAccess();
   useEffect(() => setIsManager(isActiveUserManager()), []);
+
+  const startOnboarding = (pack: OnboardingPackType) => {
+    setOnboardingCase(null);
+    setOnboardingPack(pack);
+    setOnboardingOpen(true);
+  };
 
   const { data: staff = [], isLoading: staffLoading, error: staffErr } = useStaffRegistry();
   const { data: carers = [], isLoading: carersLoading, error: carersErr } = useCarersRegistry();
@@ -71,16 +99,21 @@ export function DirectoryWorkspace() {
     return m;
   }, [participants]);
 
+  const inactiveCount = staff.filter((s) => !s.active).length;
+  const listedStaff = useMemo(
+    () => (showInactive ? staff : staff.filter((s) => s.active)),
+    [staff, showInactive],
+  );
   const filteredStaff = useMemo(() => {
     const q = staffQuery.trim().toLowerCase();
-    if (!q) return staff;
-    return staff.filter((s) =>
+    if (!q) return listedStaff;
+    return listedStaff.filter((s) =>
       [s.fullName, s.role ?? "", s.email ?? "", s.phone ?? "", s.personnelType ?? ""]
         .join(" ")
         .toLowerCase()
         .includes(q),
     );
-  }, [staff, staffQuery]);
+  }, [listedStaff, staffQuery]);
 
   const filteredCarers = useMemo(() => {
     const q = carerQuery.trim().toLowerCase();
@@ -104,16 +137,36 @@ export function DirectoryWorkspace() {
           </TabsList>
           {tab === "staff" ? (
             isManager ? (
-              <Button
-                onClick={() => {
-                  setEditStaff(null);
-                  setStaffOpen(true);
-                }}
-                className="gap-1.5"
-              >
-                <UserPlus className="h-4 w-4" />
-                Add personnel
-              </Button>
+              <div className="flex flex-wrap items-center gap-2">
+                <Button
+                  variant="outline"
+                  onClick={() => {
+                    setEditStaff(null);
+                    setStaffOpen(true);
+                  }}
+                  className="gap-1.5"
+                >
+                  <UserPlus className="h-4 w-4" />
+                  Quick add
+                </Button>
+                <OnboardingBlankPrintButton pack="volunteer" size="default" />
+                <OnboardingBlankPrintButton pack="staff" size="default" />
+                <Button
+                  variant="secondary"
+                  onClick={() => startOnboarding("volunteer")}
+                  className="gap-1.5"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Volunteer onboarding
+                </Button>
+                <Button
+                  onClick={() => startOnboarding("staff")}
+                  className="gap-1.5"
+                >
+                  <ClipboardList className="h-4 w-4" />
+                  Staff onboarding
+                </Button>
+              </div>
             ) : (
               <Badge variant="outline" className="gap-1.5">
                 <Lock className="h-3 w-3" />
@@ -121,18 +174,38 @@ export function DirectoryWorkspace() {
               </Badge>
             )
           ) : (
-            <Button
-              onClick={() => {
-                setEditCarer(null);
-                setCarerOpen(true);
-              }}
-              className="gap-1.5"
-            >
-              <UserPlus className="h-4 w-4" />
-              Add carer
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setEditCarer(null);
+                  setCarerOpen(true);
+                }}
+                className="gap-1.5"
+              >
+                <UserPlus className="h-4 w-4" />
+                Quick add carer
+              </Button>
+              <OnboardingBlankPrintButton pack="accompanying" size="default" />
+              <Button
+                onClick={() => startOnboarding("accompanying")}
+                className="gap-1.5"
+              >
+                <HeartHandshake className="h-4 w-4" />
+                Accompanying onboarding
+              </Button>
+            </div>
           )}
         </div>
+        {canOpen("onboarding") ? (
+          <p className="text-xs text-muted-foreground">
+            Print / sign / file packs also live under{" "}
+            <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+              Hub → Onboarding
+            </Link>
+            .
+          </p>
+        ) : null}
 
         <TabsContent value="staff" className="mt-4 space-y-3">
           <SearchBar
@@ -140,6 +213,17 @@ export function DirectoryWorkspace() {
             onChange={setStaffQuery}
             placeholder="Search personnel by name, role, contact…"
             count={filteredStaff.length}
+            extra={
+              inactiveCount > 0 ? (
+                <Button
+                  type="button"
+                  variant={showInactive ? "secondary" : "outline"}
+                  onClick={() => setShowInactive((v) => !v)}
+                >
+                  {showInactive ? "Showing inactive" : "Show inactive"}
+                </Button>
+              ) : null
+            }
           />
           {staffErr && <ErrorBox message={(staffErr as Error).message} />}
           <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -169,11 +253,10 @@ export function DirectoryWorkspace() {
                     return (
                       <TableRow
                         key={s.id}
-                        className={
-                          isManager
-                            ? "cursor-pointer transition-colors hover:bg-accent/40"
-                            : undefined
-                        }
+                        className={[
+                          isManager ? "cursor-pointer transition-colors hover:bg-accent/40" : "",
+                          !s.active ? "bg-secondary/20" : "",
+                        ].join(" ")}
                         onClick={openStaff}
                       >
                         <TableCell className="font-medium">{s.fullName}</TableCell>
@@ -190,7 +273,9 @@ export function DirectoryWorkspace() {
                           {s.active ? (
                             <Badge className="bg-emerald-600 text-white hover:bg-emerald-600">Active</Badge>
                           ) : (
-                            <Badge className="bg-slate-500 text-white hover:bg-slate-500">Inactive</Badge>
+                            <Badge variant="secondary">
+                              {s.exitReason ? "Off-boarded" : "Inactive"}
+                            </Badge>
                           )}
                         </TableCell>
                         <TableCell>
@@ -300,6 +385,16 @@ export function DirectoryWorkspace() {
 
       <StaffFormSheet open={staffOpen} onOpenChange={setStaffOpen} staff={editStaff} />
       <CarerFormSheet open={carerOpen} onOpenChange={setCarerOpen} carer={editCarer} />
+      <OnboardingCaseDialog
+        open={onboardingOpen}
+        onOpenChange={(o) => {
+          setOnboardingOpen(o);
+          if (!o) setOnboardingCase(null);
+        }}
+        caseRow={onboardingCase}
+        packType={onboardingPack}
+        onSaved={setOnboardingCase}
+      />
     </div>
   );
 }
@@ -309,11 +404,13 @@ function SearchBar({
   onChange,
   placeholder,
   count,
+  extra,
 }: {
   value: string;
   onChange: (v: string) => void;
   placeholder: string;
   count: number;
+  extra?: ReactNode;
 }) {
   return (
     <div className="flex flex-wrap items-center gap-3">
@@ -326,6 +423,7 @@ function SearchBar({
           className="pl-9"
         />
       </div>
+      {extra}
       <span className="text-xs text-muted-foreground">{count} record{count === 1 ? "" : "s"}</span>
     </div>
   );

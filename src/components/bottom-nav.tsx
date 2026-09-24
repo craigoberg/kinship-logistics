@@ -9,14 +9,19 @@ import {
   CalendarRange,
   Compass,
   Contact2,
+  Bus,
   Route as RouteIcon,
   Scale,
   Sun,
   Menu,
   CircleHelp,
+  MessageCircleHeart,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
+import { useMenuAccess } from "@/hooks/use-menu-access";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
+import { pathToMenuKey } from "@/lib/menu-access";
 
 export const NAV_ITEMS = [
   { to: "/", label: "Dashboard", icon: LayoutDashboard, exact: true },
@@ -24,8 +29,10 @@ export const NAV_ITEMS = [
   { to: "/event-deliver", label: "Event Deliver", icon: Compass, exact: false },
   { to: "/events", label: "Event Manage", icon: CalendarRange, exact: false },
   { to: "/governance", label: "Governance Hub", icon: Scale, exact: false },
+  { to: "/rights-voice", label: "Rights & voice", icon: MessageCircleHeart, exact: false },
   { to: "/participants", label: "Participants", icon: Users, exact: false },
   { to: "/staff", label: "Staff", icon: Contact2, exact: false },
+  { to: "/run-planning", label: "Run Planning", icon: Bus, exact: false },
   { to: "/transport", label: "Transport", icon: Truck, exact: false },
   { to: "/manifest", label: "Manifest", icon: RouteIcon, exact: false },
   { to: "/sync", label: "Sync Queue", icon: RefreshCw, exact: false },
@@ -73,17 +80,37 @@ function NavLinkButton({
   );
 }
 
+const DOCK_COL_CLASS: Record<number, string> = {
+  1: "grid-cols-1",
+  2: "grid-cols-2",
+  3: "grid-cols-3",
+  4: "grid-cols-4",
+  5: "grid-cols-5",
+};
+
+function navItemVisible(
+  item: (typeof NAV_ITEMS)[number],
+  canOpen: (key: string) => boolean,
+): boolean {
+  const key = pathToMenuKey(item.to);
+  return !key || canOpen(key);
+}
+
 export function BottomNav() {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const [menuOpen, setMenuOpen] = useState(false);
+  const { canOpen } = useMenuAccess();
+  const { chromeHidden } = useChromeVisibility();
+  const visibleItems = NAV_ITEMS.filter((item) => navItemVisible(item, canOpen));
+  const visibleDock = DOCK_ITEMS.filter((item) => navItemVisible(item, canOpen));
 
   // Close menu sheet after navigation
   useEffect(() => {
     setMenuOpen(false);
   }, [pathname]);
 
-  const activeInDock = DOCK_ITEMS.some((item) => isNavActive(pathname, item));
-  const activeOutsideDock = NAV_ITEMS.some(
+  const activeInDock = visibleDock.some((item) => isNavActive(pathname, item));
+  const activeOutsideDock = visibleItems.some(
     (item) => isNavActive(pathname, item) && !(DOCK_PATHS as readonly string[]).includes(item.to),
   );
 
@@ -91,10 +118,14 @@ export function BottomNav() {
     <>
       <nav
         aria-label="Primary"
-        className="fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur md:hidden"
+        aria-hidden={chromeHidden}
+        className={cn(
+          "fixed inset-x-0 bottom-0 z-40 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur transition-transform duration-200 md:hidden",
+          chromeHidden && "translate-y-full pointer-events-none",
+        )}
       >
-        <ul className="grid grid-cols-5">
-          {DOCK_ITEMS.map((item) => (
+        <ul className={cn("grid", DOCK_COL_CLASS[visibleDock.length + 1] ?? "grid-cols-5")}>
+          {visibleDock.map((item) => (
             <li key={item.to}>
               <NavLinkButton item={item} active={isNavActive(pathname, item)} />
             </li>
@@ -127,7 +158,7 @@ export function BottomNav() {
         className="z-50"
       >
         <div className="grid grid-cols-3 gap-2">
-          {NAV_ITEMS.map((item) => {
+          {visibleItems.map((item) => {
             const active = isNavActive(pathname, item);
             const Icon = item.icon;
             return (

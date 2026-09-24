@@ -32,7 +32,7 @@ export const mealsServiceTopic: HelpTopic = {
     },
     {
       heading: "Preparer and SFH",
-      body: "Pick Staff preparer or Guest / external preparer. Missing or expired Safe Food Handling needs a Manager note (≥10 characters) and Manager PIN before the preparer can attest.",
+      body: "Pick Staff preparer or Guest / external preparer. Missing or expired Food Preparation requirements (office-set, usually Safe Food Handler) need a Manager note (≥10 characters) and Manager PIN before the preparer can attest. Change the required items in Admin → Duty roles.",
     },
     {
       heading: "Open meal service",

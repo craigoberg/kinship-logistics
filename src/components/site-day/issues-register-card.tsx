@@ -109,7 +109,7 @@ export function IssuesRegisterCard({ issue }: Props) {
             label="Workaround active"
           />
           <ElapsedTimer
-            since={issue.createdAt}
+            since={issue.occurredAt}
             label="Total open"
             className="opacity-70"
           />
@@ -124,7 +124,7 @@ export function IssuesRegisterCard({ issue }: Props) {
             <span className="font-mono tabular-nums">
               {formatElapsed(
                 new Date(issue.resolvedAt).getTime() -
-                  new Date(issue.createdAt).getTime(),
+                  new Date(issue.occurredAt).getTime(),
               )}
             </span>
           </span>

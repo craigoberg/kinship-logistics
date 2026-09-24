@@ -32,6 +32,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useParticipants, useStaffRegistry } from "@/hooks/use-supabase-data";
 import { useOnlineStatus } from "@/hooks/use-online-status";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   hashPin,
   insertComplianceLog,
@@ -48,7 +49,10 @@ import {
   type LedgerSeverity,
 } from "@/lib/api/ledger";
 import { enqueue } from "@/lib/sync-queue";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { toast } from "sonner";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   open: boolean;
@@ -149,6 +153,20 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     witness2PinVerified;
 
   const witnessesDistinct = witness1Id !== "" && witness2Id !== "" && witness1Id !== witness2Id;
+  const adminDuty = useDutyFunctionGap({
+    functionKey: "med_admin",
+    staffId: witness1Id || null,
+    subjectLabel: "Medication admin",
+    enabled: open && !!witness1Id,
+    ledgerCategory: "CENTRE",
+  });
+  const witnessDuty = useDutyFunctionGap({
+    functionKey: "med_witness",
+    staffId: witness2Id || null,
+    subjectLabel: "Medication witness",
+    enabled: open && !!witness2Id,
+    ledgerCategory: "CENTRE",
+  });
 
   const canSubmit =
     !submitting &&
@@ -158,7 +176,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     dosage.trim().length > 0 &&
     witnessesDistinct &&
     witness1PinVerified &&
-    witness2PinVerified;
+    witness2PinVerified &&
+    adminDuty.approved &&
+    witnessDuty.approved;
 
   const selectedParticipant = useMemo(
     () => participants.find((p) => p.id === participantId) ?? null,
@@ -173,6 +193,10 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
     setPinError(null);
 
     try {
+      if (!(await adminDuty.ensureApproved()) || !(await witnessDuty.ensureApproved())) {
+        setPinError("Manager must approve the duty requirement gap first.");
+        return;
+      }
       const w1 = staffById.get(witness1Id);
       const w2 = staffById.get(witness2Id);
       if (!witness1PinVerified || !witness2PinVerified) {
@@ -190,7 +214,7 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
         action_performed: eventType,
         witness_1_identity: w1!.fullName,
         witness_2_identity: w2!.fullName,
-        timestamp: new Date().toISOString(),
+        timestamp: operationalNowIso(),
         metadata: {
           medication_name: medicationName.trim(),
           dosage: dosage.trim(),
@@ -375,7 +399,9 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
                   <CommandList>
                     <CommandEmpty>No participants found.</CommandEmpty>
                     <CommandGroup>
-                      {participants.map((p) => (
+                      {participants
+                        .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                        .map((p) => (
                         <CommandItem
                           key={p.id}
                           value={`${p.fullName} ${p.ndisNumber}`}
@@ -439,6 +465,37 @@ export function MedicationAdminModal({ open, onOpenChange, participant }: Props)
               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
               <span>Couldn't load staff_registry: {(staffError as Error).message}</span>
             </div>
+          )}
+
+          {adminDuty.needsGap && witness1Id && (
+            <DutyRequirementGapPanel
+              actorName={staff.find((s) => s.id === witness1Id)?.fullName ?? "Witness 1"}
+              evalResult={adminDuty.evalResult}
+              note={adminDuty.note}
+              onNoteChange={adminDuty.setNote}
+              managerId={adminDuty.managerId}
+              onManagerIdChange={adminDuty.setManagerId}
+              managerPin={adminDuty.managerPin}
+              onManagerPin={adminDuty.setManagerPin}
+              managers={adminDuty.managers}
+              title="Medical admin"
+              disabled={submitting}
+            />
+          )}
+          {witnessDuty.needsGap && witness2Id && (
+            <DutyRequirementGapPanel
+              actorName={staff.find((s) => s.id === witness2Id)?.fullName ?? "Witness 2"}
+              evalResult={witnessDuty.evalResult}
+              note={witnessDuty.note}
+              onNoteChange={witnessDuty.setNote}
+              managerId={witnessDuty.managerId}
+              onManagerIdChange={witnessDuty.setManagerId}
+              managerPin={witnessDuty.managerPin}
+              onManagerPin={witnessDuty.setManagerPin}
+              managers={witnessDuty.managers}
+              title="Medication witness"
+              disabled={submitting}
+            />
           )}
 
           <div className="grid gap-4 sm:grid-cols-2">

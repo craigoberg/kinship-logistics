@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 import { AlertTriangle, Plus, Save, Trash2 } from "lucide-react";
 import {
@@ -26,8 +26,18 @@ import {
   useLookupParameters,
   useBusRunMap,
 } from "@/hooks/use-supabase-data";
-import { listCentreHours } from "@/lib/api/centre-hours";
+import { CENTRE_HOURS_QUERY_KEY, listCentreHours } from "@/lib/api/centre-hours";
 import { useQuery } from "@tanstack/react-query";
+import {
+  SELF_TRANSPORT_CODE,
+  ScheduleTransportPills,
+  isAssignedBusRun,
+} from "@/components/transport/schedule-transport-pills";
+import {
+  BUS_HOME_ADDRESS_REQUIRED,
+  assignmentNeedsHomeAddress,
+  loadHomeAddress,
+} from "@/lib/api/person-addresses";
 
 interface Props {
   open: boolean;
@@ -36,11 +46,6 @@ interface Props {
   participantName: string;
   /** When present, the modal switches to edit mode. */
   editing?: AttendanceSchedule | null;
-}
-
-/** True when the inbound transport code is a Day Centre bus run. */
-function isBusRunCode(code: string): boolean {
-  return code.toUpperCase().startsWith("BUSRUN-");
 }
 
 export function AddAttendanceScheduleModal({
@@ -68,22 +73,22 @@ export function AddAttendanceScheduleModal({
 
   // Bus run lookup — used in the inbound/outbound transport sections.
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [] } = useLookupParameters(LOOKUP_CATEGORIES.operatingDay);
   // Stable badge color map — same palette as the Participants Directory.
   const busRunMap = useBusRunMap();
 
-  // Centre operating hours — used for the stretch-goal day validation.
+  // Open/close defaults for the selected operating day (prefill on add).
   const { data: centreHours = [] } = useQuery({
-    queryKey: ["centre-operating-hours"],
+    queryKey: CENTRE_HOURS_QUERY_KEY,
     queryFn: listCentreHours,
     staleTime: 5 * 60_000,
     enabled: open,
   });
 
-  // Whether the selected day has a configured centre hours row.
   const centreClosedWarning =
     dayOfWeek.length > 0 &&
-    centreHours.length > 0 &&
-    !centreHours.some((h) => h.dayOfWeek === dayOfWeek);
+    operatingDays.length > 0 &&
+    !operatingDays.some((d) => d.code === dayOfWeek);
 
   useEffect(() => {
     if (open && editing) {
@@ -109,13 +114,24 @@ export function AddAttendanceScheduleModal({
     }
   }, [open, editing]);
 
+  const busRunCodes = useMemo(() => new Set(busRuns.map((r) => r.code)), [busRuns]);
+  const needsBus = assignmentNeedsHomeAddress(inboundTransport, outboundTransport, busRunCodes);
+  const homeQ = useQuery({
+    queryKey: ["home-address", "participant", participantId],
+    queryFn: () => loadHomeAddress({ kind: "participant", id: participantId }),
+    enabled: open && participantId.length > 0,
+    staleTime: 0,
+  });
+  const homeMissing = needsBus && homeQ.isFetched && !(homeQ.data ?? "").trim();
   const valid =
     dayOfWeek.length > 0 &&
     serviceType.trim().length > 0 &&
     inboundTransport.trim().length > 0 &&
     outboundTransport.trim().length > 0 &&
     /^\d{2}:\d{2}$/.test(arrivalTime) &&
-    /^\d{2}:\d{2}$/.test(departureTime);
+    /^\d{2}:\d{2}$/.test(departureTime) &&
+    !homeMissing &&
+    !(needsBus && homeQ.isLoading);
   const canSubmit = dirty && valid && !mutation.isPending;
   const dayDisplay = dayLabel || dayOfWeek;
 
@@ -159,8 +175,7 @@ export function AddAttendanceScheduleModal({
     }
   };
 
-  // Derive the run label for the selected inbound transport (if it's a run).
-  const selectedRunLabel = isBusRunCode(inboundTransport)
+  const selectedRunLabel = isAssignedBusRun(inboundTransport, busRuns)
     ? (busRuns.find((r) => r.code === inboundTransport)?.displayName ?? inboundTransport)
     : null;
 
@@ -195,6 +210,13 @@ export function AddAttendanceScheduleModal({
               onChange={(code, displayName) => {
                 setDayOfWeek(code);
                 setDayLabel(displayName);
+                if (!isEdit) {
+                  const h = centreHours.find((row) => row.dayOfWeek === code);
+                  if (h) {
+                    setArrivalTime(h.openTime);
+                    setDepartureTime(h.closeTime);
+                  }
+                }
                 setDirty(true);
               }}
               placeholder="Select day"
@@ -232,78 +254,19 @@ export function AddAttendanceScheduleModal({
               Transport IN (morning)
             </Label>
             <p className="text-[11px] text-muted-foreground">
-              Choose a <span className="font-medium text-foreground">Day Centre Bus Run</span> to
-              assign this client to a recurring bus manifest, or pick a general transport type.
+              Self-transport, or a Day Centre bus run for the morning manifest.
             </p>
-
-            {/* Day Centre Bus Run picker */}
-            {busRuns.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-400">
-                  Day Centre Bus Run
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {busRuns.map((run) => {
-                    const selected = inboundTransport === run.code;
-                    const badge = busRunMap.get(run.code);
-                    const color = badge?.color ?? "#7c3aed";
-                    return (
-                      <button
-                        key={run.code}
-                        type="button"
-                        onClick={() => {
-                          setInboundTransport(run.code);
-                          if (!outboundTransport) setOutboundTransport("self");
-                          setDirty(true);
-                        }}
-                        style={selected ? { backgroundColor: color, borderColor: color } : { borderColor: color, color }}
-                        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-                          selected ? "text-white" : "bg-card hover:opacity-80"
-                        }`}
-                      >
-                        {run.displayName}
-                      </button>
-                    );
-                  })}
-                  {/* Clear back to general transport */}
-                  {isBusRunCode(inboundTransport) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setInboundTransport("");
-                        setDirty(true);
-                      }}
-                      className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Use general transport instead
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* General transport fallback (hidden when a run is selected) */}
-            {!isBusRunCode(inboundTransport) && (
-              <div className="space-y-1.5">
-                {busRuns.length > 0 && (
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Or general transport type
-                  </p>
-                )}
-                <LookupSelect
-                  category={LOOKUP_CATEGORIES.transportRule}
-                  value={inboundTransport}
-                  onChange={(code) => {
-                    setInboundTransport(code);
-                    if (!outboundTransport) setOutboundTransport(code);
-                    setDirty(true);
-                  }}
-                  placeholder="Morning trip"
-                />
-              </div>
-            )}
-
-            {/* Confirmation badge when a run is selected */}
+            <ScheduleTransportPills
+              value={inboundTransport}
+              busRuns={busRuns}
+              busRunMap={busRunMap}
+              invalid={inboundTransport.trim().length === 0}
+              onSelect={(code) => {
+                setInboundTransport(code);
+                if (!outboundTransport) setOutboundTransport(SELF_TRANSPORT_CODE);
+                setDirty(true);
+              }}
+            />
             {selectedRunLabel && (
               <div className="flex items-center gap-1.5 rounded-md border border-blue-500/30 bg-blue-500/10 px-3 py-1.5 text-xs font-medium text-blue-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-blue-400" />
@@ -319,73 +282,18 @@ export function AddAttendanceScheduleModal({
               Transport OUT (afternoon)
             </Label>
             <p className="text-[11px] text-muted-foreground">
-              Assign to a <span className="font-medium text-foreground">Day Centre Bus Run</span>{" "}
-              for the return journey, or pick a general transport type.
+              Self-transport, or a Day Centre bus run for the return journey.
             </p>
-
-            {/* Day Centre Bus Run picker for outbound */}
-            {busRuns.length > 0 && (
-              <div className="space-y-1.5">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-blue-400">
-                  Day Centre Bus Run
-                </p>
-                <div className="flex flex-wrap gap-2">
-                  {busRuns.map((run) => {
-                    const selected = outboundTransport === run.code;
-                    const badge = busRunMap.get(run.code);
-                    const color = badge?.color ?? "#7c3aed";
-                    return (
-                      <button
-                        key={run.code}
-                        type="button"
-                        onClick={() => {
-                          setOutboundTransport(run.code);
-                          setDirty(true);
-                        }}
-                        style={selected ? { backgroundColor: color, borderColor: color } : { borderColor: color, color }}
-                        className={`rounded-full border-2 px-3 py-1 text-xs font-semibold transition ${
-                          selected ? "text-white" : "bg-card hover:opacity-80"
-                        }`}
-                      >
-                        {run.displayName}
-                      </button>
-                    );
-                  })}
-                  {isBusRunCode(outboundTransport) && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setOutboundTransport("");
-                        setDirty(true);
-                      }}
-                      className="rounded-full border border-border px-3 py-1 text-xs text-muted-foreground hover:text-foreground"
-                    >
-                      Use general transport instead
-                    </button>
-                  )}
-                </div>
-              </div>
-            )}
-
-            {/* General transport fallback (hidden when a run is selected) */}
-            {!isBusRunCode(outboundTransport) && (
-              <div className="space-y-1.5">
-                {busRuns.length > 0 && (
-                  <p className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                    Or general transport type
-                  </p>
-                )}
-                <LookupSelect
-                  category={LOOKUP_CATEGORIES.transportRule}
-                  value={outboundTransport}
-                  onChange={(code) => {
-                    setOutboundTransport(code);
-                    setDirty(true);
-                  }}
-                  placeholder="Afternoon trip"
-                />
-              </div>
-            )}
+            <ScheduleTransportPills
+              value={outboundTransport}
+              busRuns={busRuns}
+              busRunMap={busRunMap}
+              invalid={outboundTransport.trim().length === 0}
+              onSelect={(code) => {
+                setOutboundTransport(code);
+                setDirty(true);
+              }}
+            />
           </div>
 
           <div className="grid grid-cols-2 gap-3">
@@ -416,6 +324,11 @@ export function AddAttendanceScheduleModal({
               />
             </div>
           </div>
+          {homeMissing && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              Still needed: Home street address. {BUS_HOME_ADDRESS_REQUIRED}
+            </div>
+          )}
         </div>
 
         {/* ── Remove confirmation panel (shown in-place when triggered) ── */}

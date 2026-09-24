@@ -38,7 +38,7 @@ export const manifestStartRunTopic: HelpTopic = {
     },
     {
       heading: "Start Run",
-      body: "When clearance and odometer are done, tap Start Run. The unified leg list appears; you can reorder pickup legs before departing the first stop (chain stays drivable — the bus does not teleport).",
+      body: "When clearance and odometer are done, tap Start Run. If this vehicle’s Duty role requirements (licence / WWCC) are missing or expired, a Manager must justify and PIN first. The unified leg list appears; you can reorder pickup legs before departing the first stop (chain stays drivable — the bus does not teleport).",
     },
   ],
 };

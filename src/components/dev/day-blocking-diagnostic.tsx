@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { Card } from "@/components/ui/card";
 import { TestOnly } from "./test-only";
 import { supabase } from "@/integrations/supabase/client";
+import { isLostSoulAttendanceIssue } from "@/lib/site-day/red-workaround";
 
 interface IssueRow {
   id: string;
@@ -50,6 +51,15 @@ function diagnose(issue: IssueRow, esc: EscalationRow | null): RowDiagnosis {
       escalation: esc,
       blocking: false,
       reason: "Issue status = workaround_accepted",
+    };
+  }
+  if (isLostSoulAttendanceIssue(issue.issue_description)) {
+    return {
+      issue,
+      escalation: esc,
+      blocking: false,
+      reason:
+        "Lost Soul — attendance overdue / missing person. Hub keeps the RED; Open Centre is not held.",
     };
   }
   if (issue.workaround_plan?.trim()) {

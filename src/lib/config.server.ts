@@ -16,14 +16,29 @@ import process from "node:process";
 //     and server (analytics IDs, public URLs). Define in .env with the
 //     VITE_ prefix. Never put secrets here — they ship to the browser.
 
+function normalizeSupabaseUrl(raw: string | undefined): string | undefined {
+  if (!raw?.trim()) return undefined;
+  return raw.replace(/\/rest\/v1\/?$/i, "").replace(/\/$/, "");
+}
+
 export function getServerConfig() {
   return {
     nodeEnv: process.env.NODE_ENV,
-    supabaseUrl: process.env.SUPABASE_URL,
-    supabasePublishableKey: process.env.SUPABASE_PUBLISHABLE_KEY,
+    // .env often copies the REST docs URL (`…/rest/v1/`). supabase-js wants the project origin.
+    supabaseUrl: normalizeSupabaseUrl(
+      process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL,
+    ),
+    supabasePublishableKey:
+      process.env.SUPABASE_PUBLISHABLE_KEY ||
+      process.env.VITE_SUPABASE_PUBLISHABLE_KEY,
     supabaseServiceRoleKey: process.env.SUPABASE_SERVICE_ROLE_KEY,
-    // Add server-only values here, e.g.:
-    //   databaseUrl: process.env.DATABASE_URL,
-    //   stripeSecretKey: process.env.STRIPE_SECRET_KEY,
+    postmarkServerToken:
+      process.env.POSTMARK_SERVER_TOKEN || process.env.POSTMARK_API_TOKEN,
+    postmarkFrom: process.env.POSTMARK_FROM,
+    postmarkMessageStream: process.env.POSTMARK_MESSAGE_STREAM,
+    resendApiKey: process.env.RESEND_API_KEY,
+    resendFrom: process.env.RESEND_FROM,
+    appTicketNotifySecret: process.env.APP_TICKET_NOTIFY_SECRET,
+    appPublicUrl: process.env.APP_PUBLIC_URL,
   };
 }

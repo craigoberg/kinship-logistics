@@ -1,7 +1,7 @@
 /**
  * BL-073 — meal service roll for Programme meal activities.
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -18,6 +18,10 @@ import {
 } from "@/lib/api/event-meal-service";
 import { listParticipants } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 type Props = {
   venueStopId: string;
@@ -86,6 +90,20 @@ export function MealServiceRoll({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const byId = useMemo(
+    () => new Map((participantsQ.data ?? []).map((p) => [p.id, p])),
+    [participantsQ.data],
+  );
+  const rows = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rollQ.data ?? [],
+        (r) => r.participantId,
+        surnameMapFromParticipants(participantsQ.data ?? []),
+      ),
+    [rollQ.data, participantsQ.data],
+  );
+
   if (rollQ.isLoading) {
     return (
       <div className="flex justify-center py-4">
@@ -93,9 +111,6 @@ export function MealServiceRoll({
       </div>
     );
   }
-
-  const rows = rollQ.data ?? [];
-  const byId = new Map((participantsQ.data ?? []).map((p) => [p.id, p]));
 
   return (
     <>

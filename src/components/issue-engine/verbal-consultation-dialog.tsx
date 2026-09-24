@@ -514,6 +514,7 @@ export function VerbalConsultationDialog({
         onOpenChange={(next) => {
           if (!next) handleClose();
         }}
+        hideTicket
         title={
           <span className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />
@@ -536,7 +537,7 @@ export function VerbalConsultationDialog({
         if (!next) handleClose();
       }}
     >
-      <DialogContent className="flex max-h-[92dvh] max-w-lg flex-col gap-0 overflow-hidden p-0">
+      <DialogContent hideTicket className="flex max-h-[92dvh] max-w-lg flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />

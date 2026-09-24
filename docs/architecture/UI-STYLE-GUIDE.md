@@ -67,29 +67,47 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Date (calendar)** | Defined | `DatePicker` | Any operator-facing date | Display `dd-Mmm-yy`; storage `YYYY-MM-DD`. Default caption = label + ‹ › |
 | **Date of birth** | Defined | `DatePicker` + `getDobDatePickerProps()` | Guest DOB and any DOB field | Month + year dropdowns (`captionLayout="dropdown"`), years newest-first, last 120 years through today, future days disabled. Do not chevron-step decades. |
 | **Close event guest archive** | Defined | `archiveGuestParticipantsForEvent` via `promoteEventStatus` | Event Manage → Closed | Silent; toast archived/skipped counts; skip guests still on Open/Confirmed |
+| **Archive leftover event guest** | **Defined** | Care profile `AlertDialog` + `archiveGuestFromCareProfile` | Participants directory → open guest → **Archive guest** | Soft-hide (`archived_at`). Does not delete. Does not touch `carers_registry`. Warn if still on Open/Confirmed. Reuse via Add guest. |
+| **Off-board client or staff** | **Defined** | `ServiceExitDialog` + manager `PinEntryDialog` | Care Profile tab, right of the NDIS number field. Staff sheet header. | Not in the Close/Save footer. Slate `secondary` **Off-boarded** badge + solid status bar (reason and notes). Directory rows use the same badge and a slate tint. Reason via `MobileOptionButton`. Notes (`CharacterCountedTextarea`, min 20) for Other, Deceased, and every Reactivate. Deceased cannot return. History stays. Does not use guest `archived_at`. Directory defaults to active; Show exited / Show inactive. |
 | **Day Centre visitor → event guest** | Defined | `PromoteVisitorToEventDialog` + `AddGuestBookingModal` prefill | Visitor card **Add to event…** | Command event pick (Planning/Confirmed/Open, end ≥ today) → Add guest with name/host/note seeded; DOB/emergency/allergies still required |
+| **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` + driver `PinEntryDialog` | Manifest active-stop header (`WalkOnStopIconButton`, same chrome as pickup Cancel/Absent) and Event Deliver Check-In list footer (`WalkOnFloorButton` compact outline) | Guest / client / carer pick-lists or new; minimal fields; canned YELLOW office issue. Not a floor CTA. Not on each roll row. Not Day Centre visitors. BL-122. |
 | **Day Centre Active Day tabs** | Defined | `ActiveDayPanel` Tabs | `/day` active session | Check-In · Activities · Check-Out · Issues — same IA as Event Deliver; `site_day_*` data |
+| **Day Centre Check-In count header** | **Defined** | `AttendanceRollPanel` summary | Check-In tab heading | `Booked / Arrived / Absent / Still expected`. Absent and already-left do **not** count as still expected. **Left** only when someone has checked out. Check-Out stays `n on site`. |
+| **Day Centre End of Day Report** | **Defined** | `DayCentreEndOfDayReport` + `DatePicker` | `/day` below the live session | Who came in (how/when), meal variations, checkout / went home, visitors, issues. Calendar defaults to operational today (SIM). Historical days read-only. Date display `Thu 27-Aug-26` (`formatDateWithWeekday` / `EEE dd-MMM-yy`) — weekday only on this report, not global dates. BL-123. |
+| **Day & trip support people** | **Defined** | Own stop + own methods; not fake `participants` | Day Centre run planner, Event roster, Check-In Support section, EOD / Trip Report | Staff / volunteer (`staff_registry`) and carer (`carers_registry`). Same pickup/drop-off as a client. **Bus boarding includes them** (no one left behind). Overnight morning/evening rolls stay **participants only**. Not on meal or med rolls. Casual tradies stay visitors. BL-125. |
+| **Check-off list order** | **Defined** | `sort-participants.ts` — surname A–Z, then given name, then id | Day/Event check-in, roll call, bus boarding, activity, meal, muster tap lists | **Never** re-sort by status after tap — style/badge only. Do not move checked-off people into a second section mid-list. Exception: return boarding may stay route/`legIndex` order. Display name may stay `First Last`. |
 | **Clinical flag chips** | Defined | `ClinicalFlagChips` + `clinical-flags.ts` | Day/Event rolls, meal service | Allergy + Diet chips; tap BottomSheet detail; office edits profile |
 | **Programme meal activity** | Defined | Itinerary meal stop + `MealServiceRoll` | Event Manage itinerary / Event Deliver Programme | `activity_kind=meal`; no bus hop; light Served/Declined/N/A roll |
-| **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds |
+| **Time display** | Defined | `formatTime()` / `<ClientTime />` | Showing instants | 24h `hh:mm`, no seconds. Stamps must be SIM-aware (`operationalNowIso`) — GUARDRAILS §5.3 |
+| **SIM / operational clock (all date-time work)** | **Defined** | `operationalNowIso()` / `todayLocalIso()` / `useOperationalTodayIso()` / `operationalRowStamps()` | Any feature that uses a date or time | Honour amber SIM TIME. Never `new Date()` for floor stamps, Logs, Hub notes, or “today”. Ledger `created_at` is SIM. Outbox `savedAt` may stay wall clock. |
 | **Time entry (half-hour + exact)** | Defined | `HalfHourTimeField` | Roll call times, tour defaults | Single `HH:mm` input + clock popup (24h half-hour slots). **Not** separate dropdown + second field |
 | **Occurred at (vs Logged at)** | **Defined** | `OccurredAtFields` (`DatePicker` + `HalfHourTimeField`) | Big Red Human/Asset, Log Anomaly, any late-filed issue | Operator when-it-happened; system `created_at` = logged. No future; Hub shows both |
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
 | **PIN capture** | Defined | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` | Login, step-up auth | GUARDRAILS §2.3 — never OS keyboard PIN |
+| **Idle screen lock** | **Defined** | `IdleLockGate` + `PinReauthDialog` (`dismissible={false}`, `requiredStaffId`) | After Admin idle minutes on signed-in shell | Same staff PIN; no Cancel/Escape; skip active Manifest; minutes `auth_idle_lock_minutes` (default 15; 0 = off). Wall-clock idle, not SIM. Admin: `IdleLockAdminPanel` |
 | **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
 | **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
+| **Staff certification edit** | **Defined** | `StaffFormSheet` cert card **Edit** | Correct name / number / expiry / defer | Existing cards start as a summary + **Edit**. New cards open in the field editors. Persist with sheet **Save changes**. Include `deferredUntil` in the JSONB write. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
 | **Field single-select (compact)** | Defined | `MobileOptionButton` | Enum rows, med status | Same visual contract |
-| **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` |
-| **Desktop/mobile dialog** | Defined | `Dialog` / `AlertDialog` | Standard modals | `PinEntryDialog` uses bottom sheet on mobile |
+| **Mobile overlay panel** | Defined | `BottomSheet` | Phone dialogs (no-show, options) | Slide up; `max-h-[92dvh]` + `overflow-y-auto` (built into `BottomSheet` / bottom `SheetContent`) |
+| **Desktop/mobile dialog** | Defined | `Dialog` / `AlertDialog` | Standard modals | Primitives: `max-h-[90dvh] overflow-y-auto` so footers stay reachable. Sticky header/footer shells override with `overflow-hidden` + inner scroll. `PinEntryDialog` uses bottom sheet on mobile |
 | **Issue / anomaly declaration** | Defined | `IssueDeclarationPanel` / `LogAnomalyModal` | RYGE gates | Do not hand-roll severity forms |
 | **RED verbal consultation** | Defined | `VerbalConsultationDialog` | RED path | Manager by name; operator PIN only |
+| **Manifest Day Centre title** | **Defined** | Sticky header `Daily Run — {run} · Morning` / `… · Afternoon Return` | Active `/manifest` Day Centre trip | Event trips keep the event title. Run label from Admin `bus_runs`. Confirms which bus the driver started. |
+| **End of Day Went home how** | **Defined** | Bus = Admin run display name (floor `departure_bus_run_code`, else weekly OUT) | Day Centre Report **Went home** | Family / independent stay those labels. Generic **Bus** only when the vector is bus and no run code is on file. |
 | **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
+| **Hide chrome on scroll** | **Defined** | `ChromeVisibilityProvider` + `useHideChromeOnScroll` | Dashboard document scroll + Manifest inner pane | Visible on load. Scroll down hides SIM bar, AppShell header, Manifest identity row, BottomNav, and **Cancel / Reset Trip**. Scroll up or back to top reveals. **Do not hide** when the pane cannot scroll (~48px overflow). Flip only after ~48px travel; lock ~400ms so collapsing chrome cannot flicker. Does **not** hide Close Run, Incident / Raise FABs, SiteNoGo, or MOTD. Manifest listens to the viewport-locked inner scroller — not the document. |
+| **Manifest pre-departure boarding** | **Defined** | Return `ReturnBoardingRoll` / hop `HopBoardingPanel` only | Home run and venue hop before first depart | Header shows **Pre-departure**. Hide all leg cards until All Aboard / hop boarded. Then boarding panel closes and the active leg appears. Do not `scrollIntoView` the first leg while the roll is open. |
+| **Floor CTA colours** | **Defined** | Amber pulse = next commit; green = done; blue = you-are-here; slate = blocked; red = danger | Manifest, Day Centre, Event Deliver | Locked 2026-09-09. See Quick reference — colours. RYGE chips and Raise-ticket FAB are exceptions. |
 | **Office `Select` (shadcn)** | **Defined** | `Select` from `ui/select.tsx` | Admin filters/enums (status, asset type, venue type, manager) | Admin-wide. Field routes still prefer tap lists when ≤6 options (§4.5); long field pickers may use Select (existing exception). |
 | **Page-level Submit (non-dialog)** | **Defined** | Inline primary on card/row | Tour roll, site addresses, MYOB, centre-hours row Save | Sticky page footer not required on Admin |
 | **Admin date-range export pack** | **Defined** | `AuditPackWorkspace` (+ MYOB sibling pattern) | NDIS Audit Pack ZIP, MYOB CSV | `DatePicker` from/to · section `Switch`es · **Named vs De-id `Switch` (BL-093)** · primary Generate · `PinEntryDialog` step-up · progress text. See `docs/architecture/NDIS-AUDIT-PACK.md` |
 | **Event Deliver Open location walkthrough** | **Defined** | `MandatedChecksList` (same as Day Centre Open) | Open location dialog before trip-leader PIN | Admin list `event_deliver.venue_open_checks`; empty = high-trust; PIN disabled until all ticked (BL-070) |
 | **Event Deliver pre-open Log Venue Issue** | **Defined** | `FieldActionButton` caution + `EventDayVerbalAnomalyFlow` | Pre-open panel + Open location dialog (Day Centre parity) | Walkthrough fails → venue RYGE (blocks open on RED). Big Red Button = INCIDENT only (does not block open). Pre-open `EventIssuesCard` below location panel |
+| **Programme activity Log issue** | **Defined** | `FieldActionButton` caution + `EventDayVerbalAnomalyFlow` (`activityLabel`) | Event Deliver Programme — each **Active** stop card | **Always first** in the expanded card (yellow). Then activity check-in / meal / med, then leave/movement. Same trip-day RYGE path as Log Venue Issue; subject includes stop name. Completed expand always shows **Issues during this activity** (list or empty dashed state). |
+| **Programme activity open/complete times** | **Defined** | `opened_at` / `closed_at` via `formatTime` (SIM/`operationalNowIso`) | Programme stop card header + completed summary | Active: **Opened**. Completed header + summary: **Opened · Completed**. Ledger already has `ACTIVITY_OPEN` / `ACTIVITY_CLOSE` / hop finalize. |
+| **Programme leave movement picker** | **Defined** | `MobileFieldButton` list → `LeaveMovementConfirmPanel` | Leave for {next} / Close & leave | **Below** check-in. Ask every hop: Bus · Walk · Other · On-site (**plan only**). Confirm panel: embedded **Method** + **Undo** chips (Check-In parity). Bus confirm = Release (Manifest then); Walk/Other/On-site confirm = open next. Never assume bus from DEFAULT/reset. |
 | **Admin mandated walkthrough editor** | **Defined** | `MandatedChecksAdminPanel` (Venue Safety template list: Add field / prompt / Yes·No·Required badges / trash) | Day Centre Open/Close + Event Deliver Open + Meal prep lists | Admin → System Parameters; persists string arrays; hidden from raw JSON table |
 | **Admin Council email (mailto)** | **Defined** | `CouncilEmailAdminPanel` | Hub / Route to Council escalate | Admin → System Parameters: To, optional From (shared mailbox), subject/body templates. Blank From = operator account. Hidden from raw JSON table. SQL: `2026-07-30_council_email_params.sql` |
 | **Meal prep walkthrough (Open meal)** | **Defined** | `MandatedChecksList` on `OpenMealSheet` | Cooked / packed meal open only (Centre + Trip Programme) | Admin key `meal.prep_checks`; empty = high-trust; skipped for takeaway / venue / own food; fridge temp stays on Open Centre |
@@ -97,34 +115,61 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Meal SFH Manager approval** | **Defined** | `PinEntryTrigger` + `verifyManagerPin` before preparer attest | Open meal when preparer SFH missing/expired | Strict — Manager justification + PIN; then hand tablet to preparer |
 | **Medication Give Dose PIN** | **Defined** | `GiveDoseModal` dual PIN or sole-carer PIN + justification | Day Centre + Trip Programme med rounds | Never client witness; sole mode when one carer |
 | **Manifest odometer soft-warn** | **Defined** | Caution callout (`CAUTION_CALLOUT_*`) + Accept checkbox / Use suggested | Init start vs last; leg logged vs GPS; Close Run end vs start+Σ | Soft only — no Hub issue. Thresholds `manifest.odo_*`. Fleet Correct odometer = Admin number + justification (BL-096) |
+| **Manifest GPS deny / miss** | **Defined** | `tryGetCurrentPosition` + `toast.warning` (`manifestGpsFallbackToast`) | Depart Stop / Arrive at Stop | Always attempt GPS. Never block the leg. Null lat/lng if denied/timeout. iPhone Location Services hint. GUARDRAILS §1.1. |
 | **Manifest offline / pending sync banner** | **Defined** | `ManifestOfflineBanner` | Active `/manifest` run | Amber when offline; blue while syncing; Retry via `FieldActionButton`; Close Run blocked until outbox empty (BL-082) |
 | **DEV/TEST simulate offline** | **Defined** | `Switch` on same amber SIM row as clock (`DevOperationalClockBar`) | `IS_TEST_BUILD` only (DEV + TEST) | Forces `isAppOnline()` false for Manifest outbox QA — not a production control (BL-082) |
 | **DEV/TEST lane badge on SIM bar** | **Defined** | Centre label `DEV` / `TEST` from `getAppLaneBadge()` (`VITE_APP_LANE`) | Amber SIM row only | Distinguishes Cursor/DEV host vs Vercel TEST; not a security control |
-| **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. |
-| **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. |
+| **Event bus run (R1/R2)** | **Defined** | `MobileFieldButton` + `eventBusRunOptions` (`event-bus-runs.ts`) | Roster outbound/return run; Check-Out Hand to Rx; Check-In arrival bus | Reuse Admin `bus_runs` codes; event short labels R1/R2/Rx. Day Centre keeps “Run 1” labels. Self clears run code. Generic **Bus** tap is not confirmable when 2+ Admin runs exist and no run is set — operator must pick R1/R2. |
+| **Day Centre schedule transport (Self + runs)** | **Defined** | Pill tap row: **Self** first, then Admin `bus_runs` | Participant Directory → Schedules add/edit IN/OUT | Stores `TRN-SELF` or the run code. No general-transport dropdown. Existing self/private/family codes still light Self. |
+| **Day Centre default run route** | **Defined** | `PointerSortableList` + run/direction pills (`RunRoutePanel`) | **Run Planning** (`/run-planning`) | Office drag order per run + morning/afternoon. Seeds Manifest; driver may still reorder. Same grip as Event Roster. Moved off Participants 2026-08-29. |
+| **Person address book** | **Defined** | `PersonAddressList` cards (label + address, Add / Edit / Remove) | Client Contact, Staff sheet, Carer sheet | Home stays the street field. Other places save immediately. Required label and address before Save place. |
+| **Standing stop place** | **Defined** | Weekday pills + `StopAddressSheet` tap list (`MobileFieldButton`) | Run Planning default route row | One place per person per weekday per morning or afternoon. Null = Home. Does not split stop order by day. |
+| **Today-only stop place** | **Defined** | `StopAddressSheet` on a pending passenger leg | Active Manifest | Saved place or Other address today. Writes this date only. Pending stops only. |
+| **Run Planning all-people board** | **Defined** | Week grid (`RunPlanningPeopleTable`) | **Run Planning** | One person per row. Columns: Person + Mon–Fri each with In / Out badges. Pencil (`IconActionButton`) opens Participant care profile (Schedules tab) or Staff / carer sheet. |
+| **Run Planning change log** | **Defined** | `RunPlanningChangeLog` Card, newest first | **Run Planning** (below default run routes) | Slice of **Admin → Activity log** (`operational_ledger` `RUN_PLANNING_CHANGED`). Who / what / when for IN/OUT. Search. Dashed empty state. `ClientTime`. |
+| **Admin Activity log** | **Defined** | `ActivityLogWorkspace` read-only `Table` | Admin → Activity log | DatePicker from/to, office `Select` type (includes People / records), search. Columns When / Who / What happened / **Where** / **Why** / Type. Type is a category filter, not a place. GPS prints under Where when captured. No edits. What-happened text names the person, place, meal, medicine, or compliance asset. Office record saves use `OFFICE_RECORD_CHANGED`. Floor YELLOW/RED stay on their existing ledger rows. Automated receipts actor as **System**. Same ledger as NDIS Audit Pack evidence; meal/med overlays fill historical dose/serve rows. |
+| **Staff / carer centre transport** | **Defined** | `SupportTransportDefaults` Accordion + `ScheduleTransportPills` | Staff / carer edit sheets — **top of the form**, titled **Centre run (IN / OUT)** | Collapsed by default. Only days in Lookups → Operating days. Writes `support_attendance_schedules`. Save the person first on create. |
+| **Day Centre Off today** | **Defined** | `OffTodayExemptionDialog` / `SupportOffTodayDialog` + outline **Off today** | Participant → Schedules (today's row) **and** Default run routes (column left of live status) | Operational today only. Sick/Cancelled pills + `CharacterCountedTextarea` (20). Recurring schedule stays. Live Manifest skip + driver banner — not driver RED cancel. Same button for staff / volunteer / carer (`SupportOffTodayDialog`). Route-list buttons share a fixed column so they align down the page. **Exception** stays on every active schedule row (any date). |
+| **Day Centre floor Absent / late arrival** | **Defined** | Adjust clock → **Mark Absent for Today** (reason + PIN); late arrival = existing floor row (method chip + wide-row tap, default Self) | Day Centre Check-In | **Absent** skips morning and afternoon Manifest. **Check-Out via bus** does **not** drop them from the afternoon Manifest — that run is how they get home. Family / independent still come off the bus. Late arrival clears Absent, checks them in, and puts them on Check-Out + afternoon bus when home method is bus. No new dialog. BL-124. |
+| **Day Centre Add Attendee home transport** | **Defined** | `AddAttendeeModal` + `MobileFieldButton` tap list (runs / family / independent) | Check-In **+ Add Attendee** | Required before Add to Roll. Unexpected registered client (not on today’s roll). Visitors/trades stay **+ Add visitor**. Floor `departure_vector` / `departure_bus_run_code` seed the afternoon Manifest. |
+| **Care Profile Support & risk** | **Defined** | `SupportPlanTab` + `ClientSupportPlanFields` | Organisational support plan / comms / risk (BL-114) | Care Profile tab **Support & risk**; Client onboarding pack uses the same fields (required). Hub dates reset only on Onboarding Review/Update re-file. |
+| **Day Centre run live status** | **Defined** | `RunLiveStatusBadge` from `trip_legs` | Schedules **Run today** + Default run routes | Awaiting PU · Traveling-To · Stopped-At · On-Bus · Off today · Dropped. 24h `HH:mm` under the chip (`ClientTime`) = when that status was set. Office read-only. |
+| **Manifest office run notice** | **Defined** | `OfficeRunNoticeBanner` + caution callout | Active `/manifest` Day Centre run | Amber **Office update** + **Seen**. Written when office marks Off today on an open trip. |
+| **Floor row embedded method override** | **Defined** | `EmbeddedMethodButton` + `TransportMethodPickerSheet` + big-row confirm (`floor-transport-method.ts`) | Day Centre + Event Deliver **floor** arrival & departure only | Wide row tap = confirm with **current** method (one tap when planned is right). Embedded method chip opens picker that **only saves selection** (does not check-in/out); chip updates; then tap wide row. Defer/clock stays sibling to method chip on Day Centre. Event Manage office unchanged. **Checked-in = hi-vis** solid `bg-success text-success-foreground` (§4.5) — not pale emerald tint. |
 | **Event Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Event Deliver Check-In | Was BottomSheet-on-Check-In (BL-013). Picker still Bus (Rx) vs Self; finalize is the wide row. |
 | **Day Centre Check-In arrival method** | **Superseded** | Use **Floor row embedded method override** | Day Centre attendance roll | Was BottomSheet-on-Check-In. Day Centre chips use Admin displayName (Run 1); Event uses R1/R2. |
-| **Checkbox lists (office)** | Deferred (BL-002) | shadcn `Checkbox` matrix | Menu Access | Keep disabled placeholder until RBAC; do not invent a new matrix UI in feature PRs |
+| **Checkbox lists (office)** | **Defined** | shadcn `Checkbox` matrix | Admin → Menu Access | Live ticks save immediately (`role_menu_access`). Manager column locked on. Phase 2 None/View/Update is a later control — do not invent it in feature PRs. |
 | **Toggle / switch** | **Defined (Admin/office)** | `Switch` | Admin booleans (fleet flags, preserve login, bool params) | Field-route operational yes/no may still use `MobileOptionButton` / `Checkbox` — ask if unclear |
 | **Admin colour picker** | **Defined** | Native `<input type="color">` | Lookup badge colours | Keep native until a shared palette ships |
+| **Admin CMS rich text editor** | **Defined** | `CmsRichTextEditor` (`cms-rich-text-editor.tsx`) | Admin → Public website page body | Visual + HTML tabs. Toolbar: undo/redo, heading, bold/italic/underline, lists, link, image, document, YouTube, table, media library. Insert dialogs: `CharacterCountedInput` + URL outline + missing-fields list. Library is `cms_media` URLs (no upload). Sanitize via `sanitizeCmsHtml` on save and public render. Uploads = BL-119. |
+| **Admin lookup edit** | **Defined** | `AdminLookupWorkspace` Edit dialog | Lookups (Day Centre Bus Runs, codes, names) | Actions: **Edit** + **Remove**. Dialog uses `CharacterCountedInput` for code + display name; Save disabled until dirty + valid. Bus run code change cascades assignments (`update_lookup_parameter`) so Manifest / Clients keep the run. |
 | **Admin numeric fields** | **Defined** | `Input type="number"` | Roll thresholds, odometer, capacities | `NumericEntryTrigger` remains field-only (BL-055) |
-| **Admin registry list** | **Defined** | shadcn `Table` + action column | Fleet, Vendors, Venues | Column layout like Vendors; actions via icon buttons — not whole-row “dead” click chrome |
+| **Admin registry list** | **Defined** | shadcn `Table` + action column | Fleet, Vendors, Venues, Duty roles | Column layout like Vendors; actions via icon buttons — not whole-row “dead” click chrome |
+| **Duty role Admin** | **Defined** | `DutyRolesWorkspace` (Vendors-style Table + dialogs) | Admin → Duty roles | Two tabs: Duty roles, Bindings. Tick types from Lookups catalogue. `CharacterCountedInput` names; office `Select` for function; `Checkbox` for required items. §4.3 missing-fields list + Save disabled. |
+| **Certificate type Lookups** | **Defined** | `CertificateTypesPanel` (special Lookups panel) | Admin → Lookups → Certificates & orientations | Same Table + dialog as the old Duty Requirements tab. Kind `Select`, aliases, archive. Not `lookup_parameters`. |
+| **Staff Duty roles** | **Defined** | Checkbox list on `StaffFormSheet` | Personnel edit | Separate from SYSTEM ACCESS LEVEL. Cert picker is office `Select` from Lookups types only — no free-text name. |
 | **Admin Yes/No (2-option)** | **Defined** | `MobileOptionButton` | Baseline sign-off yes/no | Same compact enum contract as Day Centre |
 | **Sheet footer (save)** | **Defined** | `SheetFooter` + §4.2 | Fleet / Venue sheets | Close (outline, left) + Save right; Close never `disabled={pending}` |
 | **Icon-only action tooltip** | **Defined** | `IconActionButton` (`ui/icon-action-button.tsx`) | Table/row action icons (Open, Edit, Clone, Archive, Remove…) | Required hover label + `aria-label`. App-wide `TooltipProvider` in `AppShell`. Do not ship bare `size="icon"` actions without a tooltip. Status-only icons (e.g. hoist) may use `Tooltip` without a button. |
+| **Event Finance expense row** | **Defined** | `IconActionButton` Edit + Delete + `AlertDialog` confirm; `LogEventExpenseModal` create/edit | Events Manage → Finance | Writable until Closed (`billing_locked`). Locked: banner + no money actions. §4.3 on expense form. |
+| **Event Roster payment history** | **Defined** | `BookingPaymentHistory` Edit/Delete + edit dialog; `$` Record payment / Record refund | Events Manage → Roster | Same finance lock. Refund via `RecordRefundMilestoneModal`. Paid balance recomputed from ledger. |
 | **Tables (dense data)** | Defined (office) | `Table` | Admin matrices, export views | Field routes + Governance Hub: use card rows |
 | **Governance Hub list row** | **Defined** | `HubListCard` + `HubListCardBody` | Human Incidents, Maintenance | Status badge + chevron **pinned top-right**; severity badges left; meta rows below |
 | **Hub list issue body** | **Defined** | `parseHubIssueBody` / `HubListCardBody` | Human + Maintenance cards | **Green:** `Issue:` only · **Yellow:** + `Workaround:` · **Red:** + `Authorising manager:` + `Plan:` (always 3 lines; empty → `—`) |
+| **Hub Public web voice** | **Defined** | Indigo `Public web` badge + Issue preview | `/public/forms` → Human Incidents | Not an Incident badge. Complaints stay **Yellow**; compliments/enquiries **Green**. Card = **Issue preview only** (~140 chars of the message) — no empty Workaround. Open Manage for full text + ref. |
 | **Office manage dialog (multi action)** | **Defined** | `ManageItemShell` | Hub resolve, compliance, maintenance | **Footer** = bottom button bar inside Manage dialog: **Close** (left, outline) + Log Note + Resolve (+ defer/council toggles in body) |
 | **RYGE severity chips** | **Defined** | `RYGE_SEVERITY_CHIPS` in `ryge-severity-chips.ts` | Log Anomaly, maintenance add | Green/yellow/red pill selectors — see §RYGE colours below |
 | **Trip left-trip / Not Attending** | **Defined** | `TripAbsentDispositionDialog` + `TripReinstateDialog` | Morning/Evening Absent, Check-In Not Attending | Disposition · safety plan ≥20 · Yellow/Red · Leader PIN. Floor → absent. |
 | **Programme Absent (mode toggle)** | **Defined** | `ProgrammeAbsentDialog` | Programme activity UserX | Large tap mode: **Still on the trip** (default) vs **Left the trip**. Hydrates skip vs left-trip reason lists. Field / touch-first. |
 | **Toast feedback** | **Defined** | `operationToasts` in `operation-toasts.ts` | After save/defer/resolve in Hub manage flows | Standard copy; `sonner` toast |
 | **Empty states** | Defined | Dashed border card | No rows in a list | `rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground` — no shared component needed |
-| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold` — variants: `primary` (blue), `success` (green), `caution` (amber, use `pulse`), `destructive` (red), `secondary` (muted). `fullWidth={false}` for toolbar chips. See `src/components/ui/field-action-button.tsx` |
+| **Field route CTA** | Defined | `FieldActionButton` | Large primary actions on manifest, events, day centre | `h-14 w-full rounded-xl font-bold`. **Floor CTA colours** (locked 2026-09-09): `caution`+`pulse` = do this next; `success` = already chosen/done; `primary` = you-are-here/navigate (not the commit); `secondary` = waiting/blocked; `destructive` = danger. `fullWidth={false}` for toolbar chips. |
 | **Manager ops toolbar** | **Defined** | `ManagerOpsChip` → `FieldActionButton` solid fills | Emergency / lockdown / infectious / do-not-open / suspend chips **inside** H&S sheet or Start-of-Day | **Never** thin outline on dark UI. Tones: `emergency`=solid red, `caution`=solid amber+black, `neutral`=muted. `layout="chip"` or `stack`. |
 | **Big Red → Health & Safety** | **Defined** | `IncidentIntakeDialog` lane 3 → `GlobalHealthSafetyFlow` | Every screen via Big Red | Third lane opens H&S BottomSheet (Emergency · site hold · Infectious). **No** INCIDENT write. **No** duplicate H&S/Emergency chips on Day Centre Active, Event Deliver, or Manifest. Log anomaly / Close / Log Venue Issue stay on primary bars. Start-of-Day **Do not open** may remain on that panel. |
 | **Big Red Incident shell (mobile)** | **Defined** | `IncidentIntakeDialog` + `VerbalConsultationDialog`: `BottomSheet` mobile / `Dialog` desktop; sticky Close-left + `FieldActionButton` primary; multi-select lists `min-h-14` solid selected | Phone-first Big Red Human/Asset + RED verbal | Same fields; no wizard. H&S lane already sheets. Filter + tall tap lists (not `Select`) for clients/staff/managers. |
+| **Raise ticket (GREEN)** | **Defined** | Draggable green pill `GlobalRaiseTicketDrawer` + `DraggableFab`; `RaiseTicketDialog` | App / form problems (TEST + PROD) | Not a Big Red lane. Hub → **App tickets**. Description ≥20; context auto-attached. Drag to park; position saved on this device (`localStorage`). Hidden on PIN / Incident / Raise ticket. Not pinned in Dialog/Sheet headers (that covered Close on iPhone/iPad). Hub **Log Note / Resolve** opens mailto To the opener (notes so far + this update) — same edit-and-send stance as Council mailto. |
+| **Exception Hub App tickets tile** | **Defined** | Existing `StatusTile` in `OperationsExceptionHub` Band 3 | Dashboard inbox for open app tickets | Same tile chrome as Human Issues. 0 rows = green all-clear; any open = warning. Drill **Open in Hub** → `/governance?tab=app_tickets`. Not a new tile visual. |
+| **Exception Hub Onboarding review tile** | **Defined** | Existing `StatusTile` in `OperationsExceptionHub` Band 3 | Signed packs inside Admin yellow/red review window | Same chrome. 0 rows = all-clear. Drill **Open in Hub** → `/governance?tab=onboarding`. Thresholds: Admin → System Parameters → Onboarding review windows. |
 | **Field multi-option picker** | Defined | `MobileFieldButton` with `badgeWhenIdle` | Start point, return depart point, 3-option layouts | Use `tone="success"` for location pickers; `badgeWhenIdle="Default"` or `"Recommended"` for the pre-selected option. No hand-rolled `optionClass`. |
 | **Field select (many items)** | Defined (exception) | shadcn `Select` | Bus run picker, event picker when list > ~6 items | Acceptable exception to tap-list rule when the option set is too long for cards. Field routes with ≤6 options must use `MobileFieldButton`. |
 | **Walkaround severity display** | Defined | `SEVERITY_DISPLAY` constant | Walkaround issue chips in `IssueAccumulatorPanel` | Colours match `RYGE_SEVERITY_CHIPS` active state. Also used for ledger text (emoji + label). Do not hand-roll a local `severityChip()`. |
@@ -134,7 +179,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Departure vector / quick inline choice** | Defined | `BottomSheet` + `MobileFieldButton` rows | Check-out departure method, 2–4 quick options | Slide-up sheet, `tone="neutral"`, immediate action on tap — no persistent selected state needed. |
 | **Dialog dismiss during save** | Defined | Always allow Close — no `isPending` guard | All modals | Remove `if (isPending) return` from `onOpenChange`; do not `disabled={busy}` the Close button. |
 | **Loading states** | Partial | `Loader2` inline, `Skeleton` | Fetches | Prefer inline spinner on buttons; skeleton for tables TBD |
-| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). Not for production operator forms. |
+| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). SIM lasts this sitting: same calendar day + refresh; **expires at Sydney midnight** and on **day login / `/auth` PIN** (not idle unlock). Not for production operator forms. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
 
 ---
 
@@ -162,20 +207,38 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 
 **Do not use:** `<input type="date">`, `<input type="time">`, `toLocaleString()` defaults, 12-hour AM/PM.
 
-**Helpers:** `src/lib/utils.ts` (`formatDate`, `formatTime`, `formatDateTime`, `todayLocalIso`).
+**Helpers:** `src/lib/utils.ts` (`formatDate`, `formatTime`, `formatDateTime`, `todayLocalIso`).  
+**Write “now” / “today”:** `operationalNowIso()` / `useOperationalTodayIso()` — never `new Date()` on floor paths (GUARDRAILS §5.3).
 
 ---
 
 ## Quick reference — colours (active / selected)
 
-Use Tailwind semantic tokens from `styles.css` — **solid fill + white text**:
+Use Tailwind semantic tokens from `styles.css` — **solid fill + white text** (amber caution uses black text).
+
+### Floor CTA colours (locked 2026-09-09)
+
+One meaning per colour on Manifest, Day Centre, and Event Deliver. Do not invent a fourth “go” colour.
+
+| Colour | Means | `FieldActionButton` | Examples |
+|--------|--------|---------------------|----------|
+| **Amber (pulse)** | **Do this next** — the one commit that moves the run | `caution` + `pulse` | All Aboard (roll complete), Depart Stop, Arrive at Stop, Confirm & Log |
+| **Green (steady)** | **Already chosen / done** | `success` | Person On bus, At drop-off default, completed ticks. **Not** the next commit. |
+| **Blue** | **You are here** — chrome / navigate | `primary` | Active-leg card border, Live “in progress”, office Start/Open navigation. Not the floor commit. |
+| **Slate** | Waiting / blocked | `secondary` or disabled | All Aboard before the roll is full; “complete boarding first” |
+| **Red** | Danger / undo | `destructive` | Incident, Cancel trip, unsafe drop, no-show |
+
+**Exceptions (do not reuse for floor commits):** RYGE Green/Yellow/Red chips = health severity, not “tap me”. Raise-ticket FAB stays green (GREEN lane identity). Close Run PIN stays red (locks the record). SIM TIME / offline banners stay amber tints.
+
+**Manifest sequence:** names slate → green; All Aboard flashing amber → roll closes; Depart flashing amber; Arrive flashing amber; At drop-off green; Confirm & Log amber.
+
+### Token map
 
 | Meaning | Token |
 |---------|--------|
-| Primary / brand action | `primary` |
-| Informational | `info` |
-| Success / on-bus / checked | `success` |
-| Caution / yellow | `warning` |
+| You-are-here / brand navigate | `primary` / `info` |
+| Already chosen / on-bus / checked | `success` |
+| Do this next / caution banner | `warning` |
 | Danger / RED / no-show | `destructive` |
 
 Selected row: `border-2`, `ring-2`, `shadow-md` (see §4.5).
@@ -269,7 +332,7 @@ These patterns are **banned app-wide** — do not use in any new code, and remov
 |---------|----------|------------------|
 | Office `Select` | Accept shadcn `Select` Admin-wide for filters/enums | Pattern registry |
 | Admin `Switch` | Accept for fleet flags, preserve-login, boolean system params | Pattern registry |
-| Menu Access checkbox matrix | Leave as BL-002 placeholder (disabled Checkbox grid) | Do not redesign now |
+| Menu Access checkbox matrix | Live shadcn Checkbox grid; Manager column locked | Phase 2 read/write control TBD |
 | Page / panel Save | Inline primary on card/row is OK | Tour roll, addresses, MYOB, centre-hours |
 | Sheet footers | Match dialog §4.2 — Close left + Save right | `fleet-asset-form-sheet`, venue form sheet |
 | Lookup colour | Keep native `type="color"` | Lookups |
@@ -296,7 +359,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 
 | Pattern | Decision | Component |
 |---------|----------|-----------|
-| Start of Day primary CTAs (`h-16 w-full`) | Use `FieldActionButton` — same rule as manifest | `start-of-day-panel.tsx` — `success` when ready, `secondary` when blocked; `caution` (amber) for "Log Anomalies" |
+| Start of Day primary CTAs (`h-16 w-full`) | Use `FieldActionButton` — Floor CTA colours | `start-of-day-panel.tsx` — `caution`+`pulse` when ready to open; `secondary` when blocked; Log Anomalies stays `caution` without pulse (exception path, not the next commit) |
 | Absence reason picker (6 options, field route) | `MobileOptionButton` tap list — ≤6 options on field routes must use tap list (same rule as manifest) | `adjust-expected-time-modal.tsx` |
 | Participant search (Add Attendee) | Accept shadcn `Command` + `CommandInput` — canonical pattern for long searchable lists | Added to pattern registry |
 | Boolean confirms in Add Attendee (med bag, unexpected med) | Accept `Checkbox` — boolean confirm is not a selector; does not need `MobileOptionButton` row | Pattern registry |
@@ -318,20 +381,25 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | **Infectious exclusion / clear to return** | Defined | `InfectiousExclusionSheet` / `InfectiousClearanceSheet` | BL-084 A/A.1 manager declare + Hub clearance | Entry via Big Red → Health & Safety (centre/trip context); if in care → home-safe + Manager PIN; Hub Clear to return; Band 2 tile |
 | **Infectious home-safe disposition** | Defined | `MobileFieldButton` outcome classes (`HOME_SAFE_DISPOSITIONS`) | Leaving care when infectious exclude | Family/carer · Staff escorted · Transport/taxi · Other — **not** a logistics plan; optional note |
 | **Emergency activate (Drill\|Live)** | Defined | `EmergencyActivateSheet` | BL-084 C manager activate | Entry via Big Red → Health & Safety. Drill\|Live `MobileFieldButton` + Yellow\|Red + `CharacterCountedTextarea` + Manager PIN |
-| **Emergency sticky banner** | Defined | `EmergencyOpsBanner` | Active Drill/Live only | Sticky strip on Day Centre, Event Deliver, Manifest, Governance Hub while `status=active`. **Clears on stand-down.** Hub Open issue CTA while active. Post-stand-down review = open Health & Safety card on Active (no banner) |
-| **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Expected / Accounted / Missing via `MobileFieldButton` — not a park-evac sim |
+| **Emergency sticky banner** | Defined | `FloorAnnouncementStrip` → `EmergencyOpsBanner` (hub) | Active Drill/Live only | Global AppShell strip on **every** signed-in page while `status=active`. Live = pulsing siren/label; Drill = solid amber. Actions: Open issue → `/governance?issue=`, Muster, Stand down. **Clears on stand-down.** Post-stand-down review = open Health & Safety card on Active (no banner) |
+| **Emergency Dashboard floor alert** | Defined | `EmergencyFloorAlert` | Dashboard `/` only | Informational fire-alarm panel (no buttons). Yellow = **STANDBY**; Red = **EVACUATE TO MUSTER POINT**. Live pulses; Drill solid amber. Side menu stays usable. Replaces normal Dashboard tiles while active |
+| **Message of the Day strip** | Defined | `FloorAnnouncementStrip` MOTD | Admin `floor_motd` non-empty | Solid sky-500 banner (high contrast on dark UI) on every page when no emergency. Empty/cleared = off. Priority: Emergency > (future Med) > MOTD |
+| **MOTD Admin** | Defined | `MotdAdminPanel` | Admin → System Parameters | Text box + Save / Clear → `system_parameters.floor_motd` |
+| **Light muster taps** | Defined | `EmergencyOpsBanner` muster sheet | Account for people in care | Yellow/Standby = “light muster”. **Red** = “Evacuate — muster at muster point” + EVACUATE callout; same Expected / Accounted / Missing taps for the care roll (not a whole-site visitor list). Empty roll when activated without Day Centre / trip day context |
 | **Emergency stand-down** | Defined | Stand-down sheet in `EmergencyOpsBanner` | Close Drill/Live | Debrief `CharacterCountedTextarea` (≥10) + Manager PIN → Hub debrief + clear banner (issue stays Open) |
 | **Site ops declare (do-not-open / lockdown / suspend)** | Defined | `SiteOpsDeclareSheet` | BL-084 B | Entry via Big Red H&S (or Start-of-Day do-not-open chip). Free-text + Yellow\|Red + Manager PIN |
-| **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each blocker with **Resolve** (Hub manage in place). Deferred + resolved + accepted workaround unlock Open Centre. Outline Hub link secondary. |
+| **Day Centre open-block Resolve** | Defined | `DayCentreBlockingRedResolveButton` → `ManageIssueDialog` | Pre-open RED gate + Start of Day **Cannot open** card (managers) | Lists each **site** blocker with **Resolve**. Lost Soul attendance overdue REDs do not appear here (Hub only; Open Centre proceeds). Deferred + resolved + accepted workaround + Lost Soul unlock Open Centre. Outline Hub link secondary. |
+| **Day Centre End of Day Report** | Defined | `DayCentreEndOfDayReport` | `/day` always (below session) | Canonical `DatePicker`; default operational today; future dates disabled; date shows weekday (`Thu 27-Aug-26`); sections match Trip Report cards |
 
 ### Component inventory (Defined in Day Centre flow)
 
 | UI element | Component | Notes |
 |------------|-----------|-------|
-| Open Day CTA | `FieldActionButton variant="success"` | Disabled + `secondary` until all checks ticked |
+| Open Day CTA | `FieldActionButton` | Locked: `caution`+`pulse` when ready, `secondary` until checks ticked. Day Centre still ships `success` until that restyle. |
 | Open Day PIN | `PinEntryTrigger` + `verifyOperatorPin` | Check Leader sign-off; PIN success opens centre |
-| Close Centre CTA | `FieldActionButton variant="success"` in closure dialog | Big green “Finalise & sign with PIN”; footer **Close** only (no small blue primary) |
+| Close Centre CTA | `FieldActionButton` in closure dialog | Locked: `caution`+`pulse` for Finalise & PIN. Day Centre still ships `success` until that restyle. Footer **Close** only. |
 | Close Centre mandated checks | `MandatedChecksList` + `useMandatedCloseChecks` | Same big green ticks as Open; Admin key `site_management.mandated_close_checks`; empty = high-trust close |
+| End of Day Report | `DayCentreEndOfDayReport` | Calendar + arrivals / meals / checkout / issues; SIM today |
 | Log Anomalies CTA | `FieldActionButton variant="caution" size="sm"` | Amber — secondary field action |
 | Severity badges (lists) | `RYGE_SEVERITY_CHIPS.activeClass` lookup | `issues-register-card`, `start-of-day-panel` |
 | Severity chips (modal) | `chip.activeClass` / `chip.idleClass` from `RYGE_SEVERITY_CHIPS` | `log-anomaly-modal` |
@@ -352,7 +420,8 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Infectious home safe | Outcome `MobileFieldButton` + `CharacterCountedInput` handover + optional note + Manager PIN | Attests left care; floor checkout / trip absent; no second Hub LEFT TRIP ticket |
 | Clear to return (BL-084 A) | `InfectiousClearanceSheet` — attestation vs medical cert `MobileFieldButton` + Manager PIN | Hub Manage issue footer when exclusion active |
 | Emergency activate (BL-084 C) | `EmergencyActivateSheet` via Big Red H&S | Manager-only Drill\|Live; free-text why; Yellow\|Red |
-| Emergency banner / muster / stand-down | `EmergencyOpsBanner` | Sticky on Centre / Event Deliver / Manifest / Hub |
+| Emergency banner / muster / stand-down | `FloorAnnouncementStrip` + `EmergencyOpsBanner` | Global AppShell strip; Dashboard `EmergencyFloorAlert` |
+| Message of the Day | `MotdAdminPanel` + MOTD strip | `floor_motd` system parameter |
 | Site do-not-open / lockdown / suspend | `SiteOpsDeclareSheet` | Big Red H&S · Start of Day do-not-open chip |
 
 ---
@@ -425,16 +494,21 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 |---------|--------|-----------|----------|
 | **Field select — outcome (2 options)** | Defined | `MobileFieldButton` tap list | Any 2-option binary choice on field floor (orderly/incident, open/close) |
 | **Field trip leader picker** | Defined | `MobileFieldButton` tap list | Short staff list (≤8) on field-floor config — not `Select` |
-| **Bus boarding per-person toggle** | Defined | `MobileFieldButton` `tone="success"` (selected = on-bus) | Manifest pickup “Passenger on board” + boarding roll rows — green, not `info` blue |
+| **Bus boarding — no one left behind** | **Defined** | Every person on that run/hop until on-bus or not travelling | Day Centre return roll, event IN/HOME, venue hops | Participants, staff, volunteers, carers. Overnight rolls stay clients-only. GUARDRAILS §11.10. |
 | **Field person confirm + nested absent** | Defined | `MobileFieldButton` (`tone="success"`) + `trailing` `UserX` | Whole name row = Confirm/toggle; **Not attending** sits **inside** the row chrome. **Second tap undoes** confirm → waiting (fat-finger / GUARDRAILS §4.4). Shell `div` + primary button + nested `UserX`. |
 | **Departure vector (events)** | Defined | `BottomSheet` + `MobileFieldButton` | Same pattern as Day Centre check-out; 2 options: Bus / Self |
 | **Event Deliver trip-day scroller** | Defined | Header under event title: `‹ date / Day N of M ›` chevrons | Multi-day only; switches `event_day_sessions` in Deliver. Test builds also move SIM clock date (keep time). Single-day: date text only. |
 | **Event Deliver activity check-in row** | Defined | `MobileFieldButton` + nested `UserX` (`trailing`) | Programme Walk / On-site roll: tap name row = confirmed; **Not attending** inside the Confirm chrome. Same as **Field person confirm + nested absent**. |
+| **Programme activity check-in status chip** | **Defined** | Header status button (hi-vis red/green) | Next to **Activity check-in** | Red while any `expected`; solid success green when all accounted. List auto-collapses only when complete; chip toggles expand/collapse (cannot collapse while outstanding). |
+| **Programme activity Log issue** | Defined | `FieldActionButton` caution + `EventDayVerbalAnomalyFlow` (`activityLabel`) | Each **Active** Programme stop: Log issue scoped to stop name; completed expand always lists **Issues during this activity** (or empty dashed state) |
+| **Programme activity times** | Defined | `opened_at` / `closed_at` + `formatTime` | Active header: Opened. Completed header + summary: Opened · Completed (SIM-aware stamps) |
 | **Event Deliver default tab** | Defined | `deriveEventDeliverSuggestedTab` + Group Status current step | Wake → Morning Roll; overnight return → Evening Roll; final day done → Check-Out; Day 2+ hide Check-In when arrival complete |
 | **Event Deliver roll-call row** | Defined | `MobileFieldButton` + nested **Defer** + `UserX` (`trailing`) | Morning/Evening: whole name row = **Mark accounted**; **Defer** + **No show** inside. **Second tap undoes** accounted → awaiting (fat-finger / §4.4). Deferred until / Yellow / Red timing unchanged. Notes kept. |
 | **Event Deliver roll-call group alert** | Defined | `EventDeliverRollAlertBanner` + `RollCallDeferDialog` (no `participantId`) | Bands use **Deferred until** (`expected_accounted_at`). Grace (muted): no Yellow while before Deferred until. Yellow after Deferred until; Red at Deferred until + Admin `*_red_mins_after` (default 30). Primary **Defer everyone…**; `Group Deferred +Nm until HH:mm — reason` on banner only. |
 | **Itinerary overnight hotel cue** | Defined | Caution callout + `BedDouble` Overnight badge | Multi-day non-final nights; hard gate via Confirm/Open (BL-072) |
+| **Event Manage Live tab** | **Defined** | `EventLiveWatchTab` + `fetchEventWatchSnapshot` + reused `EventDeliverStatusPanel` | Office watch of a running outing | Read-only name + status chip + time (Trip Report density — not floor `MobileFieldButton`). Day chips when multi-day. No board / check-in / Open location / Resolve. **Stage chips:** muted grey = not started; solid `info` (blue) = happening (on bus / at event / open programme); solid `success` (green) = that stage finished (handed over / arrived / done / delivered / finished). Amber/red = problems only. BL-120. |
 | **Caution callout (banner/strip)** | Defined | `caution-callout.ts` classes | Non-blocking office warnings (overnight hotel, close-run notes) | **Must** include `dark:` text (`amber-100` / `amber-50`) — never `text-amber-950` / `text-amber-900` alone (unreadable on dark UI) |
+| **Event unplanned walk-on** | **Defined** | `WalkOnPersonModal` | Manifest pickup + Event Deliver Check-In | Manifest: `WalkOnStopIconButton` in active-stop header (icon, Absent-sized). Event Deliver: compact outline `WalkOnFloorButton` under the check-in list — not on each row, not a full-width CTA. Kind tap list (`MobileOptionButton`); Command pickers; `CharacterCounted*` + missing list; Accept → `PinEntryDialog` (`verifyOperatorPin`). Badge **Walk-on · Intake incomplete**. |
 
 ### Component inventory (Defined in Events flow)
 
@@ -445,7 +519,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Trip leader | `MobileFieldButton` tap list | Field floor, ≤8 managers |
 | Close outcome | `MobileFieldButton` tap list | `closed_orderly` / `closed_incident` |
 | Arrival check-in button | `Button h-12` full-width | §4.4 pattern |
-| Departure handover | `BottomSheet` + `MobileFieldButton` | Slide-up picker; assigned row tap = undo (§4.4) until Close trip |
+| Departure handover | `BottomSheet` + `MobileFieldButton` | Slide-up picker; assigned row tap = undo (§4.4) until Close trip. Bus + no run + 2+ Admin runs: wide row disabled until R1/R2. |
 | Bus boarding row | `MobileFieldButton` selected | On-bus / expected state |
 | Activity check-in row | `MobileFieldButton` + `trailing` `UserX` | Confirm = whole row; Not attending nested inside |
 | Not travelling | Icon `<button> h-14 w-14` + `BottomSheet` reason | Secondary destructive action (bus hops — sheet for reason) |
@@ -454,6 +528,7 @@ See registry rows: Office Select, Page-level Submit, Toggle/switch (Admin), Admi
 | Manager PIN (location open/close) | `PinEntryTrigger` | Existing |
 | RED anomaly (trip day) | `EventDayVerbalAnomalyFlow` → `LogAnomalyModal` + `VerbalConsultationDialog` | §12.6 |
 | Empty states | Dashed border card + icon | `itinerary-tab`, `day-sessions-tab`, `booking-payment-history` |
+| Event Manage Live watch | `EventLiveWatchTab` | Office name + chip + time; reused Group Status; no write controls |
 
 ---
 
@@ -489,6 +564,64 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-09-23 | Pickup address book | Home plus named places. Run Planning weekday tap list. Manifest pending stop can switch for today, including a one-off. BL-130. |
+| 2026-09-23 | Off-board placement | Action sits right of the NDIS line (staff: sheet header), not beside Close. Slate Off-boarded badge and status bar. |
+| 2026-09-23 | Off-board client or staff | Dialog with reason rows, notes, and manager PIN. Show exited / Show inactive on directories. BL-129. |
+| 2026-09-18 | Activity log 5W | Where / Why columns + GPS under Where. Type stays a filter. Emergency / close / lockdown / rolls / hops / med-bag / infectious named like check-in. Automated sweeps actor System. Cap 2000. BL-128. |
+| 2026-09-18 | Activity log auditor detail | Check-in/out, meals, medication doses, and compliance assets name the person/item/place. System (not Unknown operator) for unattended compliance-asset trigger writes. BL-128. |
+| 2026-09-18 | Human-driven Activity log | Client/staff/carer/address and other office saves write `OFFICE_RECORD_CHANGED`. Floor YELLOW/RED unchanged. Cursor rule `human-activity-log.mdc`. BL-128. |
+| 2026-09-18 | Admin Activity log | Read-only Admin tab: date range + type + search over `operational_ledger`. Run Planning card is the planning slice. No extra table. BL-128. |
+| 2026-09-17 | SIM log stamps | Issues, ledger, Hub notes, session open/close, and resolve times write `operationalNowIso()`. Screens prefer Occurred. Outbox `savedAt` stays wall clock. |
+| 2026-09-17 | Lost Soul Open Centre | Attendance overdue / missing-person REDs stay in Hub; they do not block Open Centre. Absent if never arrived; check-in if found/late. No extra Lost roll status. |
+| 2026-09-17 | DEV operational clock | SIM is temporary: same Sydney wall day + refresh; expires at midnight; cleared on day login and `/auth` PIN, not idle unlock |
+| 2026-09-13 | Certificate types in Lookups | Official names live in Lookups → Certificates & orientations (`requirement_types`). Duty roles tick; Staff dropdown only. |
+| 2026-09-13 | Duty function hooks | Same `DutyRequirementGapPanel` on helper Arrived, Centre open/close, event open/close, Give dose. Empty bind = no panel. |
+| 2026-09-12 | Hide chrome on scroll | Stay visible on load and when Manifest/Dashboard content is shorter than the screen. Hide only after a real ~48px scroll on an overflowing pane. |
+| 2026-09-12 | Duty role Admin + staff assignment | Admin → Duty roles registry (Vendors Table). Staff sheet: Duty role checkboxes + catalogue Select for certs/orientations. Floor gap = existing meal Manager note + PIN panel. |
+| 2026-09-09 | Staff certification edit | Personnel sheet: summary card + Edit; Save changes writes name, number, expiry, and defer. |
+| 2026-09-09 | Hide chrome on scroll | Dashboard + Manifest: scroll down hides SIM / AppShell / BottomNav / Cancel Reset; scroll up reveals. ~48px travel + 400ms lock so collapsing chrome cannot flicker. Manifest uses the inner scroller. Close Run and Incident/Raise stay. |
+| 2026-09-09 | Manifest start-flow CTAs | Selected vehicle / start point = green. Continue, Confirm & Roll, Start run = slate until ready, then amber pulse. |
+| 2026-09-09 | Floor CTA colours | Amber+pulse = do this next; green = already chosen; blue = you-are-here; slate = blocked; red = danger. Manifest restyled to match. |
+| 2026-09-09 | Manifest pre-departure | Home/hop boarding is the only card until All Aboard. Legs stay hidden; header says Pre-departure. |
+| 2026-09-08 | Menu Access checkbox matrix | Live office Checkbox grid; Manager column locked. Saves to `role_menu_access`. Phase 2 None/View/Update TBD. |
+| 2026-09-08 | Archive leftover event guest | Care profile AlertDialog on guests only. Hides from Participants; carer row unchanged. |
+| 2026-09-03 | No one left behind | Bus boarding includes staff / volunteer / carer on Day Centre, trip IN/HOME, and multi-day hops. Stay-behind = not travelling (same as a participant). Morning/evening rolls stay participants only. |
+| 2026-09-03 | Return boarding roll | Include staff / volunteer / carer drop-off stops, not only `toParticipantId`. Head count is everyone on the bus. |
+| 2026-09-03 | Afternoon Manifest after checkout | Check-Out via bus keeps the person on that afternoon Manifest. Absent / family / independent still come off. |
+| 2026-09-03 | End of Day Went home how | Bus rows show Admin run name (floor code, else weekly OUT), not generic Bus. |
+| 2026-08-29 | Manifest GPS deny | Depart / Arrive proceed with blank GPS; warning toast includes iPhone Location Services path. Do not hard-block the bus. |
+| 2026-08-29 | Support floor cadence | Staff / volunteer / carer use the same Off today, clock/defer, PIN absent, late arrival, and event Group status / morning-evening rolls as clients. Not meals/meds. BL-125. |
+| 2026-08-29 | Admin Operating days | Open/close times live on Lookups → Operating days. Standalone Centre Operating Hours tab removed. “Is the centre open?” uses `operating_days`; clock values stay on `centre_operating_hours`. |
+| 2026-08-29 | Run Planning week grid | One person per row, Mon–Fri In/Out, pencil opens that record. Staff form Centre run week grid at top of edit sheet. |
+| 2026-08-29 | Run Planning menu | Bus-run order + all-people IN/OUT board moved out of Participants to `/run-planning` (between Staff and Transport). Staff/carer edit sheets set centre defaults. BL-125. |
+| 2026-08-29 | Day & trip support people | Own Manifest stop and bus/self methods. Support section under client rolls. Not meal/med. BL-125. |
+| 2026-08-28 | Day Centre floor Absent / late arrival | Mark Absent skips morning+afternoon Manifest (Off today path). Late arrival reuses floor row (default Self). Add Attendee requires home transport tap list. BL-124. |
+| 2026-08-27 | App ticket opener mailto | Hub Log Note / Resolve opens a draft email To the ticket opener with this update + notes so far (edit or send). Uses staff_registry email. |
+| 2026-08-27 | Floating Incident / Raise ticket | Global red + green pills are draggable (`DraggableFab`); position sticky on that device. Removed in-form Ticket chip that covered Close/Save on iPhone/iPad. |
+| 2026-08-27 | Day Centre End of Day Report weekday | Report calendar + session Date field show `Thu 27-Aug-26` (`formatDateWithWeekday`). Global dates stay `dd-Mmm-yy`. |
+| 2026-08-27 | Day Centre Check-In count header | Replaced `(7/11 in)` with `Booked / Arrived / Absent / Still expected` so cancellations are not implied as still waiting. |
+| 2026-08-26 | Day Centre End of Day Report | Read-only report on `/day`: `DatePicker` (SIM today default, no future), arrivals how/when, meal variations, checkout, visitors, issues. Same section chrome as Trip Report. BL-123. |
+| 2026-08-23 | Event unplanned walk-on placement | Manifest: `WalkOnStopIconButton` beside Cancel/Absent on the active stop card. Event Deliver: compact outline footer under the check-in list. Not a full-width CTA; not on each row. |
+| 2026-08-23 | Event unplanned walk-on | `WalkOnPersonModal` — same Defined add-person Dialog as Add guest; field doors on Manifest + Event Deliver; driver PIN; YELLOW canned workaround. BL-122. |
+| 2026-08-23 | Manifest one-run-slot block | Existing Start button + dashed callout (no new dialog). Named “already open / already closed” toast. Manager second-bus override not built. |
+| 2026-08-23 | Event Check-Out run + Close trip | Wide-row hand-over disabled until R1/R2 when multiple `bus_runs` exist. Close trip / Day Close waits for HOME Manifest (driver has the name) — not the last drop-off. Self = venue checkout only. |
+| 2026-08-23 | Event Manage Live stage chips | Grey = not started; blue `info` = happening; green `success` = stage complete (handed over / arrived / at-event finished / delivered). On-bus and at-event are blue, not green. |
+| 2026-08-22 | Event Manage Live tab | Office read-only field projection — `EventLiveWatchTab` + Group Status + named people (not floor taps) — BL-120 |
+| 2026-08-22 | Idle screen lock | `IdleLockGate` + non-dismissible `PinReauthDialog`; Admin `IdleLockAdminPanel` / `auth_idle_lock_minutes` (15 default; 0 = off); skip active Manifest |
+| 2026-08-22 | Admin CMS rich text editor | `CmsRichTextEditor` Visual + HTML; URL/library insert; DOMPurify allowlist; SharePoint upload later BL-119 |
+| 2026-08-21 | Admin lookup edit | Edit code + display name in Lookups (not delete/recreate); bus run code cascade keeps client/Manifest assignment |
+| 2026-08-21 | Care Profile Support & risk | BL-114 thin org support plan (goals/strengths/needs/comms/risk) on Client pack + Care Profile tab; Hub `client_support_plan` / `client_risk_assessment`; rights/handbook ack on consents |
+| 2026-08-20 | Hub Public web voice | Public forms stay in Human Incidents; indigo **Public web** badge (not orange Incident); Issue line = form type + ~140 char message; Yellow complaints skip empty Workaround |
+| 2026-08-15 | SIM clock on all date/time work | GUARDRAILS §5.3 — floor stamps and “today” must use `operationalNowIso` / `todayLocalIso`; wall `new Date()` is a defect |
+| 2026-08-15 | Care Profile dialog width | Office modal `max-w-6xl` so Schedules Run today + Off today + Exception fit |
+| 2026-08-15 | Day Centre Off today + run live status | Schedule-row **Off today** (today only); `RunLiveStatusBadge`; Manifest `OfficeRunNoticeBanner` + `trip_run_notices` |
+| 2026-08-15 | Day Centre default run route | Participants Directory `RunRoutePanel` — drag order per run + IN/OUT; Manifest seeds from `bus_run_default_routes` |
+| 2026-08-15 | Day Centre schedule transport | Self + bus-run pills only (no Self-Drive / Bus-Pickup dropdown); Self stores `TRN-SELF` |
+| 2026-08-09 | Event Finance / Roster money | Expense Edit/Delete + payment history Edit/Delete + Record refund until Closed; `billing_locked` gates UI + `assertEventFinanceWritable` |
+| 2026-08-06 | Check-off list order | Surname A–Z via `sort-participants.ts`; status changes style only — no bounce to “Already checked in” / “Handed to transport” sections |
+| 2026-08-06 | Muster sheet severity copy | Red → Evacuate/muster-point title + callout; Yellow → standby light muster; empty-roll explains missing Day Centre/trip context — BL-084 |
+| 2026-08-06 | Global floor announcements | AppShell `FloorAnnouncementStrip` (Emergency + MOTD); Dashboard `EmergencyFloorAlert` (STANDBY/EVACUATE, info-only); Admin `MotdAdminPanel` / `floor_motd` — BL-084 |
+| 2026-08-06 | Overlay vertical scroll | `DialogContent` / `AlertDialogContent`: `max-h-[90dvh] overflow-y-auto`; bottom/side `SheetContent` overflow defaults — footers reachable on short viewports (Manifest / Event Deliver). Sticky shells keep `overflow-hidden` + inner scroll |
 | 2026-08-04 | Staff day-login password set | Edit personnel: set/reset Auth password via manager PIN + service-role server fn — interim Alpha (BL-002 later) |
 | 2026-08-02 | Big Red mobile shell | Incident + RED verbal: BottomSheet on mobile, sticky File footer, min-h-14 tap lists, stacked severity / Occurred at — touch-first |
 | 2026-08-02 | Occurred at vs Logged at | `OccurredAtFields` on Big Red Human/Asset + Log Anomaly; Hub shows both; Human lane structured client(s) + assisting staff (multi) — BL-106 |
@@ -523,6 +656,13 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 | 2026-07-26 | Audit Pack Named vs De-id | Admin + Trip Report `Switch` for BL-093 identity mode (default Named) |
 | 2026-07-23 | Event Deliver Open walkthrough | `MandatedChecksList` + `event_deliver.venue_open_checks` before trip-leader PIN — BL-070 |
 | 2026-07-21 | Admin Audit Pack export | `AuditPackWorkspace` — DatePicker range, section Switches, Generate + PinEntryDialog (MYOB sibling) — BL-061/087 |
+| 2026-08-09 | Programme Active card stack order | Top → bottom: yellow **Log issue** → activity check-in → leave/movement (“How do you get to…”) |
+| 2026-08-09 | Programme change bus plan before Release | Superseded — all leave methods use confirm panel |
+| 2026-08-09 | Programme leave confirm + Undo chips | All methods plan then confirm; embedded Method + Undo (Check-In style); bus Manifest only on Release |
+| 2026-08-09 | Floor check-in hi-vis green | Event + Day Centre checked-in rows: solid `bg-success` / white text (§4.5) — replace pale emerald tint |
+| 2026-08-09 | Programme activity check-in collapse | Red/green status chip; auto-collapse when all accounted; chip expands list again |
+| 2026-08-07 | Programme leave movement ask + Other | Ask Bus/Walk/Other/On-site every hop; `movement_method` NULL until chosen; Other = non-bus public transport; SQL `2026-08-07_venue_stop_movement_ask_other.sql` |
+| 2026-08-07 | Programme activity Log issue + times | Active card caution **Log issue** (`EventDayVerbalAnomalyFlow` + activity label); completed header **Opened · Completed**; issues section always on completed expand (empty state) |
 | 2026-07-21 | Programme completed activity | Completed stops expand read-only (times, method, roll, issues) — BL-091 |
 | 2026-07-21 | Event Deliver Open location PIN | PIN success opens immediately — no second Open tap (same as Day Centre); warnings stay on panel before dialog |
 | 2026-07-21 | Morning/Evening Defer all | Header **Defer all…** next to Re-sync whenever outstanding &gt; 0 — proactive, not only Yellow banner |
@@ -539,6 +679,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 | 2026-07-20 | Event Deliver trip-day scroller | Multi-day header `‹ date ›` under title; field nav across trip days; SIM date sync in test builds |
 | 2026-07-19 | Event Deliver roll Deferred until | Banner follows pushed deadline; grace strip until Deferred until; Yellow then Red = until + Admin red mins; further defers push Red |
 | 2026-07-19 | Event Deliver roll-call group alert | Banner **Defer everyone…**; `Group Deferred +Nm — reason` on banner only; row **Defer** = one person; removed panel “Defer outstanding…” |
+| 2026-08-19 | Raise ticket (BL-116) | Green FAB + form Ticket chip; Hub App tickets tab; dedicated `app_tickets` — not Maintenance / Incidents |
+| 2026-08-21 | Onboarding review Dashboard tile | Band 3 `StatusTile`; Review due → Hub `?tab=onboarding`; Admin yellow/red days |
+| 2026-08-19 | App tickets Dashboard tile | Band 3 `StatusTile` (existing chrome); open items → Hub `?tab=app_tickets` |
 | 2026-07-19 | Event Manage vs Deliver | Field floor only in Deliver; Manage Trip Days = config; Run this event CTA; overnight Close day after Evening Roll |
 | 2026-07-18 | Manifest Passenger on board | `MobileFieldButton tone="success"` (green) — aligned with on-bus / checked token; not `info` blue |
 | 2026-07-18 | Caution callout contrast | `caution-callout.ts` — dark-mode safe amber banners; forbid `text-amber-950` alone |

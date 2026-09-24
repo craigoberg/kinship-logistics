@@ -21,6 +21,7 @@ import { executeComplianceResolution } from "@/lib/api/compliance-resolution";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
 import { HubContextMetaGrid } from "@/components/governance/hub-context-meta-grid";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
@@ -182,7 +183,7 @@ export function ManageComplianceAssetDialog({
     mutationFn: () => startComplianceAssetReview(asset.id),
     onSuccess: () => {
       invalidateAll();
-      const waitLabel = formatHubWaitDuration(asset.created_at, new Date().toISOString());
+      const waitLabel = formatHubWaitDuration(asset.created_at, operationalNowIso());
       operationToasts.reviewStarted(waitLabel);
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),
@@ -294,7 +295,7 @@ export function ManageComplianceAssetDialog({
   const hubAppearedAt = asset.created_at;
   const waitLabel = reviewStartedNote
     ? formatHubWaitDuration(hubAppearedAt, reviewStartedNote.stampedAt)
-    : formatHubWaitDuration(hubAppearedAt, new Date().toISOString());
+    : formatHubWaitDuration(hubAppearedAt, operationalNowIso());
 
   const renewalSection = (
     <>

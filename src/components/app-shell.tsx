@@ -12,15 +12,21 @@ import { IconActionButton } from "@/components/ui/icon-action-button";
 import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { getActiveUserProfile } from "@/lib/data-store";
-import { formatDate } from "@/lib/utils";
+import { cn, formatDate } from "@/lib/utils";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
+import { FloorAnnouncementStrip } from "@/components/ops/floor-announcement-strip";
+import { MenuGate } from "@/components/auth/menu-gate";
+import { useMenuAccess } from "@/hooks/use-menu-access";
+import { accessRoleLabel } from "@/lib/access-roles";
+import { useChromeVisibility, useHideChromeOnScroll } from "@/hooks/chrome-visibility";
 
 /** Human-readable label for the active user's role. */
-function roleLabel(role: string | null | undefined): string {
+function roleLabel(role: string | null | undefined, accessRole?: string | null): string {
+  const fromAccess = accessRoleLabel(accessRole);
+  if (fromAccess) return fromAccess;
   if (!role) return "";
   if (role === "coordinator") return "Manager";
   if (role === "driver") return "Driver";
-  // Future roles: assistant_manager, guardian, support_worker, dashboard
   return role.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
@@ -31,11 +37,13 @@ function roleLabel(role: string | null | undefined): string {
  */
 function SiteNoGoBanner() {
   const q = useSiteSession();
+  const { canOpen } = useMenuAccess();
   const session = q.data;
   if (!session) return null;
   if (session.phase !== "closed_no_go" && session.phase !== "escalated_lock")
     return null;
   const isNoGo = session.phase === "closed_no_go";
+  const dayLink = canOpen("day");
   return (
     <div
       className={`flex items-center justify-between gap-3 border-b px-4 py-2 text-xs md:px-6 ${
@@ -57,14 +65,23 @@ function SiteNoGoBanner() {
             : "Manager + Leader dual-PIN handshake required."}
         </span>
       </div>
-      <Link to="/day" className="font-semibold underline-offset-2 hover:underline">
-        Open Day Centre →
-      </Link>
+      {dayLink ? (
+        <Link to="/day" className="font-semibold underline-offset-2 hover:underline">
+          Open Day Centre →
+        </Link>
+      ) : null}
     </div>
   );
 }
 
-export function AppShell({ children }: { children: ReactNode }) {
+export function AppShell({
+  children,
+  viewportLock = false,
+}: {
+  children: ReactNode;
+  /** Single viewport-height column — used by Manifest so iOS cannot nest-scroll. */
+  viewportLock?: boolean;
+}) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -76,6 +93,8 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   const [medOpen, setMedOpen] = useState(false);
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
+  const { chromeHidden } = useChromeVisibility();
+  useHideChromeOnScroll(!viewportLock && isDashboard ? "window" : null);
 
   const handleLogout = () => {
     try {
@@ -94,15 +113,56 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [identity, setIdentity] = useState<{ name: string; role: string } | null>(null);
   useEffect(() => {
     const p = getActiveUserProfile();
-    if (p) setIdentity({ name: p.fullName, role: roleLabel(p.role) });
+    if (p) setIdentity({ name: p.fullName, role: roleLabel(p.role, p.accessRole) });
   }, []);
+
+  // Kill document rubber-band while Manifest owns the only scroller.
+  useEffect(() => {
+    if (!viewportLock) return;
+    const html = document.documentElement;
+    const body = document.body;
+    const prev = {
+      htmlOverflow: html.style.overflow,
+      bodyOverflow: body.style.overflow,
+      htmlOverscroll: html.style.overscrollBehavior,
+      bodyOverscroll: body.style.overscrollBehavior,
+    };
+    html.style.overflow = "hidden";
+    body.style.overflow = "hidden";
+    html.style.overscrollBehavior = "none";
+    body.style.overscrollBehavior = "none";
+    return () => {
+      html.style.overflow = prev.htmlOverflow;
+      body.style.overflow = prev.bodyOverflow;
+      html.style.overscrollBehavior = prev.htmlOverscroll;
+      body.style.overscrollBehavior = prev.bodyOverscroll;
+    };
+  }, [viewportLock]);
 
   return (
     <TooltipProvider delayDuration={300}>
-    <div className="flex min-h-dvh bg-background text-foreground">
+    <div
+      className={cn(
+        "flex bg-background text-foreground",
+        viewportLock ? "min-h-0 flex-1 overflow-hidden" : "min-h-dvh",
+      )}
+    >
       <AppSidebar collapsed={sidebarCollapsed} onToggle={toggleSidebar} />
-      <div className="flex min-w-0 flex-1 flex-col">
-        <header className="sticky top-0 z-30 flex min-h-14 items-center justify-between gap-3 border-b border-border bg-background/90 px-4 py-2 backdrop-blur md:min-h-16 md:px-6">
+      <div
+        className={cn(
+          "flex min-w-0 flex-1 flex-col",
+          viewportLock && "min-h-0 overflow-hidden",
+        )}
+      >
+        <header
+          className={cn(
+            "sticky top-0 z-30 flex shrink-0 items-center justify-between gap-3 overflow-hidden border-b border-border bg-background/90 px-4 backdrop-blur md:px-6",
+            chromeHidden
+              ? "max-h-0 min-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+              : "min-h-14 py-2 opacity-100 md:min-h-16",
+          )}
+          aria-hidden={chromeHidden}
+        >
           {/* Left: menu toggle (md+) + page title */}
           <div className="flex min-w-0 items-center gap-2">
             <IconActionButton
@@ -167,8 +227,15 @@ export function AppShell({ children }: { children: ReactNode }) {
 
         <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} />
         <SiteNoGoBanner />
-        <main className="flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6">
-          {children}
+        <FloorAnnouncementStrip />
+        <main
+          className={
+            viewportLock
+              ? "flex min-h-0 flex-1 flex-col overflow-hidden pb-24 md:pb-8"
+              : "flex-1 px-4 pb-24 pt-4 md:px-6 md:pb-8 md:pt-6"
+          }
+        >
+          <MenuGate>{children}</MenuGate>
         </main>
       </div>
       <BottomNav />

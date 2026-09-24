@@ -1,14 +1,40 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { UnifiedIssuesPanel } from "./unified-issues-panel";
 import { ComplianceAssetsPanel } from "./compliance-assets-panel";
 import { MaintenancePanel } from "./maintenance-panel";
+import { AppTicketsPanel } from "./app-tickets-panel";
+import { OnboardingWorkspace } from "@/components/onboarding/onboarding-workspace";
 
-type HubTab = "issues" | "maintenance" | "assets";
+export type HubTab = "issues" | "maintenance" | "assets" | "app_tickets" | "onboarding";
 
-export function GovernanceHubWorkspace() {
-  const [hubTab, setHubTab] = useState<HubTab>("issues");
+export function GovernanceHubWorkspace(props: {
+  openIssueId?: string | null;
+  initialTab?: HubTab;
+}) {
+  const { openIssueId, initialTab } = props;
+  const { canOpen } = useMenuAccess();
+  const showOnboarding = canOpen("onboarding");
+  const [hubTab, setHubTab] = useState<HubTab>(() => {
+    if (openIssueId) return "issues";
+    return initialTab ?? "issues";
+  });
   const [manageAssetId, setManageAssetId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (openIssueId) {
+      setHubTab("issues");
+      return;
+    }
+    if (initialTab && (initialTab !== "onboarding" || showOnboarding)) {
+      setHubTab(initialTab);
+    }
+  }, [openIssueId, initialTab, showOnboarding]);
+
+  useEffect(() => {
+    if (hubTab === "onboarding" && !showOnboarding) setHubTab("issues");
+  }, [hubTab, showOnboarding]);
 
   return (
     <Tabs
@@ -16,14 +42,19 @@ export function GovernanceHubWorkspace() {
       onValueChange={(v) => setHubTab(v as HubTab)}
       className="space-y-4"
     >
-      <TabsList>
+      <TabsList className="flex h-auto flex-wrap">
         <TabsTrigger value="issues">Human Incidents</TabsTrigger>
         <TabsTrigger value="maintenance">Maintenance &amp; Repairs</TabsTrigger>
         <TabsTrigger value="assets">Compliance &amp; Renewals</TabsTrigger>
+        {showOnboarding ? (
+          <TabsTrigger value="onboarding">Onboarding</TabsTrigger>
+        ) : null}
+        <TabsTrigger value="app_tickets">App tickets</TabsTrigger>
       </TabsList>
 
       <TabsContent value="issues" className="space-y-4">
         <UnifiedIssuesPanel
+          openIssueId={openIssueId}
           onManageRenewal={(assetId) => {
             setManageAssetId(assetId);
             setHubTab("assets");
@@ -40,6 +71,16 @@ export function GovernanceHubWorkspace() {
           externalManageAssetId={manageAssetId}
           onExternalManageHandled={() => setManageAssetId(null)}
         />
+      </TabsContent>
+
+      {showOnboarding ? (
+        <TabsContent value="onboarding" className="space-y-4">
+          <OnboardingWorkspace />
+        </TabsContent>
+      ) : null}
+
+      <TabsContent value="app_tickets" className="space-y-4">
+        <AppTicketsPanel />
       </TabsContent>
     </Tabs>
   );

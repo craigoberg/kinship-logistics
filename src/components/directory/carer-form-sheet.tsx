@@ -28,12 +28,16 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   useInsertCarer,
   useUpdateCarer,
   useParticipants,
 } from "@/hooks/use-supabase-data";
 import type { Carer, CarerPayload } from "@/lib/data-store";
+import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
+import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
+import { PersonAddressList } from "@/components/address/person-address-list";
 
 interface Props {
   open: boolean;
@@ -166,7 +170,9 @@ export function CarerFormSheet({
                           <Check className={cn("mr-2 h-4 w-4", !participantId ? "opacity-100" : "opacity-0")} />
                           <span className="text-muted-foreground">No participant linked</span>
                         </CommandItem>
-                        {participants.map((p) => (
+                        {participants
+                          .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                          .map((p) => (
                           <CommandItem
                             key={p.id}
                             value={`${p.fullName} ${p.ndisNumber}`}
@@ -194,6 +200,26 @@ export function CarerFormSheet({
           )}
 
 
+          {isEdit && carer ? (
+            <OnboardingSubjectPanel
+              subjectTable="carers_registry"
+              subjectId={carer.id}
+              defaultPack="accompanying"
+              seedName={carer.fullName}
+            />
+          ) : null}
+          {isEdit && carer ? (
+            <SupportTransportDefaults
+              personKind="carer"
+              carerId={carer.id}
+              personName={fullName.trim() || carer.fullName}
+            />
+          ) : (
+            <p className="rounded-md border border-dashed border-border px-3 py-3 text-xs text-muted-foreground">
+              Save this carer first, then set their Centre run (how they get in and out).
+            </p>
+          )}
+
           <div className="grid gap-3 sm:grid-cols-2">
             <Field label="Full name" className="sm:col-span-2">
               <Input value={fullName} onChange={(e) => setFullName(e.target.value)} autoFocus />
@@ -211,9 +237,16 @@ export function CarerFormSheet({
             <Field label="Email" className="sm:col-span-2">
               <Input value={email} onChange={(e) => setEmail(e.target.value)} type="email" />
             </Field>
-            <Field label="Street address" className="sm:col-span-2">
+            <Field label="Home / street address" className="sm:col-span-2">
               <Input value={streetAddress} onChange={(e) => setStreetAddress(e.target.value)} />
             </Field>
+            {carer?.id ? (
+              <PersonAddressList owner={{ kind: "carer", id: carer.id }} />
+            ) : (
+              <p className="text-[11px] text-muted-foreground sm:col-span-2">
+                Save this carer first, then add other pickup places.
+              </p>
+            )}
             <Field label="Primary contact" className="sm:col-span-2">
               <div className="flex items-center gap-3 rounded-md border border-border px-3 py-2">
                 <Switch checked={isPrimary} onCheckedChange={setIsPrimary} />

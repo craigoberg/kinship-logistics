@@ -21,6 +21,7 @@ import {
   type TripLeg,
 } from "@/lib/data-store";
 import { finalizeEventVenueHop } from "@/lib/api/event-hop-transport";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 
 export type RunCloseKind =
   | "event_outbound"
@@ -248,6 +249,34 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
 
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
+  const passengerNames = legs
+    .filter((l) => isPassengerPickupLeg(l) && l.passengerPresent !== false)
+    .map((l) => (l.toLabel ?? "").trim())
+    .filter(Boolean);
+  const kindLabel =
+    summary.kind === "day_centre_morning"
+      ? "Day Centre morning"
+      : summary.kind === "day_centre_afternoon"
+        ? "Day Centre afternoon"
+        : summary.kind === "event_outbound"
+          ? "trip outbound"
+          : summary.kind === "event_return"
+            ? "trip return home"
+            : summary.kind === "event_venue_hop"
+              ? "venue hop"
+              : "transport";
+  const dropOff =
+    summary.kind === "day_centre_afternoon" || summary.kind === "event_return";
+  const peopleBit =
+    passengerNames.length > 0
+      ? `${dropOff ? "dropped off" : "picked up"} ${passengerNames.join(", ")}`
+      : `${summary.completedLegs} stop${summary.completedLegs === 1 ? "" : "s"} complete`;
+  const skipped = summary.cancelledPickups.map((c) => c.label).filter(Boolean);
+  const runCode = trip.busRunCode ? ` ${trip.busRunCode}` : "";
+  const closeSummary =
+    `Closed ${kindLabel}${runCode} — ${peopleBit}` +
+    (skipped.length ? ` (not travelling: ${skipped.join(", ")})` : "") +
+    (summary.totalKm ? ` (${Math.round(summary.totalKm * 10) / 10} km)` : "");
 
   await writeToLedgerOrThrow({
     staff_id: staffId,
@@ -256,7 +285,7 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
     action_type: "TRANSPORT_RUN_CLOSED",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       trip_id: input.tripId,
       event_id: trip.eventId,
       bus_run_code: trip.busRunCode,
@@ -272,7 +301,10 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
       cancellations_acknowledged: input.cancellationsAcknowledged,
       closed_by: staffId,
       operator_staff_id: operatorStaffId,
-    },
+      passenger_names: passengerNames,
+      location: kindLabel,
+      summary: closeSummary,
+    }),
   });
 
   const closed = await completeTrip(input.tripId, input.endOdometerKm);

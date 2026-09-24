@@ -3,6 +3,7 @@
  * Front door before PIN terminal. Not full RBAC (menus / idle lock / tight RLS).
  */
 import { supabase } from "@/integrations/supabase/client";
+import { clearOperationalClockOnOperatorLogin } from "@/lib/operational-clock";
 
 export async function signInDaySession(
   email: string,
@@ -31,6 +32,17 @@ export async function signInDaySession(
   if (!user) {
     throw new Error("Day login failed — no session returned.");
   }
+  const { data: staffRow, error: staffErr } = await supabase
+    .from("staff_registry")
+    .select("full_name, active")
+    .ilike("email", trimmed)
+    .maybeSingle();
+  if (!staffErr && staffRow && (staffRow as { active?: boolean | null }).active === false) {
+    await supabase.auth.signOut();
+    const name = String((staffRow as { full_name?: string | null }).full_name ?? "").trim() || "This person";
+    throw new Error(`${name} has been off-boarded and cannot sign in.`);
+  }
+  clearOperationalClockOnOperatorLogin();
   return { userId: user.id, email: user.email ?? trimmed };
 }
 

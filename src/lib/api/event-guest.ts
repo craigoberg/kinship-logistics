@@ -6,9 +6,11 @@ import {
   insertEventBooking,
   type EventRosterBooking,
 } from "@/lib/data-store";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { recordOfficeChangeBestEffort, resolveAuditActor } from "@/lib/api/office-change-log";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 export type GuestParticipant = {
   id: string;
@@ -103,6 +105,76 @@ export async function listGuestParticipants(): Promise<GuestParticipant[]> {
   return (data ?? []).map((r) => mapGuest(r as Record<string, unknown>));
 }
 
+/** BL-122 — roadside guest: name + allergies only. DOB / emergency later (office). */
+export async function createWalkOnGuestParticipant(input: {
+  firstName: string;
+  lastName: string;
+  allergiesNotes: string;
+  phone?: string | null;
+}): Promise<GuestParticipant> {
+  const firstName = input.firstName.trim();
+  const lastName = input.lastName.trim();
+  if (!firstName || !lastName) throw new Error("First and last name are required.");
+  const allergies = input.allergiesNotes.trim();
+  if (!allergies) {
+    throw new Error('Allergies / alerts required (enter "None" if none known).');
+  }
+  const phone = input.phone?.trim() || null;
+
+  const row = {
+    first_name: firstName,
+    last_name: lastName,
+    ndis_number: guestNdisPlaceholder(),
+    dual_witness_pin_hash: "GUEST",
+    iddsi_level_liquids: 0,
+    iddsi_level_solids: 7,
+    participant_kind: "guest",
+    archived_at: null,
+    date_of_birth: null,
+    emergency_contact_name: null,
+    emergency_contact_phone: phone,
+    emergency_contact_relationship: phone ? "Walk-on phone" : null,
+    allergies_notes: allergies,
+    street_address: null,
+    regular_pickup_address: null,
+  };
+
+  const { data, error } = await supabase
+    .from("participants")
+    .insert(row)
+    .select(
+      "id, first_name, last_name, date_of_birth, emergency_contact_name, emergency_contact_phone, emergency_contact_relationship, allergies_notes, regular_pickup_address, street_address, archived_at, participant_kind",
+    )
+    .single();
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      throw new Error(
+        "Guest participant columns missing — run docs/sql/2026-07-26_event_guest_participants.sql",
+      );
+    }
+    throw error;
+  }
+
+  const guest = mapGuest(data as Record<string, unknown>);
+  const actor = await resolveAuditActor();
+  await writeToLedger({
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "EVENT_WALK_ON_GUEST_CREATED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      summary: `Added walk-on guest ${guest.fullName}`,
+      actor_name: actor.name,
+      person_name: guest.fullName,
+      participant_id: guest.id,
+      display_name: guest.fullName,
+    },
+  });
+  return guest;
+}
+
 export async function createGuestParticipant(input: {
   firstName: string;
   lastName: string;
@@ -161,15 +233,21 @@ export async function createGuestParticipant(input: {
   }
 
   const guest = mapGuest(data as Record<string, unknown>);
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_GUEST_PARTICIPANT_CREATED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { participant_id: guest.id, display_name: guest.fullName },
+    metadata: {
+      summary: `Added event guest ${guest.fullName}`,
+      actor_name: actor.name,
+      person_name: guest.fullName,
+      participant_id: guest.id,
+      display_name: guest.fullName,
+    },
   });
   return guest;
 }
@@ -183,17 +261,81 @@ export async function reactivateGuestParticipant(
     .update({ archived_at: null, participant_kind: "guest" })
     .eq("id", participantId);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "guest",
+    recordId: participantId,
+    recordName: "event guest",
+    summary: "Reactivated an archived event guest",
+  });
 }
 
+export async function listLiveGuestEventTitles(
+  participantId: string,
+): Promise<string[]> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select("booking_status, event_manifest!inner(title, status)")
+    .eq("participant_id", participantId)
+    .eq("is_guest_booking", true)
+    .neq("booking_status", "Cancelled");
+  if (error) {
+    if (isSchemaMismatchError(error)) return [];
+    throw error;
+  }
+  const titles: string[] = [];
+  for (const raw of data ?? []) {
+    const r = raw as {
+      event_manifest?: { title?: string; status?: string } | null;
+    };
+    const status = r.event_manifest?.status ?? "";
+    if (status === "Open" || status === "Confirmed") {
+      const title = (r.event_manifest?.title ?? "Event").trim() || "Event";
+      titles.push(`${title} (${status})`);
+    }
+  }
+  return titles;
+}
+
+/** Soft-hide an event guest. Returns false if already archived or not a guest. */
 export async function archiveGuestParticipant(
   participantId: string,
-): Promise<void> {
-  const { error } = await supabase
+): Promise<boolean> {
+  const { data, error } = await supabase
     .from("participants")
-    .update({ archived_at: new Date().toISOString() })
+    .update({ archived_at: operationalNowIso() })
     .eq("id", participantId)
-    .eq("participant_kind", "guest");
+    .eq("participant_kind", "guest")
+    .is("archived_at", null)
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  return !!data;
+}
+
+/** Care-profile / directory archive — ledger receipt + friendly error if not a guest. */
+export async function archiveGuestFromCareProfile(
+  participantId: string,
+): Promise<void> {
+  const archived = await archiveGuestParticipant(participantId);
+  if (!archived) {
+    throw new Error("Only an active event guest can be archived from this screen.");
+  }
+  const actor = await resolveAuditActor();
+  await writeToLedger({
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "EVENT_GUEST_PARTICIPANT_ARCHIVED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: {
+      summary: "Archived event guest from care profile",
+      actor_name: actor.name,
+      participant_id: participantId,
+      source: "care_profile",
+    },
+  });
 }
 
 export type ArchiveGuestsForEventResult = {
@@ -266,7 +408,8 @@ export async function archiveGuestParticipantsForEvent(
       skippedIds.push(participantId);
       continue;
     }
-    await archiveGuestParticipant(participantId);
+    const didArchive = await archiveGuestParticipant(participantId);
+    if (!didArchive) continue;
     archivedIds.push(participantId);
     await writeToLedger({
       staff_id: staffId,
@@ -331,15 +474,18 @@ export async function addGuestBookingToEvent(input: {
         : "no",
   });
 
-  const staffId = await resolveStaffIdWithFallback();
+  const actor = await resolveAuditActor();
   await writeToLedger({
-    staff_id: staffId,
+    staff_id: actor.staffId ?? DEFAULT_STAFF_UUID,
     category: "CENTRE",
     severity: "INFO",
     action_type: "EVENT_GUEST_BOOKING_ADDED",
     gps_lat: null,
     gps_lng: null,
     metadata: {
+      summary: `Booked guest ${booking.participantName || "guest"} on event`,
+      actor_name: actor.name,
+      person_name: booking.participantName,
       event_id: input.eventId,
       booking_id: booking.id,
       participant_id: input.participantId,
@@ -398,6 +544,7 @@ export async function listIncompleteGuestBookings(
     .select(
       `id, participant_id, outbound_transport_mode, return_transport_mode,
        trip_pickup_address_override, transport_med_bag_required, is_guest_booking, booking_status,
+       is_walk_on,
        participants!event_roster_bookings_participant_id_fkey!inner(
          first_name, last_name, date_of_birth, emergency_contact_name,
          emergency_contact_phone, allergies_notes, regular_pickup_address, street_address,
@@ -408,12 +555,38 @@ export async function listIncompleteGuestBookings(
     .neq("booking_status", "Cancelled");
 
   if (error) {
-    if (isSchemaMismatchError(error)) return [];
+    if (isSchemaMismatchError(error)) {
+      // Pre-BL-122 DBs: retry without is_walk_on (do not skip the hard-block).
+      const retry = await supabase
+        .from("event_roster_bookings")
+        .select(
+          `id, participant_id, outbound_transport_mode, return_transport_mode,
+           trip_pickup_address_override, transport_med_bag_required, is_guest_booking, booking_status,
+           participants!event_roster_bookings_participant_id_fkey!inner(
+             first_name, last_name, date_of_birth, emergency_contact_name,
+             emergency_contact_phone, allergies_notes, regular_pickup_address, street_address,
+             participant_kind
+           )`,
+        )
+        .eq("event_id", eventId)
+        .neq("booking_status", "Cancelled");
+      if (retry.error) {
+        if (isSchemaMismatchError(retry.error)) return [];
+        throw retry.error;
+      }
+      return collectIncompleteGuestBookings(retry.data ?? []);
+    }
     throw error;
   }
 
+  return collectIncompleteGuestBookings(data ?? []);
+}
+
+function collectIncompleteGuestBookings(
+  rows: unknown[],
+): GuestBookingIncomplete[] {
   const out: GuestBookingIncomplete[] = [];
-  for (const raw of data ?? []) {
+  for (const raw of rows) {
     const r = raw as {
       id: string;
       participant_id: string;
@@ -422,6 +595,7 @@ export async function listIncompleteGuestBookings(
       trip_pickup_address_override?: string | null;
       transport_med_bag_required?: string | null;
       is_guest_booking?: boolean | null;
+      is_walk_on?: boolean | null;
       participants?: {
         first_name?: string;
         last_name?: string;
@@ -434,6 +608,8 @@ export async function listIncompleteGuestBookings(
         participant_kind?: string | null;
       } | null;
     };
+    // BL-122 — walk-ons are accepted incomplete; YELLOW issue is the office work.
+    if (r.is_walk_on === true) continue;
     const p = r.participants;
     const isGuest =
       r.is_guest_booking === true || p?.participant_kind === "guest";

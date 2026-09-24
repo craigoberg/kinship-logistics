@@ -79,15 +79,15 @@ All operator and manager **authentication PIN capture** must use the canonical o
 4. **Verify once at entry** — PIN is verified when the pad completes; parent forms gate submit on `*PinVerified` flags (or refs if the API still needs the value). Do not re-prompt with a text field.
 5. **New PIN surfaces** — any new build requiring PIN auth must import from `src/components/auth/`; code review / agent rules treat raw PIN inputs as a blocking defect.
 
-### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — BL-002 deferred)
+### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — Phase 2/3 still later)
 
-Full role-based access control is **deferred until last** (`docs/BACKLOG.md` **BL-002**). Until then, PIN terminal + permissive anon RLS remains the interim model. **No new build may introduce patterns that force a rewrite when BL-002 lands.**
+**Phase 1 menu visibility is built** (`role_menu_access` + Admin → Menu Access + `MenuGate`; BL-002). **Day-login JWT for operational data is in force** as of 2026-08-20 (`docs/sql/2026-08-20_day_login_operational_rls.sql`, BL-117). PIN is action step-up and floor identity, not the database role. Phase 2 (read-only menus) and Phase 3 (relationship-scoped rows) are not built.
 
-#### Target two-tier session (product intent — not yet built)
+#### Target two-tier session
 
-1. **Day session** — staff signs in with **email + password** (Supabase Auth) at start of day. Session stays active for an Admin-configurable duration (e.g. full shift or N hours).
-2. **Screen lock** — after Admin-configurable **idle** minutes (e.g. 15), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active manifest run** may suppress idle lock (BL-002).
-3. **Action step-up** — high-impact operations continue to use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
+1. **Day session** — **built.** Staff signs in with **email + password** (Supabase Auth) at start of day. Session JWT is required for operational table access.
+2. **Screen lock** — **built 2026-08-22.** After Admin-configurable **idle** minutes (`system_parameters.auth_idle_lock_minutes`, default **15**; **0** = off), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active Manifest run** for this staff suppresses idle lock. Timer is wall-clock idle (not SIM).
+3. **Action step-up** — **built.** High-impact operations use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
 
 #### Build regulations (effective immediately)
 
@@ -99,7 +99,7 @@ Full role-based access control is **deferred until last** (`docs/BACKLOG.md` **B
 | Preserve `staff_registry.auth_user_id` link to `auth.users` | New parallel identity stores or browser service-role |
 | Route/menu placeholders → future `role_menu_access` | Hard-coded irreversible menu denial scattered in features |
 | Tunable timeouts → `system_parameters` (`auth_*` keys) | Hard-coded idle/session timeouts in components |
-| Operational table RLS: anon + permissive **or** `SECURITY DEFINER` RPC | `authenticated`-only policies on tables PIN terminals write today |
+| Operational tables: `GRANT` / RLS to **authenticated** (day-login JWT). Anon only for published CMS + `submit_public_form`. Server jobs use **service_role**. | Re-open `anon` ALL on participants / staff / incidents / attendance; PIN-only DB access without a JWT |
 
 **Agent rule:** `.cursor/rules/rbac-forward-compat.mdc` — checklist before shipping.
 
@@ -132,7 +132,7 @@ Flow Graph:
 - Database Safeguard: To flag verbal-workaround records for the Hub without triggering UUID-shape errors on the `owner` column, the sentinel is always carried inside `issue_description` (prefix `"[VERBAL WORKAROUND] "`), never in `owner`.
 - Multi-Device Realtime Retired: The `RedHandshakeWaitingPanel`, `subscribeToEscalationPool` polling, and the `GlobalEscalationInterceptor` mount have all been removed from the active route tree. The legacy `operational_escalations` table remains in place for historic records and existing manager grounding logic (e.g. `getAssetGroundedStatus`); new RED anomalies do NOT write to it.
 - Single-Rail Hub Routing: The Governance Hub (`UnifiedIssuesPanel`) reads from `site_issues_register` + `operational_incidents` + `compliance_assets` and presents every `[VERBAL WORKAROUND]` ticket alongside ordinary Yellow workarounds, with "Resolve" writing the closing ledger receipt.
-- **Day Centre Open Centre RED gate (scoped):** Open Centre blocks only on **Day Centre–scoped** REDs — rows where `event_id IS NULL` **and** `event_day_session_id IS NULL`. Trip morning/evening roll REDs and other event-floor REDs (`event_day_session_id` / `event_id` set) appear in the Hub and may block **Event Deliver / Open location** via `hasOpenRedIssueForSession`, but **must never** block Day Centre opening. Implementation: `fetchDayCentreBlockingReds` / `isDayCentreScopedIssue` in `src/lib/site-day/red-workaround.ts`. Non-blocking statuses: `resolved`, Hub `deferred`, or an accepted workaround (`workaround_accepted` / plan / `[VERBAL WORKAROUND]` / approved escalation notes). Managers may clear blockers in place via **Resolve** on the open-block card (`DayCentreBlockingRedResolveButton` → same `ManageIssueDialog` as the Hub).
+- **Day Centre Open Centre RED gate (scoped):** Open Centre blocks only on **Day Centre–scoped** REDs — rows where `event_id IS NULL` **and** `event_day_session_id IS NULL`. Trip morning/evening roll REDs and other event-floor REDs (`event_day_session_id` / `event_id` set) appear in the Hub and may block **Event Deliver / Open location** via `hasOpenRedIssueForSession`, but **must never** block Day Centre opening. Implementation: `fetchDayCentreBlockingReds` / `isDayCentreScopedIssue` / `doesIssueBlockDayCentreOpen` in `src/lib/site-day/red-workaround.ts`. Non-blocking: `resolved`, Hub `deferred`, accepted workaround (`workaround_accepted` / plan / `[VERBAL WORKAROUND]` / approved escalation notes), or **Lost Soul** attendance overdue (`[ATTENDANCE]` / `[AUTOMATED_RED] … overdue by N min` — person late or missing). Lost Soul REDs stay open in the Hub for review; mark Absent if they never arrive; check-in if they turn up late (RED is not auto-closed). Checkout and unexpected-med REDs still follow the normal gate. Managers may clear remaining blockers in place via **Resolve** on the open-block card (`DayCentreBlockingRedResolveButton` → same `ManageIssueDialog` as the Hub).
 - **Day Centre mandated checks (Open vs Close):** String arrays on `system_parameters`, edited via Admin → System Parameters → **Mandated walkthrough checklists** (`MandatedChecksAdminPanel` — Venue Safety template–style list; not raw JSON). Open: `site_management.mandated_compliance_checks` (`useMandatedChecks` / Start of Day). Close: `site_management.mandated_close_checks` (`useMandatedCloseChecks` / closure dialog). Same big green tick UI (`MandatedChecksList`). Empty array = high-trust 1-tap. Confirmed close labels written to `CENTRE_CLOSED` ledger metadata as `close_checks_confirmed`. Event Deliver Open uses the same Admin panel for `event_deliver.venue_open_checks` (BL-070).
 - **Day Centre Issues Register (scoped):** Start of Day walkthrough and Active Day both use `listActiveIssues` / `useActiveSiteIssues` — today's non-resolved Day Centre rows, plus prior Day Centre `open` / `workaround_accepted` / `deferred` (no event FKs). Purpose: surface existing RYG issues and workarounds before open so they are not re-reported. Trip/event issues must **not** appear on the Day Centre floor (Hub only). Hub Active includes `workaround_accepted` as still-operating until Resolve.
 - Preserved Fallbacks: `DynamicOperationalForm.tsx`, `RedHandshakeWaitingPanel` historical migrations, `GlobalEscalationInterceptor.tsx`, and the `operational_escalations` schema remain on disk as inactive fallbacks per the project's preservation policy. They MUST NOT be re-mounted without an explicit architectural review.
@@ -163,6 +163,8 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | RED Verbal Consultation   | `src/components/issue-engine/verbal-consultation-dialog.tsx` | Remote manager contact log — manager by name, operator PIN only; Hub close-out by manager. |
 | Global Escalation Intercept | `src/components/dashboard/global-escalation-interceptor.tsx`  | Real-time broadcast coordinator pop-up handling atomic RPC claims.                               |
 | Field single-select rows    | `src/components/manifest/mobile-field-button.tsx`             | `MobileFieldButton` / `MobileOptionButton` — high-contrast tap lists (§4.5).                     |
+| Field route CTA             | `src/components/ui/field-action-button.tsx`                   | Floor next-action = `caution` (+ `pulse`). Green `success` = already done. Blue `primary` = chrome / navigate. See UI-STYLE-GUIDE Floor CTA colours. |
+| Hide chrome on scroll       | `src/hooks/chrome-visibility.tsx`                             | Dashboard + Manifest: hide SIM / AppShell / BottomNav / Cancel on scroll down; reveal on scroll up. Do not hide Close Run or Incident/Raise. |
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
@@ -276,15 +278,22 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 - **Instant timestamps:** Full ISO instants from Supabase (`created_at`, `checked_in_at`, …) are stored UTC. Render them through `<ClientTime />` or `formatDateTime()` so the user sees local wall-clock time.
 - **Never** render raw `toISOString()` strings to operators.
 
-#### DEV operational clock (test builds only)
+#### DEV operational clock (test builds only) — honour SIM on all date/time work
 
-- **Purpose:** Fake Sydney **date + time** so multi-day trips and YELLOW→RED sweeps can be tested without waiting for the wall clock.
-- **Gate:** `IS_TEST_BUILD` (`src/lib/test-mode.ts`) — never active in production builds.
-- **API:** `src/lib/operational-clock.ts` — `getOperationalNow()`, `operationalNowMs()`, `getOperationalTodayIso()`, `setOperationalClockOverride`, `clearOperationalClockOverride`.
-- **Wiring:** `todayLocalIso()`, `getSydneyIsoDate()` (no-arg), Day Centre / event curfew / morning / attendance sweeps, and Exception Hub roll-call breach timing all read the operational clock.
+**Locked 2026-08-15.** Any feature that reads or writes a date, time, “today”, duration, overdue check, or operator-visible timestamp **must** go through the operational clock. SIM TIME on the amber bar is the day being tested. Wall-clock `new Date()` in that path is a **blocking defect**.
+
+- **Purpose:** Fake Sydney **date + time** so multi-day trips, Manifest runs, attendance, and YELLOW→RED sweeps can be tested without waiting for the wall clock.
+- **Gate:** `IS_TEST_BUILD` (`src/lib/test-mode.ts`) — never active in production builds. Production always uses live time via the same helpers.
+- **API:** `src/lib/operational-clock.ts` — `operationalNowIso()`, `operationalNowMs()`, `getOperationalNow()`, `getOperationalTodayIso()`, `useOperationalTodayIso()`, `setOperationalClockOverride`, `clearOperationalClockOverride`. Calendar “today”: `todayLocalIso()` / `getSydneyIsoDate()` (no-arg). Weekday: `todaysSydneyDayCode()` after a SIM-aware today hook.
+- **Must use operational clock:**
+  - “What day is it?” / roster / schedule / Manifest seed / trip_date
+  - Floor stamps operators see: depart / arrive / board (`start_at`, `end_at`, `completed_at`), check-in/out, open/close location or activity, Off today / exceptions, run live-status chips
+  - Overdue, sweep, curfew, morning-roll, and “minutes since” comparisons (`operationalNowMs()`)
+  - Operator-visible log stamps: `site_issues_register.created_at` / `occurred_at`, `operational_ledger.created_at`, Hub `hub_issue_notes.stamped_at`, session open/close, resolve / workaround times. Display prefers `occurred_at` (fallback `created_at`). Use `operationalRowStamps()` on issue inserts.
+- **Must not:** `new Date()`, `new Date().toISOString()`, or `new Date().toISOString().slice(0, 10)` for those paths.
 - **UI:** Sticky `DevOperationalClockBar` in `__root.tsx` — tap to open sheet; ±1 day / ±15–60 min shortcuts; Clear → live.
-- **Audit trail:** Ledger `created_at` / operator action timestamps still use **real** wall time. Only operational *decisions* (which day is today, overdue minutes) use the override.
-- **Frozen clock:** Override is a fixed Sydney wall instant until changed — it does not auto-tick.
+- **Audit-only exception (wall clock OK):** Sync-metadata such as outbox `savedAt` (when the device queued a write — not when the stop happened). SIM expiry: compare the Sydney **wall** date SIM was set on vs live `new Date()` — never use SIM to decide whether SIM itself is stale. If the **operator** will see the time on a screen, it is not this exception — stamp with `operationalNowIso()`.
+- **Frozen clock:** Override is a fixed Sydney wall instant until changed — it does not auto-tick. It is **temporary**: stored with the Sydney **wall** date it was set on; expired at the next Sydney midnight (or if the blob has no set-on date — old forever-persist SIM). Also cleared on **day email login** and **PIN on `/auth`**. Not cleared on idle PIN unlock or action step-up. Refresh the same calendar day keeps it. Production has no SIM.
 
 #### Display formats (mandatory)
 
@@ -300,8 +309,8 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 
 #### Storage layer (unchanged)
 
-- **Instants:** UTC ISO strings (`new Date().toISOString()`) for `timestamptz` columns and ledger metadata.
-- **Calendar dates:** Plain **`YYYY-MM-DD`** strings in the database (`event_manifest.start_date`, `end_date`, session dates, etc.). Only the **display layer** uses `dd-Mmm-yy`; parsing back from pickers uses `parseIsoDateLocal` / `toIsoDateString` without UTC day-shift.
+- **Instants:** UTC ISO strings for `timestamptz` columns. **Write** them with `operationalNowIso()` (or `resolveOperationalNow().toISOString()`) so DEV/TEST SIM TIME is stored. Do not use `new Date().toISOString()` for floor/operator stamps.
+- **Calendar dates:** Plain **`YYYY-MM-DD`** strings in the database (`event_manifest.start_date`, `end_date`, session dates, etc.). “Today” for writes = `todayLocalIso()` / `getOperationalTodayIso()`. Only the **display layer** uses `dd-Mmm-yy`; parsing back from pickers uses `parseIsoDateLocal` / `toIsoDateString` without UTC day-shift.
 
 ---
 
@@ -652,8 +661,40 @@ Differences that are **violations**:
 | Drag reorder + cancel dialog | `src/components/manifest/manage-pickups-panel.tsx` |
 | Trip start (events) | `startTrip()` — `src/lib/data-store.ts` |
 | Trip start (Day Centre) | `startDayCentreRun()` — `src/lib/data-store.ts` |
+| One run slot | `assertTransportRunSlotStartable` — `src/lib/api/transport-run-exclusivity.ts` |
 | Chain recompute + persist | `computePickupChainEndpoints`, `rebuildTripPickupChain`, `reorderTripPickupLegs` — `src/lib/data-store.ts` |
 | Site address defaults | `src/components/admin/transport-site-addresses-panel.tsx` |
+
+#### 11.9 One Manifest per run slot (locked 2026-08-23)
+
+**One live trip** per slot. A second person cannot open the same run. A **closed** slot cannot be started again.
+
+| Slot | Identity |
+| :-- | :-- |
+| Event Transport IN / HOME | `event_id` + trip date + bus run + direction (`trip_return`) |
+| Day Centre morning / afternoon | Operational today + bus run + direction |
+| Venue hop | Existing hop trip — already named-block if another driver has it active |
+
+Same staff + still `active` → resume that trip (do not insert another). Anyone else → error naming who has it. Slot `completed` → error; second bus is an **incident** (manager override later). Cancel the abandoned trip first if the holder walked away.
+
+SQL: `docs/sql/2026-08-23_transport_run_slot_exclusivity.sql` (cancel leftover active drafts + unique indexes).
+
+#### 11.10 No one left behind — bus boarding (locked 2026-09-03)
+
+**Bus head count is every person on that vehicle**, not clients only.
+
+| Surface | Who must appear on boarding |
+| :-- | :-- |
+| Day Centre morning pickups | Each pickup stop — participant **or** staff/volunteer/carer (`isPassengerPickupLeg`) |
+| Day Centre afternoon return | Pre-departure return boarding roll — same person set as drop-off stops |
+| Event Transport IN / HOME | `event_bus_manifest` — rostered bus travellers including event support bookings |
+| Multi-day / single-day **venue hops** | `event_bus_manifest` for that hop — everyone still with the group (checked-in participants, accompanying carers, trip support people not absent/checked out) |
+
+**Off the bus** only via the same explicit paths as a participant: **not travelling** / Skip, cancelled pickup, or Left trip. Role (carer, volunteer, staff) must **not** drop someone from the list.
+
+**Not this rule:** overnight **morning** and **evening/curfew** rolls (§12.5), meals, and meds remain **participants only**. Support people are not roll-called at the hotel; they still board the bus with the group unless marked not travelling.
+
+Code: `isPassengerPickupLeg` / return boarding in `src/routes/manifest.tsx`; hop seed `seedBusManifestForHop` in `src/lib/api/event-hop-transport.ts`; IN/HOME `seedBusManifest` in `src/lib/api/event-day-ops.ts`. Agent rule: `.cursor/rules/bus-no-one-left-behind.mdc`.
 
 ### Amendment Process (§11)
 
@@ -661,7 +702,7 @@ Differences that are **violations**:
 
 ---
 
-## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended same day — Day Centre parity)
+## 12. Venue Registry, Outing Trips & Multi-Day Accountability (Locked — effective 2026-07-04; amended 2026-07-04 Day Centre parity; amended 2026-08-23 bus HOME close gate; amended 2026-09-03 no-one-left-behind boarding)
 
 > Status: Permanent Build Requirement. Applies to **out-of-centre single-day outings**, **multi-day tours**, and the **Venue Management** registry. Extends §11 (driver manifest) and Day Centre patterns (`client_attendance_log`, `site_day_sessions`) — **same cadence, temporary centre at the venue**. Does **not** replace Day Centre modules.
 
@@ -676,11 +717,11 @@ These trips are **not NDIS-funded**. Safety, auditability, and internal P&L repo
 | **Centre parity** | Single-day and multi-day outings use the **same separation** as Day Centre: **transport** (bus runs, manifests) vs **site** (leader open, arrival roll, program, departure handover, close). Events are **not** a different operational model. |
 | **Two accountability layers** | **Transport layer:** `event_bus_manifest` + §11 driver manifest — who is on **this bus for this leg**. **Event-floor layer:** `event_attendance_log` (planned; mirrors `client_attendance_log`) — who has **arrived at / departed from** the temporary centre. **Neither layer substitutes for the other.** |
 | **Hard open = event starts** | Trip leader **opens the location** (Manager PIN + on-the-day venue checks, parallel to Day Centre open). **RED blocks open** — buses may be turned around; self-transport contacted. Kinship transport may start **hours before** open; that does **not** start the event. |
-| **Hard close = handover done** | Trip leader **closes the location** after **departure handover** — every participant on assigned return transport (bus / self). Leader **does not** wait for the last home drop-off. |
+| **Hard close = handover done** | Trip leader **closes the location** after **departure handover**. **Self:** venue checkout is enough. **Bus:** checkout **and** the person is on the HOME Manifest (driver has the name — pending or completed drop-off leg). Leader **does not** wait for the last home drop-off. *(Amended 2026-08-23 — close the gap between the venue wave-goodbye and the driver asking where everyone is.)* |
 | **Transport home** | Return legs completed and reconciled via §11 manifest (parallel to Day Centre going-home logging). **`event_manifest` → Closed** is not blocked on the last drop-off completing. |
 | **Venue safety (planning) ≠ live roll** | Registry baseline sign-off (§12.2) is **planning/compliance**. Live rolls are §12.4 event-floor + bus boarding + curfew/morning (multi-day). |
 | **One hop = one trip** | Each venue leg (Hotel → Park → Cinema → Hotel) is exactly **one** `transport_trip` with its own manifest lifecycle per §11. |
-| **Check on at bus boarding** | Before every hop **depart**, every expected bus traveller is checked **onto the bus** — transport accountability for that leg only. |
+| **Check on at bus boarding** | Before every hop **depart**, **every person on that hop** (participant, staff, volunteer, carer) is checked **onto the bus** or marked **not travelling** — same as §11.10. Transport accountability for that leg only. Overnight rolls stay participants-only (§12.5). |
 | **Group hop arrival** | When the **whole group** travels together on one bus, **no per-person event-floor check-in at the hop destination** — group presence is implied unless an incident was logged en route. |
 | **Self-transport** | Permitted **only** on **first day inbound** and **last day outbound** (roster + API). Self arrivals are checked in on the **event-floor roll** as they arrive at the venue. |
 | **Trip leader on duty** | A **Manager** (or Coordinator with manager-equivalent PIN per §7) must be assigned to **`event_day_sessions`** for each calendar day before Confirm. UI label: **Trip leader** (not “Day Centre manager”). |
@@ -843,7 +884,7 @@ Transport accountability only — keyed by `event_day_session_id` + `transport_t
 
 | Column | Purpose |
 | :-- | :-- |
-| `participant_id` / `carer_id` | Who is expected on **this bus for this leg** |
+| `participant_id` / `staff_id` / `carer_id` | Who is expected on **this bus for this leg** — one person per row |
 | `status` | `expected` \| `on_bus` \| `not_travelling` |
 | `checked_on_at` / `checked_on_by` | Tap when **boarding** — §4.4 fat-finger cards |
 
@@ -851,9 +892,10 @@ Transport accountability only — keyed by `event_day_session_id` + `transport_t
 
 1. **Every venue hop = one new `transport_trip`** (`trip_kind` e.g. `event_venue_hop`). Driver uses §11 manifest for that hop only.
 2. Trip leader or coordinator completes **bus boarding roll before driver Depart Stop**.
-3. **Depart gate:** all expected → `on_bus`; no active RED lock on trip day; optional manager PIN on depart.
-4. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
-5. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
+3. **Depart gate:** all expected → `on_bus` **or** `not_travelling`; no active RED lock on trip day; optional manager PIN on depart.
+4. **No one left behind (§11.10):** seed participants **and** staff/volunteers/carers still with the group. Do not build hop boarding from `participant_id` / checked-in clients only.
+5. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
+6. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
 
 #### 12.4.3a Outbound vs. return runs — two separate manifests
 
@@ -907,7 +949,7 @@ Transport HOME — return manifest (separate trip, trip_return = depot):
 | :-- | :-- |
 | **Day 1 — arrive at first stop** | Transport in (bus/self) → trip leader **opens location** → **event-floor check-in** (handover from transport) |
 | **Staying at venue until curfew** | No constant re-check-in — **curfew roll** (bedtime) + **morning roll** (breakfast) at base only — §12.5 |
-| **Daily bus hops** | **Boarding roll** when getting on bus → drive → group arrival at next location (no per-person floor check-in at destination) |
+| **Daily bus hops** | **Boarding roll** for **everyone still with the group** when getting on bus → drive → group arrival at next location (no per-person floor check-in at destination). Stay-behind = **not travelling**, same as a participant. |
 | **Return to hotel** | Boarding roll → if no incident en route, group back at base |
 | **Between days** | Repeat open/hops/curfew/morning pattern |
 | **Last day** | Morning roll (if applicable) → program → departure handover → **close location** → return transport home → **close event** |
@@ -927,7 +969,7 @@ Do **not** keep executable Arrival / Bus boarding / Morning / Evening rolls in M
 
 | Gate | Rule |
 | :-- | :-- |
-| **Day close** | Intermediate nights: once **evening roll is complete** (everyone accounted/absent). Final / single day: **Check-Out handover** complete (nobody still checked in). May close **before** the scheduled curfew clock (high-trust; `close_declared_at` + ledger are the audit). Open Yellow OK; open RED still blocks where existing open/close rules say so. Day close does **not** wait for Manifest home drops. |
+| **Day close** | Intermediate nights: once **evening roll is complete** (everyone accounted/absent). Final / single day: **Check-Out handover** complete (nobody still checked in) **and** every bus handover is on the HOME Manifest (self-transport needs venue checkout only). May close **before** the scheduled curfew clock (high-trust; `close_declared_at` + ledger are the audit). Open Yellow OK; open RED still blocks where existing open/close rules say so. Day close does **not** wait for the last Manifest home drop — only that the driver has them on the return run. |
 | **Sequential open** | Cannot **Open location** on Day N+1 while Day N is not `closed_orderly` / `closed_incident`. |
 | **Event → Closed** | All day sessions closed + no open RED + final-day departure cleared + return transport home complete when bus passengers exist (`guardOpenToClosed` + `event-lifecycle-gates.ts`). |
 | **Status integrity** | UI must not show Closed while trip days remain open; repair reopens `event_manifest.status` to Open if that inconsistency is found. |
@@ -938,14 +980,16 @@ Code: `src/lib/api/event-lifecycle-gates.ts`, `openEventLocation` / `closeEventL
 
 | Concept | Table / field | Meaning |
 | :-- | :-- | :-- |
-| **Planning / Confirm / Open / Closed** | `event_manifest.status` | **Office lifecycle** — roster ready, trip authorised, finance lock at end |
+| **Planning / Confirm / Open / Closed** | `event_manifest.status` | **Office lifecycle** — roster ready, trip authorised; **finance writable until Closed** (`billing_locked`) |
 | **Open / close location** | `event_day_sessions.phase` | **Operational floor** — trip leader has opened/closed the temporary centre that day |
 
 `event_manifest.status` → **Open** authorises transport and coordinator workflows; **the event floor starts** only when trip leader **opens location** (`active`). Do not conflate the two.
 
 ### 12.5 Curfew & Morning Rolls — YELLOW → RED → SMS
 
-Multi-day **curfew** and **morning** accountability mirror **`client_attendance_log`** escalation semantics (`src/lib/api/client-attendance.ts`):
+Multi-day **curfew** and **morning** accountability are **participant (client) rolls only** — do not add staff, volunteers, or carers to hotel head-count. Support people board with the group on hops (§11.10) instead.
+
+These rolls mirror **`client_attendance_log`** escalation semantics (`src/lib/api/client-attendance.ts`):
 
 | Mechanism | Rule |
 | :-- | :-- |
@@ -989,8 +1033,10 @@ This § applies to `compliance_assets` tied to trip infrastructure where relevan
 | Existing asset | Trip use |
 | :-- | :-- |
 | `event_roster_bookings` | Attendee revenue, carer flags, transport modes |
-| `event_financial_ledger` + Finance tab | Vendor expenses (venue hire, tickets, meals, transport) |
-| `recordEventPaymentMilestone` | Payment tracking |
+| `event_financial_ledger` + Finance tab | Vendor expenses (venue hire, tickets, meals, transport) — create/edit/delete until Closed |
+| `recordEventPaymentMilestone` / refund / edit / delete | Payment tracking; booking `amount_paid` recomputed from event-tagged ledger lines |
+
+**Finance lock (office):** Writable while `event_manifest.status !== 'Closed'` and `billing_locked` is false. Promoting to **Closed** sets `billing_locked`; all expense and payment/refund write paths call `assertEventFinanceWritable` and throw a clear **Billing locked** error. UI hides/disables money actions; history stays read-only. Edit/delete is **in place** (no void-and-repost).
 
 NDIS claim generation is **out of scope** for these trips. Internal P&L only.
 
@@ -1080,7 +1126,7 @@ First production slice for **Movies-style single-day**: Phases 1–3 + **Phase 8
 | Driver manifest | §11 — `src/routes/manifest.tsx` | One invocation per hop |
 | Day Centre arrival roll | `src/components/site-day/attendance-roll-panel.tsx` | **Template for `event_attendance_log` UI (Phase 8)** |
 | Day Centre open/close | `src/lib/api/site-day-sessions.ts`, `start-of-day-panel.tsx` | **Template for open/close location (Phase 8)** |
-| Bus boarding roll | `src/components/events/bus-check-on-panel.tsx` | Transport layer only — do not treat as event-floor roll |
+| Bus boarding roll | `HopBoardingPanel` on `/manifest`; seed `seedBusManifestForHop` | Transport layer only — do not treat as event-floor or overnight roll. `bus-check-on-panel.tsx` is unused legacy. |
 | Attendance sweep + SMS | `src/lib/api/client-attendance.ts` | Template for event-floor + curfew sweep |
 | Event day ops | `src/lib/api/event-day-ops.ts` | Split: bus manifest vs attendance log |
 | Venue admin | `src/routes/admin.tsx` → Venues tab | Built |
@@ -1102,6 +1148,7 @@ Rules:
 - **Do not merge Setup and Deliver** — they have different rhythms, different primary users, and different UI density requirements.
 - **Event Deliver** must also be launchable **from inside an event card** in `/events` (a "Run this event" button when the event is confirmed and today is a valid trip day).
 - **Trip Report** remains in `/events` as a tab; it is **not** inside Event Deliver — closing the field session triggers a return to office review.
+- **Live watch (BL-120):** Event Manage **Live** tab is a **read-only office projection** of the same tables Deliver and Manifest write (group status, named pickups, attendance, programme, rolls, open issues). It is **not** a fourth write surface and must not expose board / check-in / open-location / Resolve controls. Hub remains issue close-out. Stage chips: grey = not started; blue = happening; green = that stage finished.
 
 #### 12.13.2 The Extended Golden Rule (locked)
 
@@ -1145,14 +1192,18 @@ Specifically:
     • RED on open checks → cannot open (same gate as Day Centre)
     • Manager PIN → Trip status = "Active" → ledger EVENT_TRIP_OPENED
        ↓
-[4] Activity loop (one cycle per venue / activity)
-           ┌─ Open activity
-           ├─ Movement method: Bus | Walk | On-site (at same location)
-           │   ALL: individual check-in per person before activity starts
-           │   Bus: §11 Manifest boarding roll for this hop (driver handles)
-           │   Walk/on-site: activity check-in roll (same UI as arrival roll — tap each person)
+[4] Activity loop (one cycle per venue / activity) — leave-from-current
+           ┌─ On the **current** stop card: Leave for {next} / Close & leave…
+           │   Ask Bus | Walk | On-site **every hop** (Hotel→Joes bus, Joes→Park walk, …)
+           │   Bus: Release on current card → §11 Manifest → depart → arrive
+           │        (current completes on Release; destination stays Pending until finalize)
+           │   Walk/on-site: opens next + completes current in one step
+           ├─ Pending destination: waiting-only (no Release / movement picker there)
+           ├─ At destination (bus: after Manifest hop arrive / finalize):
+           │   Activity is open — individual accountability already done at boarding
+           │   (walk/on-site: tap check-in roll at activity start)
            ├─ Anomaly / INCIDENT button available throughout
-           └─ Close activity → group assumed (button; no per-person close-out needed)
+           └─ Final stop of day: plain Complete (evening roll / check-out)
                 └─ Unresolved incident blocks close until logged / workaround accepted
            (Repeat for each activity in the itinerary)
        ↓
@@ -1200,7 +1251,7 @@ All must use `useRealtimeInvalidate` (§10.3) — no ad-hoc channel subscription
 
 - **Entry point:** Top-level menu item `Event Deliver` (same level as `Manifest`, `Day Centre`). Also available as a `Run this event` button inside the event card when status = `confirmed` or `open` and today is a valid trip day.
 - **Active events list:** Cards show event name, today's phase, outstanding check-ins. Touch-friendly full-width cards.
-- **All CTAs:** `FieldActionButton` (§BL-060 Manifest audit pattern) — `h-14`, full-width, variant by context (`success` for open/close, `caution` for exceptions).
+- **All CTAs:** `FieldActionButton` — `h-14`, full-width. Next commit = `caution` (+ `pulse`). Selected/done = `success`. You-are-here = `primary`. Danger = `destructive`. UI-STYLE-GUIDE Floor CTA colours.
 - **Movement method picker:** `MobileFieldButton` tap list (Bus / Walk / Already on-site) — not a native Select.
 - **Arrival and checkout rolls:** Same `MobileOptionButton` / full-width touch rows as Day Centre attendance (§4.4).
 - **No extra fields or steps** not specified here — ask before adding.
@@ -1215,8 +1266,8 @@ Canonical status sequence for a **multi-day overnight** day (example: hotel base
 | :-- | :-- | :-- |
 | 1 | **Check in at {base}** / **All checked in at {base}** | `event_attendance_log` arrival roll (Check-In tab) |
 | 2 | **Morning roll call** / **Morning roll — all accounted** (or **Morning roll complete** if any Absent) | `event_morning_log` (§12.5) — **Day 2+ only** (not first day) |
-| 3 | **Board bus — depart {from} for {to}** | Individual boarding via **§11 Manifest** (driver); trip leader sees counts from `event_bus_manifest` and/or `trip_legs` |
-| 4 | **At {destination}** / **In transit to {destination}** | Active `event_venue_stops` phase + hop `transport_trips` leg state |
+| 3 | **Board bus — depart {from} for {to}** | Trip leader **Close & leave** on the **current** card (ask Bus each hop) → **Release** → individual boarding via **§11 Manifest**; destination stays `pending` until hop arrive |
+| 4 | **At {destination}** / **In transit to {destination}** | **In transit** = hop trip `active` + leg `en_route`. **At destination** = hop trip `completed` (finalize opens destination `active`) — never Open/Release on the destination Pending card |
 | 5 | **Board bus — return {from} → {base}** | Next itinerary hop (requires return stop in Itinerary — e.g. venue again as final stop) |
 | 6 | **Evening roll call** / **Evening roll — all accounted** (or **Evening roll complete** if any Absent) | `event_curfew_log` (§12.5) — **non-final nights only**; deadline from `curfew_time` |
 
@@ -1271,6 +1322,16 @@ Phases are **sequential** — do not start B before A ships to production.
 
 > **2026-07-13 — Project owner directive (activity check-in amendment):** Every activity requires **individual check-in per person regardless of transport method** — both bus hops and walk/on-site activities. Time has passed since the last roll call; a person may be unwell or missing. Bus hops: individual boarding via §11 Manifest (existing). Walk/on-site: individual activity check-in roll (same tap-per-row UI as arrival roll). Group completion is *assumed* at activity close (no per-person close-out required) unless an incident is logged mid-activity. This supersedes the earlier "walk = group departure confirm" wording in §12.13.2.
 
+> **2026-08-06 — Project owner directive (hop custody gating):** Programme must not Open a bus destination before the hop arrives. Manifest must not prepare a hop without trip-leader Release. Group Status **Board bus** stays current until release/boarding/transit — destination `active` alone must not skip boarding.
+
+> **2026-08-07 — Project owner directive (leave-from-current handoffs):** Trip leader stays mentally on the **current** activity. **Close & leave…** / **Leave for {next}…** on the current card asks **Bus | Walk | Other | On-site every hop** (`movement_method` stays NULL until chosen — never default/reset to bus). **Other** = train/tram/public (activity check-in, no Manifest hop). Bus **Release** lives on that same card (not on the next Pending stop). Current completes on Release (or on walk/other start); destination opens on Manifest arrive. Pending destinations are waiting-only. SQL: `2026-08-07_venue_stop_movement_ask_other.sql`.
+
+> **2026-08-08 — Project owner directive (activity check-in before leave):** Walk / Other / on-site venue activities must finish **individual activity check-in** (zero `expected` on `event_activity_rolls`) before **Close & leave**, Release, or Complete. Premature complete shows **Resume activity check-in**. After walk/other leave, UI focuses the destination card for check-in.
+
+> **2026-08-09 — Project owner directive (reversible leave plan):** Choosing **Bus | Walk | Other | On-site** only plans movement on the next stop. Confirm is separate: **Release group to bus** (Manifest) or **Leave for {next}** (open check-in). Until confirm, embedded **Method** + **Undo** chips (Check-In parity) reverse or change the choice.
+
+> **2026-08-09 — Project owner directive (event finance until Closed):** Events Manage Finance + Roster money (expenses, payments, refunds) stay editable/deletable in place until **Closed** / `billing_locked`. Writes use `assertEventFinanceWritable`; booking `amount_paid` recomputed from event-tagged ledger.
+
 > **2026-07-14 — Project owner directive (group status panel):** Event Deliver shows a live **Group status** timeline (§12.13.8): all checked in at base → board bus via Manifest for each hop → at destination → return hop to base → off bus here until curfew. Counts refresh from attendance, venue stops, bus manifest, and transport legs.
 
 > **2026-07-18 — Project owner directive (group status — morning/evening rolls):** Multi-day Group status includes **Morning roll** (Day 2+) after all checked in, and **Evening roll** as the final overnight step (non-final nights). Programme / first hop is **blocked** until morning roll is complete. Labels prefer “Evening roll” over “Curfew” (time still shown as deadline).
@@ -1295,6 +1356,10 @@ Phases are **sequential** — do not start B before A ships to production.
 
 > **2026-07-20 — Project owner directive (Day Centre open ignores trip REDs):** A missing client on a trip morning/evening roll (or any event-floor RED with `event_id` / `event_day_session_id`) must **not** block Day Centre Open Centre. Gate uses Day-scoped REDs only (`event_id` and `event_day_session_id` both null). Hub still shows trip REDs; Event Deliver location open stays session-scoped.
 
+> **2026-09-17 — Project owner directive (Lost Soul Rule):** A person who is late or still missing (Day Centre arrival overdue, client or support) raises a RED that **stays open in the Hub** for review. That RED **must not** block Open Centre. Mark **Absent** if they never arrive; **check in** if they turn up or are found (RED is not auto-closed). Next operating day proceeds for everyone else. Implementation: `isLostSoulAttendanceIssue` / `doesIssueBlockDayCentreOpen`.
+
+> **2026-09-17 — Project owner directive (SIM log stamps):** Operator-visible timestamps on REDs, Logs, Hub notes, and session open/close honour SIM TIME (`operationalNowIso()` / `operationalRowStamps()`), including `operational_ledger.created_at`. Display prefers `occurred_at`. Outbox `savedAt` stays wall clock. Historical rows written before this may still show wall `created_at`.
+
 > **2026-07-18 — Project owner directive (Event Deliver Reset Start of Day — test only):** Mid-tour QA rewind for **the current trip day only** (stay on Day N). Wipes floor ops (morning/evening rolls + Hub issues, activity rolls, hop/outbound/return trips, later stop runtime); also wipes **`asset_daily_clearance` for that calendar date** so Manifest walkaround can be re-run. Keeps leader, roll clocks, itinerary. **Day 1:** ends ready to Open Location. **Day 2+:** overnight continuity — location left **active**, roster **checked in**, wake at prior-night base so Morning Roll is available without redoing arrival Check-In. Always sets DEV clock to `session_date` @ **07:00** Syd. Not Trip Days “Reset trip days”. Gated by `IS_TEST_BUILD`. Implementation: `resetEventDayToStartOfDay` + `ResetEventDayButton`. SQL: `docs/sql/2026-07-18_event_day_start_reset.sql`.
 
 ---
@@ -1307,7 +1372,7 @@ Phases are **sequential** — do not start B before A ships to production.
 
 ### 13.1 The Global Button
 
-A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else.
+A prominent `INCIDENT / FAULT` button (red pill, AlertTriangle icon) is mounted on **every screen** via `GlobalIncidentIntakeDrawer`. Default position adapts per screen: top strip on `/manifest` (thumb-safe); bottom-right everywhere else. Operators may **drag** either this pill or the green Raise ticket pill; the spot is remembered on that device (`localStorage`). Floating pills sit above Dialog/Sheet chrome so they do not cover Close / Save in form headers.
 
 The button is **never context-specific** — available at all times so staff can report anything immediately without navigating first. Label remains **Incident / Fault**; the chooser includes Health & Safety as a third lane.
 
@@ -1422,15 +1487,16 @@ Both utilities are exported from `src/lib/api/site-issues.ts`. **Never display a
 
 ## 14. Governance Hub Structure & Issue Routing
 
-### 14.1 Three-Tab Governance Hub
+### 14.1 Governance Hub tabs
 
-The Governance Hub (`/governance`) has three tabs. **RYGE severity applies equally across all three tabs** — any tab can have Red, Yellow, Green, or Escalation items. Tab membership is determined by *source/context*, not by severity.
+The Governance Hub (`/governance`) has four tabs. **RYGE severity applies equally across Human / Maintenance / Compliance** — any of those tabs can have Red, Yellow, Green, or Escalation items. Tab membership is determined by *source/context*, not by severity. **App tickets** are always GREEN-equivalent and never write to the three operational registers.
 
 | Tab | Backing table | Purpose |
 | :-- | :-- | :-- |
 | **Human Incidents** | `operational_incidents` (`incident_type = 'human_operational'`) + `site_issues_register` | Injuries, welfare concerns, disputes, near-misses — anything involving a **person** |
 | **Maintenance & Repairs** | `maintenance_items` | Physical faults requiring repair: venue defects, broken equipment, asset failures, dented panels, graffiti |
 | **Compliance & Renewals** | `compliance_assets` | Expiry-driven items: insurance, vehicle rego, staff certs, formal audits — populated programmatically |
+| **App tickets** | `app_tickets` + `app_ticket_notes` | In-app support notes (TEST + PROD). Software / form problems — **not** incidents or physical repairs. BL-116. |
 
 > **Human Incidents tab** filters `operational_incidents` to `incident_type = 'human_operational'` only. Asset/mechanical incidents from the Equipment & Asset lane are tracked exclusively in Maintenance & Repairs via `maintenance_items`. Health & Safety Hub cards (infectious, emergency, site hold) use Hub area `health_safety` — not Big Red Human/Asset writes.
 
@@ -1451,12 +1517,14 @@ The table below is the single source of truth for all write paths. **Source dete
 | **Day Centre Walk-around** (site-day LogAnomalyModal) | Day Centre session | ✓ ALL RYGE + Human Incidents via `session_id` | ✗ | ✓ ALL RYGE `centre_issue` | Maintenance & Repairs |
 | **Bus / Vehicle Pre-trip Walk-around** | Pre-trip clearance | ✓ via `asset_clearance_items` | ✗ | ✓ ALL RYGE `vehicle_issue` | Maintenance & Repairs |
 | **Compliance engine** | Programmatic | ✗ | ✗ | ✗ | Compliance & Renewals |
+| **Raise ticket** (green) | Any | ✗ | ✗ | ✗ | App tickets (`app_tickets`) |
 
 **Key rules:**
 - **GREEN issues are NOT informational-only.** A Green issue is a low-priority note (graffiti, dented panel) that still needs staff follow-up. Green issues appear in the appropriate tab based on source.
 - Walk-arounds (Venue, Day Centre, Bus) always write to **Maintenance & Repairs**.
 - The Big Red Button gate (Human vs Asset vs Health & Safety) determines the path — H&S never opens the free-text INCIDENT RYGE form.
 - `operational_incidents` always receives a record for Human/Asset audit purposes, but only `human_operational` rows display in the Human Incidents tab.
+- **App tickets never write** to `operational_incidents`, `site_issues_register`, or `maintenance_items`.
 
 ---
 
@@ -1475,6 +1543,14 @@ The table below is the single source of truth for all write paths. **Source dete
 Implementation anchors:
 - `src/components/global/incident-intake-dialog.tsx` → `commitWrite()` (Human/Asset)
 - `src/components/global/global-health-safety-flow.tsx` (Health & Safety)
+
+### 14.3.1 Raise ticket (BL-116)
+
+Green companion to Big Red — **not** a fourth Incident lane. Available globally as a **draggable** pill (same device-sticky behaviour as Incident / Fault). Open forms still stamp the ticket with the dialog/sheet title. Always GREEN-equivalent (description + auto context). Writes **only** to `app_tickets`. Hidden on PIN, Incident / Fault, and the Raise ticket dialog itself. Not a header chip inside Dialog / Sheet (that covered Close on iPhone/iPad). Hub **Log Note / Resolve** prefills a mailto To the opener (`staff_registry.email`) with the latest update and notes so far — operator edits or sends (same stance as Council mailto). New-ticket Postmark notify to Admin To remains a separate office-inbox path.
+
+Office inbox: Dashboard Exception Hub Band 3 **App tickets** tile (all open items; amber while any remain) plus optional **server email** (Postmark) to Admin `app_tickets.notify_to`. Filing succeeds if mail is skipped or fails. Not Council mailto (BL-062).
+
+Implementation: `GlobalRaiseTicketDrawer`, `RaiseTicketDialog`, `TicketSurfaceProvider`, `useAppTicketsTileFeed`, `/api/internal/app-ticket-notify`.
 
 ---
 

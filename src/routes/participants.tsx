@@ -1,6 +1,6 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { ShieldCheck, UserPlus, Search } from "lucide-react";
+import { useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import {
@@ -14,7 +14,11 @@ import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
+import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
+import { type OnboardingCase } from "@/lib/api/onboarding";
 import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import type { Participant } from "@/lib/data-store";
@@ -48,7 +52,19 @@ function ParticipantsPage() {
   // another screen) immediately re-fetches the Bus/Self indicator grid.
   useRealtimeInvalidate({
     table: "participant_attendance_schedules",
-    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"]],
+    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"], ["bus-run-default-routes"]],
+  });
+  useRealtimeInvalidate({
+    table: "bus_run_default_routes",
+    queryKeys: [["bus-run-default-routes"]],
+  });
+  useRealtimeInvalidate({
+    table: "trip_legs",
+    queryKeys: [["run-live-status"]],
+  });
+  useRealtimeInvalidate({
+    table: "attendance_roster_logs",
+    queryKeys: [["run-live-status"], ["attendance_logs"]],
   });
 
   const [selected, setSelected] = useState<Participant | null>(null);
@@ -58,8 +74,25 @@ function ParticipantsPage() {
   const [search, setSearch] = useState("");
   const [dayFilter, setDayFilter] = useState("all");
   const [transportFilter, setTransportFilter] = useState("all");
+  const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const [showExited, setShowExited] = useState(false);
+  const exitedCount = participants.filter(
+    (p) => p.participantKind !== "guest" && p.serviceStatus === "exited",
+  ).length;
+  const activeCount = participants.length - exitedCount;
+  const visibleParticipants = useMemo(
+    () =>
+      showExited
+        ? participants
+        : participants.filter(
+            (p) => p.participantKind === "guest" || p.serviceStatus !== "exited",
+          ),
+    [participants, showExited],
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -67,7 +100,29 @@ function ParticipantsPage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Participants directory</h2>
           <p className="text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
+            {isLoading
+              ? "Loading…"
+              : `${activeCount} active${exitedCount > 0 ? ` · ${exitedCount} exited` : ""} · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
+            {canOpen("onboarding") ? (
+              <>
+                {" "}
+                Full intake pack (print / sign / file):{" "}
+                <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+                  Hub → Onboarding
+                </Link>
+                .
+              </>
+            ) : null}
+            {canOpen("run_planning") ? (
+              <>
+                {" "}
+                Bus run order for everyone is in{" "}
+                <Link to="/run-planning" className="underline underline-offset-2">
+                  Run Planning
+                </Link>
+                .
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -75,9 +130,24 @@ function ParticipantsPage() {
             <ShieldCheck className="h-4 w-4" />
             Record medication admin
           </Button>
-          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+          <Button
+            variant="outline"
+            onClick={() => setAddOpen(true)}
+            className="gap-1.5"
+          >
             <UserPlus className="h-4 w-4" />
-            Add new participant
+            Quick add
+          </Button>
+          <OnboardingBlankPrintButton pack="client" size="default" />
+          <Button
+            onClick={() => {
+              setOnboardingCase(null);
+              setOnboardingOpen(true);
+            }}
+            className="gap-1.5"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Client onboarding
           </Button>
         </div>
       </header>
@@ -105,6 +175,17 @@ function ParticipantsPage() {
             ))}
           </SelectContent>
         </Select>
+
+        {exitedCount > 0 && (
+          <Button
+            type="button"
+            variant={showExited ? "secondary" : "outline"}
+            className="h-11"
+            onClick={() => setShowExited((v) => !v)}
+          >
+            {showExited ? "Showing exited" : "Show exited"}
+          </Button>
+        )}
 
         <Select value={transportFilter} onValueChange={setTransportFilter}>
           <SelectTrigger className="h-11 w-48" aria-label="Filter by transport">
@@ -137,7 +218,7 @@ function ParticipantsPage() {
       )}
 
       <ParticipantTable
-        participants={participants}
+        participants={visibleParticipants}
         search={search}
         dayFilter={dayFilter}
         transportFilter={transportFilter}
@@ -151,10 +232,21 @@ function ParticipantsPage() {
         participant={selected}
         open={open}
         onOpenChange={setOpen}
+        onSaved={setSelected}
       />
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />
       <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
+      <OnboardingCaseDialog
+        open={onboardingOpen}
+        onOpenChange={(o) => {
+          setOnboardingOpen(o);
+          if (!o) setOnboardingCase(null);
+        }}
+        caseRow={onboardingCase}
+        packType="client"
+        onSaved={setOnboardingCase}
+      />
     </div>
   );
 }

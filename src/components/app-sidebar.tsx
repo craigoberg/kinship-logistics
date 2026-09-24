@@ -2,6 +2,8 @@ import { Link, useRouterState } from "@tanstack/react-router";
 import { HeartHandshake, AlertTriangle, PanelLeftClose, PanelLeftOpen } from "lucide-react";
 import { NAV_ITEMS } from "./bottom-nav";
 import { SyncIndicator } from "./sync-indicator";
+import { useMenuAccess } from "@/hooks/use-menu-access";
+import { pathToMenuKey } from "@/lib/menu-access";
 import { cn } from "@/lib/utils";
 import { useNoShowWatch } from "@/hooks/use-no-show-watch";
 import { Button } from "@/components/ui/button";
@@ -20,6 +22,12 @@ interface AppSidebarProps {
 export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const { count: noShowCount, thresholdMinutes } = useNoShowWatch();
+  const { canOpen } = useMenuAccess();
+  const visibleItems = NAV_ITEMS.filter((item) => {
+    const key = pathToMenuKey(item.to);
+    return !key || canOpen(key);
+  });
+  const showDayNoShow = canOpen("day");
 
   return (
     <TooltipProvider delayDuration={0}>
@@ -87,7 +95,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
           </div>
         )}
 
-        {noShowCount > 0 && !collapsed && (
+        {showDayNoShow && noShowCount > 0 && !collapsed && (
           <Link
             to="/day"
             className="mx-3 mt-3 flex items-start gap-2 rounded-md border border-yellow-500/60 bg-yellow-500/10 px-3 py-2 text-xs text-yellow-700 transition-colors hover:bg-yellow-500/20"
@@ -104,7 +112,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
           </Link>
         )}
 
-        {noShowCount > 0 && collapsed && (
+        {showDayNoShow && noShowCount > 0 && collapsed && (
           <Tooltip>
             <TooltipTrigger asChild>
               <Link
@@ -123,7 +131,7 @@ export function AppSidebar({ collapsed, onToggle }: AppSidebarProps) {
 
         <nav aria-label="Primary" className="flex-1 overflow-y-auto p-2">
           <ul className="space-y-1">
-            {NAV_ITEMS.map((item) => {
+            {visibleItems.map((item) => {
               const active = item.exact ? pathname === item.to : pathname.startsWith(item.to);
               const Icon = item.icon;
               const link = (

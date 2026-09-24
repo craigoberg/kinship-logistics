@@ -48,7 +48,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchApprovedRedWorkarounds,
   isDayCentreScopedIssue,
-  redHasAcceptedWorkaround,
+  doesIssueBlockDayCentreOpen,
 } from "@/lib/site-day/red-workaround";
 import { DayCentreBlockingRedResolveButton } from "./day-centre-blocking-red-resolve-button";
 import { ClientTime } from "@/components/ui/client-time";
@@ -61,6 +61,8 @@ import {
   resolveStaffDisplayName,
 } from "@/lib/data-store";
 import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   sessionId: string;
@@ -103,6 +105,13 @@ export function StartOfDayPanel({ sessionId }: Props) {
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [ticked, setTicked] = useState<Set<number>>(new Set());
   const mandatedItems = useMandatedChecks();
+  const openDuty = useDutyFunctionGap({
+    functionKey: "centre_open",
+    staffId: getStaffId(),
+    subjectLabel: "Day Centre open",
+    enabled: confirmOpen,
+    ledgerCategory: "CENTRE",
+  });
   const allChecked =
     mandatedItems.length === 0 || ticked.size >= mandatedItems.length;
 
@@ -124,14 +133,9 @@ export function StartOfDayPanel({ sessionId }: Props) {
     staleTime: 5_000,
   });
   const escMap = escMapQ.data ?? null;
-  // Deferred REDs are parked in Hub — they must not hold Open Centre (parity
-  // with fetchDayCentreBlockingReds). Accepted workarounds also clear the gate.
-  const blockingIssues = dayScopedOpen.filter((i) => {
-    if (i.status === "deferred") return false;
-    if (i.severity === "red") return !redHasAcceptedWorkaround(i, escMap);
-    if (i.severity === "yellow") return !i.workaroundPlan?.trim();
-    return false;
-  });
+  const blockingIssues = dayScopedOpen.filter((i) =>
+    doesIssueBlockDayCentreOpen(i, escMap),
+  );
   const hasBlocking = blockingIssues.length > 0;
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
   const registerIssues = sortSiteIssuesByRygeNewestFirst(dayScopedOpen);
@@ -254,7 +258,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
                     </span>
                     <div className="flex items-center gap-2">
                       <ClientTime
-                        iso={issue.createdAt}
+                        iso={issue.occurredAt}
                         className="text-xs text-muted-foreground"
                       />
                       {isManager ? (
@@ -440,6 +444,21 @@ export function StartOfDayPanel({ sessionId }: Props) {
             </AlertDialogDescription>
           </AlertDialogHeader>
           <div className="space-y-2 py-1">
+            {openDuty.needsGap && (
+              <DutyRequirementGapPanel
+                actorName={openDuty.actor?.fullName ?? "Check Leader"}
+                evalResult={openDuty.evalResult}
+                note={openDuty.note}
+                onNoteChange={openDuty.setNote}
+                managerId={openDuty.managerId}
+                onManagerIdChange={openDuty.setManagerId}
+                managerPin={openDuty.managerPin}
+                onManagerPin={openDuty.setManagerPin}
+                managers={openDuty.managers}
+                title="Centre open"
+                disabled={openMut.isPending}
+              />
+            )}
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Check Leader PIN <span className="text-rose-600">*</span>
             </Label>
@@ -451,9 +470,10 @@ export function StartOfDayPanel({ sessionId }: Props) {
               title="Declare site safe"
               description="PIN confirms the walkthrough is complete and opens the centre."
               required
-              disabled={openMut.isPending}
+              disabled={openMut.isPending || (openDuty.needsGap && !openDuty.approved)}
               onVerify={verifyOperatorPin}
-              onSuccess={() => {
+              onSuccess={async () => {
+                if (!(await openDuty.ensureApproved())) return;
                 setOpenerPinVerified(true);
                 openMut.mutate();
               }}

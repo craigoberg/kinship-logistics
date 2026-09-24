@@ -1,5 +1,6 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_STAFF_UUID,
   resolveStaffIdWithFallback,
   verifyStaffPin,
 } from "@/lib/data-store";
@@ -146,9 +147,11 @@ async function siteLedger(
   action: string,
   metadata: Record<string, unknown>,
   severity: "RED" | "YELLOW" | "GREEN" | "INFO" = "INFO",
+  opts?: { automated?: boolean },
 ): Promise<void> {
   try {
-    const staffId = await resolveStaffIdWithFallback();
+    const automated = opts?.automated === true;
+    const staffId = automated ? DEFAULT_STAFF_UUID : await resolveStaffIdWithFallback();
     const gps = await tryGetGps();
     await writeToLedger({
       staff_id: staffId,
@@ -157,7 +160,11 @@ async function siteLedger(
       action_type: `site_day.${action}`,
       gps_lat: gps?.lat ?? null,
       gps_lng: gps?.lng ?? null,
-      metadata,
+      metadata: {
+        location: "Day Centre",
+        ...metadata,
+        ...(automated ? { automated: true, actor_name: "System" } : {}),
+      },
     });
   } catch (err) {
     console.error("[site_day.ledger] write failed", err);
@@ -183,6 +190,22 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
 }
 
 /**
+ * Fetch a Day Centre session for any calendar date (YYYY-MM-DD).
+ * Read-only — does not provision a row. Used by the End of Day Report.
+ */
+export async function getSessionByDate(
+  date: string,
+): Promise<SiteDaySession | null> {
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .select("*")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToSession(data as SiteDaySessionRow) : null;
+}
+
+/**
  * Return today's session row if it exists, otherwise insert a fresh row in
  * `open_pending` phase. Written from the browser client under RLS — same
  * path the dual-PIN handshake updates use.
@@ -200,8 +223,13 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "initialize",
-    { session_id: next.id, session_date: next.sessionDate },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      why: "Day Centre session row created for the operational day",
+    },
     "INFO",
+    { automated: true },
   );
   return next;
 }
@@ -246,7 +274,12 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "open",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "Leader declared the centre open",
+    },
     "GREEN",
   );
   // BL-100 / BL-073 — seed Activities template (meals + med round) if empty.
@@ -277,7 +310,7 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
     .update({
       phase: "closed_orderly",
       closed_by_id: closedByUserId,
-      close_declared_at: new Date().toISOString(),
+      close_declared_at: operationalNowIso(),
       close_leader_notes: notes || null,
     })
     .eq("id", existing.data.id)
@@ -287,7 +320,12 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "close",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "All clients accounted",
+    },
     "GREEN",
   );
   return next;
@@ -352,6 +390,7 @@ export async function reopenSession(args: {
       session_date: next.sessionDate,
       manager_staff_id: args.managerStaffId,
       reason: args.reason,
+      why: args.reason,
       prior_close_at: priorCloseAt,
       prior_closed_by: priorClosedBy,
     },
@@ -473,7 +512,7 @@ export async function submitManagerHandshake(
     manager_plan_text: args.plan,
     manager_decision: args.decision,
     manager_auth_staff_id: args.managerStaffId,
-    manager_auth_at: new Date().toISOString(),
+    manager_auth_at: operationalNowIso(),
   };
   console.debug("[submitManagerHandshake] update payload", payload);
   const { data, error } = await supabase
@@ -548,13 +587,13 @@ export async function submitLeaderHandshake(
     .update({
       leader_decision: args.decision,
       leader_auth_staff_id: args.leaderStaffId,
-      leader_auth_at: new Date().toISOString(),
+      leader_auth_at: operationalNowIso(),
       phase: nextPhase,
       ...(bothGo
-        ? { open_declared_at: new Date().toISOString() }
+        ? { open_declared_at: operationalNowIso() }
         : {
             closed_by_id: args.leaderStaffId,
-            close_declared_at: new Date().toISOString(),
+            close_declared_at: operationalNowIso(),
           }),
     })
     .eq("id", args.sessionId)

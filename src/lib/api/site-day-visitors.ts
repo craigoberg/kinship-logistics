@@ -5,6 +5,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { operationalNowIso } from "@/lib/operational-clock";
 
 export type SiteDayVisitorKind =
@@ -130,13 +131,16 @@ export async function addSiteDayVisitor(input: {
     action_type: "SITE_DAY_VISITOR_ARRIVED",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       visitor_id: row.id,
       session_id: input.sessionId,
       display_name: row.displayName,
+      person_name: row.displayName,
       kind: row.kind,
+      location: "Day Centre",
       linked_participant_id: row.linkedParticipantId,
-    },
+      summary: `Visitor ${row.displayName} (${visitorKindLabel(row.kind)}) arrived at Day Centre`,
+    }),
   });
 
   return row;
@@ -169,12 +173,15 @@ export async function markSiteDayVisitorLeft(
     action_type: "SITE_DAY_VISITOR_LEFT",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       visitor_id: row.id,
       session_id: row.sessionId,
       display_name: row.displayName,
+      person_name: row.displayName,
       kind: row.kind,
-    },
+      location: "Day Centre",
+      summary: `Visitor ${row.displayName} (${visitorKindLabel(row.kind)}) left Day Centre`,
+    }),
   });
 
   return row;

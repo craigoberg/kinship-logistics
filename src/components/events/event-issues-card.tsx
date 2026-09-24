@@ -220,7 +220,7 @@ function IssueRow({ issue, verbalWorkaround, onResolve, resolving, resolved }: I
             </p>
           )}
           <div className="mt-1 flex flex-wrap items-center gap-2 text-[10px] text-muted-foreground">
-            <ClientTime iso={issue.createdAt} />
+            <ClientTime iso={issue.occurredAt || issue.createdAt} />
             <span className="uppercase tracking-wide font-semibold">{issue.severity}</span>
             {verbalWorkaround && !resolved && (
               <span className="font-semibold text-amber-700">Verbal workaround — pending Hub close-out</span>

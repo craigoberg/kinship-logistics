@@ -14,6 +14,8 @@ export const adminOverviewTopic: HelpTopic = {
     "backup",
     "menu access",
     "operating hours",
+    "activity log",
+    "change log",
     "audit pack",
     "configuration",
   ],
@@ -22,6 +24,7 @@ export const adminOverviewTopic: HelpTopic = {
   relatedIds: [
     "admin-venues",
     "admin-vendors",
+    "admin-duty-roles",
     "hub-update-sla",
     "checkin-roll-escalations",
     "event-open-checks",
@@ -30,31 +33,31 @@ export const adminOverviewTopic: HelpTopic = {
   steps: [
     {
       heading: "Lookups",
-      body: "Editable code lists (event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Named runs (R1, R2, …) feed multi-bus events and directory filters.",
+      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Certificates & orientations is the official ticket-name list for Duty roles and Staff. Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days drive the calendar Centre chips, staff Centre run, and attendance seeder defaults.",
     },
     {
       heading: "Fleet Register",
       body: "Vehicles for Manifest — rego/compliance context, current odometer hints, and odometer corrections. Depot/bus-run name lists often live under Lookups.",
     },
     {
-      heading: "Venues & Vendors",
-      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. See the dedicated how-tos.",
+      heading: "Venues, Vendors & Duty roles",
+      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, On the floor, Bus Driver) bound to floor functions — not menu access.",
     },
     {
       heading: "System Parameters — structured panels",
-      body: "Prefer named panels over raw JSON: Multi-day tour roll calls (default times + Green/Yellow/Red alert minutes + max deferral); Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack. Hub Update Due / Stale thresholds and attendance no-show / roll-call grace keys also live here as System Parameters.",
+      body: "Prefer named panels over raw JSON: Idle screen lock (minutes after last tap; 0 = off; default 15); Multi-day tour roll calls (default times + Green/Yellow/Red alert minutes + max deferral); Onboarding review windows (Band 3 yellow/red days); Mandated walkthrough checklists (Day Centre open/close, Event Deliver open location, meal prep ticks); Council email; MYOB export; NDIS Audit Pack. Hub Update Due / Stale thresholds and attendance no-show / roll-call grace keys also live here as System Parameters.",
     },
     {
       heading: "System Parameters — JSON table",
       body: "Other tunable keys live in the parameter table. Managers edit with justification; changes are ledgered. Do not put secrets (alarm codes) in checklist text — that belongs in the secrets backlog item.",
     },
     {
-      heading: "Centre Operating Hours",
-      body: "Expected centre open/close hours for the site calendar — not the same as Declare Site Safe & Open Day Centre PIN.",
+      heading: "Menu Access",
+      body: "Role × menu matrix (Manager-only). Ticks save to role_menu_access and hide menus the role cannot open. Manager is always granted every menu. Read-only and per-person scope come later.",
     },
     {
-      heading: "Menu Access",
-      body: "Role × menu matrix (Manager-only). Checkboxes are placeholders until BL-002 wires role_menu_access. Help soft-filters by role today.",
+      heading: "Activity log",
+      body: "Read-only who / what / where / when / why from the operational ledger, plus meal serves and medication doses. Type is a filter, not the place. GPS shows when captured. Check-in/out names the person and place (Day Centre or trip) and how they arrived or left. Automated Yellow/Red sweeps credit System. Date range, type filter, search. Cannot edit. Auditor USB ZIP is still NDIS Audit Pack under System Parameters.",
     },
     {
       heading: "Backup & Restore",
