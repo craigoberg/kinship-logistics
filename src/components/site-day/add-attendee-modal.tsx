@@ -33,11 +33,12 @@ import {
 } from "@/lib/api/client-attendance";
 import { useParticipantDirectoryIndicators } from "@/hooks/use-participant-indicators";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
-import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useLookupParameters, useTodaysPlannedBusRunCodes } from "@/hooks/use-supabase-data";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import {
   buildBusSelfPickerOptions,
+  filterBusRunOptions,
   floorSelectionKey,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
@@ -56,8 +57,12 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
   const [home, setHome] = useState<FloorTransportSelection | null>(null);
 
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const plannedRuns = useTodaysPlannedBusRunCodes();
   const homeOptions = useMemo(() => {
-    const busOpts = eventBusRunOptions(busRunLookups);
+    const busOpts = filterBusRunOptions(
+      eventBusRunOptions(busRunLookups),
+      plannedRuns.afternoonCodes,
+    );
     return [
       ...buildBusSelfPickerOptions(busOpts, "dayCentre", {
         busTitlePrefix: "Home on",
@@ -73,7 +78,7 @@ export function AddAttendeeModal({ open, sessionId, onClose }: Props) {
         label: "Indep",
       },
     ];
-  }, [busRunLookups]);
+  }, [busRunLookups, plannedRuns.afternoonCodes]);
 
   const eligibleQ = useQuery({
     queryKey: ["attendance-eligible-walkin", sessionId],

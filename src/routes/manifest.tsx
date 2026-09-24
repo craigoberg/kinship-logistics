@@ -1396,6 +1396,9 @@ function EventPickAndStart({
           ) : todaysRuns.length > 1 ? (
             <div className="grid gap-2">
               <Label htmlFor="bus-run">Which run?</Label>
+              <p className="text-xs text-muted-foreground">
+                Only runs assigned to today in Run Planning.
+              </p>
               <Select
                 value={selectedRun && selectedDirection ? `${selectedRun}:${selectedDirection}` : ""}
                 onValueChange={(v) => {

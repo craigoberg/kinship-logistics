@@ -5941,6 +5941,24 @@ function scheduledBusRunCode(
   return code && knownRunCodes.has(code) ? code : "";
 }
 
+/** True when a stored schedule weekday is the same day as `dayCode` (DAY-THU or Thursday). */
+function scheduleDayMatches(stored: string | null | undefined, dayCode: string): boolean {
+  const canon = (raw: string) => {
+    const v = raw.trim().toLowerCase();
+    if (v === "day-mon" || v === "monday" || v === "mon") return "mon";
+    if (v === "day-tue" || v === "tuesday" || v === "tue") return "tue";
+    if (v === "day-wed" || v === "wednesday" || v === "wed") return "wed";
+    if (v === "day-thu" || v === "thursday" || v === "thu") return "thu";
+    if (v === "day-fri" || v === "friday" || v === "fri") return "fri";
+    if (v === "day-sat" || v === "saturday" || v === "sat") return "sat";
+    if (v === "day-sun" || v === "sunday" || v === "sun") return "sun";
+    return v;
+  };
+  const a = canon(stored ?? "");
+  const b = canon(dayCode);
+  return a.length > 0 && a === b;
+}
+
 function scheduleMatchesBusRun(
   inbound: string | null | undefined,
   outbound: string | null | undefined,
@@ -5960,9 +5978,9 @@ function scheduleMatchesBusRun(
  * Fetches the authoritative set of bus run codes from system_lookup_parameters
  * so any code naming convention works (BUSRUN-1, R1, RUN-A, etc.).
  *
- * The Manifest picker uses the weekly plan (minus Off today). Floor check-out /
- * family home method still shapes who is on the trip when the run starts; it
- * must not hide a planned afternoon run from the dropdown.
+ * The Manifest picker uses the weekly plan for this weekday only (minus Off today).
+ * A run assigned on another weekday is not offered. Floor home method can add
+ * someone onto a run already planned today; it cannot add another day's run.
  */
 export async function listTodaysBusRunSummaries(
   dayCode: string,
@@ -5987,8 +6005,7 @@ export async function listTodaysBusRunSummaries(
 
   const { data, error } = await supabase
     .from("participant_attendance_schedules")
-    .select("participant_id, inbound_transport, outbound_transport, transport_required")
-    .eq("day_of_week", dayCode)
+    .select("participant_id, day_of_week, inbound_transport, outbound_transport, transport_required")
     .eq("active", true);
   if (error) throw error;
 
@@ -6004,10 +6021,12 @@ export async function listTodaysBusRunSummaries(
   for (const row of data ?? []) {
     const r = row as {
       participant_id: string;
+      day_of_week: string | null;
       inbound_transport: string | null;
       outbound_transport: string | null;
       transport_required: string | null;
     };
+    if (!scheduleDayMatches(r.day_of_week, dayCode)) continue;
     if (exemptIds.has(r.participant_id)) continue;
     const inb = scheduledBusRunCode(r.inbound_transport, r.transport_required, knownRunCodes);
     const outb = scheduledBusRunCode(r.outbound_transport, r.transport_required, knownRunCodes);
@@ -6017,8 +6036,7 @@ export async function listTodaysBusRunSummaries(
   try {
     const { data: supportRows, error: supportErr } = await supabase
       .from("support_attendance_schedules")
-      .select("person_kind, staff_id, carer_id, inbound_transport, outbound_transport")
-      .eq("day_of_week", dayCode)
+      .select("person_kind, staff_id, carer_id, day_of_week, inbound_transport, outbound_transport")
       .eq("active", true);
     if (supportErr) {
       if (!isSchemaMismatchError(supportErr)) {
@@ -6032,9 +6050,11 @@ export async function listTodaysBusRunSummaries(
           person_kind: "staff" | "volunteer" | "carer";
           staff_id: string | null;
           carer_id: string | null;
+          day_of_week: string | null;
           inbound_transport: string | null;
           outbound_transport: string | null;
         };
+        if (!scheduleDayMatches(s.day_of_week, dayCode)) continue;
         const key = s.carer_id
           ? supportPersonKey("carer", s.carer_id)
           : supportPersonKey(s.person_kind, s.staff_id ?? "");
@@ -6048,11 +6068,12 @@ export async function listTodaysBusRunSummaries(
   } catch (err) {
     console.warn("[listTodaysBusRunSummaries:support]", err);
   }
+  const plannedToday = new Set([...Object.keys(morningIds), ...Object.keys(afternoonIds)]);
   for (const [pid, f] of floorHome) {
     if (exemptIds.has(pid)) continue;
     if (f.status === "absent" || f.status === "checked_out") continue;
     if (f.departureVector !== "bus" || !f.departureBusRunCode) continue;
-    if (!knownRunCodes.has(f.departureBusRunCode)) continue;
+    if (!plannedToday.has(f.departureBusRunCode)) continue;
     addId(afternoonIds, f.departureBusRunCode, pid);
   }
   const morningCounts: Record<string, number> = {};

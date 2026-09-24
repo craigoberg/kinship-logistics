@@ -36,7 +36,7 @@ import { TransportMethodPickerSheet } from "@/components/ui/transport-method-pic
 import { cn, formatUnknownError } from "@/lib/utils";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
-import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useLookupParameters, useTodaysPlannedBusRunCodes } from "@/hooks/use-supabase-data";
 import {
   arrivalMethodBadgeLabel,
   checkOutParticipant,
@@ -63,6 +63,7 @@ import {
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import {
   buildBusSelfPickerOptions,
+  filterBusRunOptions,
   selectionFromScheduleLabel,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
@@ -195,18 +196,27 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     () => eventBusRunOptions(busRunLookups),
     [busRunLookups],
   );
+  const plannedRuns = useTodaysPlannedBusRunCodes();
+  const arrivalBusOpts = useMemo(
+    () => filterBusRunOptions(busRunOpts, plannedRuns.morningCodes),
+    [busRunOpts, plannedRuns.morningCodes],
+  );
+  const departureBusOpts = useMemo(
+    () => filterBusRunOptions(busRunOpts, plannedRuns.afternoonCodes),
+    [busRunOpts, plannedRuns.afternoonCodes],
+  );
   const arrivalPickerOptions = useMemo(
     () =>
-      buildBusSelfPickerOptions(busRunOpts, "dayCentre", {
+      buildBusSelfPickerOptions(arrivalBusOpts, "dayCentre", {
         busTitlePrefix: "Arrived on",
         selfTitle: "Self / family",
         selfSubtitle: "Not on the centre bus",
       }),
-    [busRunOpts],
+    [arrivalBusOpts],
   );
   const departurePickerOptions = useMemo(
     () => [
-      ...buildBusSelfPickerOptions(busRunOpts, "dayCentre", {
+      ...buildBusSelfPickerOptions(departureBusOpts, "dayCentre", {
         busTitlePrefix: "Departing on",
         selfTitle: "Family / carer",
         selfSubtitle: "Collected by family or carer",
@@ -220,7 +230,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         label: "Indep",
       },
     ],
-    [busRunOpts],
+    [departureBusOpts],
   );
 
   const participantsQ = useQuery({
@@ -433,7 +443,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     }
     return selectionFromScheduleLabel(
       transportLabelMap[row.participantId],
-      busRunOpts,
+      arrivalBusOpts,
       "dayCentre",
       scheduleLabelIsSelf,
     );
@@ -451,7 +461,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     if (row.departureVector === "bus") {
       return selectionFromScheduleLabel(
         row.departureBusRunCode,
-        busRunOpts,
+        departureBusOpts,
         "dayCentre",
         scheduleLabelIsSelf,
       );
@@ -459,7 +469,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     return selectionFromScheduleLabel(
       outboundLabelMap[row.participantId] ||
         transportLabelMap[row.participantId],
-      busRunOpts,
+      departureBusOpts,
       "dayCentre",
       scheduleLabelIsSelf,
     );

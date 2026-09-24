@@ -1445,6 +1445,27 @@ export function useTodaysBusRunSummaries(dayCode: string, runLabels: Record<stri
   });
 }
 
+/** Run codes Run Planning assigned for the operational weekday (morning vs afternoon). */
+export function useTodaysPlannedBusRunCodes() {
+  const today = useOperationalTodayIso();
+  const dayCode = useMemo(() => todaysSydneyDayCode(), [today]);
+  const { data: busRunDefs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const runLabels = useMemo(
+    () => Object.fromEntries(busRunDefs.map((r) => [r.code, r.displayName])),
+    [busRunDefs],
+  );
+  const q = useTodaysBusRunSummaries(dayCode, runLabels);
+  const morningCodes = useMemo(
+    () => new Set((q.data ?? []).filter((r) => r.direction === "morning").map((r) => r.runCode)),
+    [q.data],
+  );
+  const afternoonCodes = useMemo(
+    () => new Set((q.data ?? []).filter((r) => r.direction === "afternoon").map((r) => r.runCode)),
+    [q.data],
+  );
+  return { morningCodes, afternoonCodes, ready: q.isSuccess };
+}
+
 export function usePatchTripLeg() {
   const qc = useQueryClient();
   return useMutation({

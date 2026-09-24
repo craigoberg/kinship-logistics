@@ -11,12 +11,13 @@ import { Button } from "@/components/ui/button";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
 import { TransportMethodPickerSheet } from "@/components/ui/transport-method-picker-sheet";
 import { ClientTime } from "@/components/ui/client-time";
-import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useLookupParameters, useTodaysPlannedBusRunCodes } from "@/hooks/use-supabase-data";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import {
   buildBusSelfPickerOptions,
+  filterBusRunOptions,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
 import {
@@ -48,7 +49,12 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
   const [dutyPending, setDutyPending] = useState<DutyOnDutyPending | null>(null);
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
-  const busOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
+  const plannedRuns = useTodaysPlannedBusRunCodes();
+  const busOpts = useMemo(
+    () =>
+      filterBusRunOptions(eventBusRunOptions(busRunLookups), plannedRuns.morningCodes),
+    [busRunLookups, plannedRuns.morningCodes],
+  );
   const arrivalOptions = useMemo(
     () => buildBusSelfPickerOptions(busOpts, "dayCentre"),
     [busOpts],
