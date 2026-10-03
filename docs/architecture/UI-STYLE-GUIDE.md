@@ -64,8 +64,8 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Required multi-line text** | Defined | `CharacterCountedTextarea` | Justifications, anomaly notes | Min 20 chars default; see `MIN_*` constants |
 | **Required single-line text** | Defined | `CharacterCountedInput` | Evidence refs | Min 6 chars (`MIN_EVIDENCE`) |
 | **Required custom control** | Defined | `required-field.ts` helpers | Date/select wrappers | Same red border + counter contract |
-| **Date (calendar)** | Defined | `DatePicker` | Any operator-facing date | Display `dd-Mmm-yy`; storage `YYYY-MM-DD`. Default caption = label + ‹ › |
-| **Date of birth** | Defined | `DatePicker` + `getDobDatePickerProps()` | Guest DOB and any DOB field | Month + year dropdowns (`captionLayout="dropdown"`), years newest-first, last 120 years through today, future days disabled. Do not chevron-step decades. |
+| **Date (calendar)** | Defined | `DatePicker` | Any operator-facing date | Display `dd-Mmm-yy`; storage `YYYY-MM-DD`. Caption is a month dropdown and a year dropdown, each with ‹ › (one month or one year). Default span is 120 years back through 30 years ahead unless the caller sets `startMonth` / `endMonth`. |
+| **Date of birth** | Defined | `DatePicker` + `getDobDatePickerProps()` | Guest DOB and any DOB field | Same month/year dropdowns and ‹ › steppers. Years newest-first, last 120 years through today, future days disabled. |
 | **Close event guest archive** | Defined | `archiveGuestParticipantsForEvent` via `promoteEventStatus` | Event Manage → Closed | Silent; toast archived/skipped counts; skip guests still on Open/Confirmed |
 | **Archive leftover event guest** | **Defined** | Care profile `AlertDialog` + `archiveGuestFromCareProfile` | Participants directory → open guest → **Archive guest** | Soft-hide (`archived_at`). Does not delete. Does not touch `carers_registry`. Warn if still on Open/Confirmed. Reuse via Add guest. |
 | **Off-board client or staff** | **Defined** | `ServiceExitDialog` + manager `PinEntryDialog` | Care Profile tab, right of the NDIS number field. Staff sheet header. | Not in the Close/Save footer. Slate `secondary` **Off-boarded** badge + solid status bar (reason and notes). Directory rows use the same badge and a slate tint. Reason via `MobileOptionButton`. Notes (`CharacterCountedTextarea`, min 20) for Other, Deceased, and every Reactivate. Deceased cannot return. History stays. Does not use guest `archived_at`. Directory defaults to active; Show exited / Show inactive. |
@@ -85,7 +85,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Numeric entry (km, odometer)** | Defined | `NumericEntryPad` / `NumericEntryDialog` / `NumericEntryTrigger` | Manifest km, odometer | Sibling to PinPad — not for PIN |
 | **PIN capture** | Defined | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` | Login, step-up auth | GUARDRAILS §2.3 — never OS keyboard PIN |
 | **Idle screen lock** | **Defined** | `IdleLockGate` + `PinReauthDialog` (`dismissible={false}`, `requiredStaffId`) | After Admin idle minutes on signed-in shell | Same staff PIN; no Cancel/Escape; skip active Manifest; minutes `auth_idle_lock_minutes` (default 15; 0 = off). Wall-clock idle, not SIM. Admin: `IdleLockAdminPanel` |
-| **Day session login** | Defined | `DayLoginForm` (`day-login-form.tsx`) | Thin Auth gate before PIN (BL-099) | Email + password Inputs (not PinPad); Supabase Auth only; then Operator PIN step |
+| **Manager password confirm** | Defined | `DayLoginForm` (`day-login-form.tsx`) | After a manager PIN on `/auth` | Email + password Inputs (not PinPad). Prefills that person's email. Wrong email or password does not sign in as someone else. |
 | **Staff day-login password set** | **Defined** | `StaffFormSheet` section + `setStaffDayLoginPassword` | Edit personnel — set/reset Auth password | Password + confirm Inputs (`requiredFieldOutline`); **Set day-login password** → `PinEntryDialog` manager step-up; server `createServerFn` + service role (create/update Auth user, link `auth_user_id`). Not PIN. Interim until BL-002. |
 | **Staff certification edit** | **Defined** | `StaffFormSheet` cert card **Edit** | Correct name / number / expiry / defer | Existing cards start as a summary + **Edit**. New cards open in the field editors. Persist with sheet **Save changes**. Include `deferredUntil` in the JSONB write. |
 | **Field single-select (list)** | Defined | `MobileFieldButton` | Vehicle picker, start point, primary choices | Solid fill when selected (§4.5) |
@@ -564,6 +564,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-10-04 | Manager password confirm | PIN pad is the only front door. A manager PIN then uses `DayLoginForm` for that person's email and password. |
+| 2026-10-03 | Date picker caption | Every `DatePicker` shows a month dropdown and a year dropdown, each with ‹ ›. DOB still uses `getDobDatePickerProps()` (newest year first, no future dates). |
 | 2026-09-23 | Pickup address book | Home plus named places. Run Planning weekday tap list. Manifest pending stop can switch for today, including a one-off. BL-130. |
 | 2026-09-23 | Off-board placement | Action sits right of the NDIS line (staff: sheet header), not beside Close. Slate Off-boarded badge and status bar. |
 | 2026-09-23 | Off-board client or staff | Dialog with reason rows, notes, and manager PIN. Show exited / Show inactive on directories. BL-129. |

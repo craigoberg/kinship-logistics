@@ -5,7 +5,7 @@ export const signInPinTopic: HelpTopic = {
   kind: "howto",
   title: "Sign-in and PIN",
   summary:
-    "How terminal login and action PINs work during Alpha — day profile vs step-up PIN.",
+    "Everyone signs in with a PIN. A manager PIN then asks for that person's email and password.",
   keywords: [
     "login",
     "pin",
@@ -13,32 +13,32 @@ export const signInPinTopic: HelpTopic = {
     "auth",
     "sign in",
     "unlock",
-    "operator",
-    "coordinator",
+    "manager",
+    "carer",
   ],
   menus: ["auth", "dashboard"],
   roles: "all",
   relatedIds: ["red-verbal-consultation", "manifest-start-run"],
   steps: [
     {
-      heading: "Open the app",
-      body: "Go to Yada Connect on the tablet or browser. If you see the auth screen, complete day login first (email + password when that lane is enabled), then staff PIN when prompted.",
+      heading: "PIN first",
+      body: "Everyone enters their PIN on the sign-in screen. Drivers, support workers, volunteers, and carers are signed in as themselves. A 4-digit PIN works once, then you choose a 6-digit PIN.",
     },
     {
-      heading: "Day profile (who is on the terminal)",
-      body: "After PIN login, your name and role sit on the terminal as the active staff profile. Most screens use that profile for attribution (who opened the centre, who closed a run, who logged an issue).",
+      heading: "Manager confirm",
+      body: "If the PIN belongs to a manager or assistant manager, the next screen asks for that person's email and password. Another person's login is rejected.",
     },
     {
-      heading: "Action / step-up PIN",
-      body: "High-impact actions (Close Run, verbal RED sign-off, some Open/Close gates) ask for a PIN again in a Pin pad dialog. That can be your PIN or another authorised operator’s — it does not always mean logging out of the day session.",
+      heading: "Change PIN",
+      body: "Use Change PIN at the top of the screen, or on the idle lock. Enter the current PIN, then the new 6-digit PIN twice. A manager can set or unlock a PIN on the staff or carer form.",
+    },
+    {
+      heading: "Action PIN",
+      body: "Close run, medication witness, and similar actions can ask for a named person's PIN. That signs the action. It does not log you out or log someone else in.",
     },
     {
       heading: "If a PIN is rejected",
-      body: "Check you entered four digits, that the staff record has a PIN set in Personnel, and that Guardian PINs are not used for terminal login (guardians are drop-off verification only).",
-    },
-    {
-      heading: "Switching operator",
-      body: "Use Log out / sign-in again when a different staff member takes the tablet. Do not share PINs — each operator signs their own actions.",
+      body: "After too many tries on a known person, a manager must unlock the PIN. Too many wrong codes on the pad sleep that tablet for a short time. Guardian PINs are not a sign-in. Use Log out when someone else takes the tablet.",
     },
   ],
 };

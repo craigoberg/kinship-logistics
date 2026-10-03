@@ -114,6 +114,8 @@ export function BottomNav() {
     (item) => isNavActive(pathname, item) && !(DOCK_PATHS as readonly string[]).includes(item.to),
   );
 
+  if (visibleItems.length === 0) return null;
+
   return (
     <>
       <nav

@@ -38,6 +38,8 @@ import type { Carer, CarerPayload } from "@/lib/data-store";
 import { OnboardingSubjectPanel } from "@/components/onboarding/onboarding-subject-panel";
 import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
 import { PersonAddressList } from "@/components/address/person-address-list";
+import { PinPad } from "@/components/auth/pin-pad";
+import { managerSetPersonPin, managerUnlockPersonPin } from "@/lib/auth/pin-session";
 
 interface Props {
   open: boolean;
@@ -68,6 +70,8 @@ export function CarerFormSheet({
   const [notes, setNotes] = useState("");
   const [participantId, setParticipantId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [pin, setPin] = useState("");
+  const [unlockBusy, setUnlockBusy] = useState(false);
 
   const insert = useInsertCarer();
   const update = useUpdateCarer();
@@ -83,6 +87,7 @@ export function CarerFormSheet({
     setIsPrimary(carer?.isPrimaryContact ?? false);
     setNotes(carer?.notes ?? "");
     setParticipantId(carer?.participantId ?? defaultParticipantId ?? null);
+    setPin("");
   }, [open, carer, defaultParticipantId]);
 
 
@@ -94,6 +99,19 @@ export function CarerFormSheet({
   const save = async () => {
     if (!fullName.trim()) {
       toast.error("Full name is required", {
+        className: "!bg-red-600 !text-white !border-red-700",
+      });
+      return;
+    }
+    const trimmedPin = pin.trim();
+    if (!isEdit && !/^\d{6}$/.test(trimmedPin)) {
+      toast.error("A 6-digit PIN is required", {
+        className: "!bg-red-600 !text-white !border-red-700",
+      });
+      return;
+    }
+    if (isEdit && trimmedPin && !/^\d{6}$/.test(trimmedPin)) {
+      toast.error("PIN must be exactly 6 digits", {
         className: "!bg-red-600 !text-white !border-red-700",
       });
       return;
@@ -111,9 +129,15 @@ export function CarerFormSheet({
     try {
       if (isEdit && carer) {
         await update.mutateAsync({ id: carer.id, payload });
+        if (trimmedPin) {
+          await managerSetPersonPin({ personKind: "carer", personId: carer.id, newPin: trimmedPin });
+        }
         toast.success("Carer updated", { description: payload.fullName });
       } else {
-        await insert.mutateAsync(payload);
+        const created = await insert.mutateAsync(payload);
+        if (trimmedPin) {
+          await managerSetPersonPin({ personKind: "carer", personId: created.id, newPin: trimmedPin });
+        }
         toast.success("Carer added", { description: payload.fullName });
       }
       onOpenChange(false);
@@ -258,6 +282,46 @@ export function CarerFormSheet({
             <Field label="Notes" className="sm:col-span-2">
               <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
             </Field>
+            <Field
+              label={isEdit ? "6-digit PIN (leave blank to keep current)" : "6-digit PIN"}
+              className="sm:col-span-2"
+            >
+              <PinPad
+                value={pin}
+                onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
+                length={6}
+                showConfirmKey
+                confirmLabel="Use this PIN"
+                onComplete={(v) => setPin(v)}
+              />
+              {!isEdit && !/^\d{6}$/.test(pin) && (
+                <p className="text-[11px] text-destructive">A 6-digit PIN is required before this carer can sign in.</p>
+              )}
+              {isEdit && pin.length > 0 && !/^\d{6}$/.test(pin) && (
+                <p className="text-[11px] text-destructive">PIN must be exactly 6 digits.</p>
+              )}
+              {isEdit && carer && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={unlockBusy}
+                  onClick={() => {
+                    setUnlockBusy(true);
+                    void managerUnlockPersonPin({ personKind: "carer", personId: carer.id })
+                      .then(() => toast.success("PIN unlocked", { description: carer.fullName }))
+                      .catch((err: unknown) =>
+                        toast.error("Could not unlock PIN", {
+                          description: err instanceof Error ? err.message : String(err),
+                        }),
+                      )
+                      .finally(() => setUnlockBusy(false));
+                  }}
+                >
+                  {unlockBusy ? "Unlocking…" : "Unlock PIN"}
+                </Button>
+              )}
+            </Field>
           </div>
         </div>
 
@@ -265,7 +329,7 @@ export function CarerFormSheet({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={save} disabled={busy} className="gap-1.5">
+          <Button onClick={save} disabled={busy || (!isEdit && !/^\d{6}$/.test(pin))} className="gap-1.5">
             <Save className="h-4 w-4" />
             {busy ? "Saving…" : isEdit ? "Save changes" : "Add carer"}
           </Button>

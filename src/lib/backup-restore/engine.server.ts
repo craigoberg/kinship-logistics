@@ -134,32 +134,8 @@ export async function createFullBackup(): Promise<BackupManifest> {
 }
 
 export async function verifyManagerPin(staffId: string, pin: string): Promise<void> {
-  const client = createServiceServerClient();
-  const { data, error } = await client.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  if (error) throw new Error(`PIN verification failed: ${error.message}`);
-
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
-    id: string;
-    role: string | null;
-    personnel_type?: string | null;
-  }>;
-  const row = rows.find((r) => r.id === staffId);
-  if (!row) throw new Error("Incorrect manager PIN.");
-
-  const access = (row.personnel_type ?? row.role ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  const isCoordinator =
-    access === "coordinator" ||
-    access === "manager" ||
-    access === "assistant_manager" ||
-    access.includes("manager");
-  if (!isCoordinator) {
-    throw new Error("Selected operator is not a manager.");
-  }
+  const { assertManagerPin } = await import("@/lib/auth/pin-auth.server");
+  await assertManagerPin(staffId, pin);
 }
 
 async function insertRestoreRows(

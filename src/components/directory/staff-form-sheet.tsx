@@ -44,7 +44,8 @@ import {
   replaceStaffDutyRoles,
 } from "@/lib/api/duty-roles";
 import { evaluateRequirementHolds, requirementTypeMatchesName } from "@/lib/duty-roles";
-import { getActiveUserProfile, hashPin } from "@/lib/data-store";
+import { getActiveUserProfile } from "@/lib/data-store";
+import { managerSetPersonPin, managerUnlockPersonPin } from "@/lib/auth/pin-session";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
 import { ACCESS_ROLES } from "@/lib/access-roles";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
@@ -94,6 +95,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
   const [dayPasswordConfirm, setDayPasswordConfirm] = useState("");
   const [passwordPinOpen, setPasswordPinOpen] = useState(false);
   const [passwordBusy, setPasswordBusy] = useState(false);
+  const [unlockBusy, setUnlockBusy] = useState(false);
 
   const insert = useInsertStaffMember();
   const update = useUpdateStaffMember();
@@ -173,30 +175,41 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
         return;
       }
       const trimmedPin = pin.trim();
-      if (!isEdit && !/^\d{4}$/.test(trimmedPin)) {
-        toast.error("A 4-digit PIN is required for new personnel", {
+      if (!isEdit && !/^\d{6}$/.test(trimmedPin)) {
+        toast.error("A 6-digit PIN is required for new personnel", {
           className: "!bg-red-600 !text-white !border-red-700",
         });
         return;
       }
-      if (isEdit && trimmedPin && !/^\d{4}$/.test(trimmedPin)) {
-        toast.error("PIN must be exactly 4 digits", {
+      if (isEdit && trimmedPin && !/^\d{6}$/.test(trimmedPin)) {
+        toast.error("PIN must be exactly 6 digits", {
           className: "!bg-red-600 !text-white !border-red-700",
         });
         return;
       }
-      let pinHash: string | null | undefined;
-      if (trimmedPin) {
-        console.log("[staff-form] hashing PIN");
-        pinHash = await hashPin(trimmedPin);
-        console.log("[staff-form] PIN hashed OK");
-      }
-      const payload = buildStaffPayload(pinHash);
+      const payload = buildStaffPayload();
       console.log("[staff-form] sending mutation", payload);
       const saved =
         isEdit && staff
           ? await update.mutateAsync({ id: staff.id, payload })
           : await insert.mutateAsync(payload);
+      if (trimmedPin) {
+        try {
+          await managerSetPersonPin({
+            personKind: "staff",
+            personId: saved.id,
+            newPin: trimmedPin,
+          });
+        } catch (pinErr) {
+          toast.error("Person saved, but the PIN was not set", {
+            description: pinErr instanceof Error ? pinErr.message : String(pinErr),
+            className: "!bg-red-600 !text-white !border-red-700",
+            duration: 12_000,
+          });
+          onOpenChange(false);
+          return;
+        }
+      }
       try {
         await replaceStaffDutyRoles(saved.id, dutyRoleIds);
       } catch (dutyErr) {
@@ -218,7 +231,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
 
   const trimmedName = fullName.trim();
   const trimmedPinLive = pin.trim();
-  const pinValidLive = /^\d{4}$/.test(trimmedPinLive);
+  const pinValidLive = /^\d{6}$/.test(trimmedPinLive);
   const nameMissing = !trimmedName;
   const roleMissing = !isEdit && !role.trim();
   const personnelTypeMissing = !isEdit && !personnelType;
@@ -454,26 +467,48 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
               </p>
             )}
             <Field
-              label={isEdit ? "4-digit PIN (leave blank to keep current)" : "4-digit PIN"}
+              label={isEdit ? "6-digit PIN (leave blank to keep current)" : "6-digit PIN"}
               required={!isEdit}
               className="sm:col-span-2"
             >
               <PinPad
                 value={pin}
-                onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 4))}
-                length={4}
+                onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 6))}
+                length={6}
                 showConfirmKey
+                confirmLabel="Use this PIN"
                 onComplete={(v) => setPin(v)}
               />
               {pinMissing && (
-                <p className="text-[11px] text-destructive">A 4-digit PIN is required for new personnel.</p>
+                <p className="text-[11px] text-destructive">A 6-digit PIN is required for new personnel.</p>
               )}
               {pinBadFormat && (
-                <p className="text-[11px] text-destructive">PIN must be exactly 4 digits.</p>
+                <p className="text-[11px] text-destructive">PIN must be exactly 6 digits.</p>
               )}
               <p className="text-[11px] text-muted-foreground/70">
-                Used for medication witness, handshake, and terminal sign-in. Hashed before storage.
+                Sign-in and action PIN. Stored on the server. Not 123456 or a straight run.
               </p>
+              {isEdit && staff && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={unlockBusy}
+                  onClick={() => {
+                    setUnlockBusy(true);
+                    void managerUnlockPersonPin({ personKind: "staff", personId: staff.id })
+                      .then(() => toast.success("PIN unlocked", { description: staff.fullName }))
+                      .catch((err: unknown) =>
+                        toast.error("Could not unlock PIN", {
+                          description: err instanceof Error ? err.message : String(err),
+                        }),
+                      )
+                      .finally(() => setUnlockBusy(false));
+                  }}
+                >
+                  {unlockBusy ? "Unlocking…" : "Unlock PIN"}
+                </Button>
+              )}
             </Field>
 
             {!isEdit && (
@@ -752,16 +787,15 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
             <Textarea value={notes} onChange={(e) => setNotes(e.target.value)} rows={3} />
           </Field>
 
-          {isEdit && staff && (
+          {isEdit && staff && (personnelType === "manager" || personnelType === "assistant_manager") && (
             <section className="space-y-3 rounded-md border border-border bg-muted/30 p-3">
               <div>
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Day-login password (Supabase Auth)
+                  Manager sign-in password
                 </Label>
                 <p className="mt-1 text-[11px] text-muted-foreground">
-                  Email + password for morning day login — separate from the 4-digit PIN. Setting
-                  the password also saves the email on this record if you just typed it. Interim
-                  Alpha control — RBAC will revisit later.
+                  Email and password, then this person's own PIN. Drivers, volunteers, and carers
+                  do not use a password.
                 </p>
               </div>
               <Field label="Email for day login" required>
@@ -856,8 +890,8 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                   nameMissing && "Full name",
                   roleMissing && "Role / title",
                   personnelTypeMissing && "System access level",
-                  pinMissing && "4-digit PIN",
-                  pinBadFormat && "PIN must be exactly 4 digits",
+                  pinMissing && "6-digit PIN",
+                  pinBadFormat && "PIN must be exactly 6 digits",
                   certTypeMissing && "Certificate / orientation type",
                 ]
                   .filter(Boolean)
@@ -877,7 +911,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
           onOpenChange={setPasswordPinOpen}
           title="Authorise password set"
           description="Manager PIN required to set this person's day-login password."
-          length={4}
+          length={6}
           busy={passwordBusy}
           onVerify={async (actorPin) => {
             const staffId = getActiveUserProfile()?.staffId;

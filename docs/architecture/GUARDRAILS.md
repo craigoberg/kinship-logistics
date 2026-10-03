@@ -81,13 +81,17 @@ All operator and manager **authentication PIN capture** must use the canonical o
 
 ### 2.4 RBAC Forward Compatibility (locked 2026-07-12 — Phase 2/3 still later)
 
-**Phase 1 menu visibility is built** (`role_menu_access` + Admin → Menu Access + `MenuGate`; BL-002). **Day-login JWT for operational data is in force** as of 2026-08-20 (`docs/sql/2026-08-20_day_login_operational_rls.sql`, BL-117). PIN is action step-up and floor identity, not the database role. Phase 2 (read-only menus) and Phase 3 (relationship-scoped rows) are not built.
+**Phase 1 menu visibility is built** (`role_menu_access` + Admin → Menu Access + `MenuGate`; BL-002). **Operational data still requires a Supabase JWT** (BL-117). That JWT is now **the signed-in person**, not a shared morning login. Phase 2 (read-only menus) and Phase 3 (relationship-scoped rows, including a carer seeing only their person) are not built. Menu hiding is not row-level hiding.
 
-#### Target two-tier session
+#### Go-live session (2026-10-04)
 
-1. **Day session** — **built.** Staff signs in with **email + password** (Supabase Auth) at start of day. Session JWT is required for operational table access.
-2. **Screen lock** — **built 2026-08-22.** After Admin-configurable **idle** minutes (`system_parameters.auth_idle_lock_minutes`, default **15**; **0** = off), the UI locks; the **same** staff member re-unlocks with their **PIN** via `PinReauthDialog`, returning to the same screen/state. **Active Manifest run** for this staff suppresses idle lock. Timer is wall-clock idle (not SIM).
-3. **Action step-up** — **built.** High-impact operations use `PinEntryDialog` / `verifyCoordinatorPin` (trip leader, operator, manager-by-name flows). Action PIN ≠ screen unlock ≠ day login.
+1. **PIN first** — Everyone enters a PIN. Driver, support worker, volunteer, and carer: the server mints a session for **that** person. Manager and Assistant Manager: the PIN does not open the app. The next screen asks for **that person's** email and password. A different login does not become someone else.
+2. **Screen lock** — After idle minutes (`auth_idle_lock_minutes`), the same person re-enters their PIN. Idle lock is not a user switch.
+3. **Change PIN** — On the signed-in header and on the idle-lock pad: current PIN, new PIN, new PIN again. Managers set or unlock a PIN on the staff or carer form.
+4. **Action step-up** — A named person's PIN can still authorise an action (medication witness, trip leader, manager approval). That does not replace the signed-in person.
+5. **Lockout** — Five wrong attempts against a known person (their PIN, or a manager password after the right PIN) lock that PIN until a manager unlocks it (`auth_pin_max_attempts`). Eight wrong codes on the PIN pad sleep that tablet and IP (`auth_pin_device_max_attempts`, `auth_pin_device_lock_minutes`). A miss on the pad does not lock a person, because the pad does not know whose PIN was tried.
+
+Existing 4-digit SHA-256 PINs work once at the next sign-in, then the person must choose a 6-digit PIN. New PINs are a peppered lookup (`PIN_PEPPER` on the app server only).
 
 #### Build regulations (effective immediately)
 
@@ -99,7 +103,7 @@ All operator and manager **authentication PIN capture** must use the canonical o
 | Preserve `staff_registry.auth_user_id` link to `auth.users` | New parallel identity stores or browser service-role |
 | Route/menu placeholders → future `role_menu_access` | Hard-coded irreversible menu denial scattered in features |
 | Tunable timeouts → `system_parameters` (`auth_*` keys) | Hard-coded idle/session timeouts in components |
-| Operational tables: `GRANT` / RLS to **authenticated** (day-login JWT). Anon only for published CMS + `submit_public_form`. Server jobs use **service_role**. | Re-open `anon` ALL on participants / staff / incidents / attendance; PIN-only DB access without a JWT |
+| Operational tables: `GRANT` / RLS to **authenticated**. The JWT is the signed-in person (a floor PIN mints it; a manager PIN is followed by that person's email + password). Anon only for published CMS + `submit_public_form`. Server jobs use **service_role**. | Re-open `anon` ALL on participants / staff / incidents / attendance; client-side “find whoever matches this PIN”; `anon` execute on PIN verify; a manager PIN that opens the app without that person's password |
 
 **Agent rule:** `.cursor/rules/rbac-forward-compat.mdc` — checklist before shipping.
 
@@ -269,7 +273,7 @@ Every expiring metric—including vehicle registration renewals, insurance polic
 
 **Canonical helpers:** `src/lib/utils.ts` — `formatDate`, `formatTime`, `formatDateTime`, `parseIsoDateLocal`, `toIsoDateString`, `todayLocalIso`, `REGIONAL_DATE_FORMAT`.  
 **SSR-safe timestamps:** `src/components/ui/client-time.tsx` — `<ClientTime iso="…" />` / `useClientFormattedDate`.  
-**Calendar inputs:** `src/components/ui/date-picker.tsx` — canonical `DatePicker` with `REGIONAL_DATE_FORMAT`. Date of birth: `getDobDatePickerProps()` (month + year dropdowns; do not chevron-step decades).
+**Calendar inputs:** `src/components/ui/date-picker.tsx` — canonical `DatePicker` with `REGIONAL_DATE_FORMAT`. Caption: month dropdown and year dropdown, each with ‹ › (one month or one year). Date of birth: `getDobDatePickerProps()` (newest years first, last 120 years through today, future days disabled).
 
 #### Local timezone (mandatory)
 

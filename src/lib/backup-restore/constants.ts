@@ -23,6 +23,8 @@ export const SERVICE_ROLE_ONLY_FUNCTIONS = [
   "exec_backup_ddl",
   "backup_drop_all_public_fks",
   "backup_restore_all_public_fks",
+  "verify_operator_pin",
+  "verify_staff_pin",
 ] as const;
 
 /** Tables whose rows must never be overwritten when restoring into DEV. */
@@ -55,7 +57,8 @@ export const FUTURE_AUTH_PROTECTED_TABLES = [
 
 /** Column-level preservation if row-level merge is added later. */
 export const AUTH_PROTECTED_COLUMNS: Record<string, readonly string[]> = {
-  staff_registry: ["pin_hash", "auth_user_id", "email", "phone"],
+  staff_registry: ["pin_hash", "pin_lookup", "auth_user_id", "email", "phone"],
+  carers_registry: ["pin_hash", "pin_lookup", "auth_user_id", "email", "phone"],
   participants: ["dual_witness_pin_hash"],
 };
 

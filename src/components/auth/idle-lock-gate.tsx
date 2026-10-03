@@ -8,17 +8,18 @@ import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 export function IdleLockGate() {
   const { locked, unlock, minutes } = useIdleLock();
   const profile = getActiveUserProfile();
-  const staffId = profile?.staffId ?? "";
-  const name = profile?.fullName ?? "the signed-in staff member";
+  const personId =
+    profile?.personKind === "carer" ? (profile.carerId ?? "") : (profile?.staffId ?? "");
+  const name = profile?.fullName ?? "the signed-in person";
 
   return (
     <PinReauthDialog
-      open={locked && !!staffId}
+      open={locked && !!personId}
       onOpenChange={(next) => {
         if (!next) unlock();
       }}
       dismissible={false}
-      requiredStaffId={staffId}
+      requiredStaffId={personId}
       title="Screen locked"
       description={`This tablet locked after ${minutes} minute${minutes === 1 ? "" : "s"} idle. Enter ${name}'s PIN to continue where you left off.`}
       onAuthenticated={unlock}

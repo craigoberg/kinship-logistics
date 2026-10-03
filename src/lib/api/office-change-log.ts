@@ -76,6 +76,15 @@ export async function resolveAuditActor(): Promise<AuditActor> {
   const authUser = sessionData.user ?? null;
   const authUserId = authUser?.id ?? null;
 
+  if (profile?.fullName && (profile.personKind === "carer" || (profile.staffId && profile.staffId !== DEFAULT_STAFF_UUID))) {
+    const name = profile.fullName.trim();
+    return {
+      staffId: profile.personKind === "carer" ? null : profile.staffId,
+      authUserId: profile.authUserId ?? authUserId,
+      name: name || "Signed-in staff",
+    };
+  }
+
   if (profile?.staffId && profile.staffId !== DEFAULT_STAFF_UUID) {
     const name = (profile.fullName ?? "").trim();
     return {

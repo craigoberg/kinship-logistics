@@ -16,6 +16,7 @@ import { cn, formatDate } from "@/lib/utils";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { FloorAnnouncementStrip } from "@/components/ops/floor-announcement-strip";
 import { MenuGate } from "@/components/auth/menu-gate";
+import { ChangePinDialog } from "@/components/auth/change-pin-dialog";
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import { accessRoleLabel } from "@/lib/access-roles";
 import { useChromeVisibility, useHideChromeOnScroll } from "@/hooks/chrome-visibility";
@@ -92,6 +93,7 @@ export function AppShell({
   const isDashboard = pathname === "/";
 
   const [medOpen, setMedOpen] = useState(false);
+  const [changePinOpen, setChangePinOpen] = useState(false);
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
   const { chromeHidden } = useChromeVisibility();
   useHideChromeOnScroll(!viewportLock && isDashboard ? "window" : null);
@@ -213,6 +215,16 @@ export function AppShell({
               </Button>
             )}
             <SyncIndicator compact />
+            {identity && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setChangePinOpen(true)}
+                className="text-xs"
+              >
+                Change PIN
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="sm"
@@ -226,6 +238,7 @@ export function AppShell({
         </header>
 
         <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} />
+        <ChangePinDialog open={changePinOpen} onOpenChange={setChangePinOpen} />
         <SiteNoGoBanner />
         <FloorAnnouncementStrip />
         <main

@@ -11,7 +11,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/auth/pin-pad";
-import { verifyLoginPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { verifyNamedPersonPin } from "@/lib/auth/pin-session";
+import { getActiveUserProfile } from "@/lib/data-store";
+import { ChangePinDialog } from "@/components/auth/change-pin-dialog";
 import { cn } from "@/lib/utils";
 import { useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
 
@@ -43,6 +46,7 @@ export function PinReauthDialog({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
   useHideGlobalFabs(open);
 
   useEffect(() => {
@@ -60,9 +64,14 @@ export function PinReauthDialog({
     setError(null);
     try {
       if (requiredStaffId) {
-        await verifyNamedStaffPin(requiredStaffId, value);
+        const profile = getActiveUserProfile();
+        if (profile?.personKind === "carer" && profile.carerId) {
+          await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
+        } else {
+          await verifyNamedStaffPin(requiredStaffId, value);
+        }
       } else {
-        await verifyLoginPin(value);
+        throw new Error("Sign in again from the PIN pad.");
       }
       onAuthenticated();
       onOpenChange(false);
@@ -130,6 +139,18 @@ export function PinReauthDialog({
         {error && (
           <p className="text-center text-sm font-medium text-destructive">{error}</p>
         )}
+
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full text-xs"
+          disabled={busy}
+          onClick={() => setChangeOpen(true)}
+        >
+          Change PIN
+        </Button>
+
+        <ChangePinDialog open={changeOpen} onOpenChange={setChangeOpen} />
 
         {dismissible && (
           <AlertDialogFooter>

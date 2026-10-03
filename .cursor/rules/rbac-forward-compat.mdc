@@ -1,23 +1,27 @@
 ---
-description: RBAC forward compatibility — day-login RLS in force; menu RBAC still last
+description: RBAC — PIN-first go-live login; menus Phase 1; row scope still later
 alwaysApply: true
 ---
 
-# RBAC forward compatibility (BL-002 menus last — day-login RLS in force)
+# RBAC (BL-002 — go-live login is PIN first)
 
 **Full spec:** `docs/BACKLOG.md` → **BL-002**. **Locked build rules:** `docs/architecture/GUARDRAILS.md` §2.4.
 
-**Menus / role gates remain last.** Day-login JWT for operational tables shipped 2026-08-20 (BL-117, `docs/sql/2026-08-20_day_login_operational_rls.sql`). PIN is step-up + floor identity, not the database role.
+**Menus stay Phase 1.** Operational tables still need a JWT (BL-117). That JWT is the signed-in person.
 
-## Target session model
+## Session model (2026-10-04)
 
-| Layer | Mechanism | Purpose |
-|--------|-----------|---------|
-| **Day session** | Supabase Auth — email + password at start of day (**built**) | JWT required for operational reads/writes |
-| **Screen lock** | Idle timeout → `PinReauthDialog` (**built 2026-08-22**) | Same staff re-unlocks with **their** PIN; resume where they were; exempt active Manifest. Minutes: `auth_idle_lock_minutes` (default 15; 0 = off) |
-| **Action step-up** | `PinEntryDialog` / `verifyCoordinatorPin` (**built**) | High-impact sign-off (may be trip leader or operator, not always day-session user) |
+| Door | Who | What they enter |
+|------|-----|-----------------|
+| **PIN pad** | Everyone | Their PIN first. Floor PIN mints **that** session. A manager PIN does not. |
+| **Manager confirm** | Manager and Assistant Manager | After their PIN: **their** email and password. A different login is rejected. |
+| **Screen lock** | Whoever is signed in | Same person's PIN (`PinReauthDialog`). Not a user switch. |
+| **Change PIN** | Whoever is signed in | Header and idle lock: current, new, new again. |
+| **Action PIN** | Named person on that action | Does not replace the signed-in profile. |
 
-**Do not conflate** day login, screen unlock, and action PIN — three separate concerns.
+Lockout: `auth_pin_max_attempts` (person, manager unlocks on the form), `auth_pin_device_max_attempts` + `auth_pin_device_lock_minutes` (PIN pad / IP). Pepper: server env `PIN_PEPPER` only. SQL: `docs/sql/2026-10-03_pin_login_model.sql`.
+
+Carer sign-in is identity only. “Mary sees only Fred” is still Phase 3.
 
 ## Mandatory patterns (use today)
 
@@ -33,7 +37,8 @@ alwaysApply: true
 
 ## Forbidden patterns (block BL-002)
 
-- **PIN-only as the only identity path** in new modules — must also work when `user` (Supabase Auth) is present.
+- **PIN-only database access without a JWT** — the PIN door must mint a session for that person.
+- **A PIN that switches the signed-in person** (`loginWithPin` / `verify_operator_pin` style).
 - **Replacing `getActiveUserProfile()`** with auth-only session state for operational attribution.
 - **New auth bypasses** — e.g. service-role client calls from **browser**, hard-coded admin UUIDs, `localStorage` role flags without staff_registry backing.
 - **Re-opening `anon` ALL** on participants, staff, incidents, attendance, or other PII/ops tables.

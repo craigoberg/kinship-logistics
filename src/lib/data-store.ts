@@ -1090,7 +1090,7 @@ export function isActiveUserManager(): boolean {
 
 // ---------- PIN-based terminal login (RBAC) ----------
 
-export type UserRole = "driver" | "coordinator";
+export type UserRole = "driver" | "coordinator" | "carer";
 
 export const USER_ROLE_KEY = "yada_user_role";
 export const USER_PROFILE_KEY = "yada_user_profile";
@@ -1098,6 +1098,9 @@ export const WORKFLOW_MODE_KEY = "current_workflow_mode";
 
 export interface ActiveUserProfile {
   staffId: string;
+  /** Set when a carer signed in with their PIN. Not a staff_registry id. */
+  carerId?: string | null;
+  personKind?: "staff" | "carer";
   fullName: string;
   role: UserRole;
   staffRole: string | null;
@@ -1148,96 +1151,15 @@ export class GuardianPinError extends Error {
 }
 
 /**
- * Verifies a 4-digit PIN through the `verify_operator_pin` security-definer RPC.
- * Returns the matched staff member plus their resolved RBAC role, or null if no
- * PIN matches.
- *
- * On success this persists role + identity to localStorage so the route
- * guardian and downstream FK writes can attribute actions correctly.
+ * Retired. Sign-in no longer accepts any PIN as a new identity.
+ * Sign-in is the PIN pad in `/auth`. A PIN cannot switch who is signed in.
  */
 export async function loginWithPin(
-  pin: string,
+  _pin: string,
 ): Promise<ActiveUserProfile | null> {
-  if (!/^\d{4}$/.test(pin)) return null;
-
-  const { data, error } = await supabase.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
-    id: string;
-    full_name?: string | null;
-    role: string | null;
-    personnel_type?: string | null;
-  }>;
-  if (error || rows.length === 0) {
-    console.error("[data-store] RPC auth failed or returned no rows:", error);
-    return null;
-  }
-
-  const record = rows[0];
-  const accessKey = (record.personnel_type ?? "").trim();
-  const titleOrRole = (record.role ?? "").trim();
-  const normalizedAccess = accessKey.toLowerCase().replace(/\s+/g, "_");
-  const normalizedTitle = titleOrRole.toLowerCase().replace(/\s+/g, "_");
-
-  if (normalizedAccess === "guardian" || normalizedTitle === "guardian") {
-    throw new GuardianPinError(
-      "Guardian PINs are for drop-off verification only and cannot be used to log into the staff terminal.",
-    );
-  }
-
-  // SYSTEM ACCESS LEVEL first; title/role column as fallback (legacy free text).
-  const role = classifyRole(accessKey || null) ?? classifyRole(titleOrRole || null);
-  if (!role) {
-    console.error("[data-store] Unmapped role variance detected:", {
-      personnel_type: record.personnel_type ?? null,
-      role: record.role ?? null,
-    });
-    throw new Error(
-      `PIN matched ${record.full_name || "this person"}, but their access level ` +
-        `(${accessKey || titleOrRole || "unset"}) cannot sign into the terminal. ` +
-        `In Staff → Edit, set SYSTEM ACCESS LEVEL to Driver, Support Worker, Manager, or Assistant Manager.`,
-    );
-  }
-
-  // Best-effort vehicle lookup for drivers — schema may not expose a
-  // default-driver column, so swallow errors.
-  let vehicleId: string | null = null;
-  let vehicleName: string | null = null;
-  if (role === "driver") {
-    try {
-      const { data: asset } = await supabase
-        .from("transport_assets")
-        .select("id, vehicle_name")
-        .limit(1)
-        .maybeSingle();
-      if (asset) {
-        vehicleId = (asset as { id: string }).id;
-        vehicleName = (asset as { vehicle_name: string | null }).vehicle_name ?? null;
-      }
-    } catch {
-      /* non-fatal */
-    }
-  }
-
-  const authUserId = (await supabase.auth.getUser()).data.user?.id ?? null;
-  const profile: ActiveUserProfile = {
-    staffId: record.id,
-    fullName: record.full_name || "Staff Member",
-    role,
-    staffRole: record.role,
-    accessRole: accessKey || null,
-    vehicleId,
-    vehicleName,
-    authUserId,
-  };
-
-  if (typeof localStorage !== "undefined") {
-    localStorage.setItem(STAFF_KEY, record.id);
-    persistActiveUserProfile(profile);
-  }
-
-  return profile;
+  throw new Error(
+    "Sign in from the PIN pad. A PIN cannot switch who is signed in.",
+  );
 }
 
 /** Write the floor profile used by Menu Access and attribution. */
@@ -1248,10 +1170,21 @@ export function persistActiveUserProfile(profile: ActiveUserProfile): void {
   localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
 }
 
+/** Persist who is signed in. Carers must not be written into the staff id slot. */
+export function persistFloorIdentity(profile: ActiveUserProfile): void {
+  persistActiveUserProfile(profile);
+  if (typeof localStorage === "undefined") return;
+  if (profile.personKind === "carer" || !profile.staffId) {
+    localStorage.removeItem(STAFF_KEY);
+    return;
+  }
+  localStorage.setItem(STAFF_KEY, profile.staffId);
+}
+
 export function getActiveUserRole(): UserRole | null {
   if (typeof localStorage === "undefined") return null;
   const v = localStorage.getItem(USER_ROLE_KEY);
-  return v === "driver" || v === "coordinator" ? v : null;
+  return v === "driver" || v === "coordinator" || v === "carer" ? v : null;
 }
 
 export function getActiveUserProfile(): ActiveUserProfile | null {
@@ -7855,70 +7788,53 @@ export async function insertAssetClearanceWithItems(input: {
 // ============================================================================
 
 /**
- * Verifies a 4-digit onboarding PIN against staff_registry via the
- * `verify_operator_pin` security-definer RPC, and confirms the matched
- * staff row equals the expected `staffId`.
+ * Named PIN check (action step-up). Does not change who is signed in.
+ * A locked PIN throws so the screen can say a manager must unlock it.
  */
 export async function verifyStaffPin(
   staffId: string,
   pin: string,
 ): Promise<boolean> {
-  if (!/^\d{4,}$/.test(pin)) return false;
-  const { data, error } = await supabase.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  if (error) {
-    console.error("[verifyStaffPin] failed", error);
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) return false;
+  try {
+    const { verifyNamedPersonPin } = await import("@/lib/auth/pin-session");
+    await verifyNamedPersonPin({ personKind: "staff", personId: staffId, pin });
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (/locked|sign in first/i.test(msg)) {
+      throw e instanceof Error ? e : new Error(msg);
+    }
     return false;
   }
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
-    id: string;
-  }>;
-  return rows.some((r) => r.id === staffId);
 }
 
 /**
- * GUARDRAILS §1.3 / §3 — Manager-only verification for RED override paths.
- *
- * Verifies that `pin` belongs to `staffId` AND that the staff member holds
- * a coordinator / manager role. Throws a user-surfaceable message when the
- * PIN is correct but the role is insufficient, so the dialog can display it.
- *
- * Returns `true` on success. Returns `false` when the PIN does not match.
- * Throws when the matched staff member does not hold coordinator/manager role.
+ * Manager-only verification for RED override paths.
+ * The PIN must belong to `staffId`. It does not sign that person in.
  */
 export async function verifyCoordinatorPin(
   staffId: string,
   pin: string,
 ): Promise<boolean> {
-  if (!/^\d{4,}$/.test(pin)) return false;
-  const { data, error } = await supabase.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  if (error) {
-    console.error("[verifyCoordinatorPin] failed", error);
-    return false;
-  }
-  const rows = (
-    Array.isArray(data) ? data : data ? [data] : []
-  ) as Array<{ id: string; role: string | null; personnel_type?: string | null }>;
-  const row = rows.find((r) => r.id === staffId);
-  if (!row) {
-    if (rows.length > 0) {
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) return false;
+  try {
+    const { verifyNamedPersonPin } = await import("@/lib/auth/pin-session");
+    const { isManagerLevelAccess } = await import("@/lib/auth/pin-role");
+    const who = await verifyNamedPersonPin({ personKind: "staff", personId: staffId, pin });
+    if (!isManagerLevelAccess(who.personnelType, who.roleTitle)) {
       throw new Error(
-        "That PIN belongs to a different staff member. This action needs the assigned trip leader’s PIN.",
+        "The selected staff member does not hold a Manager or Assistant Manager role and cannot authorise this.",
       );
+    }
+    return true;
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    if (/does not hold|locked|sign in first/i.test(msg)) {
+      throw e instanceof Error ? e : new Error(msg);
     }
     return false;
   }
-  const role =
-    classifyRole(row.personnel_type ?? null) ?? classifyRole(row.role ?? null);
-  if (role !== "coordinator") {
-    throw new Error(
-      "The selected staff member does not hold a Coordinator or Manager role and cannot authorise RED overrides.",
-    );
-  }
-  return true;
 }
 
 /** Manager side of the dual-PIN handshake — must run BEFORE the driver PIN. */

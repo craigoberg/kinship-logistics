@@ -198,6 +198,7 @@ export function canOpenMenu(
   opts?: { tableUnavailable?: boolean; stillLoading?: boolean },
 ): boolean {
   if (isManagerAccessRole(accessRole)) return true;
+  if ((accessRole ?? "").trim().toLowerCase() === "carer") return false;
   if (opts?.tableUnavailable) return true;
   if (opts?.stillLoading || rows === null) return true;
 
