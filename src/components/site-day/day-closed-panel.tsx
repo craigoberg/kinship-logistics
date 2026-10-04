@@ -21,6 +21,7 @@ import { reopenSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/s
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { TestOnly } from "@/components/dev/test-only";
+import { FloorLeaderLine } from "./floor-leader-bar";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -128,6 +129,7 @@ export function DayClosedPanel({ session }: Props) {
               ? "Dual-PIN handshake ended in NO-GO. Centre is hard-locked for clients today. Notify any expected attendees."
               : "Today's attendance has been finalised and flipped to billing-ready. The MYOB Export workspace in Admin can now pick up these rows."}
           </p>
+          <FloorLeaderLine session={session} />
           {session.closeDeclaredAt && (
             <p className="text-xs text-muted-foreground">
               Closed <ClientTime iso={session.closeDeclaredAt} />

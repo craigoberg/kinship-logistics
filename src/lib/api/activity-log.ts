@@ -190,6 +190,7 @@ const ACTION_LABELS: Record<string, string> = {
   EMERGENCY_ACTIVATED: "Emergency activated",
   EMERGENCY_STOOD_DOWN: "Emergency stood down",
   "site_day.open": "Centre opened",
+  "site_day.floor_leader": "Floor Leader",
   "site_day.initialize": "Centre session started",
   "site_day.issue_logged": "Issue logged",
   "governance.issue_resolved": "Issue closed",
@@ -1068,6 +1069,12 @@ function composeHighRiskSummary(
   }
   if (raw === "site_day.open") {
     return joinParts([`Opened Day Centre`, reason ? `— ${reason}` : null]);
+  }
+  if (raw === "site_day.floor_leader") {
+    const next = metaString(meta, "person_name");
+    const previous = metaString(meta, "previous_name");
+    if (previous && next) return `${previous} handed the floor to ${next}.`;
+    if (next) return `${next} is Floor Leader.`;
   }
   if (raw === "site_day.centre_reopened") {
     return joinParts([`Reopened Day Centre`, reason ? `— ${reason}` : null]);

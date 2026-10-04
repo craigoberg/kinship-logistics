@@ -1,10 +1,13 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
   DEFAULT_STAFF_UUID,
+  getActiveUserProfile,
   resolveStaffIdWithFallback,
   verifyStaffPin,
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
   dateAtSydneyMidday,
   getSydneyDayIndex,
@@ -76,6 +79,8 @@ export interface SiteDaySession {
   leaderDecision: HandshakeDecision | null;
   leaderAuthStaffId: string | null;
   leaderAuthAt: string | null;
+  floorLeaderStaffId: string | null;
+  floorLeaderSince: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -97,6 +102,8 @@ interface SiteDaySessionRow {
   leader_decision: HandshakeDecision | null;
   leader_auth_staff_id: string | null;
   leader_auth_at: string | null;
+  floor_leader_staff_id?: string | null;
+  floor_leader_since?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -119,9 +126,58 @@ function rowToSession(r: SiteDaySessionRow): SiteDaySession {
     leaderDecision: r.leader_decision,
     leaderAuthStaffId: r.leader_auth_staff_id,
     leaderAuthAt: r.leader_auth_at,
+    floorLeaderStaffId: r.floor_leader_staff_id ?? null,
+    floorLeaderSince: r.floor_leader_since ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+const FLOOR_LEADER_SQL = "Run docs/sql/2026-10-04_floor_leader.sql on this database, then hard-refresh.";
+
+export async function assignFloorLeader(input: {
+  sessionId: string;
+  staffId: string;
+  staffName: string;
+  previousName: string | null;
+}): Promise<SiteDaySession> {
+  const nowIso = operationalNowIso();
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      floor_leader_staff_id: input.staffId,
+      floor_leader_since: nowIso,
+    })
+    .eq("id", input.sessionId)
+    .select("*")
+    .single();
+  if (error) {
+    if (isSchemaMismatchError(error)) throw new Error(FLOOR_LEADER_SQL);
+    throw new Error(error.message);
+  }
+  const next = rowToSession(data as SiteDaySessionRow);
+  try {
+    const summary = input.previousName
+      ? `${input.previousName} handed the floor to ${input.staffName}.`
+      : `${input.staffName} is Floor Leader.`;
+    const metadata = await withAuditActorMeta({
+      location: "Day Centre",
+      session_id: next.id,
+      person_name: input.staffName,
+      previous_name: input.previousName,
+      summary,
+    });
+    await writeToLedger({
+      staff_id: input.staffId,
+      category: "CENTRE",
+      severity: "INFO",
+      action_type: "site_day.floor_leader",
+      metadata,
+    });
+  } catch (err) {
+    console.warn("[assignFloorLeader] activity log", err);
+  }
+  return next;
 }
 
 function todayIso(): string {
@@ -312,6 +368,20 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
     await ensureSiteDayActivitiesSeeded(next.id);
   } catch (e) {
     console.warn("[openSession] activity seed", e);
+  }
+  const profile = getActiveUserProfile();
+  const staffId = profile?.personKind === "carer" ? "" : (profile?.staffId ?? "");
+  if (staffId && staffId !== DEFAULT_STAFF_UUID) {
+    try {
+      return await assignFloorLeader({
+        sessionId: next.id,
+        staffId,
+        staffName: profile?.fullName?.trim() || "Floor Leader",
+        previousName: null,
+      });
+    } catch (e) {
+      console.warn("[openSession] floor leader", e);
+    }
   }
   return next;
 }

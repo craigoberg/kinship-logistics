@@ -18,6 +18,7 @@ export const DUTY_FUNCTION_KEYS = [
   { key: "event_venue_open", label: "Open event location" },
   { key: "event_day_close", label: "Close event day / location" },
   { key: "med_witness", label: "Medication witness" },
+  { key: "floor_leader", label: "Floor Leader" },
 ] as const;
 
 export type DutyFunctionKey = (typeof DUTY_FUNCTION_KEYS)[number]["key"];
