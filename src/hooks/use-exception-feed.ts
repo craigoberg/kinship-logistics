@@ -29,6 +29,7 @@ import {
 } from "@/lib/operational-clock";
 import { listAppTickets } from "@/lib/api/app-tickets";
 import { listOnboardingCases } from "@/lib/api/onboarding";
+import { syncMissingPrimaryContactIssues } from "@/lib/api/primary-contact-gap";
 import { ONBOARDING_PACK_LABELS } from "@/lib/onboarding/form-types";
 import {
   daysUntilIsoDate,
@@ -1159,6 +1160,24 @@ export function useOnboardingReviewTileFeed(params: {
         return a.severity === "critical" ? -1 : 1;
       });
       return rows;
+    },
+    staleTime: 30_000,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/** Active clients with no primary contact. Opening the Dashboard raises one yellow ticket each. */
+export function useMissingPrimaryContactTileFeed() {
+  return useQuery<{ key: string; title: string; detail: string; severity: Severity }[]>({
+    queryKey: ["primary-contact-gaps"],
+    queryFn: async () => {
+      const gaps = await syncMissingPrimaryContactIssues();
+      return gaps.map((gap) => ({
+        key: gap.participantId,
+        title: gap.name,
+        detail: "No primary contact on file. A yellow Hub ticket stays open until one is saved.",
+        severity: "warning" as const,
+      }));
     },
     staleTime: 30_000,
     refetchOnWindowFocus: true,

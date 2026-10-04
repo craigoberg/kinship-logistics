@@ -18,11 +18,19 @@ export const STAFF_EXIT_REASONS = [
   { code: "other", label: "Other" },
 ] as const;
 
+export const CARER_EXIT_REASONS = [
+  { code: "no_longer_contact", label: "No longer the contact" },
+  { code: "moved_away", label: "Moved away" },
+  { code: "requested_change", label: "Participant asked for a change" },
+  { code: "other", label: "Other" },
+] as const;
+
 export type ClientExitReason = (typeof CLIENT_EXIT_REASONS)[number]["code"];
 export type StaffExitReason = (typeof STAFF_EXIT_REASONS)[number]["code"];
+export type CarerExitReason = (typeof CARER_EXIT_REASONS)[number]["code"];
 
 const REASON_LABELS = new Map<string, string>(
-  [...CLIENT_EXIT_REASONS, ...STAFF_EXIT_REASONS].map((r) => [r.code, r.label]),
+  [...CLIENT_EXIT_REASONS, ...STAFF_EXIT_REASONS, ...CARER_EXIT_REASONS].map((r) => [r.code, r.label]),
 );
 
 export function exitReasonLabel(code: string | null | undefined): string {

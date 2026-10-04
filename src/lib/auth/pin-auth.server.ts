@@ -41,8 +41,23 @@ type PersonRow = {
 
 const STAFF_COLS =
   "id, full_name, role, personnel_type, active, email, pin_hash, pin_lookup, pin_digits, pin_failed_count, pin_locked_at, auth_user_id";
-const CARER_COLS =
+const CARER_COLS_BASE =
   "id, full_name, email, pin_hash, pin_lookup, pin_digits, pin_failed_count, pin_locked_at, auth_user_id";
+const CARER_COLS = `${CARER_COLS_BASE}, exited_at`;
+
+function missingExitColumn(error: { code?: string; message?: string } | null): boolean {
+  if (!error) return false;
+  const msg = (error.message ?? "").toLowerCase();
+  return error.code === "42703" || error.code === "PGRST204" || msg.includes("exited_at");
+}
+
+async function selectCarerRow(
+  run: (cols: string) => PromiseLike<{ data: unknown; error: { code?: string; message?: string } | null }>,
+): Promise<{ data: unknown; error: { code?: string; message?: string } | null }> {
+  const first = await run(CARER_COLS);
+  if (missingExitColumn(first.error)) return run(CARER_COLS_BASE);
+  return first;
+}
 
 export class PinAuthError extends Error {
   readonly deviceLockedUntil?: string;
@@ -244,7 +259,7 @@ function carerFrom(raw: Record<string, unknown>): PersonRow {
     full_name: (raw.full_name as string | null) ?? null,
     role: null,
     personnel_type: null,
-    active: true,
+    active: !raw.exited_at,
     email: (raw.email as string | null) ?? null,
     pin_hash: (raw.pin_hash as string | null) ?? null,
     pin_lookup: (raw.pin_lookup as string | null) ?? null,
@@ -266,11 +281,9 @@ async function loadStaff(id: string): Promise<PersonRow | null> {
 }
 
 async function loadCarer(id: string): Promise<PersonRow | null> {
-  const { data, error } = await service()
-    .from("carers_registry")
-    .select(CARER_COLS)
-    .eq("id", id)
-    .maybeSingle();
+  const { data, error } = await selectCarerRow((cols) =>
+    service().from("carers_registry").select(cols).eq("id", id).maybeSingle(),
+  );
   if (error) throw new PinAuthError("Could not check that PIN. Try again.");
   return data ? carerFrom(data as Record<string, unknown>) : null;
 }
@@ -279,7 +292,9 @@ async function findByLookup(hex: string): Promise<PersonRow | null> {
   const db = service();
   const [staffRes, carerRes] = await Promise.all([
     db.from("staff_registry").select(STAFF_COLS).eq("pin_lookup", hex).maybeSingle(),
-    db.from("carers_registry").select(CARER_COLS).eq("pin_lookup", hex).maybeSingle(),
+    selectCarerRow((cols) =>
+      db.from("carers_registry").select(cols).eq("pin_lookup", hex).maybeSingle(),
+    ),
   ]);
   if (staffRes.error || carerRes.error) {
     throw new PinAuthError("Could not check that PIN. Try again.");
@@ -313,7 +328,7 @@ async function findLegacyStaff(pin: string): Promise<PersonRow | null> {
 }
 
 function assertActive(row: PersonRow): void {
-  if (row.kind === "staff" && row.active === false) {
+  if (row.active === false) {
     const name = (row.full_name ?? "This person").trim();
     throw new PinAuthError(`${name} has been off-boarded and cannot sign in.`);
   }
@@ -875,7 +890,9 @@ async function loadSelf(accessToken: string): Promise<PersonRow> {
   const db = service();
   const [staffRes, carerRes] = await Promise.all([
     db.from("staff_registry").select(STAFF_COLS).eq("auth_user_id", userId).maybeSingle(),
-    db.from("carers_registry").select(CARER_COLS).eq("auth_user_id", userId).maybeSingle(),
+    selectCarerRow((cols) =>
+      db.from("carers_registry").select(cols).eq("auth_user_id", userId).maybeSingle(),
+    ),
   ]);
   if (staffRes.data) return staffFrom(staffRes.data as Record<string, unknown>);
   if (carerRes.data) return carerFrom(carerRes.data as Record<string, unknown>);

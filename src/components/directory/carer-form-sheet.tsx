@@ -10,6 +10,7 @@ import {
   SheetFooter,
 } from "@/components/ui/sheet";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -28,7 +29,8 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { cn } from "@/lib/utils";
-import { isOperationalParticipant } from "@/lib/service-exit";
+import { isOperationalParticipant, exitReasonLabel } from "@/lib/service-exit";
+import { ServiceExitDialog } from "@/components/directory/service-exit-dialog";
 import {
   useInsertCarer,
   useUpdateCarer,
@@ -74,6 +76,7 @@ export function CarerFormSheet({
   const [pin, setPin] = useState("");
   const [unlockBusy, setUnlockBusy] = useState(false);
   const [volunteerBusy, setVolunteerBusy] = useState(false);
+  const [exitOpen, setExitOpen] = useState(false);
 
   const insert = useInsertCarer();
   const update = useUpdateCarer();
@@ -153,16 +156,40 @@ export function CarerFormSheet({
   };
 
   return (
+    <>
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="right"
         className="flex w-full flex-col gap-0 overflow-hidden p-0 sm:max-w-xl"
       >
         <SheetHeader className="border-b border-border px-6 py-4">
-          <SheetTitle>{isEdit ? "Edit carer" : "Add carer / support contact"}</SheetTitle>
-          <SheetDescription>
-            Writes directly to <code>carers_registry</code>.
-          </SheetDescription>
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              <SheetTitle className="flex flex-wrap items-center gap-2">
+                {isEdit ? "Edit carer" : "Add carer / support contact"}
+                {isEdit && carer?.exitedAt && (
+                  <Badge variant="secondary" className="uppercase tracking-wide">
+                    Off-boarded
+                  </Badge>
+                )}
+              </SheetTitle>
+              <SheetDescription>
+                Writes directly to <code>carers_registry</code>.
+              </SheetDescription>
+            </div>
+            {isEdit && carer && !carer.exitedAt && (
+              <Button type="button" variant="outline" onClick={() => setExitOpen(true)}>
+                Off-board
+              </Button>
+            )}
+          </div>
+          {isEdit && carer?.exitedAt && (
+            <div className="mt-3 rounded-md bg-secondary px-3 py-2 text-sm font-medium text-secondary-foreground">
+              Off-boarded
+              {carer.exitReason ? ` — ${exitReasonLabel(carer.exitReason)}` : ""}
+              {carer.exitNotes ? `. ${carer.exitNotes}` : ""}
+            </div>
+          )}
         </SheetHeader>
 
         <div className="flex-1 space-y-4 overflow-y-auto px-6 py-5">
@@ -357,13 +384,29 @@ export function CarerFormSheet({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={save} disabled={busy || (!isEdit && !/^\d{6}$/.test(pin))} className="gap-1.5">
+          <Button onClick={save} disabled={busy || !!carer?.exitedAt || (!isEdit && !/^\d{6}$/.test(pin))} className="gap-1.5">
             <Save className="h-4 w-4" />
             {busy ? "Saving…" : isEdit ? "Save changes" : "Add carer"}
           </Button>
         </SheetFooter>
       </SheetContent>
     </Sheet>
+    {carer && (
+      <ServiceExitDialog
+        open={exitOpen}
+        onOpenChange={setExitOpen}
+        mode="offboard"
+        subject="carer"
+        personId={carer.id}
+        displayName={carer.fullName}
+        participantId={carer.participantId}
+        participantName={
+          participants.find((p) => p.id === carer.participantId)?.fullName ?? null
+        }
+        onCompleted={() => onOpenChange(false)}
+      />
+    )}
+    </>
   );
 }
 

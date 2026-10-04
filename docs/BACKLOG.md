@@ -234,6 +234,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 
 | Date | Change |
 |------|--------|
+| 2026-10-04 | Carer off-board uses the same reason form and manager PIN as staff. A primary contact must be replaced first. Past contacts stay on the client with dates. Dashboard shows clients with no primary contact and raises one yellow Hub ticket each. SQL `docs/sql/2026-10-04_carer_offboard.sql`. |
 | 2026-10-04 | BL-122 walk-on: search includes archived people. Off-boarded people come as a guest. Close event no longer archives guests. |
 | 2026-10-04 | Volunteer is a system access level (`personnel_type` = `volunteer`). Staff profile shows who that person cares for. SQL `docs/sql/2026-10-04_volunteer_access.sql`. |
 | 2026-10-04 | BL-132 one person, several hats. Walk-on and Add guest search people already on file. Carer **Also a volunteer** keeps one bus seat. SQL `docs/sql/2026-10-04_person_hats.sql`. |

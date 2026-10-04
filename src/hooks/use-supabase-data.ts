@@ -602,6 +602,8 @@ function invalidateCarerCaches(qc: ReturnType<typeof useQueryClient>, participan
   qc.invalidateQueries({ queryKey: ["carers_for_participant"] });
   qc.invalidateQueries({ queryKey: ["primary_carer"] });
   qc.invalidateQueries({ queryKey: ["participants"] });
+  qc.invalidateQueries({ queryKey: ["carer-client-terms"] });
+  qc.invalidateQueries({ queryKey: ["primary-contact-gaps"] });
   if (participantId) {
     qc.invalidateQueries({ queryKey: ["carers_for_participant", participantId] });
     qc.invalidateQueries({ queryKey: ["primary_carer", participantId] });

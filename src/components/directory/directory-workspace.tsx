@@ -72,6 +72,7 @@ export function DirectoryWorkspace() {
   const [staffQuery, setStaffQuery] = useState("");
   const [showInactive, setShowInactive] = useState(false);
   const [carerQuery, setCarerQuery] = useState("");
+  const [showExitedCarers, setShowExitedCarers] = useState(false);
   const [staffOpen, setStaffOpen] = useState(false);
   const [carerOpen, setCarerOpen] = useState(false);
   const [editStaff, setEditStaff] = useState<StaffMember | null>(null);
@@ -115,17 +116,22 @@ export function DirectoryWorkspace() {
     );
   }, [listedStaff, staffQuery]);
 
+  const exitedCarerCount = carers.filter((c) => c.exitedAt).length;
+  const listedCarers = useMemo(
+    () => (showExitedCarers ? carers : carers.filter((c) => !c.exitedAt)),
+    [carers, showExitedCarers],
+  );
   const filteredCarers = useMemo(() => {
     const q = carerQuery.trim().toLowerCase();
-    if (!q) return carers;
-    return carers.filter((c) => {
+    if (!q) return listedCarers;
+    return listedCarers.filter((c) => {
       const linked = c.participantId ? participantMap.get(c.participantId) ?? "" : "";
       return [c.fullName, c.relationship ?? "", c.email ?? "", c.phone ?? "", linked]
         .join(" ")
         .toLowerCase()
         .includes(q);
     });
-  }, [carers, carerQuery, participantMap]);
+  }, [listedCarers, carerQuery, participantMap]);
 
   return (
     <div className="space-y-4">
@@ -311,6 +317,17 @@ export function DirectoryWorkspace() {
             onChange={setCarerQuery}
             placeholder="Search carers by name, relationship, linked client…"
             count={filteredCarers.length}
+            extra={
+              exitedCarerCount > 0 ? (
+                <Button
+                  type="button"
+                  variant={showExitedCarers ? "secondary" : "outline"}
+                  onClick={() => setShowExitedCarers((v) => !v)}
+                >
+                  {showExitedCarers ? "Showing off-boarded" : "Show off-boarded"}
+                </Button>
+              ) : null
+            }
           />
           {carersErr && <ErrorBox message={(carersErr as Error).message} />}
           <div className="overflow-hidden rounded-lg border border-border bg-card">
@@ -356,7 +373,11 @@ export function DirectoryWorkspace() {
                           )}
                         </TableCell>
                         <TableCell>
-                          {c.isPrimaryContact ? (
+                          {c.exitedAt ? (
+                            <Badge variant="secondary" className="uppercase tracking-wide">
+                              Off-boarded
+                            </Badge>
+                          ) : c.isPrimaryContact ? (
                             <Badge className="bg-indigo-600 text-white hover:bg-indigo-600">Primary</Badge>
                           ) : (
                             <Badge variant="outline">Secondary</Badge>

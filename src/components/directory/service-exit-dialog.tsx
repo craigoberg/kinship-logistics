@@ -22,14 +22,17 @@ import {
 } from "@/lib/api/service-exit";
 import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
 import { SUPPORT_SCHEDULES_KEY } from "@/lib/api/support-attendance";
+import { listCarersForParticipant } from "@/lib/data-store";
+import { offboardCarer } from "@/lib/api/carer-offboard";
 import {
+  CARER_EXIT_REASONS,
   CLIENT_EXIT_REASONS,
   STAFF_EXIT_REASONS,
   exitNotesRequired,
 } from "@/lib/service-exit";
 
 type Mode = "offboard" | "reactivate";
-type Subject = "client" | "staff";
+type Subject = "client" | "staff" | "carer";
 
 interface Props {
   open: boolean;
@@ -38,6 +41,9 @@ interface Props {
   subject: Subject;
   personId: string;
   displayName: string;
+  /** Client this carer is linked to. Required when that client would be left without a primary. */
+  participantId?: string | null;
+  participantName?: string | null;
   onCompleted: (result: {
     mode: Mode;
     reason: string | null;
@@ -53,15 +59,21 @@ export function ServiceExitDialog({
   subject,
   personId,
   displayName,
+  participantId = null,
+  participantName = null,
   onCompleted,
 }: Props) {
   const qc = useQueryClient();
-  const reasons = subject === "client" ? CLIENT_EXIT_REASONS : STAFF_EXIT_REASONS;
+  const reasons =
+    subject === "client" ? CLIENT_EXIT_REASONS : subject === "carer" ? CARER_EXIT_REASONS : STAFF_EXIT_REASONS;
   const [reason, setReason] = useState("");
   const [notes, setNotes] = useState("");
   const [pinOpen, setPinOpen] = useState(false);
   const [floorBlock, setFloorBlock] = useState<string | null>(null);
   const [checking, setChecking] = useState(false);
+  const [replacementId, setReplacementId] = useState("");
+  const [otherContacts, setOtherContacts] = useState<Array<{ id: string; name: string }>>([]);
+  const [needsReplacement, setNeedsReplacement] = useState(false);
 
   useEffect(() => {
     if (!open) return;
@@ -69,7 +81,10 @@ export function ServiceExitDialog({
     setNotes("");
     setPinOpen(false);
     setFloorBlock(null);
-    if (mode !== "offboard") return;
+    setReplacementId("");
+    setOtherContacts([]);
+    setNeedsReplacement(false);
+    if (mode !== "offboard" || subject === "carer") return;
     let cancelled = false;
     setChecking(true);
     void assertClearOfLiveService({
@@ -91,11 +106,43 @@ export function ServiceExitDialog({
     };
   }, [open, mode, subject, personId, displayName]);
 
+  useEffect(() => {
+    if (!open || subject !== "carer" || mode !== "offboard" || !participantId) return;
+    let cancelled = false;
+    setChecking(true);
+    void listCarersForParticipant(participantId)
+      .then((carers) => {
+        if (cancelled) return;
+        const self = carers.find((c) => c.id === personId);
+        const others = carers.filter((c) => c.id !== personId && !c.exitedAt);
+        const someoneElseIsPrimary = others.some((c) => c.isPrimaryContact);
+        const mustReplace = (self?.isPrimaryContact ?? false) || !someoneElseIsPrimary;
+        setNeedsReplacement(mustReplace);
+        setOtherContacts(others.map((c) => ({ id: c.id, name: c.fullName })));
+        if (mustReplace && others.length === 0) {
+          setFloorBlock(
+            `Add another contact for ${participantName ?? "this client"} before this one can be off-boarded.`,
+          );
+        }
+      })
+      .catch((err: unknown) => {
+        if (!cancelled) setFloorBlock((err as Error).message);
+      })
+      .finally(() => {
+        if (!cancelled) setChecking(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [open, subject, mode, participantId, participantName, personId]);
+
   const notesNeeded = exitNotesRequired(reason, mode);
   const missing: string[] = [];
   if (mode === "offboard" && !reason) missing.push("Reason");
   if (notesNeeded && notes.trim().length < 20) missing.push("Notes (20 characters)");
-  if (floorBlock) missing.push("Finish today first");
+  if (needsReplacement && otherContacts.length === 0) missing.push("Another contact");
+  if (needsReplacement && otherContacts.length > 0 && !replacementId) missing.push("New primary contact");
+  if (floorBlock) missing.push(subject === "carer" ? "Replacement contact" : "Finish today first");
   const canSubmit = !checking && missing.length === 0;
 
   const invalidate = () => {
@@ -108,6 +155,10 @@ export function ServiceExitDialog({
     void qc.invalidateQueries({ queryKey: ["participant-directory-indicators"] });
     void qc.invalidateQueries({ queryKey: ["event_roster_bookings"] });
     void qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+    void qc.invalidateQueries({ queryKey: ["carers_registry"] });
+    void qc.invalidateQueries({ queryKey: ["carers_for_participant"] });
+    void qc.invalidateQueries({ queryKey: ["carer-client-terms"] });
+    void qc.invalidateQueries({ queryKey: ["primary-contact-gaps"] });
   };
 
   const title =
@@ -115,9 +166,11 @@ export function ServiceExitDialog({
       ? `Off-board ${displayName}`
       : `Reactivate ${displayName}`;
   const description =
-    mode === "offboard"
-      ? "History stays on this record. Future runs, medication, and trips stop. This does not delete the person."
-      : "They return as active. Previous schedules, medication, and bookings are not restored.";
+    subject === "carer"
+      ? "Choose why they are leaving. If they are the primary contact, name who takes over. Their time with this client stays on the file."
+      : mode === "offboard"
+        ? "History stays on this record. Future runs, medication, and trips stop. This does not delete the person."
+        : "They return as active. Previous schedules, medication, and bookings are not restored.";
 
   return (
     <>
@@ -130,11 +183,29 @@ export function ServiceExitDialog({
 
           <div className="space-y-3">
             {checking && (
-              <p className="text-sm text-muted-foreground">Checking today’s floor…</p>
+              <p className="text-sm text-muted-foreground">
+                {subject === "carer" ? "Checking contacts…" : "Checking today’s floor…"}
+              </p>
             )}
             {floorBlock && (
               <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
                 {floorBlock}
+              </div>
+            )}
+
+            {subject === "carer" && needsReplacement && otherContacts.length > 0 && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  New primary contact
+                </p>
+                {otherContacts.map((item) => (
+                  <MobileOptionButton
+                    key={item.id}
+                    selected={replacementId === item.id}
+                    label={item.name}
+                    onClick={() => setReplacementId(item.id)}
+                  />
+                ))}
               </div>
             )}
 
@@ -197,7 +268,21 @@ export function ServiceExitDialog({
         title="Manager PIN"
         description="A manager authorises this. The PIN is not stored."
         onVerify={async (pin) => {
-          if (mode === "offboard" && subject === "client") {
+          if (mode === "offboard" && subject === "carer") {
+            const result = await offboardCarer({
+              carerId: personId,
+              displayName,
+              reason,
+              notes,
+              managerPin: pin,
+              replacementCarerId: replacementId || null,
+            });
+            invalidate();
+            onCompleted({ mode, reason, notes: notes.trim(), exitedAt: result.exitedAt });
+            toast.success(`${displayName} off-boarded`, {
+              description: "Their time as a contact stays on the client file. Their PIN no longer signs in.",
+            });
+          } else if (mode === "offboard" && subject === "client") {
             const result = await offboardClient({
               participantId: personId,
               displayName,

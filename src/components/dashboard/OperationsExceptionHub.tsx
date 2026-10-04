@@ -46,6 +46,7 @@ import {
   useOperationalEmergencyFeed,
   useAppTicketsTileFeed,
   useOnboardingReviewTileFeed,
+  useMissingPrimaryContactTileFeed,
   type ComplianceExceptionRow,
   type Severity,
 } from "@/hooks/use-exception-feed";
@@ -149,6 +150,7 @@ export function OperationsExceptionHub() {
   const { data: emergencyOpsRows = [] }   = useOperationalEmergencyFeed();
   const { data: appTicketRows = [] }      = useAppTicketsTileFeed();
   const { data: onboardingReviewRows = [] } = useOnboardingReviewTileFeed(onboardingReviewSla);
+  const { data: missingPrimaryRows = [] } = useMissingPrimaryContactTileFeed();
 
   const [activeAsset, setActiveAsset] = useState<ComplianceAsset | null>(null);
 
@@ -340,6 +342,27 @@ export function OperationsExceptionHub() {
       })),
     },
     {
+      id: "primary-contact",
+      anchorId: "exception-section-primary-contact",
+      label: "No primary contact",
+      icon: UserX,
+      isLive: false,
+      rows: missingPrimaryRows.map((r) => ({
+        key: r.key,
+        title: r.title,
+        detail: r.detail,
+        severity: r.severity,
+        action: (
+          <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
+            <Link to="/participants">
+              <UserX className="mr-1 h-3.5 w-3.5" />
+              Open clients
+            </Link>
+          </Button>
+        ),
+      })),
+    },
+    {
       id: "maintenance",
       anchorId: "exception-section-maintenance",
       label: "Maintenance",
@@ -405,7 +428,7 @@ export function OperationsExceptionHub() {
     "medication",
     "on-road",
   ]);
-  const BAND3_IDS = new Set(["hub-human", "app-tickets", "onboarding-review"]);
+  const BAND3_IDS = new Set(["hub-human", "app-tickets", "onboarding-review", "primary-contact"]);
 
   const band1 = buckets.filter((b) => BAND1_IDS.has(b.id));
   const band2 = buckets.filter((b) => BAND2_IDS.has(b.id));

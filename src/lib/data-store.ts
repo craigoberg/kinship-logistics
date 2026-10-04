@@ -1280,6 +1280,9 @@ export interface Carer {
   isPrimaryContact: boolean;
   notes: string | null;
   createdAt: string | null;
+  exitedAt: string | null;
+  exitReason: string | null;
+  exitNotes: string | null;
 }
 
 interface CarerRow {
@@ -1293,6 +1296,9 @@ interface CarerRow {
   is_primary_contact: boolean | null;
   notes: string | null;
   created_at: string | null;
+  exited_at?: string | null;
+  exit_reason?: string | null;
+  exit_notes?: string | null;
 }
 
 function rowToCarer(r: CarerRow): Carer {
@@ -1307,6 +1313,9 @@ function rowToCarer(r: CarerRow): Carer {
     isPrimaryContact: r.is_primary_contact ?? false,
     notes: r.notes,
     createdAt: r.created_at,
+    exitedAt: r.exited_at ?? null,
+    exitReason: r.exit_reason ?? null,
+    exitNotes: r.exit_notes ?? null,
   };
 }
 
@@ -1389,6 +1398,11 @@ export async function insertCarer(p: CarerPayload): Promise<Carer> {
     recordName: created.fullName,
     after: carerPublicFields(created),
   });
+  if (created.participantId) {
+    void import("@/lib/api/carer-offboard").then((m) =>
+      m.rememberCarerLink(created.id, created.participantId!, created.isPrimaryContact),
+    );
+  }
   return created;
 }
 
@@ -1521,9 +1535,22 @@ export async function setPrimaryCarer(carerId: string, participantId: string): P
     summary: `Set ${saved.fullName} as primary carer`,
     after: carerPublicFields(saved),
   });
+  void import("@/lib/api/carer-offboard").then((m) =>
+    m.rememberCarerLink(saved.id, participantId, true),
+  );
+  void import("@/lib/api/primary-contact-gap").then((m) => m.resolvePrimaryContactGap(participantId));
   return saved;
 }
 export async function demoteCarer(carerId: string): Promise<Carer> {
+  const { data: current, error: readErr } = await supabase
+    .from("carers_registry")
+    .select("participant_id, is_primary_contact")
+    .eq("id", carerId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (current?.is_primary_contact) {
+    throw new Error("Choose another primary contact before this one can stop being primary.");
+  }
   const { data, error } = await supabase
     .from("carers_registry")
     .update({ is_primary_contact: false })
@@ -1559,9 +1586,47 @@ export async function linkCarerToParticipant(carerId: string, participantId: str
     summary: `Linked carer ${saved.fullName} to a client`,
     after: carerPublicFields(saved),
   });
+  void import("@/lib/api/carer-offboard").then((m) =>
+    m.rememberCarerLink(saved.id, participantId, saved.isPrimaryContact),
+  );
   return saved;
 }
 export async function unlinkCarer(carerId: string): Promise<Carer> {
+  const { data: current, error: readErr } = await supabase
+    .from("carers_registry")
+    .select("participant_id, is_primary_contact")
+    .eq("id", carerId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  const participantId = (current?.participant_id as string | null) ?? null;
+  if (current?.is_primary_contact) {
+    throw new Error("This is the primary contact. Off-board them and choose the new primary contact.");
+  }
+  if (participantId) {
+    const { data: others, error: othersErr } = await supabase
+      .from("carers_registry")
+      .select("id, is_primary_contact")
+      .eq("participant_id", participantId)
+      .neq("id", carerId);
+    if (othersErr) throw othersErr;
+    const stillHasPrimary = ((others ?? []) as Array<{ is_primary_contact: boolean | null }>).some(
+      (row) => row.is_primary_contact,
+    );
+    if (!stillHasPrimary) {
+      throw new Error("This client would have no primary contact. Off-board this carer and name the new one.");
+    }
+    const { operationalNowIso } = await import("@/lib/operational-clock");
+    const { error: termErr } = await supabase
+      .from("carer_client_terms")
+      .update({ ended_at: operationalNowIso(), end_reason: "unlinked" })
+      .eq("carer_id", carerId)
+      .eq("participant_id", participantId)
+      .is("ended_at", null);
+    if (termErr) {
+      const { isSchemaMismatchError } = await import("@/lib/api/supabase-errors");
+      if (!isSchemaMismatchError(termErr)) throw termErr;
+    }
+  }
   const { data, error } = await supabase
     .from("carers_registry")
     .update({ participant_id: null, is_primary_contact: false })
