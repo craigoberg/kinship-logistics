@@ -981,7 +981,17 @@ export async function bulkDeferGroup(
       r.status !== "checked_out" &&
       r.status !== "accounted",
   );
-  if (!targets.length) return { deferredCount: 0, yellowsAutoCleared: 0 };
+  if (!targets.length) {
+    let supportDeferred = 0;
+    try {
+      const { bulkDeferSupportGroup } = await import("@/lib/api/support-attendance");
+      const extra = await bulkDeferSupportGroup(sessionId, method, minutes, yellowThresholdMins);
+      supportDeferred = extra.deferredCount;
+    } catch {
+      /* support table not migrated yet */
+    }
+    return { deferredCount: supportDeferred, yellowsAutoCleared: 0 };
+  }
 
   const updates = targets.map((r) => {
     const next = new Date(Date.parse(r.expectedArrivalAt) + minutes * 60_000)
@@ -1746,6 +1756,60 @@ export async function checkOutParticipant(
   }
 
   return { row: finalRow, vector, departureAutoCloseOutcome: outcome.kind };
+}
+
+/** Undo check-out only (checked_out → checked_in). Arrival time and home method stay. Does not reopen a closed departure warning. */
+export async function undoClientCheckOut(
+  row: ClientAttendanceRow,
+): Promise<ClientAttendanceRow> {
+  if (row.status !== "checked_out" && !row.checkedOutAt) {
+    throw new Error("Not checked out.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const nowIso = operationalNowIso();
+  const { data: fresh, error: freshErr } = await supabase
+    .from("client_attendance_log")
+    .select("status, checked_out_at")
+    .eq("id", row.id)
+    .single();
+  if (freshErr) throw freshErr;
+  const prior = fresh as { status?: string; checked_out_at?: string | null };
+  if (prior.status !== "checked_out" && !prior.checked_out_at) {
+    throw new Error("Not checked out.");
+  }
+  const { data, error } = await supabase
+    .from("client_attendance_log")
+    .update({
+      status: "checked_in" as AttendanceStatus,
+      checked_out_at: null,
+      checked_out_by: null,
+      updated_at: nowIso,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw error;
+
+  const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "ATTENDANCE_CHECKOUT_UNDO",
+    gps_lat: gps?.lat ?? null,
+    gps_lng: gps?.lng ?? null,
+    metadata: await withAuditActorMeta({
+      attendance_id: row.id,
+      session_id: row.sessionId,
+      participant_id: row.participantId,
+      person_name: who,
+      location: "Day Centre",
+      summary: `Undid check-out for ${who} at Day Centre`,
+    }),
+  });
+  return toRow(data as DbRow);
 }
 
 export async function sweepOverdueDepartures(

@@ -50,6 +50,7 @@ import {
   sweepOverdueArrivals,
   sweepOverdueDepartures,
   toggleCheckIn,
+  undoClientCheckOut,
   type ClientAttendanceRow,
   type DepartureVector,
 } from "@/lib/api/client-attendance";
@@ -190,6 +191,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   } | null>(null);
   /** Undo check-in: chip → AlertDialog confirm (two taps / fat-finger safe). */
   const [undoTarget, setUndoTarget] = useState<ClientAttendanceRow | null>(null);
+  const [undoKind, setUndoKind] = useState<"check_in" | "check_out">("check_in");
 
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busRunOpts = useMemo(
@@ -364,6 +366,32 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     },
   });
 
+  /** Undo check-out only (checked_out → checked_in). Arrival and home method stay. */
+  const undoOutMut = useMutation({
+    mutationFn: (row: ClientAttendanceRow) => undoClientCheckOut(row),
+    onMutate: async (row) => {
+      await qc.cancelQueries({ queryKey: ROLL_KEY(sessionId) });
+      const prev = qc.getQueryData<ClientAttendanceRow[]>(ROLL_KEY(sessionId));
+      const flipped: ClientAttendanceRow = {
+        ...row,
+        status: "checked_in",
+        checkedOutAt: null,
+        checkedOutBy: null,
+      };
+      qc.setQueryData<ClientAttendanceRow[]>(ROLL_KEY(sessionId), (prevRows) =>
+        (prevRows ?? []).map((r) => (r.id === row.id ? flipped : r)),
+      );
+      return { prev };
+    },
+    onError: (e: Error, _row, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ROLL_KEY(sessionId), ctx.prev);
+      toast.error("Could not undo check-out", { description: e.message });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+    },
+  });
+
   const arrivalMut = useMutation({
     mutationFn: ({
       row,
@@ -501,7 +529,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         (r) => r.status !== "checked_out" && !r.checkedOutAt,
       );
     } else if (mode === "check_out") {
-      filtered = allRows.filter((r) => r.status === "checked_in");
+      // Still here and already left stay in one list. Green means they have left.
+      filtered = allRows.filter(
+        (r) => r.status === "checked_in" || r.status === "checked_out",
+      );
     } else {
       filtered = allRows;
     }
@@ -570,7 +601,8 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
           <span className="ml-1 font-mono font-medium normal-case text-muted-foreground/70">
             {mode === "check_out" ? (
               <>
-                ({rows.length} on site
+                ({arrived} on site
+                {leftCount > 0 && <> · {leftCount} left</>}
                 {visitorsPresent.length > 0 && showVisitors && (
                   <>
                     {" "}· {visitorsPresent.length} visitor
@@ -726,14 +758,21 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
             ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
             : null;
           const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
-          // Hi-vis green = white text; Yellow/Absent/Out keep charcoal on tints.
-          const subTextCls = isIn
+          // Green means this screen is done. Check-In: arrived. Check-Out: left.
+          // Still on site at Check-Out stays a plain row. Amber/red still wins.
+          const arrivalDone = mode !== "check_out" && isIn && !isYellow && !isRed;
+          const departureDone = mode === "check_out" && isOut;
+          const awaitingDeparture =
+            mode === "check_out" && isIn && !isYellow && !isRed;
+          const hiVisDone = arrivalDone || departureDone;
+          const subTextCls = hiVisDone
             ? "text-success-foreground/90"
-            : isYellow || isAbsent || isOut
+            : isYellow || isAbsent || (isOut && !departureDone)
               ? "text-slate-900/80"
               : "text-muted-foreground";
           const busy =
             undoMut.isPending ||
+            undoOutMut.isPending ||
             arrivalMut.isPending ||
             checkoutMut.isPending;
           const canConfirmArrival =
@@ -774,9 +813,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                 className={cn(
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
-                  isIn && !isYellow && !isRed &&
+                  hiVisDone &&
                     "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
-                  !isIn && !isRed && !isYellow && !isAbsent && !isOut &&
+                  (awaitingDeparture ||
+                    (!hiVisDone && !isRed && !isYellow && !isAbsent && !isOut)) &&
                     "border-border bg-card",
                   isYellow &&
                     "border-amber-500 bg-amber-50 text-slate-900",
@@ -784,7 +824,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     "border-2 border-destructive bg-destructive/10 text-destructive",
                   isAbsent &&
                     "border-slate-400 bg-slate-200/70 text-slate-900",
-                  isOut &&
+                  isOut && !departureDone &&
                     "border-slate-400 bg-slate-100 text-slate-900",
                 )}
               >
@@ -809,7 +849,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     }
                   }}
                   disabled={!canConfirmArrival && !canConfirmDeparture}
-                  aria-pressed={isIn}
+                  aria-pressed={mode === "check_out" ? isOut : isIn}
                   aria-label={
                     canConfirmDeparture
                       ? `Check out ${displayName} via ${departureSel.label}`
@@ -830,7 +870,8 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     <span
                       className={cn(
                         "truncate text-base font-semibold",
-                        (isAbsent || isOut) && "line-through decoration-slate-500/60",
+                        (isAbsent || (isOut && !departureDone)) &&
+                          "line-through decoration-slate-500/60",
                       )}
                     >
                       {nameMap[r.participantId] ?? "Loading…"}
@@ -881,8 +922,19 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                         Absent · {absentLabel}
                       </Badge>
                     )}
+                    {isIn && (
+                      <Badge className="border border-slate-400 bg-white text-[10px] uppercase text-slate-900">
+                        Checked in
+                      </Badge>
+                    )}
                     {isOut && (
-                      <Badge className="bg-slate-600 text-white text-[10px] uppercase">
+                      <Badge
+                        className={
+                          departureDone
+                            ? "border border-slate-400 bg-white text-[10px] uppercase text-slate-900"
+                            : "bg-slate-600 text-[10px] uppercase text-white"
+                        }
+                      >
                         Checked out
                       </Badge>
                     )}
@@ -960,7 +1012,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     <button
                       type="button"
                       disabled={busy}
-                      onClick={() => setUndoTarget(r)}
+                      onClick={() => {
+                        setUndoKind("check_in");
+                        setUndoTarget(r);
+                      }}
                       className={cn(
                         "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
                         "border border-slate-300 bg-white text-slate-900 shadow-sm",
@@ -969,6 +1024,29 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                       )}
                       title="Undo check-in"
                       aria-label={`Undo check-in for ${displayName}`}
+                    >
+                      <RotateCcw className="h-3.5 w-3.5" />
+                      <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
+                        Undo
+                      </span>
+                    </button>
+                  )}
+                  {departureDone && (
+                    <button
+                      type="button"
+                      disabled={busy}
+                      onClick={() => {
+                        setUndoKind("check_out");
+                        setUndoTarget(r);
+                      }}
+                      className={cn(
+                        "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
+                        "border border-slate-300 bg-white text-slate-900 shadow-sm",
+                        "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
+                        "disabled:pointer-events-none disabled:opacity-50",
+                      )}
+                      title="Undo check-out"
+                      aria-label={`Undo check-out for ${displayName}`}
                     >
                       <RotateCcw className="h-3.5 w-3.5" />
                       <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
@@ -999,9 +1077,9 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   <div
                     className={cn(
                       "rounded-full p-2",
-                      isIn
+                      hiVisDone
                         ? "bg-green-600 text-white"
-                        : isAbsent || isOut
+                        : isAbsent || (isOut && !departureDone)
                           ? "bg-slate-400 text-white"
                           : "bg-muted text-muted-foreground",
                     )}
@@ -1179,7 +1257,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         yellowThresholdMins={yellowMins}
         onClose={(changed: boolean) => {
           setBulkOpen(false);
-          if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+          if (changed) {
+            qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+            qc.invalidateQueries({ queryKey: ["support-attendance-roll", sessionId] });
+          }
         }}
       />
 
@@ -1271,24 +1352,33 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Undo check-in?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {undoKind === "check_out" ? "Undo check-out?" : "Undo check-in?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {undoTarget
-                ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to expected — not yet arrived.`
-                : "This person will go back to expected — not yet arrived."}
+              {undoKind === "check_out"
+                ? undoTarget
+                  ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to still on site — checked in, not yet left.`
+                  : "This person will go back to still on site — checked in, not yet left."
+                : undoTarget
+                  ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to expected — not yet arrived.`
+                  : "This person will go back to expected — not yet arrived."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={undoMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={undoMut.isPending || undoOutMut.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
-              disabled={undoMut.isPending || !undoTarget}
+              disabled={(undoMut.isPending || undoOutMut.isPending) || !undoTarget}
               onClick={() => {
                 if (!undoTarget) return;
-                undoMut.mutate(undoTarget);
+                if (undoKind === "check_out") undoOutMut.mutate(undoTarget);
+                else undoMut.mutate(undoTarget);
                 setUndoTarget(null);
               }}
             >
-              Undo check-in
+              {undoKind === "check_out" ? "Undo check-out" : "Undo check-in"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

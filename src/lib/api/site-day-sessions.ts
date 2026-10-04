@@ -422,10 +422,11 @@ export async function reopenSession(args: {
 }
 
 /**
- * TEST-ONLY rewind. Flip today's session row back to `open_pending` and
- * clear all open/close/handshake stamps so the Start of Day flow renders
- * fresh. Also rewinds Activities delivery (`site_day_activities` → pending).
- * Does NOT touch issues, escalations, attendance, or billing.
+ * TEST-ONLY rewind. Flip today's session row back to `open_pending`,
+ * clear open/close stamps, rewind activities, and wipe the centre floor
+ * for that date (check-in/out, support, visitors, meals, doses, issues,
+ * roster exceptions, and Day Centre bus runs). Weekly schedules stay.
+ * The roll is seeded again from those schedules.
  *
  * UI for this action is gated by `IS_TEST_BUILD` so it never appears on
  * published deployments.
@@ -440,6 +441,9 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
   if (existing.error) throw existing.error;
   if (!existing.data) throw new Error("No session row to reset.");
   const prior = rowToSession(existing.data as SiteDaySessionRow);
+
+  const { resetCentreFloorForSession } = await import("@/lib/api/centre-day-reset");
+  const floor = await resetCentreFloorForSession(prior.id, prior.sessionDate);
 
   const { data, error } = await supabase
     .from("site_day_sessions")
@@ -465,6 +469,15 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
   if (error) throw error;
   const next = rowToSession(data as SiteDaySessionRow);
 
+  await supabase
+    .from("site_day_sessions")
+    .update({
+      lockdown_active: false,
+      lockdown_reason: null,
+      lockdown_severity: null,
+    })
+    .eq("id", prior.id);
+
   const { resetSiteDayActivitiesDelivery } = await import(
     "@/lib/api/site-day-activities"
   );
@@ -479,8 +492,11 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
       prior_open_at: prior.openDeclaredAt,
       prior_close_at: prior.closeDeclaredAt,
       activities_reset: activitiesReset,
+      floor_reset: floor,
       reason: reason ?? null,
       test_only: true,
+      location: "Day Centre",
+      summary: `Reset start of day for ${next.sessionDate} — cleared ${floor.clientAttendance} client and ${floor.supportAttendance} support attendance rows`,
     },
     "YELLOW",
   );

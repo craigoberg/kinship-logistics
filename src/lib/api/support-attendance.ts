@@ -742,6 +742,60 @@ export async function recordSupportArrival(input: {
   return logged;
 }
 
+/** Undo check-in only (checked_in → expected). Does not reopen a closed arrival warning. */
+export async function undoSupportCheckIn(
+  row: SupportAttendanceRow,
+): Promise<SupportAttendanceRow> {
+  if (row.status === "checked_out" || row.checkedOutAt) {
+    throw new Error("Already checked out — use Adjust if you need to correct this.");
+  }
+  if (row.status !== "checked_in") {
+    throw new Error("Not checked in.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { data: fresh, error: freshErr } = await supabase
+    .from("support_attendance_log")
+    .select("status, checked_out_at")
+    .eq("id", row.id)
+    .single();
+  if (freshErr) throw new Error(freshErr.message);
+  const prior = fresh as { status?: string; checked_out_at?: string | null };
+  if (prior.status === "checked_out" || prior.checked_out_at) {
+    throw new Error("Already checked out — cannot undo check-in.");
+  }
+  const { data, error } = await supabase
+    .from("support_attendance_log")
+    .update({
+      status: "expected",
+      checked_in_at: null,
+      checked_in_by: null,
+      updated_at: now,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const names = await resolveSupportNames();
+  const logged = toLog(data as LogDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "SUPPORT_CHECKIN_UNDO",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: row.id,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "Day Centre",
+      summary: `Undid check-in for ${logged.displayName} at Day Centre`,
+    }),
+  });
+  return logged;
+}
+
 export async function checkOutSupport(input: {
   rowId: string;
   departureVector?: DepartureVector | null;
@@ -790,7 +844,56 @@ export async function checkOutSupport(input: {
   return logged;
 }
 
-/** Save how they are actually coming in, without checking them in. */
+/** Undo check-out only (checked_out → checked_in). Arrival time and home method stay. Does not reopen a closed warning. */
+export async function undoSupportCheckOut(
+  row: SupportAttendanceRow,
+): Promise<SupportAttendanceRow> {
+  if (row.status !== "checked_out" && !row.checkedOutAt) {
+    throw new Error("Not checked out.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { data: fresh, error: freshErr } = await supabase
+    .from("support_attendance_log")
+    .select("status, checked_out_at")
+    .eq("id", row.id)
+    .single();
+  if (freshErr) throw new Error(freshErr.message);
+  const prior = fresh as { status?: string; checked_out_at?: string | null };
+  if (prior.status !== "checked_out" && !prior.checked_out_at) {
+    throw new Error("Not checked out.");
+  }
+  const { data, error } = await supabase
+    .from("support_attendance_log")
+    .update({
+      status: "checked_in",
+      checked_out_at: null,
+      checked_out_by: null,
+      updated_at: now,
+    })
+    .eq("id", row.id)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const names = await resolveSupportNames();
+  const logged = toLog(data as LogDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "SUPPORT_CHECKOUT_UNDO",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: row.id,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "Day Centre",
+      summary: `Undid check-out for ${logged.displayName} at Day Centre`,
+    }),
+  });
+  return logged;
+}
 export async function persistSupportArrivalMethod(input: {
   rowId: string;
   arrivalMethod: ArrivalMethod;
