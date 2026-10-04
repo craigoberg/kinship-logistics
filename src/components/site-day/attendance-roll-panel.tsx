@@ -441,6 +441,17 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     if (row.status === "absent") {
       return { kind: "self", busRunCode: null, label: "Self" };
     }
+    if (row.arrivalMethod === "private" || row.arrivalMethod === "walk_in") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
+    if (row.arrivalBusRunCode) {
+      return selectionFromScheduleLabel(
+        row.arrivalBusRunCode,
+        arrivalBusOpts,
+        "dayCentre",
+        scheduleLabelIsSelf,
+      );
+    }
     return selectionFromScheduleLabel(
       transportLabelMap[row.participantId],
       arrivalBusOpts,
@@ -1225,17 +1236,27 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
             ...prev,
             [methodKey(picker.phase, picker.rowId)]: next,
           }));
-          if (picker.phase === "departure" && pickerRow) {
-            void persistDepartureMethod(pickerRow, next).then(
-              () => {
-                qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
-              },
-              (e: Error) => {
-                toast.error("Could not save home transport", {
-                  description: e.message,
-                });
-              },
-            );
+          const saved = pickerRow;
+          const phase = picker.phase;
+          if (!saved) return;
+          const refresh = () => {
+            void qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+            void qc.invalidateQueries({ queryKey: ["bus-run-roster"] });
+          };
+          if (phase === "departure") {
+            void persistDepartureMethod(saved, next).then(refresh, (e: Error) => {
+              toast.error("Could not save home transport", {
+                description: e.message,
+              });
+            });
+          } else if (saved.status !== "absent") {
+            void recordClientArrival(saved, {
+              arrival: next.kind === "self" ? "self" : "bus",
+              busRunCode: next.kind === "bus" ? next.busRunCode : null,
+              alsoCheckIn: false,
+            }).then(refresh, (e: Error) => {
+              toast.error("Could not save arrival", { description: e.message });
+            });
           }
         }}
       />

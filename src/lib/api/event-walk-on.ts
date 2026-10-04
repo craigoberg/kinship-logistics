@@ -14,6 +14,7 @@ import {
 } from "@/lib/data-store";
 import {
   createWalkOnGuestParticipant,
+  ensureGuestVisitParticipant,
   listGuestParticipants,
   reactivateGuestParticipant,
   type GuestParticipant,
@@ -30,7 +31,7 @@ export const WALK_ON_WORKAROUND =
 export const WALK_ON_OPS_NOTE = "Walk-on — intake incomplete. Office follow-up.";
 
 export type WalkOnSource = "manifest" | "venue";
-export type WalkOnKind = "client" | "guest" | "carer";
+export type WalkOnKind = "client" | "guest" | "carer" | "support";
 
 export type WalkOnHost = {
   participantId: string;
@@ -77,6 +78,13 @@ export type AddEventWalkOnInput = {
   /** Existing carer, or omit with newCarerName. */
   carerId?: string | null;
   newCarerName?: string | null;
+  /** Known staff or volunteer — do not create a participant. */
+  staffId?: string | null;
+  supportKind?: "staff" | "volunteer";
+  linkedParticipantId?: string | null;
+  /** Off-boarded person accepted as a guest. Real record stays off. */
+  realRecordLeftOff?: boolean;
+  linkPersonId?: string | null;
 };
 
 export type AddEventWalkOnResult = {
@@ -181,7 +189,7 @@ export async function addEventWalkOn(
   );
 
   const allergies = input.allergiesNotes.trim();
-  if (input.kind !== "carer" && !allergies) {
+  if (input.kind !== "carer" && input.kind !== "support" && !allergies) {
     throw new Error('Allergies / alerts required (enter "None" if none known).');
   }
 
@@ -190,6 +198,9 @@ export async function addEventWalkOn(
   }
   if (input.kind === "carer" && !input.hostParticipantId) {
     throw new Error("Pick the client this carer is with.");
+  }
+  if (input.kind === "support" && !input.staffId) {
+    throw new Error("Pick the person to add.");
   }
 
   if (input.kind === "client" && input.participantId) {
@@ -208,13 +219,91 @@ export async function addEventWalkOn(
   let displayName = "";
   let booking: EventRosterBooking;
 
+  if (input.kind === "support") {
+    const { addEventSupportBooking } = await import("@/lib/api/event-support");
+    const supportKind = input.supportKind === "volunteer" ? "volunteer" : "staff";
+    const { data: staffRow, error: staffErr } = await supabase
+      .from("staff_registry")
+      .select("full_name")
+      .eq("id", input.staffId!)
+      .maybeSingle();
+    if (staffErr) throw new Error(staffErr.message);
+    displayName = String((staffRow as { full_name?: string } | null)?.full_name ?? "").trim() || "Support";
+    const supportBooking = await addEventSupportBooking({
+      eventId,
+      personKind: supportKind,
+      staffId: input.staffId,
+      linkedParticipantId: input.linkedParticipantId ?? input.hostParticipantId,
+      outboundTransportMode: outbound,
+      returnTransportMode: ret,
+      outboundBusRunCode: outbound === "bus" ? runCode : null,
+      returnBusRunCode: ret === "bus" ? runCode : null,
+      tripPickupAddressOverride: outbound === "bus" ? pickup : null,
+    });
+    let issueId: string | null = null;
+    try {
+      const issue = await createIssue({
+        sessionId: null,
+        eventId,
+        eventDaySessionId: input.eventDaySessionId ?? null,
+        severity: "yellow",
+        owner: "internal",
+        occurredAt: operationalNowIso(),
+        issueDescription: walkOnIssueDescription({
+          displayName,
+          kind: "support",
+          eventTitle,
+          hostName: null,
+          source: input.source,
+          returnMode: ret,
+        }),
+        workaroundPlan: WALK_ON_WORKAROUND,
+      });
+      issueId = issue.id;
+    } catch (e) {
+      console.warn("[addEventWalkOn] YELLOW issue failed", e);
+    }
+    const actorId = await resolveStaffIdWithFallback();
+    await writeToLedger({
+      staff_id: actorId,
+      category: "CENTRE",
+      severity: "YELLOW",
+      action_type: "EVENT_WALK_ON_ACCEPTED",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: {
+        event_id: eventId,
+        booking_id: supportBooking.id,
+        staff_id: input.staffId,
+        kind: "support",
+        person_kind: supportKind,
+        source: input.source,
+        issue_id: issueId,
+        summary: `Added ${displayName} (${supportKind}) to ${eventTitle} — already on file`,
+      },
+    });
+    return { displayName, kind: "support", bookingId: supportBooking.id, issueId };
+  }
+
   if (input.kind === "carer") {
     const result = await addWalkOnCarer(input, pickup);
     displayName = result.displayName;
     booking = result.booking;
   } else {
     let participantId = input.participantId?.trim() || "";
-    if (input.kind === "guest" && !participantId) {
+    if (input.kind === "guest" && input.realRecordLeftOff) {
+      const parts = (input.firstName ?? "").trim()
+        ? [input.firstName ?? "", input.lastName ?? ""]
+        : ["Guest", "Visit"];
+      participantId = await ensureGuestVisitParticipant({
+        firstName: parts[0] || "Guest",
+        lastName: (parts[1] ?? "").trim() || "Visit",
+        allergiesNotes: allergies,
+        phone: input.phone,
+        personId: input.linkPersonId ?? null,
+        existingGuestId: participantId || null,
+      });
+    } else if (input.kind === "guest" && !participantId) {
       const first = (input.firstName ?? "").trim();
       const last = (input.lastName ?? "").trim();
       if (!first || !last) throw new Error("First and last name are required.");
@@ -322,6 +411,7 @@ export async function addEventWalkOn(
         hostName,
         source: input.source,
         returnMode: ret,
+        realRecordLeftOff: input.realRecordLeftOff,
       }),
       workaroundPlan: WALK_ON_WORKAROUND,
     });
@@ -361,10 +451,14 @@ function walkOnIssueDescription(args: {
   hostName: string | null;
   source: WalkOnSource;
   returnMode: "bus" | "self";
+  realRecordLeftOff?: boolean;
 }): string {
   const where = args.source === "manifest" ? "a Manifest stop" : "the venue (self-transport)";
   const host = args.hostName ? ` Host: ${args.hostName}.` : "";
-  return `[WALK-ON] ${args.displayName} (${args.kind}) accepted onto ${args.eventTitle} at ${where}.${host} Return: ${args.returnMode}. Office: billing, consent, and finish intake.`;
+  const leftOff = args.realRecordLeftOff
+    ? " They were off-boarded. The real record was left off and they are a guest for this event only."
+    : "";
+  return `[WALK-ON] ${args.displayName} (${args.kind}) accepted onto ${args.eventTitle} at ${where}.${host} Return: ${args.returnMode}.${leftOff} Office: billing, consent, and finish intake.`;
 }
 
 async function addWalkOnCarer(

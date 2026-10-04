@@ -6057,6 +6057,127 @@ export interface BusRunRosterEntry {
   address: string | null;
 }
 
+type FloorArrivalChoice = { self: boolean; runCode: string | null };
+
+/**
+ * Actual arrival saved on today's centre roll.
+ * Bus with no run code is left unset so the weekly plan still applies.
+ * Self / family, or an explicit other run, moves the morning Manifest
+ * when that run has not been started yet.
+ */
+async function loadFloorArrivalsForDate(
+  dateIso: string,
+): Promise<Map<string, FloorArrivalChoice>> {
+  const out = new Map<string, FloorArrivalChoice>();
+  const { data: session, error: sessErr } = await supabase
+    .from("site_day_sessions")
+    .select("id")
+    .eq("session_date", dateIso)
+    .maybeSingle();
+  if (sessErr || !session) return out;
+  const sessionId = (session as { id: string }).id;
+
+  const record = (
+    key: string,
+    status: string,
+    method: string | null,
+    runCode: string | null,
+  ) => {
+    if (!key || key.endsWith(":")) return;
+    if (status === "absent") {
+      out.set(key, { self: true, runCode: null });
+      return;
+    }
+    const self = method === "private" || method === "walk_in";
+    const run = !self && method === "bus" ? (runCode ?? "").trim() || null : null;
+    if (!self && !run) return;
+    out.set(key, { self, runCode: run });
+  };
+
+  const { data: clients, error: clientErr } = await supabase
+    .from("client_attendance_log")
+    .select("participant_id, status, arrival_method, arrival_bus_run_code")
+    .eq("session_id", sessionId);
+  if (!clientErr) {
+    for (const raw of clients ?? []) {
+      const row = raw as {
+        participant_id: string;
+        status: string;
+        arrival_method: string | null;
+        arrival_bus_run_code: string | null;
+      };
+      record(row.participant_id, row.status, row.arrival_method, row.arrival_bus_run_code);
+    }
+  }
+
+  const { data: support, error: supportErr } = await supabase
+    .from("support_attendance_log")
+    .select("person_kind, staff_id, carer_id, status, arrival_method, arrival_bus_run_code")
+    .eq("session_id", sessionId);
+  if (!supportErr && !isSchemaMismatchError(supportErr)) {
+    for (const raw of support ?? []) {
+      const row = raw as {
+        person_kind: "staff" | "volunteer" | "carer";
+        staff_id: string | null;
+        carer_id: string | null;
+        status: string;
+        arrival_method: string | null;
+        arrival_bus_run_code: string | null;
+      };
+      const key = row.carer_id
+        ? supportPersonKey("carer", row.carer_id)
+        : supportPersonKey(row.person_kind, row.staff_id ?? "");
+      record(key, row.status, row.arrival_method, row.arrival_bus_run_code);
+    }
+  }
+  return out;
+}
+
+async function entriesForArrivalExtras(keys: string[]): Promise<BusRunRosterEntry[]> {
+  const participantIds = keys.filter((k) => !k.startsWith("s:") && !k.startsWith("c:"));
+  const supportKeys = keys.filter((k) => k.startsWith("s:") || k.startsWith("c:"));
+  const people = await fetchBusRunRosterEntries(participantIds);
+  if (supportKeys.length === 0) return people;
+  const { supportRosterEntriesForKeys } = await import("@/lib/api/support-attendance");
+  const support = await supportRosterEntriesForKeys(supportKeys);
+  return [
+    ...people,
+    ...support.map((s) => ({ id: s.id, name: s.name, address: s.address })),
+  ];
+}
+
+/**
+ * Morning bus list after the floor has changed how someone is actually arriving.
+ * An already-started run keeps the legs it was given at Start.
+ */
+export async function applyMorningFloorArrivalTransport<
+  T extends { id: string; name: string; address: string | null },
+>(
+  roster: T[],
+  busRunCode: string,
+  dateIso: string,
+  revive: (entry: BusRunRosterEntry) => T,
+): Promise<T[]> {
+  const floor = await loadFloorArrivalsForDate(dateIso);
+  if (floor.size === 0) return roster;
+  const byId = new Map(roster.map((r) => [r.id, r]));
+  const extras: string[] = [];
+  for (const [key, f] of floor) {
+    if (f.self || (f.runCode && f.runCode !== busRunCode)) {
+      byId.delete(key);
+      continue;
+    }
+    if (f.runCode === busRunCode && !byId.has(key)) extras.push(key);
+  }
+  if (extras.length > 0) {
+    const added = await entriesForArrivalExtras(extras);
+    for (const row of added) {
+      if (!byId.has(row.id)) byId.set(row.id, revive(row));
+    }
+  }
+  return [...byId.values()];
+}
+
 /** Preview today's passengers for a bus run (same roster as trip seeding). */
 export async function listBusRunRosterForDay(
   busRunCode: string,
@@ -6136,6 +6257,14 @@ export async function listBusRunRosterForDay(
     ];
   } catch (err) {
     console.warn("[listBusRunRosterForDay:support]", err);
+  }
+  if (direction === "morning") {
+    present = await applyMorningFloorArrivalTransport(
+      present,
+      busRunCode,
+      todayLocalIso(),
+      (entry) => entry,
+    );
   }
   try {
     const { paintDayCentreStopAddresses } = await import("@/lib/api/person-addresses");
@@ -6959,6 +7088,16 @@ export async function startDayCentreRun(
     roster.push(...support);
   } catch (err) {
     console.warn("[startDayCentreRun:support]", err);
+  }
+
+  if (direction === "morning") {
+    const adjusted = await applyMorningFloorArrivalTransport(
+      roster,
+      input.busRunCode,
+      today,
+      busRunRosterEntryToPerson,
+    );
+    roster.splice(0, roster.length, ...adjusted);
   }
 
   try {

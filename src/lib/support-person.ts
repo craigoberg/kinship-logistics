@@ -1,3 +1,5 @@
+import { workforceHat } from "@/lib/person-hats";
+
 /** BL-125 — staff / volunteer / carer identity keys (not fake participants). */
 
 export type SupportPersonKind = "staff" | "volunteer" | "carer";
@@ -7,8 +9,7 @@ export function classifyWorkforceKind(
   personnelType: string | null | undefined,
   role: string | null | undefined,
 ): "staff" | "volunteer" {
-  const blob = `${personnelType ?? ""} ${role ?? ""}`.toLowerCase();
-  return blob.includes("volunteer") ? "volunteer" : "staff";
+  return workforceHat(personnelType, role);
 }
 
 export function supportPersonKey(kind: SupportPersonKind, id: string): string {

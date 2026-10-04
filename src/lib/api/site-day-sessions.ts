@@ -5,7 +5,12 @@ import {
   verifyStaffPin,
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
-import { getSydneyIsoDate, todaysSydneyDayCode } from "@/lib/operational-time";
+import {
+  dateAtSydneyMidday,
+  getSydneyDayIndex,
+  getSydneyIsoDate,
+  todaysSydneyDayCode,
+} from "@/lib/operational-time";
 import { getOperationalTodayIso, operationalNowIso } from "@/lib/operational-clock";
 
 // ---------------------------------------------------------------------------
@@ -121,6 +126,23 @@ function rowToSession(r: SiteDaySessionRow): SiteDaySession {
 
 function todayIso(): string {
   return getOperationalTodayIso();
+}
+
+/** Weekday and clock for a centre session, falling back to operational today. */
+export async function centreSessionClock(sessionId: string): Promise<{
+  dateIso: string;
+  at: Date;
+  dow: number;
+}> {
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .select("session_date")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const stored = (data as { session_date?: string } | null)?.session_date;
+  const dateIso = !error && stored ? String(stored) : getOperationalTodayIso();
+  const at = dateAtSydneyMidday(dateIso);
+  return { dateIso, at, dow: getSydneyDayIndex(at) };
 }
 
 /**

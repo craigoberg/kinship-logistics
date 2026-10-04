@@ -40,6 +40,7 @@ import { SupportTransportDefaults } from "@/components/directory/support-transpo
 import { PersonAddressList } from "@/components/address/person-address-list";
 import { PinPad } from "@/components/auth/pin-pad";
 import { managerSetPersonPin, managerUnlockPersonPin } from "@/lib/auth/pin-session";
+import { grantVolunteerHat } from "@/lib/api/known-people";
 
 interface Props {
   open: boolean;
@@ -72,6 +73,7 @@ export function CarerFormSheet({
   const [pickerOpen, setPickerOpen] = useState(false);
   const [pin, setPin] = useState("");
   const [unlockBusy, setUnlockBusy] = useState(false);
+  const [volunteerBusy, setVolunteerBusy] = useState(false);
 
   const insert = useInsertCarer();
   const update = useUpdateCarer();
@@ -299,6 +301,32 @@ export function CarerFormSheet({
               )}
               {isEdit && pin.length > 0 && !/^\d{6}$/.test(pin) && (
                 <p className="text-[11px] text-destructive">PIN must be exactly 6 digits.</p>
+              )}
+              {isEdit && carer && (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  disabled={volunteerBusy}
+                  onClick={() => {
+                    setVolunteerBusy(true);
+                    void grantVolunteerHat(carer.id)
+                      .then(() =>
+                        toast.success(`${carer.fullName} is now also a volunteer`, {
+                          description:
+                            "One person. The bus plan follows the volunteer hat. The carer link stays.",
+                        }),
+                      )
+                      .catch((err: unknown) =>
+                        toast.error("Could not add the volunteer hat", {
+                          description: err instanceof Error ? err.message : String(err),
+                        }),
+                      )
+                      .finally(() => setVolunteerBusy(false));
+                  }}
+                >
+                  {volunteerBusy ? "Updating…" : "Also a volunteer"}
+                </Button>
               )}
               {isEdit && carer && (
                 <Button

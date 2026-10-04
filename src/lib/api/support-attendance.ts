@@ -13,8 +13,9 @@ import {
   operationalNowMs,
   operationalRowStamps,
 } from "@/lib/operational-clock";
-import { getSydneyDayIndex, sydneyTimeTodayFromClock } from "@/lib/operational-time";
+import { sydneyTimeTodayFromClock } from "@/lib/operational-time";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
+import { centreSessionClock } from "@/lib/api/site-day-sessions";
 import type {
   ArrivalMethod,
   AttendanceStatus,
@@ -140,6 +141,20 @@ interface LogDb {
   escalation_severity?: EscalationSeverity | null;
 }
 
+function departureFromOutbound(outbound: string | null): {
+  vector: DepartureVector | null;
+  code: string | null;
+} {
+  const method = mapTransportToMethod(outbound);
+  if (method === "private" || method === "walk_in") {
+    return { vector: "family", code: null };
+  }
+  if (method === "bus") {
+    return { vector: "bus", code: (outbound ?? "").trim() || null };
+  }
+  return { vector: null, code: null };
+}
+
 function mapTransportToMethod(transportRule: string | null): ArrivalMethod {
   const v = (transportRule ?? "").trim().toLowerCase();
   if (!v) return "other";
@@ -252,6 +267,44 @@ export async function listSupportSchedulesForPerson(input: {
   return [];
 }
 
+/** Carer id → staff id when both rows share one person and the workforce row is active. */
+async function carerIdsTravellingWithWorkforce(): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  const carers = await supabase.from("carers_registry").select("id, person_id");
+  if (carers.error) return out;
+  const staff = await supabase
+    .from("staff_registry")
+    .select("id, person_id")
+    .eq("active", true);
+  if (staff.error) return out;
+  const staffByPerson = new Map<string, string>();
+  for (const raw of staff.data ?? []) {
+    const row = raw as { id: string; person_id: string | null };
+    if (row.person_id) staffByPerson.set(row.person_id, row.id);
+  }
+  for (const raw of carers.data ?? []) {
+    const row = raw as { id: string; person_id: string | null };
+    const staffId = row.person_id ? staffByPerson.get(row.person_id) : undefined;
+    if (staffId) out.set(row.id, staffId);
+  }
+  return out;
+}
+
+async function dropCarerPlansOwnedByWorkforce(
+  rows: SupportSchedule[],
+): Promise<SupportSchedule[]> {
+  const owned = await carerIdsTravellingWithWorkforce();
+  if (owned.size === 0) return rows;
+  const staffDays = new Set(
+    rows.filter((r) => r.staffId).map((r) => `${r.staffId}:${r.dayOfWeek}`),
+  );
+  return rows.filter((r) => {
+    if (!r.carerId) return true;
+    const staffId = owned.get(r.carerId);
+    return !(staffId && staffDays.has(`${staffId}:${r.dayOfWeek}`));
+  });
+}
+
 export async function listSupportSchedules(): Promise<SupportSchedule[]> {
   const { data, error } = await supabase
     .from("support_attendance_schedules")
@@ -263,7 +316,8 @@ export async function listSupportSchedules(): Promise<SupportSchedule[]> {
     throw new Error(error.message);
   }
   const names = await resolveSupportNames();
-  return (data ?? []).map((r) => toSchedule(r as ScheduleDb, names));
+  const mapped = (data ?? []).map((r) => toSchedule(r as ScheduleDb, names));
+  return dropCarerPlansOwnedByWorkforce(mapped);
 }
 
 export async function upsertSupportSchedule(input: {
@@ -504,8 +558,19 @@ export async function listSupportAttendanceRoll(
   return (data ?? []).map((r) => toLog(r as LogDb, names));
 }
 
+/** Ids currently in the register. Null when the read fails, so seeding still attempts the insert. */
+async function loadRegistryIds(
+  table: "staff_registry" | "carers_registry",
+): Promise<Set<string> | null> {
+  const { data, error } = await supabase.from(table).select("id");
+  if (error) return null;
+  const ids = new Set((data ?? []).map((row) => (row as { id: string }).id));
+  return ids.size > 0 ? ids : null;
+}
+
 export async function seedSupportRollFromSchedules(sessionId: string): Promise<number> {
-  const dow = getSydneyDayIndex();
+  const sessionClock = await centreSessionClock(sessionId);
+  const dow = sessionClock.dow;
   let masterOpen: string | null = null;
   let masterClose: string | null = null;
   try {
@@ -530,26 +595,47 @@ export async function seedSupportRollFromSchedules(sessionId: string): Promise<n
   const todays = (scheds ?? []).filter(
     (s) => WEEKDAY_INDEX[String((s as ScheduleDb).day_of_week)] === dow,
   ) as ScheduleDb[];
-  const exempt = await loadExemptSupportKeysForDate(getOperationalTodayIso());
+  const exempt = await loadExemptSupportKeysForDate(sessionClock.dateIso);
   const { loadInactiveStaffIds } = await import("@/lib/api/service-exit");
-  const inactiveStaff = await loadInactiveStaffIds();
+  const [inactiveStaff, knownStaff, knownCarers] = await Promise.all([
+    loadInactiveStaffIds(),
+    loadRegistryIds("staff_registry"),
+    loadRegistryIds("carers_registry"),
+  ]);
   const attending = todays.filter((s) => {
     if (s.staff_id && inactiveStaff.has(s.staff_id)) return false;
+    // A plan can outlive the person (register row removed, schedule left behind).
+    // One missing id fails the whole insert, so skip them.
+    if (s.staff_id && knownStaff && !knownStaff.has(s.staff_id)) return false;
+    if (s.carer_id && knownCarers && !knownCarers.has(s.carer_id)) return false;
     const key = s.carer_id
       ? supportPersonKey("carer", s.carer_id)
       : supportPersonKey(s.person_kind, s.staff_id ?? "");
     return !exempt.has(key);
   });
-  if (!attending.length) return 0;
+  const staffToday = new Set(
+    attending.map((s) => s.staff_id).filter((id): id is string => !!id),
+  );
+  const ownedByStaff = await carerIdsTravellingWithWorkforce();
+  const oneSeat = attending.filter((s) => {
+    if (!s.carer_id) return true;
+    const staffId = ownedByStaff.get(s.carer_id);
+    return !(staffId && staffToday.has(staffId));
+  });
+  if (!oneSeat.length) return 0;
 
-  const payload = attending.map((s) => {
+  const payload = oneSeat.map((s) => {
     const arrival = sydneyTimeTodayFromClock(
       (s.expected_arrival_time ?? masterOpen ?? "09:00").slice(0, 5),
+      sessionClock.at,
     );
     const departure = sydneyTimeTodayFromClock(
       (s.expected_departure_time ?? masterClose ?? "15:00").slice(0, 5),
+      sessionClock.at,
     );
     const inbound = s.inbound_transport;
+    const arrivalMethod = mapTransportToMethod(inbound);
+    const home = departureFromOutbound(s.outbound_transport);
     return {
       session_id: sessionId,
       person_kind: s.person_kind,
@@ -558,8 +644,10 @@ export async function seedSupportRollFromSchedules(sessionId: string): Promise<n
       linked_participant_id: s.linked_participant_id,
       expected_arrival_at: arrival,
       expected_departure_at: departure,
-      arrival_method: mapTransportToMethod(inbound),
-      arrival_bus_run_code: mapTransportToMethod(inbound) === "bus" ? inbound : null,
+      arrival_method: arrivalMethod,
+      arrival_bus_run_code: arrivalMethod === "bus" ? inbound : null,
+      departure_vector: home.vector,
+      departure_bus_run_code: home.code,
       status: "expected" as const,
     };
   });
@@ -700,6 +788,26 @@ export async function checkOutSupport(input: {
     }),
   });
   return logged;
+}
+
+/** Save how they are actually coming in, without checking them in. */
+export async function persistSupportArrivalMethod(input: {
+  rowId: string;
+  arrivalMethod: ArrivalMethod;
+  arrivalBusRunCode?: string | null;
+}): Promise<void> {
+  const now = operationalNowIso();
+  const run =
+    input.arrivalMethod === "bus" ? (input.arrivalBusRunCode ?? "").trim() || null : null;
+  const { error } = await supabase
+    .from("support_attendance_log")
+    .update({
+      arrival_method: input.arrivalMethod,
+      arrival_bus_run_code: run,
+      updated_at: now,
+    })
+    .eq("id", input.rowId);
+  if (error) throw new Error(error.message);
 }
 
 export async function persistSupportDepartureMethod(input: {
@@ -1118,6 +1226,57 @@ export async function listSupportRosterForDayCentreRun(input: {
   return out;
 }
 
+/** Names for support people moved onto a run they were not on in the weekly plan. */
+export async function supportRosterEntriesForKeys(
+  keys: string[],
+): Promise<TransportRosterPerson[]> {
+  const staffIds = keys.filter((k) => k.startsWith("s:")).map((k) => k.slice(2));
+  const carerIds = keys.filter((k) => k.startsWith("c:")).map((k) => k.slice(2));
+  const out: TransportRosterPerson[] = [];
+  if (staffIds.length > 0) {
+    const { data } = await supabase
+      .from("staff_registry")
+      .select("id, full_name, personnel_type, role, street_address")
+      .in("id", staffIds);
+    for (const raw of data ?? []) {
+      const row = raw as {
+        id: string;
+        full_name: string;
+        personnel_type: string | null;
+        role: string | null;
+        street_address: string | null;
+      };
+      const kind = classifyWorkforceKind(row.personnel_type, row.role);
+      out.push(
+        supportRosterPerson({
+          kind,
+          staffId: row.id,
+          name: row.full_name,
+          address: (row.street_address ?? "").trim() || null,
+        }),
+      );
+    }
+  }
+  if (carerIds.length > 0) {
+    const { data } = await supabase
+      .from("carers_registry")
+      .select("id, full_name, street_address")
+      .in("id", carerIds);
+    for (const raw of data ?? []) {
+      const row = raw as { id: string; full_name: string; street_address: string | null };
+      out.push(
+        supportRosterPerson({
+          kind: "carer",
+          carerId: row.id,
+          name: row.full_name,
+          address: (row.street_address ?? "").trim() || null,
+        }),
+      );
+    }
+  }
+  return out;
+}
+
 export async function applyAfternoonSupportHomeTransport(
   roster: TransportRosterPerson[],
   busRunCode: string,
@@ -1126,6 +1285,7 @@ export async function applyAfternoonSupportHomeTransport(
   const floor = await loadSupportFloorHomeForDate(dateIso);
   if (floor.size === 0) return roster;
   const byId = new Map(roster.map((r) => [r.id, r]));
+  const extras: string[] = [];
   for (const [key, f] of floor) {
     if (f.status === "absent") {
       byId.delete(key);
@@ -1136,8 +1296,16 @@ export async function applyAfternoonSupportHomeTransport(
       continue;
     }
     if (f.departureVector === "bus" && f.departureBusRunCode) {
-      if (f.departureBusRunCode !== busRunCode) byId.delete(key);
+      if (f.departureBusRunCode === busRunCode) {
+        if (!byId.has(key)) extras.push(key);
+      } else {
+        byId.delete(key);
+      }
     }
+  }
+  if (extras.length > 0) {
+    const added = await supportRosterEntriesForKeys(extras);
+    for (const person of added) byId.set(person.id, person);
   }
   return [...byId.values()];
 }

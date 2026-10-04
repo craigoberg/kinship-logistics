@@ -40,7 +40,6 @@ import {
   listEventDaySessions,
 } from "@/lib/api/event-outing";
 import { fetchActualTransportForSessions } from "@/lib/api/event-transport";
-import { archiveGuestParticipantsForEvent } from "@/lib/api/event-guest";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso, formatDate } from "@/lib/utils";
 
@@ -452,22 +451,8 @@ export async function promoteEventStatus(
     return { newStatus: next };
   }
 
-  // BL-098 — archive guests after Close; never roll back billing lock.
-  try {
-    const archive = await archiveGuestParticipantsForEvent(eventId);
-    return {
-      newStatus: next,
-      guestsArchived: archive.archivedIds.length,
-      guestsSkipped: archive.skippedIds.length,
-    };
-  } catch (e) {
-    return {
-      newStatus: next,
-      guestsArchived: 0,
-      guestsSkipped: 0,
-      guestArchiveError: (e as Error).message,
-    };
-  }
+  // Guests stay on file. Office archives them from the care profile after follow-up.
+  return { newStatus: next };
 }
 
 /** Close a specific event_day_session (orderly or incident). Manager-only. */

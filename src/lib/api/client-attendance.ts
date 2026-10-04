@@ -23,10 +23,8 @@ import {
   lookupParticipantName,
   withAuditActorMeta,
 } from "@/lib/api/office-change-log";
-import {
-  getSydneyDayIndex,
-  sydneyTimeTodayFromClock,
-} from "@/lib/operational-time";
+import { getSydneyDayIndex, sydneyTimeTodayFromClock } from "@/lib/operational-time";
+import { centreSessionClock } from "@/lib/api/site-day-sessions";
 import { getOperationalTodayIso, operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
 
@@ -282,7 +280,8 @@ function readScheduleClock(
 }
 
 export async function seedRollFromSchedules(sessionId: string): Promise<number> {
-  const dow = getSydneyDayIndex();
+  const sessionClock = await centreSessionClock(sessionId);
+  const dow = sessionClock.dow;
 
   // Tier 2 — facility-wide master defaults when today is an Operating Day.
   // Returns null when today is not in Lookups → Operating days, in which
@@ -312,7 +311,7 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
     (s: Record<string, unknown>) =>
       s.active === true && WEEKDAY_INDEX[String(s.day_of_week)] === dow,
   );
-  const exemptIds = await loadExemptParticipantIdsForDate(getOperationalTodayIso());
+  const exemptIds = await loadExemptParticipantIdsForDate(sessionClock.dateIso);
   const { loadExitedParticipantIds } = await import("@/lib/api/service-exit");
   const exitedIds = await loadExitedParticipantIds();
   const attending = todays.filter(
@@ -332,9 +331,10 @@ export async function seedRollFromSchedules(sessionId: string): Promise<number> 
     byParticipant.set(participantId, {
       session_id: sessionId,
       participant_id: participantId,
-      expected_arrival_at: sydneyTimeTodayFromClock(arrivalClock),
+      expected_arrival_at: sydneyTimeTodayFromClock(arrivalClock, sessionClock.at),
       expected_departure_at: sydneyTimeTodayFromClock(
         departureClock ?? "15:00",
+        sessionClock.at,
       ),
       arrival_method: mapTransportToMethod(
         (s.inbound_transport as string | null) ??

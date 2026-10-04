@@ -47,7 +47,8 @@ import { evaluateRequirementHolds, requirementTypeMatchesName } from "@/lib/duty
 import { getActiveUserProfile } from "@/lib/data-store";
 import { managerSetPersonPin, managerUnlockPersonPin } from "@/lib/auth/pin-session";
 import type { StaffMember, StaffCertification, StaffPayload } from "@/lib/data-store";
-import { ACCESS_ROLES } from "@/lib/access-roles";
+import { ACCESS_ROLES, normalizeAccessRoleKey } from "@/lib/access-roles";
+import { listCarerLinksForStaff } from "@/lib/api/known-people";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { SupportTransportDefaults } from "@/components/directory/support-transport-defaults";
 import { PersonAddressList } from "@/components/address/person-address-list";
@@ -113,6 +114,13 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     staleTime: 30_000,
     enabled: open,
   });
+  const carerLinksQ = useQuery({
+    queryKey: ["staff-carer-links", staff?.id ?? "new"],
+    queryFn: () => listCarerLinksForStaff(staff!.id),
+    enabled: open && !!staff?.id,
+    staleTime: 15_000,
+  });
+  const carerLinks = carerLinksQ.data ?? [];
   const assignedQ = useQuery({
     queryKey: ["staff-duty-roles", staff?.id ?? "new"],
     queryFn: () => listStaffDutyRoleIds(staff!.id),
@@ -127,7 +135,7 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
     if (!open) return;
     setFullName(staff?.fullName ?? "");
     setRole(staff?.role ?? "");
-    setPersonnelType(staff?.personnelType ?? "");
+    setPersonnelType(normalizeAccessRoleKey(staff?.personnelType) ?? staff?.personnelType ?? "");
     setPhone(staff?.phone ?? "");
     setEmail(staff?.email ?? "");
     setStreetAddress(staff?.streetAddress ?? "");
@@ -441,6 +449,18 @@ export function StaffFormSheet({ open, onOpenChange, staff }: Props) {
                 <p className="text-[11px] text-destructive">System access level is required.</p>
               )}
             </Field>
+            {isEdit && carerLinks.length > 0 && (
+              <Field label="Carer for" className="sm:col-span-2">
+                <ul className="rounded-md border border-border bg-muted/40 px-3 py-2 text-sm">
+                  {carerLinks.map((link) => (
+                    <li key={link.carerId}>
+                      {link.participantName}
+                      {link.relationship ? ` — ${link.relationship}` : ""}
+                    </li>
+                  ))}
+                </ul>
+              </Field>
+            )}
             <Field label="Phone">
               <Input value={phone} onChange={(e) => setPhone(e.target.value)} inputMode="tel" />
             </Field>

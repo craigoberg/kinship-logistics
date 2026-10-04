@@ -16,9 +16,10 @@ export interface AccessRole {
 export const ACCESS_ROLES: readonly AccessRole[] = [
   { key: "manager", label: "Manager" },
   { key: "assistant_manager", label: "Assistant Manager" },
-  { key: "guardian", label: "Guardian" },
   { key: "support_worker", label: "Support Worker" },
+  { key: "volunteer", label: "Volunteer" },
   { key: "driver", label: "Driver" },
+  { key: "guardian", label: "Guardian" },
   { key: "dashboard", label: "Dashboard (Display Only)" },
 ] as const;
 

@@ -252,15 +252,21 @@ export async function createGuestParticipant(input: {
   return guest;
 }
 
-/** Clear archive so an existing guest can be booked again. */
+/** Clear archive on a guest row only. Does not turn a client or staff record back on. */
 export async function reactivateGuestParticipant(
   participantId: string,
 ): Promise<void> {
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("participants")
     .update({ archived_at: null, participant_kind: "guest" })
-    .eq("id", participantId);
+    .eq("id", participantId)
+    .eq("participant_kind", "guest")
+    .select("id")
+    .maybeSingle();
   if (error) throw error;
+  if (!data) {
+    throw new Error("That record is not a guest. It was left unchanged.");
+  }
   void recordOfficeChangeBestEffort({
     action: "updated",
     entity: "guest",
@@ -268,6 +274,45 @@ export async function reactivateGuestParticipant(
     recordName: "event guest",
     summary: "Reactivated an archived event guest",
   });
+}
+
+/**
+ * Tonight's guest visit. Reuses a guest row, or creates one linked to the
+ * same person. Does not clear a client archive or turn staff back on.
+ */
+export async function ensureGuestVisitParticipant(input: {
+  firstName: string;
+  lastName: string;
+  allergiesNotes: string;
+  phone?: string | null;
+  personId: string | null;
+  existingGuestId: string | null;
+}): Promise<string> {
+  if (input.existingGuestId) {
+    await reactivateGuestParticipant(input.existingGuestId);
+    if (input.personId) {
+      const { error } = await supabase
+        .from("participants")
+        .update({ person_id: input.personId })
+        .eq("id", input.existingGuestId);
+      if (error && !isSchemaMismatchError(error)) throw new Error(error.message);
+    }
+    return input.existingGuestId;
+  }
+  const created = await createWalkOnGuestParticipant({
+    firstName: input.firstName,
+    lastName: input.lastName,
+    allergiesNotes: input.allergiesNotes,
+    phone: input.phone,
+  });
+  if (input.personId) {
+    const { error } = await supabase
+      .from("participants")
+      .update({ person_id: input.personId })
+      .eq("id", created.id);
+    if (error && !isSchemaMismatchError(error)) throw new Error(error.message);
+  }
+  return created.id;
 }
 
 export async function listLiveGuestEventTitles(

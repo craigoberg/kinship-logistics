@@ -42,6 +42,15 @@ import {
   type WalkOnKind,
   type WalkOnSource,
 } from "@/lib/api/event-walk-on";
+import { EVENT_SUPPORT_KEY } from "@/lib/api/event-support";
+import {
+  knownPersonComesAsGuest,
+  knownPersonHatLine,
+  knownPersonStatusNote,
+  listKnownPeople,
+  matchKnownPeople,
+  type KnownPerson,
+} from "@/lib/api/known-people";
 
 export function WalkOnCompanionsLine({
   eventId,
@@ -190,7 +199,7 @@ export function WalkOnPersonModal({
   const signedIn = isReady && !!user;
   const [kind, setKind] = useState<WalkOnKind>("guest");
   const [hostId, setHostId] = useState<string | null>(hostParticipantId);
-  const [guestMode, setGuestMode] = useState<"reuse" | "new">("reuse");
+  const [guestMode, setGuestMode] = useState<"reuse" | "new" | "visit">("reuse");
   const [reuseGuestId, setReuseGuestId] = useState<string | null>(null);
   const [clientId, setClientId] = useState<string | null>(null);
   const [carerId, setCarerId] = useState<string | null>(null);
@@ -202,6 +211,11 @@ export function WalkOnPersonModal({
   const [phone, setPhone] = useState("");
   const [ret, setRet] = useState<"bus" | "self">(source === "venue" ? "self" : "bus");
   const [pinOpen, setPinOpen] = useState(false);
+  const [knownQuery, setKnownQuery] = useState("");
+  const [picked, setPicked] = useState<KnownPerson | null>(null);
+  const [visitAsGuest, setVisitAsGuest] = useState(false);
+  const [staffId, setStaffId] = useState<string | null>(null);
+  const [supportKind, setSupportKind] = useState<"staff" | "volunteer">("volunteer");
 
   const outbound: "bus" | "self" = source === "manifest" ? "bus" : "self";
 
@@ -210,6 +224,12 @@ export function WalkOnPersonModal({
     queryFn: () => listWalkOnHosts(eventId),
     enabled: open,
     staleTime: 15_000,
+  });
+  const knownQ = useQuery({
+    queryKey: ["known-people"],
+    queryFn: listKnownPeople,
+    enabled: open,
+    staleTime: 30_000,
   });
   const clientsQ = useQuery({
     queryKey: ["walk-on-clients", eventId],
@@ -246,13 +266,12 @@ export function WalkOnPersonModal({
     setPhone("");
     setRet(source === "venue" ? "self" : "bus");
     setPinOpen(false);
+    setKnownQuery("");
+    setPicked(null);
+    setVisitAsGuest(false);
+    setStaffId(null);
+    setSupportKind("volunteer");
   }, [open, hostParticipantId, source]);
-
-  useEffect(() => {
-    if (kind === "guest" && guestsQ.data && guestsQ.data.length === 0) {
-      setGuestMode("new");
-    }
-  }, [kind, guestsQ.data]);
 
   useEffect(() => {
     if (kind !== "guest" || guestMode !== "reuse" || !reuseGuestId) return;
@@ -268,8 +287,72 @@ export function WalkOnPersonModal({
 
   const hosts = hostsQ.data ?? [];
   const clients = clientsQ.data ?? [];
-  const guests = guestsQ.data ?? [];
   const carers: Carer[] = carersQ.data ?? [];
+  const knownMatches = useMemo(
+    () => matchKnownPeople(knownQ.data ?? [], knownQuery),
+    [knownQ.data, knownQuery],
+  );
+  const newGuestClash = useMemo(() => {
+    if (kind !== "guest" || guestMode !== "new") return [];
+    return matchKnownPeople(knownQ.data ?? [], `${firstName} ${lastName}`.trim());
+  }, [kind, guestMode, knownQ.data, firstName, lastName]);
+
+  function onSearch(value: string) {
+    setKnownQuery(value);
+    setPicked(null);
+    setVisitAsGuest(false);
+    setStaffId(null);
+    const parts = value.trim().split(/\s+/).filter(Boolean);
+    setFirstName(parts[0] ?? "");
+    setLastName(parts.slice(1).join(" "));
+    if (value.trim().length >= 2) {
+      setKind("guest");
+      setGuestMode("new");
+    }
+  }
+
+  function useKnownPerson(person: KnownPerson) {
+    setKnownQuery(person.name);
+    setPicked(person);
+    const parts = person.name.trim().split(/\s+/).filter(Boolean);
+    setFirstName(parts[0] ?? "");
+    setLastName(parts.slice(1).join(" ") || "Guest");
+    if (knownPersonComesAsGuest(person)) {
+      setVisitAsGuest(true);
+      setKind("guest");
+      setGuestMode("visit");
+      setReuseGuestId(person.guestParticipantId);
+      setStaffId(null);
+      return;
+    }
+    setVisitAsGuest(false);
+    if (person.staffId && !person.staffOffboarded) {
+      setKind("support");
+      setStaffId(person.staffId);
+      setSupportKind(person.hats.includes("volunteer") ? "volunteer" : "staff");
+      if (person.caresForParticipantId) setHostId(person.caresForParticipantId);
+      return;
+    }
+    if (person.carerId) {
+      setKind("carer");
+      setNewCarer(false);
+      setCarerId(person.carerId);
+      if (person.caresForParticipantId) setHostId(person.caresForParticipantId);
+      return;
+    }
+    const guestId =
+      person.participantKind === "guest" ? person.participantId : person.guestParticipantId;
+    if (guestId && !person.clientParticipantId) {
+      setKind("guest");
+      setGuestMode("reuse");
+      setReuseGuestId(guestId);
+      return;
+    }
+    if (person.participantId) {
+      setKind("client");
+      setClientId(person.participantId);
+    }
+  }
 
   const missing = useMemo(() => {
     const items: string[] = [];
@@ -277,11 +360,15 @@ export function WalkOnPersonModal({
       if (!hostId) items.push("Who they are with");
     }
     if (kind === "client" && !clientId) items.push("Select a client");
+    if (kind === "support" && !staffId) items.push("Select the person already on file");
     if (kind === "guest") {
       if (guestMode === "reuse" && !reuseGuestId) items.push("Select a prior guest");
       if (guestMode === "new") {
         if (firstName.trim().length < 2) items.push("First name");
         if (lastName.trim().length < 2) items.push("Last name");
+        if (newGuestClash.length > 0) {
+          items.push("This name is already on file — pick them above");
+        }
       }
     }
     if (kind === "carer") {
@@ -291,7 +378,7 @@ export function WalkOnPersonModal({
         items.push("Select a carer (or add new)");
       }
     }
-    if (kind !== "carer" && allergies.trim().length < 4) {
+    if (kind !== "carer" && kind !== "support" && allergies.trim().length < 4) {
       items.push('Allergies / alerts (enter "None" if none)');
     }
     return items;
@@ -306,10 +393,14 @@ export function WalkOnPersonModal({
     newCarer,
     newCarerName,
     carerId,
+    staffId,
+    newGuestClash.length,
     allergies,
   ]);
 
-  const formReady = missing.length === 0;
+  const showDetails =
+    !!picked || (knownQuery.trim().length >= 2 && knownMatches.length === 0);
+  const formReady = showDetails && missing.length === 0;
 
   const saveMut = useMutation({
     mutationFn: () =>
@@ -330,13 +421,24 @@ export function WalkOnPersonModal({
         participantId:
           kind === "client"
             ? clientId
-            : kind === "guest" && guestMode === "reuse"
+            : kind === "guest" && (guestMode === "reuse" || guestMode === "visit")
               ? reuseGuestId
               : null,
-        firstName: kind === "guest" && guestMode === "new" ? firstName : undefined,
-        lastName: kind === "guest" && guestMode === "new" ? lastName : undefined,
+        firstName:
+          kind === "guest" && (guestMode === "new" || (guestMode === "visit" && !reuseGuestId))
+            ? firstName
+            : undefined,
+        lastName:
+          kind === "guest" && (guestMode === "new" || (guestMode === "visit" && !reuseGuestId))
+            ? lastName
+            : undefined,
         carerId: kind === "carer" && !newCarer ? carerId : null,
         newCarerName: kind === "carer" && newCarer ? newCarerName : null,
+        staffId: kind === "support" ? staffId : null,
+        supportKind: kind === "support" ? supportKind : undefined,
+        realRecordLeftOff: visitAsGuest,
+        linkPersonId: visitAsGuest ? picked?.personId ?? null : null,
+        linkedParticipantId: kind === "support" ? hostId : null,
       }),
     onSuccess: (result) => {
       toast.success(`${result.displayName} added to the trip.`, {
@@ -345,6 +447,7 @@ export function WalkOnPersonModal({
           : "Added — office follow-up issue could not be created. Tell the office.",
       });
       qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+      qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(eventId) });
       qc.invalidateQueries({ queryKey: ["walk-on-hosts", eventId] });
       qc.invalidateQueries({ queryKey: ["event-walk-ons", eventId] });
       qc.invalidateQueries({ queryKey: ["guest-participants"] });
@@ -381,7 +484,57 @@ export function WalkOnPersonModal({
             </DialogDescription>
           </DialogHeader>
 
-          {missing.length > 0 && (
+          <div className="space-y-2">
+            <label className="text-sm font-medium" htmlFor="walk-on-known">
+              Someone we already know
+            </label>
+            <input
+              id="walk-on-known"
+              className="flex h-11 w-full rounded-md border border-input bg-background px-3 text-sm"
+              value={knownQuery}
+              onChange={(e) => onSearch(e.target.value)}
+              placeholder="Type a name — clients, staff, volunteers, carers, guests"
+              autoComplete="off"
+            />
+            {knownQuery.trim().length >= 2 && knownMatches.length > 0 && (
+              <div className="max-h-40 space-y-1 overflow-y-auto">
+                {knownMatches.map((person) => {
+                  const note = knownPersonStatusNote(person);
+                  return (
+                    <button
+                      key={person.key}
+                      type="button"
+                      className="flex w-full flex-col rounded-md border border-border px-3 py-2 text-left text-sm hover:bg-muted"
+                      onClick={() => useKnownPerson(person)}
+                    >
+                      <span className="font-medium">{person.name}</span>
+                      <span className="text-xs text-muted-foreground">{knownPersonHatLine(person)}</span>
+                      {note ? (
+                        <span className="text-xs font-medium text-amber-800">{note}</span>
+                      ) : null}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+            {knownQuery.trim().length >= 2 && knownMatches.length === 0 && (
+              <p className="text-xs text-muted-foreground">
+                No one on file with that name. Add them as a new guest below.
+              </p>
+            )}
+            {visitAsGuest && picked && (
+              <p className="text-xs text-muted-foreground">
+                {picked.name} stays off-boarded. Tonight they are a guest. The office follows up. No Manager PIN.
+              </p>
+            )}
+            {kind === "support" && staffId && (
+              <p className="text-xs text-muted-foreground">
+                Adding the person already on file. A new guest record will not be created.
+              </p>
+            )}
+          </div>
+
+          {showDetails && missing.length > 0 && (
             <div className="space-y-1.5 rounded-lg border-2 border-destructive/40 bg-destructive/5 p-3 text-sm text-destructive">
               <div className="flex items-center gap-1.5 font-semibold">
                 <AlertTriangle className="h-4 w-4 shrink-0" />
@@ -395,12 +548,17 @@ export function WalkOnPersonModal({
             </div>
           )}
 
+          {showDetails && (
           <div className="space-y-4">
+            {!picked && (
             <div className="grid grid-cols-3 gap-2">
               <MobileOptionButton
                 label="Guest"
                 selected={kind === "guest"}
-                onClick={() => setKind("guest")}
+                onClick={() => {
+                  setKind("guest");
+                  setGuestMode("new");
+                }}
               />
               <MobileOptionButton
                 label="Client"
@@ -413,6 +571,7 @@ export function WalkOnPersonModal({
                 onClick={() => setKind("carer")}
               />
             </div>
+            )}
 
             <PickerBox
               invalid={(kind === "guest" || kind === "carer") && !hostId}
@@ -432,56 +591,21 @@ export function WalkOnPersonModal({
               ))}
             </PickerBox>
 
-            {kind === "guest" && (
-              <>
-                <div className="grid grid-cols-2 gap-2">
-                  <MobileOptionButton
-                    label="Prior guest"
-                    selected={guestMode === "reuse"}
-                    onClick={() => setGuestMode("reuse")}
-                  />
-                  <MobileOptionButton
-                    label="New person"
-                    selected={guestMode === "new"}
-                    onClick={() => setGuestMode("new")}
-                  />
-                </div>
-                {guestMode === "reuse" ? (
-                  <PickerBox
-                    invalid={!reuseGuestId}
-                    placeholder="Search prior guests…"
-                    empty="No prior guests on file."
-                    loading={guestsQ.isLoading}
-                    valueLabel={guests.find((g) => g.id === reuseGuestId)?.fullName}
-                  >
-                    {guests.map((g) => (
-                      <CommandItem
-                        key={g.id}
-                        value={g.fullName}
-                        onSelect={() => setReuseGuestId(g.id)}
-                      >
-                        {g.fullName}
-                        {g.archivedAt ? " (archived)" : ""}
-                      </CommandItem>
-                    ))}
-                  </PickerBox>
-                ) : (
-                  <div className="grid grid-cols-2 gap-2">
-                    <CharacterCountedInput
-                      label="First name"
-                      value={firstName}
-                      onValueChange={setFirstName}
-                      minChars={2}
-                    />
-                    <CharacterCountedInput
-                      label="Last name"
-                      value={lastName}
-                      onValueChange={setLastName}
-                      minChars={2}
-                    />
-                  </div>
-                )}
-              </>
+            {kind === "guest" && guestMode === "new" && (
+              <div className="grid grid-cols-2 gap-2">
+                <CharacterCountedInput
+                  label="First name"
+                  value={firstName}
+                  onValueChange={setFirstName}
+                  minChars={2}
+                />
+                <CharacterCountedInput
+                  label="Last name"
+                  value={lastName}
+                  onValueChange={setLastName}
+                  minChars={2}
+                />
+              </div>
             )}
 
             {kind === "client" && (
@@ -583,6 +707,7 @@ export function WalkOnPersonModal({
               </div>
             </div>
           </div>
+          )}
 
           <DialogFooter className="gap-2 sm:justify-between">
             <Button

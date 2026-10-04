@@ -31,6 +31,7 @@ import {
   getDobDatePickerProps,
 } from "@/components/ui/date-picker";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
+import { Checkbox } from "@/components/ui/checkbox";
 import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
 import { listParticipants, type EventManifest } from "@/lib/data-store";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
@@ -45,6 +46,14 @@ import {
   type GuestBookingPrefill,
   type GuestParticipant,
 } from "@/lib/api/event-guest";
+import {
+  addKnownPersonToEvent,
+  listKnownPeople,
+  matchKnownPeople,
+  knownPersonHatLine,
+  knownPersonStatusNote,
+} from "@/lib/api/known-people";
+import { EVENT_SUPPORT_KEY } from "@/lib/api/event-support";
 
 interface Props {
   open: boolean;
@@ -95,6 +104,7 @@ export function AddGuestBookingModal({
   const [retRun, setRetRun] = useState<string | null>(null);
   const [medBag, setMedBag] = useState<"yes" | "no" | "not_set">("not_set");
   const [pickupOverride, setPickupOverride] = useState("");
+  const [confirmStranger, setConfirmStranger] = useState(false);
 
   const fromVisitor = !!prefill;
 
@@ -102,6 +112,12 @@ export function AddGuestBookingModal({
     queryKey: ["guest-participants"],
     queryFn: listGuestParticipants,
     enabled: open && !fromVisitor,
+    staleTime: 30_000,
+  });
+  const knownQ = useQuery({
+    queryKey: ["known-people"],
+    queryFn: listKnownPeople,
+    enabled: open,
     staleTime: 30_000,
   });
   const hostsQ = useQuery({
@@ -133,6 +149,7 @@ export function AddGuestBookingModal({
     setRetRun(null);
     setMedBag("not_set");
     setPickupOverride("");
+    setConfirmStranger(false);
   };
 
   useEffect(() => {
@@ -178,6 +195,11 @@ export function AddGuestBookingModal({
       );
   const medBagOk = outbound === "self" || medBag !== "not_set";
 
+  const nameOnFile = useMemo(() => {
+    if (mode !== "new") return [];
+    return matchKnownPeople(knownQ.data ?? [], `${firstName} ${lastName}`.trim());
+  }, [mode, knownQ.data, firstName, lastName]);
+
   const missing = useMemo(() => {
     const items: string[] = [];
     if (mode === "reuse") {
@@ -189,6 +211,9 @@ export function AddGuestBookingModal({
       if (!emergencyName.trim()) items.push("Emergency contact name");
       if (!emergencyPhone.trim()) items.push("Emergency phone");
       if (!allergies.trim()) items.push('Allergies / alerts (enter "None" if none)');
+      if (nameOnFile.length > 0 && !confirmStranger) {
+        items.push("This name is already on file — add that person, or confirm they are new");
+      }
     }
     if (outbound === "bus" && medBag === "not_set") {
       items.push("Transport med bag — Yes or No");
@@ -210,6 +235,8 @@ export function AddGuestBookingModal({
     medBag,
     needsBus,
     pickupOk,
+    nameOnFile.length,
+    confirmStranger,
   ]);
 
   const saveMut = useMutation({
@@ -384,7 +411,10 @@ export function AddGuestBookingModal({
                   <Input
                     className={cn("h-11", requiredFieldOutline(!firstName.trim()))}
                     value={firstName}
-                    onChange={(e) => setFirstName(e.target.value)}
+                    onChange={(e) => {
+                      setFirstName(e.target.value);
+                      setConfirmStranger(false);
+                    }}
                   />
                 </div>
                 <div className="space-y-1">
@@ -392,10 +422,69 @@ export function AddGuestBookingModal({
                   <Input
                     className={cn("h-11", requiredFieldOutline(!lastName.trim()))}
                     value={lastName}
-                    onChange={(e) => setLastName(e.target.value)}
+                    onChange={(e) => {
+                      setLastName(e.target.value);
+                      setConfirmStranger(false);
+                    }}
                   />
                 </div>
               </div>
+              {nameOnFile.length > 0 && (
+                <div className="space-y-2 rounded-md border border-border p-3">
+                  <p className="text-sm font-medium">Already on file</p>
+                  {nameOnFile.map((person) => (
+                    <div key={person.key} className="flex items-center justify-between gap-2">
+                      <div className="text-sm">
+                        <div className="font-medium">{person.name}</div>
+                        <div className="text-xs text-muted-foreground">{knownPersonHatLine(person)}</div>
+                        {knownPersonStatusNote(person) ? (
+                          <div className="text-xs font-medium text-amber-800">
+                            {knownPersonStatusNote(person)}
+                          </div>
+                        ) : null}
+                      </div>
+                      <Button
+                        type="button"
+                        size="sm"
+                        variant="outline"
+                        disabled={saveMut.isPending}
+                        onClick={() => {
+                          void addKnownPersonToEvent({
+                            eventId: event.id,
+                            eventTitle: event.title,
+                            ticketPrice: event.ticketPrice,
+                            person,
+                            hostParticipantId: hostId,
+                            outboundTransportMode: outbound,
+                            returnTransportMode: ret,
+                            busRunCode: outbound === "bus" ? outRun : ret === "bus" ? retRun : null,
+                          })
+                            .then((name) => {
+                              toast.success(`${name} added to the event.`);
+                              qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
+                              qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(event.id) });
+                              onOpenChange(false);
+                            })
+                            .catch((err: unknown) =>
+                              toast.error("Could not add them", {
+                                description: err instanceof Error ? err.message : String(err),
+                              }),
+                            );
+                        }}
+                      >
+                        Add this person
+                      </Button>
+                    </div>
+                  ))}
+                  <label className="flex items-center gap-2 text-xs">
+                    <Checkbox
+                      checked={confirmStranger}
+                      onCheckedChange={(v) => setConfirmStranger(v === true)}
+                    />
+                    None of these — this is a new guest
+                  </label>
+                </div>
+              )}
               <div className="space-y-1">
                 <ReqLabel>Date of birth</ReqLabel>
                 <DatePicker
