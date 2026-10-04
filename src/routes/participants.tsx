@@ -3,6 +3,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -17,7 +18,7 @@ import { MedicationAdminModal } from "@/components/medication/medication-admin-m
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
 import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
 import { type OnboardingCase } from "@/lib/api/onboarding";
-import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useParticipantDirectory, useLookupParameters } from "@/hooks/use-supabase-data";
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
@@ -36,6 +37,9 @@ export const Route = createFileRoute("/participants")({
   component: ParticipantsPage,
 });
 
+const DIRECTORY_FILTER_CLASS =
+  "h-11 !border-transparent !bg-muted px-3 !text-foreground !shadow-none hover:!bg-muted hover:!text-foreground data-[state=on]:!border-success data-[state=on]:!bg-success data-[state=on]:!text-success-foreground data-[state=on]:hover:!bg-success data-[state=on]:hover:!text-success-foreground";
+
 const DAY_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "All Days" },
   { value: "DAY-MON", label: "Monday" },
@@ -45,8 +49,13 @@ const DAY_OPTIONS: { value: string; label: string }[] = [
   { value: "DAY-FRI", label: "Friday" },
 ];
 
+function isArchivedDirectoryRow(p: Participant): boolean {
+  if (p.participantKind === "guest") return !!p.archivedAt;
+  return p.serviceStatus === "exited";
+}
+
 function ParticipantsPage() {
-  const { data: participants = [], isLoading, error } = useParticipants();
+  const { data: participants = [], isLoading, error } = useParticipantDirectory();
 
   // BMS-style silent refresh: any schedule change (this device or coordinator on
   // another screen) immediately re-fetches the Bus/Self indicator grid.
@@ -79,19 +88,18 @@ function ParticipantsPage() {
   const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
-  const [showExited, setShowExited] = useState(false);
-  const exitedCount = participants.filter(
-    (p) => p.participantKind !== "guest" && p.serviceStatus === "exited",
-  ).length;
-  const activeCount = participants.length - exitedCount;
+  const [directoryFilters, setDirectoryFilters] = useState<string[]>(["participants", "guests"]);
+  const showParticipants = directoryFilters.includes("participants");
+  const showGuests = directoryFilters.includes("guests");
+  const showArchived = directoryFilters.includes("archived");
   const visibleParticipants = useMemo(
     () =>
-      showExited
-        ? participants
-        : participants.filter(
-            (p) => p.participantKind === "guest" || p.serviceStatus !== "exited",
-          ),
-    [participants, showExited],
+      participants.filter((p) => {
+        const guest = p.participantKind === "guest";
+        if (guest ? !showGuests : !showParticipants) return false;
+        return isArchivedDirectoryRow(p) === showArchived;
+      }),
+    [participants, showParticipants, showGuests, showArchived],
   );
 
   return (
@@ -102,7 +110,7 @@ function ParticipantsPage() {
           <p className="text-sm text-muted-foreground">
             {isLoading
               ? "Loading…"
-              : `${activeCount} active${exitedCount > 0 ? ` · ${exitedCount} exited` : ""} · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
+              : `${visibleParticipants.length} shown · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
             {canOpen("onboarding") ? (
               <>
                 {" "}
@@ -152,17 +160,36 @@ function ParticipantsPage() {
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1">
+      <div className="space-y-2">
+        <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or NDIS number…"
+            placeholder="Search this list by name or NDIS number…"
             className="h-11 pl-9"
-            aria-label="Search participants"
+            aria-label="Search the current list"
           />
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          type="multiple"
+          variant="outline"
+          value={directoryFilters}
+          onValueChange={setDirectoryFilters}
+          aria-label="Who to show"
+          className="justify-start"
+        >
+          <ToggleGroupItem value="participants" className={DIRECTORY_FILTER_CLASS}>
+            Participants
+          </ToggleGroupItem>
+          <ToggleGroupItem value="guests" className={DIRECTORY_FILTER_CLASS}>
+            Guests
+          </ToggleGroupItem>
+          <ToggleGroupItem value="archived" className={DIRECTORY_FILTER_CLASS}>
+            Archived
+          </ToggleGroupItem>
+        </ToggleGroup>
         <Select value={dayFilter} onValueChange={setDayFilter}>
           <SelectTrigger className="h-11 w-40" aria-label="Filter by day">
             <SelectValue />
@@ -175,17 +202,6 @@ function ParticipantsPage() {
             ))}
           </SelectContent>
         </Select>
-
-        {exitedCount > 0 && (
-          <Button
-            type="button"
-            variant={showExited ? "secondary" : "outline"}
-            className="h-11"
-            onClick={() => setShowExited((v) => !v)}
-          >
-            {showExited ? "Showing exited" : "Show exited"}
-          </Button>
-        )}
 
         <Select value={transportFilter} onValueChange={setTransportFilter}>
           <SelectTrigger className="h-11 w-48" aria-label="Filter by transport">
@@ -209,6 +225,7 @@ function ParticipantsPage() {
             <SelectItem value="walk_in">🟢 Walk-in</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       </div>
 
       {error && (

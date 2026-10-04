@@ -139,6 +139,8 @@ export interface Participant {
   participantKind: ParticipantKind;
   /** Client service exit. Guests stay on archived_at. Default active when the column is absent. */
   serviceStatus: "active" | "exited";
+  /** Set when a guest is archived. Clients use serviceStatus instead. */
+  archivedAt: string | null;
   exitedAt: string | null;
   exitedById: string | null;
   exitReason: string | null;
@@ -303,6 +305,7 @@ interface ParticipantRow {
   exited_by_id?: string | null;
   exit_reason?: string | null;
   exit_notes?: string | null;
+  archived_at?: string | null;
   ndis_number: string;
   street_address: string | null;
   regular_pickup_address: string | null;
@@ -330,6 +333,7 @@ function rowToParticipant(r: ParticipantRow): Participant {
     fullName: `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim(),
     participantKind: r.participant_kind === "guest" ? "guest" : "client",
     serviceStatus: r.service_status === "exited" ? "exited" : "active",
+    archivedAt: r.archived_at ?? null,
     exitedAt: r.exited_at ?? null,
     exitedById: r.exited_by_id ?? null,
     exitReason: r.exit_reason ?? null,
@@ -391,6 +395,16 @@ export async function listParticipants(): Promise<Participant[]> {
   return (data ?? [])
     .filter((r) => !(r as { archived_at?: string | null }).archived_at)
     .map((r) => rowToParticipant(r as ParticipantRow));
+}
+
+/** Directory only. Includes archived guests. Other screens keep listParticipants(). */
+export async function listParticipantDirectory(): Promise<Participant[]> {
+  const { data, error } = await supabase
+    .from("participants")
+    .select("*")
+    .order("last_name", { ascending: true });
+  if (error) throw error;
+  return (data ?? []).map((r) => rowToParticipant(r as ParticipantRow));
 }
 
 export interface ParticipantPatch {

@@ -117,7 +117,7 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 onClick={() => onSelect(p)}
                 className={cn(
                   "flex w-full cursor-pointer items-start justify-between gap-3 p-4 text-left transition-colors hover:bg-accent/40",
-                  p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                  (p.participantKind === "guest" ? !!p.archivedAt : p.serviceStatus === "exited") && "bg-secondary/25",
                 )}
               >
                 <div className="min-w-0 flex-1 space-y-2">
@@ -126,6 +126,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                     {p.participantKind === "guest" && (
                       <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                         Guest
+                      </Badge>
+                    )}
+                    {p.participantKind === "guest" && p.archivedAt && (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                        Archived
                       </Badge>
                     )}
                     {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
@@ -188,7 +193,7 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                   onClick={() => onSelect(p)}
                   className={cn(
                     "cursor-pointer border-t border-border transition-colors hover:bg-accent/40",
-                    p.participantKind !== "guest" && p.serviceStatus === "exited" && "bg-secondary/25",
+                    (p.participantKind === "guest" ? !!p.archivedAt : p.serviceStatus === "exited") && "bg-secondary/25",
                   )}
                 >
                   <td className="px-3 py-2 font-medium">
@@ -197,6 +202,11 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                       {p.participantKind === "guest" && (
                         <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                           Guest
+                        </Badge>
+                      )}
+                      {p.participantKind === "guest" && p.archivedAt && (
+                        <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                          Archived
                         </Badge>
                       )}
                       {p.participantKind !== "guest" && p.serviceStatus === "exited" && (

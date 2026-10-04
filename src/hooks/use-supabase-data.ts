@@ -24,6 +24,7 @@ import { busRunEffectiveColor } from "@/lib/bus-run-palette";
 
 import {
   listParticipants,
+  listParticipantDirectory,
   listSyncLogs,
   listStaffRegistry,
   insertStaffMember,
@@ -651,6 +652,16 @@ export function useParticipants() {
   return useQuery({
     queryKey: ["participants"],
     queryFn: listParticipants,
+    staleTime: 30_000,
+    enabled: isReady && !!user,
+  });
+}
+
+export function useParticipantDirectory() {
+  const { user, isReady } = useAuthReady();
+  return useQuery({
+    queryKey: ["participants", "directory"],
+    queryFn: listParticipantDirectory,
     staleTime: 30_000,
     enabled: isReady && !!user,
   });
