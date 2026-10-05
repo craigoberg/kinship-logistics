@@ -51,6 +51,8 @@ export interface MaintenanceItem {
   updatedAt: string;
   /** When the fault actually happened. Falls back to createdAt when unset. */
   occurredAt: string;
+  /** Board pack number when filed from the Red Button. */
+  incidentNumber: string | null;
   /** Timestamp of the most recent maintenance note; null if no notes yet. */
   lastNoteAt: string | null;
 }
@@ -103,6 +105,7 @@ function rowToItem(r: Record<string, any>): MaintenanceItem {
     updatedAt: r.updated_at,
     occurredAt: r.occurred_at ?? r.created_at,
     lastNoteAt: r.last_note_at ?? null,
+    incidentNumber: r.incident_number ? String(r.incident_number) : null,
   };
 }
 
@@ -178,12 +181,9 @@ export async function listMaintenanceItems(
 
   // Fetch broadly; tab filtering is done client-side so the rewarn window
   // and overdue deferrals can be applied without a server-side date expression.
-  let q = supabase
-    .from("maintenance_items")
-    .select(
-      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, occurred_at, last_note_at",
-    )
-    .order("created_at", { ascending: false });
+  const cols =
+    "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, occurred_at, last_note_at, incident_number";
+  let q = supabase.from("maintenance_items").select(cols).order("created_at", { ascending: false });
 
   // Pre-filter server-side where unambiguous
   if (args.tab === "resolved") {
@@ -199,7 +199,21 @@ export async function listMaintenanceItems(
   if (args.source) q = q.eq("source", args.source);
   if (args.eventId) q = q.eq("event_id", args.eventId);
 
-  const { data, error } = await q;
+  let { data, error } = await q;
+  if (error && isSchemaMismatchError(error)) {
+    let retry = supabase
+      .from("maintenance_items")
+      .select(cols.replace(", incident_number", ""))
+      .order("created_at", { ascending: false });
+    if (args.tab === "resolved") retry = retry.in("status", ["resolved", "closed"]);
+    else if (args.tab !== "all") retry = retry.not("status", "in", '("resolved","closed")');
+    if (args.severity) retry = retry.eq("severity", args.severity);
+    if (args.source) retry = retry.eq("source", args.source);
+    if (args.eventId) retry = retry.eq("event_id", args.eventId);
+    const second = await retry;
+    data = second.data as typeof data;
+    error = second.error;
+  }
   if (error) throw error;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any

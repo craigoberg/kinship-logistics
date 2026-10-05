@@ -5,6 +5,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { createIssue, markResolved } from "@/lib/api/site-issues";
+import { fileBoardReport, siteIssueHubSource } from "@/lib/incident-board-report";
 import { writeToLedger, tryGetGps, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { listAttendanceRoll } from "@/lib/api/client-attendance";
 import { emitMockSms } from "@/lib/notifications/mock-sms";
@@ -380,6 +381,12 @@ export async function activateEmergency(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: siteIssueHubSource(input.eventId, input.eventDaySessionId),
+    hubRowId: issue.id,
+  });
+
   const { data, error } = await supabase
     .from("operational_emergencies")
     .insert({
@@ -583,6 +590,12 @@ export async function declareDoNotOpenCentre(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "day_centre",
+    hubRowId: issue.id,
+  });
+
   await setPhase(input.siteDaySessionId, "closed_no_go");
 
   const { error } = await supabase
@@ -631,6 +644,12 @@ export async function declareCentreLockdown(input: {
       "New arrivals blocked. Complete orderly Day Centre close when everyone is accounted for.",
     owner: "internal",
     issueArea: "health_safety",
+  });
+
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "day_centre",
+    hubRowId: issue.id,
   });
 
   const { error } = await supabase
@@ -753,6 +772,12 @@ export async function declareProgrammeSuspend(input: {
     workaroundPlan: "Hop / programme start gated until manager clears suspend.",
     owner: "internal",
     issueArea: "health_safety",
+  });
+
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "event",
+    hubRowId: issue.id,
   });
 
   const { error } = await supabase

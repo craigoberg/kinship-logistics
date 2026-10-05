@@ -17,6 +17,7 @@ export type AppMenuKey =
   | "event_deliver"
   | "events"
   | "governance"
+  | "reporting"
   | "rights_voice"
   | "participants"
   | "staff"
@@ -70,6 +71,12 @@ export const MENU_CATALOGUE: readonly MenuDefinition[] = [
     label: "Governance Hub",
     description: "Unified issues, incident ledger, NDIS",
     path: "/governance",
+  },
+  {
+    key: "reporting",
+    label: "Reporting",
+    description: "Board pack — centre journal and trips for a date range",
+    path: "/reporting",
   },
   {
     key: "rights_voice",

@@ -20,6 +20,7 @@ import { Route as HelpRouteImport } from './routes/help'
 import { Route as ManifestRouteImport } from './routes/manifest'
 import { Route as ParticipantsRouteImport } from './routes/participants'
 import { Route as PublicRouteImport } from './routes/public'
+import { Route as ReportingRouteImport } from './routes/reporting'
 import { Route as RightsVoiceRouteImport } from './routes/rights-voice'
 import { Route as RunPlanningRouteImport } from './routes/run-planning'
 import { Route as StaffRouteImport } from './routes/staff'
@@ -88,6 +89,11 @@ const ParticipantsRoute = ParticipantsRouteImport.update({
 const PublicRoute = PublicRouteImport.update({
   id: '/public',
   path: '/public',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const ReportingRoute = ReportingRouteImport.update({
+  id: '/reporting',
+  path: '/reporting',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RightsVoiceRoute = RightsVoiceRouteImport.update({
@@ -176,6 +182,7 @@ export interface FileRoutesByFullPath {
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/public': typeof PublicRouteWithChildren
+  '/reporting': typeof ReportingRoute
   '/rights-voice': typeof RightsVoiceRoute
   '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
@@ -202,6 +209,7 @@ export interface FileRoutesByTo {
   '/help': typeof HelpRoute
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
+  '/reporting': typeof ReportingRoute
   '/rights-voice': typeof RightsVoiceRoute
   '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
@@ -229,6 +237,7 @@ export interface FileRoutesById {
   '/manifest': typeof ManifestRoute
   '/participants': typeof ParticipantsRoute
   '/public': typeof PublicRouteWithChildren
+  '/reporting': typeof ReportingRoute
   '/rights-voice': typeof RightsVoiceRoute
   '/run-planning': typeof RunPlanningRoute
   '/staff': typeof StaffRoute
@@ -258,6 +267,7 @@ export interface FileRouteTypes {
     | '/manifest'
     | '/participants'
     | '/public'
+    | '/reporting'
     | '/rights-voice'
     | '/run-planning'
     | '/staff'
@@ -284,6 +294,7 @@ export interface FileRouteTypes {
     | '/help'
     | '/manifest'
     | '/participants'
+    | '/reporting'
     | '/rights-voice'
     | '/run-planning'
     | '/staff'
@@ -310,6 +321,7 @@ export interface FileRouteTypes {
     | '/manifest'
     | '/participants'
     | '/public'
+    | '/reporting'
     | '/rights-voice'
     | '/run-planning'
     | '/staff'
@@ -338,6 +350,7 @@ export interface RootRouteChildren {
   ManifestRoute: typeof ManifestRoute
   ParticipantsRoute: typeof ParticipantsRoute
   PublicRoute: typeof PublicRouteWithChildren
+  ReportingRoute: typeof ReportingRoute
   RightsVoiceRoute: typeof RightsVoiceRoute
   RunPlanningRoute: typeof RunPlanningRoute
   StaffRoute: typeof StaffRoute
@@ -426,6 +439,13 @@ declare module '@tanstack/react-router' {
       path: '/public'
       fullPath: '/public'
       preLoaderRoute: typeof PublicRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/reporting': {
+      id: '/reporting'
+      path: '/reporting'
+      fullPath: '/reporting'
+      preLoaderRoute: typeof ReportingRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/rights-voice': {
@@ -570,6 +590,7 @@ const rootRouteChildren: RootRouteChildren = {
   ManifestRoute: ManifestRoute,
   ParticipantsRoute: ParticipantsRoute,
   PublicRoute: PublicRouteWithChildren,
+  ReportingRoute: ReportingRoute,
   RightsVoiceRoute: RightsVoiceRoute,
   RunPlanningRoute: RunPlanningRoute,
   StaffRoute: StaffRoute,

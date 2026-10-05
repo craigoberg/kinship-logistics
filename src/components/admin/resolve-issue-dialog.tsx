@@ -49,6 +49,7 @@ import {
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import { getExclusionByHubIssueId, type InfectiousExclusion } from "@/lib/api/infectious-exclusion";
 import { InfectiousClearanceSheet } from "@/components/site-day/infectious-clearance-sheet";
+import { IncidentBoardReportDialog } from "@/components/governance/incident-board-report-dialog";
 import { isActiveUserManager } from "@/lib/data-store";
 import {
   useCouncilEmailFrom,
@@ -141,6 +142,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
   const [pinOpen, setPinOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"resolve" | "forceAck">("resolve");
   const [clearanceOpen, setClearanceOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
   const [activeExclusion, setActiveExclusion] = useState<InfectiousExclusion | null>(null);
 
   useEffect(() => {
@@ -153,6 +155,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
       setCouncilSev("Sev 2");
       setPinOpen(false);
       setClearanceOpen(false);
+      setBoardOpen(false);
       setActiveExclusion(null);
     }
   }, [open]);
@@ -406,7 +409,17 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
     activeExclusion.status === "active" &&
     isActiveUserManager();
 
-  const { location, reporter, reference } = hubIssueContextMeta(issue);
+  const { location, reporter, reference, referenceLabel } = hubIssueContextMeta(issue);
+  const incidentNumberOnRow = String(
+    ((issue.raw ?? {}) as { incident_number?: string }).incident_number ?? "",
+  ).trim();
+  const redButtonHuman =
+    issue.source === "incident" &&
+    !isPublicWeb &&
+    (!!incidentNumberOnRow || /Filed from:/i.test(issue.description ?? ""));
+  const showBoardReport = redButtonHuman || isHealthSafety;
+  const boardHubSource =
+    issue.source === "incident" ? "incident" : issue.source === "event" ? "event" : "day_centre";
   const notes = timelineQuery.data ?? [];
   const reviewStartedNote = findHubReviewStartedNote(notes);
   const reviewStarted = isHubReviewStarted(notes);
@@ -463,7 +476,7 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
 
       <HubContextMetaGrid
         rows={[
-          ...(reference ? [{ label: "Ref", value: reference }] : []),
+          ...(reference ? [{ label: referenceLabel ?? "Ref", value: reference }] : []),
           { label: "Location", value: location },
           { label: "Reported by", value: reporter ?? "Unknown staff" },
           { label: "Occurred", value: <FormattedDateTime value={issue.occurredAt} /> },
@@ -512,23 +525,37 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
         councilOptions={COUNCIL_SEVERITY_OPTIONS}
         showEscalate={issue.source === "day_centre" && !isHealthSafety}
         extraFooterStart={
-          showClearance ? (
-            <Button
-              size="sm"
-              className="bg-emerald-600 hover:bg-emerald-700"
-              onClick={() => setClearanceOpen(true)}
-            >
-              Clear to return
-            </Button>
-          ) : isAwaitingOperatorAck ? (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={handleForceAckClick}
-              disabled={!canForceAck}
-            >
-              Force-ack (Manager)
-            </Button>
+          showBoardReport || showClearance || isAwaitingOperatorAck ? (
+            <>
+              {showBoardReport ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setBoardOpen(true)}
+                >
+                  Board report
+                </Button>
+              ) : null}
+              {showClearance ? (
+                <Button
+                  size="sm"
+                  className="bg-emerald-600 hover:bg-emerald-700"
+                  onClick={() => setClearanceOpen(true)}
+                >
+                  Clear to return
+                </Button>
+              ) : isAwaitingOperatorAck ? (
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  onClick={handleForceAckClick}
+                  disabled={!canForceAck}
+                >
+                  Force-ack (Manager)
+                </Button>
+              ) : null}
+            </>
           ) : undefined
         }
         onLogUpdate={handleLogClick}
@@ -544,6 +571,13 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
         onOpenChange={setPinOpen}
         reason="Manager PIN required to save issue changes."
         onAuthenticated={handlePinAuthenticated}
+      />
+
+      <IncidentBoardReportDialog
+        hubSource={boardHubSource}
+        hubRowId={issue.sourceRowId}
+        open={boardOpen}
+        onOpenChange={setBoardOpen}
       />
 
       <InfectiousClearanceSheet

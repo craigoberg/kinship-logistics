@@ -14,6 +14,7 @@ export type HelpDeepLinkTo =
   | "/events"
   | "/event-deliver"
   | "/governance"
+  | "/reporting"
   | "/rights-voice"
   | "/admin"
   | "/sync"
@@ -34,6 +35,7 @@ export const HELP_MENU_ROUTES: Record<
   event_deliver: { to: "/event-deliver", label: "Open Event Deliver" },
   "event-deliver": { to: "/event-deliver", label: "Open Event Deliver" },
   governance: { to: "/governance", label: "Open Governance Hub" },
+  reporting: { to: "/reporting", label: "Open Reporting" },
   rights_voice: { to: "/rights-voice", label: "Open Rights & voice" },
   admin: { to: "/admin", label: "Open Admin" },
   sync: { to: "/sync", label: "Open Sync Queue" },

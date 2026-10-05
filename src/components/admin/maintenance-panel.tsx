@@ -38,6 +38,7 @@ import { FormattedDateTime } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubContextMetaGrid, HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
+import { IncidentBoardReportDialog } from "@/components/governance/incident-board-report-dialog";
 import { maintenanceItemBodyLines } from "@/lib/governance/hub-maintenance-item-body";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
@@ -124,6 +125,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
   const [deferDatetimeValid, setDeferDatetimeValid] = useState(true);
   const [pinOpen, setPinOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"resolve" | "close">("resolve");
 
   useEffect(() => {
@@ -132,6 +134,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       setDeferOn(false);
       setDeferAt(defaultDeferIso());
       setDeferDatetimeValid(true);
+      setBoardOpen(false);
     }
   }, [open, item.id]);
 
@@ -326,6 +329,9 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       )}
       <HubContextMetaGrid
         rows={[
+          ...(item.incidentNumber
+            ? [{ label: "Incident no.", value: item.incidentNumber }]
+            : []),
           { label: "Location", value: item.locationLabel },
           { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
           { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
@@ -394,16 +400,25 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       resolveCloseLabel="Mark Resolved"
       canResolve={canResolve}
       extraFooterStart={
-        item.status === "resolved" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={handleCloseClick}
-          >
-            {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            Close Item
-          </Button>
+        item.source === "incident_fault" || item.incidentNumber || item.status === "resolved" ? (
+          <>
+            {item.source === "incident_fault" || item.incidentNumber ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setBoardOpen(true)}>
+                Board report
+              </Button>
+            ) : null}
+            {item.status === "resolved" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={handleCloseClick}
+              >
+                {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                Close Item
+              </Button>
+            ) : null}
+          </>
         ) : undefined
       }
     />
@@ -412,6 +427,12 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       onOpenChange={setPinOpen}
       reason="Manager PIN required to resolve or close a maintenance item."
       onAuthenticated={handlePinAuthenticated}
+    />
+    <IncidentBoardReportDialog
+      hubSource="maintenance"
+      hubRowId={item.id}
+      open={boardOpen}
+      onOpenChange={setBoardOpen}
     />
     </>
   );
@@ -709,6 +730,9 @@ function ItemsList({ tab, onManage }: ItemsListProps) {
                             value: formatDate(item.deferredUntil),
                           },
                         ]
+                      : []),
+                    ...(item.incidentNumber
+                      ? [{ label: "Incident no.", value: item.incidentNumber }]
                       : []),
                     { label: "Location", value: item.locationLabel },
                     { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },

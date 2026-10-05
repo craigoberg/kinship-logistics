@@ -251,7 +251,7 @@ function IssuesList({
       ) : (
         <div className="space-y-2">
           {visible.map((i) => {
-            const { location, reporter, reference } = hubIssueContextMeta(i);
+            const { location, reporter, reference, referenceLabel } = hubIssueContextMeta(i);
             const updatedAt = issueUpdatedAt(i);
             const workflow = deriveIssueWorkflowStatus(i, reviewStartedKeys);
             const deferredUntil = issueDeferredUntil(i);
@@ -300,7 +300,9 @@ function IssuesList({
                       ...(deferredUntil && workflow === "deferred"
                         ? [{ label: "Deferred to", value: deferredUntil }]
                         : []),
-                      ...(reference ? [{ label: "Ref", value: reference }] : []),
+                      ...(reference
+                        ? [{ label: referenceLabel ?? "Ref", value: reference }]
+                        : []),
                       { label: "Location", value: location },
                       { label: "Reported by", value: reporter ?? "Unknown staff" },
                       {

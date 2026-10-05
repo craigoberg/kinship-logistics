@@ -9,6 +9,8 @@ export interface HubIssueContextMeta {
   location: string | null;
   reporter: string | null;
   reference?: string | null;
+  /** Card label for `reference`. Defaults to Ref. */
+  referenceLabel?: string;
 }
 
 /** Who / where for Human Incidents — shared by list cards and manage dialog. */
@@ -31,9 +33,12 @@ export function hubIssueContextMeta(issue: UnifiedIssue): HubIssueContextMeta {
     const filedMatch = desc.match(/Filed from:\s*([^\]]+)/);
     const eventName = eventMatch?.[1]?.trim() ?? null;
     const filedFrom = filedMatch?.[1]?.trim() ?? null;
+    const incidentNumber = String(raw.incident_number ?? "").trim();
     return {
       location: eventName ? `Event: ${eventName}` : filedFrom,
       reporter,
+      reference: incidentNumber || null,
+      referenceLabel: incidentNumber ? "Incident no." : undefined,
     };
   }
 
@@ -43,6 +48,8 @@ export function hubIssueContextMeta(issue: UnifiedIssue): HubIssueContextMeta {
       reporter: String(raw.driver_name ?? "").trim() || reporter,
     };
   }
+
+  const incidentNumber = String(raw.incident_number ?? "").trim();
 
   if (issue.source === "event") {
     // Badge may already be "Trip Day · Multi 1"
@@ -54,11 +61,18 @@ export function hubIssueContextMeta(issue: UnifiedIssue): HubIssueContextMeta {
     return {
       location: tripName ? `Trip Day · ${tripName}` : "Trip Day",
       reporter,
+      reference: incidentNumber || null,
+      referenceLabel: incidentNumber ? "Incident no." : undefined,
     };
   }
 
   if (issue.source === "day_centre") {
-    return { location: "Day Centre", reporter };
+    return {
+      location: "Day Centre",
+      reporter,
+      reference: incidentNumber || null,
+      referenceLabel: incidentNumber ? "Incident no." : undefined,
+    };
   }
 
   return { location: null, reporter };

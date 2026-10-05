@@ -195,6 +195,14 @@ export function TripReportTab({ event }: Props) {
         }}
       />
 
+      <TripReportDocument report={report} />
+    </div>
+  );
+}
+
+export function TripReportDocument({ report }: { report: TripReport }) {
+  return (
+    <div className="space-y-6">
       {/* ── Event header ── */}
       <Section icon={<FileText className="h-4 w-4" />} title="Event summary">
         <div className="grid gap-2 sm:grid-cols-2 text-sm">

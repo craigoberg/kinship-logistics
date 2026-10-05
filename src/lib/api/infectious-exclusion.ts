@@ -9,6 +9,7 @@ import {
   type AttendanceStatus,
 } from "@/lib/data-store";
 import { createIssue, markResolved } from "@/lib/api/site-issues";
+import { fileBoardReport, siteIssueHubSource } from "@/lib/incident-board-report";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { getSydneyIsoDate } from "@/lib/operational-time";
 import { operationalNowIso } from "@/lib/operational-clock";
@@ -389,6 +390,12 @@ export async function declareInfectiousExclusion(
     workaroundPlan: workaround,
     owner: "internal",
     issueArea: "health_safety",
+  });
+
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: siteIssueHubSource(input.eventId, input.eventDaySessionId),
+    hubRowId: issue.id,
   });
 
   const now = operationalNowIso();
