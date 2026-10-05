@@ -358,7 +358,7 @@ export interface BaselineSignoffAnswer {
 
 export interface BaselineSignoffInput {
   venue_id: string;
-  /** Manager 4-digit PIN — verified before write. */
+  /** Manager sign-in PIN (4 or 6 digits) — verified before write. */
   managerPin: string;
   evidence_ref: string;
   notes?: string | null;

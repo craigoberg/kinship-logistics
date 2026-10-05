@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
 import { Textarea } from "@/components/ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -86,10 +87,8 @@ const LEDGER_MAP: Record<
 
 
 async function verifyWitnessPin(member: StaffMember | undefined, pin: string): Promise<void> {
-  if (!member?.pinHash) throw new Error("Incorrect PIN. Please try again.");
-  const candidate = await hashPin(pin);
-  const ok = candidate === member.pinHash || pin === member.pinHash;
-  if (!ok) throw new Error("Incorrect PIN. Please try again.");
+  if (!member?.id) throw new Error("Select the witness first.");
+  await verifyNamedStaffPin(member.id, pin);
 }
 
 export function MedicationAdminModal({ open, onOpenChange, participant }: Props) {
@@ -627,7 +626,7 @@ function WitnessBlock({
         verifiedLabel="Witness PIN verified"
         length={4}
         title={title}
-        description={`Verify ${selected?.fullName ?? "witness"} PIN for medication sign-off.`}
+        description={`Enter ${selected?.fullName ?? "the witness"}'s sign-in PIN. Four digits, or all six, then OK.`}
         disabled={!staffValue}
         onVerify={async (pin) => {
           await verifyWitnessPin(selected, pin);
@@ -635,7 +634,7 @@ function WitnessBlock({
         onSuccess={onPinVerified}
       />
       <p className="text-[11px] text-muted-foreground">
-        4-digit security PIN — verified against staff_registry.pin_hash.
+        Their sign-in PIN. Four digits, or all six, then OK.
       </p>
     </div>
   );

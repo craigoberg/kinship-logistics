@@ -5,7 +5,7 @@ export const addStaffTopic: HelpTopic = {
   kind: "howto",
   title: "Staff — add personnel and set role / PIN",
   summary:
-    "Managers add staff and volunteers in Staff → Add personnel with role, system access level, and a 4-digit PIN.",
+    "Managers add staff and volunteers in Staff → Add personnel with role, system access level, and a 6-digit PIN.",
   keywords: [
     "staff",
     "personnel",
@@ -33,8 +33,8 @@ export const addStaffTopic: HelpTopic = {
       body: "Enter Full name, Role / title, and SYSTEM ACCESS LEVEL (Manager, Assistant Manager, Support Worker, Driver, etc.). Optional: Phone, Email, Street address; keep Active on for working staff.",
     },
     {
-      heading: "4-digit PIN",
-      body: "Enter a 4-digit PIN on the Pin pad (required for new personnel). Used for terminal sign-in, med witness, and step-up dialogs. Guardian PINs cannot log into the staff terminal.",
+      heading: "6-digit PIN",
+      body: "Enter a 6-digit PIN on the Pin pad (required for new personnel). Used for terminal sign-in, med witness, and step-up dialogs. Guardian PINs cannot log into the staff terminal.",
     },
     {
       heading: "Save and verify",

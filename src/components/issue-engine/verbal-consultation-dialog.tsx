@@ -437,7 +437,7 @@ export function VerbalConsultationDialog({
           ) : (
             <div className="rounded-lg border border-border bg-muted/20 p-3">
               <p className="mb-2 text-xs text-muted-foreground">
-                Your 4-digit operator PIN
+                Your sign-in PIN (4 digits, or all 6)
               </p>
               <PinPad
                 value={pinDraft}

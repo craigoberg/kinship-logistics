@@ -6,6 +6,7 @@
  * Does not restore those plans on reactivate.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { resolveStaffIdFromPin } from "@/lib/auth/pin-session";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import {
@@ -69,20 +70,29 @@ function isManagerRole(personnelType: string | null, title: string | null): bool
 export async function resolveAuthorisingManager(
   pin: string,
 ): Promise<{ id: string; fullName: string }> {
-  if (!/^\d{4,}$/.test(pin)) {
-    throw new Error("Enter the manager’s 4-digit PIN.");
+  const code = pin.trim();
+  if (!/^\d{4}$|^\d{6}$/.test(code)) {
+    throw new Error("Enter the manager’s sign-in PIN.");
   }
-  const { data, error } = await supabase.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
+  let staffId: string;
+  try {
+    staffId = await resolveStaffIdFromPin(code);
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : "";
+    throw new Error(msg || "PIN not recognised.");
+  }
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .select("id, full_name, role, personnel_type")
+    .eq("id", staffId)
+    .maybeSingle();
   if (error) throw new Error(error.message || "Could not verify that PIN.");
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
+  const record = data as {
     id: string;
     full_name?: string | null;
     role: string | null;
     personnel_type?: string | null;
-  }>;
-  const record = rows[0];
+  } | null;
   if (!record?.id) throw new Error("PIN not recognised.");
   if (!isManagerRole(record.personnel_type ?? null, record.role ?? null)) {
     throw new Error("A manager PIN is required. Guardian and dashboard PINs cannot authorise this.");

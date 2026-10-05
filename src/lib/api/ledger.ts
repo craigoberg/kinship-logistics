@@ -373,11 +373,11 @@ export interface ResolveVehicleMaintenanceInput {
   // ----- Formal Audit only (resolutionType === 'formal_audit') -----
   /** Auditor staff id (PIN-verified). */
   auditorStaffId?: string | null;
-  /** Auditor 4-digit PIN — server-verified via verify_staff_pin RPC. */
+  /** Auditor sign-in PIN (4 or 6 digits) — verified on the app server. */
   auditorPin?: string | null;
   /** Witness staff id (PIN-verified, must differ from auditor). */
   witnessStaffId?: string | null;
-  /** Witness 4-digit PIN. */
+  /** Witness sign-in PIN (4 or 6 digits). */
   witnessPin?: string | null;
   /** Full checklist snapshot — embedded in ledger metadata + mirrored to checklist_responses. */
   checklistCategory?: string | null;

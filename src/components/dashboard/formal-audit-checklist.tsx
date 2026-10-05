@@ -329,8 +329,8 @@ export function buildFormalAuditPayload(
     state.auditorStaffId !== state.witnessStaffId &&
     state.auditorPinVerified &&
     state.witnessPinVerified &&
-    /^\d{4}$/.test(state.auditorPin) &&
-    /^\d{4}$/.test(state.witnessPin);
+    /^\d{4}$|^\d{6}$/.test(state.auditorPin) &&
+    /^\d{4}$|^\d{6}$/.test(state.witnessPin);
   const valid = items.length > 0 && allMarked && failsHaveNotes && pinsOk;
   return { rows, valid };
 }
