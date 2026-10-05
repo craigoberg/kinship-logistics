@@ -4,7 +4,7 @@
  *
  * Interim Alpha helper (BL-002 will revisit invite / self-reset / RBAC).
  */
-import { verifyManagerPin } from "@/lib/backup-restore/engine.server";
+import { assertManagerPin } from "@/lib/auth/pin-auth.server";
 import { createServiceServerClient } from "@/lib/supabase.server";
 
 const MIN_PASSWORD_LEN = 6;
@@ -44,7 +44,7 @@ export async function setStaffAuthPassword(args: {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LEN} characters.`);
   }
 
-  await verifyManagerPin(args.actorStaffId, args.actorPin);
+  await assertManagerPin(args.actorStaffId, args.actorPin);
 
   const service = createServiceServerClient();
   const { data: staff, error: staffErr } = await service

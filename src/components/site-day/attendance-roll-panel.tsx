@@ -10,7 +10,6 @@ import {
   Clock,
   Loader2,
   LogOut,
-  RotateCcw,
   Users,
   Bus,
   UserPlus,
@@ -74,6 +73,7 @@ import {
   subscribeOperationalClock,
 } from "@/lib/operational-clock";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { FloorRollUndoButton } from "./floor-roll-undo-button";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
 import { AddVisitorModal } from "./add-visitor-modal";
@@ -1009,50 +1009,26 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     />
                   )}
                   {isIn && !isOut && mode !== "check_out" && (
-                    <button
-                      type="button"
+                    <FloorRollUndoButton
+                      kind="check_in"
+                      personName={displayName}
                       disabled={busy}
                       onClick={() => {
                         setUndoKind("check_in");
                         setUndoTarget(r);
                       }}
-                      className={cn(
-                        "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                        "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                        "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                        "disabled:pointer-events-none disabled:opacity-50",
-                      )}
-                      title="Undo check-in"
-                      aria-label={`Undo check-in for ${displayName}`}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                        Undo
-                      </span>
-                    </button>
+                    />
                   )}
                   {departureDone && (
-                    <button
-                      type="button"
+                    <FloorRollUndoButton
+                      kind="check_out"
+                      personName={displayName}
                       disabled={busy}
                       onClick={() => {
                         setUndoKind("check_out");
                         setUndoTarget(r);
                       }}
-                      className={cn(
-                        "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                        "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                        "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                        "disabled:pointer-events-none disabled:opacity-50",
-                      )}
-                      title="Undo check-out"
-                      aria-label={`Undo check-out for ${displayName}`}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                        Undo
-                      </span>
-                    </button>
+                    />
                   )}
                   <span
                     role="button"

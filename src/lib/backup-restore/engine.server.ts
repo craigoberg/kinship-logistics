@@ -16,6 +16,7 @@ import {
   schemaCatalogSummary,
   type SchemaCatalog,
 } from "@/lib/backup-restore/schema-catalog";
+import { assertManagerPin } from "@/lib/auth/pin-auth.server";
 import { createServiceServerClient, getServerSupabaseUrl } from "@/lib/supabase.server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
@@ -133,11 +134,6 @@ export async function createFullBackup(): Promise<BackupManifest> {
   };
 }
 
-export async function verifyManagerPin(staffId: string, pin: string): Promise<void> {
-  const { assertManagerPin } = await import("@/lib/auth/pin-auth.server");
-  await assertManagerPin(staffId, pin);
-}
-
 async function insertRestoreRows(
   service: SupabaseClient,
   tableName: string,
@@ -228,7 +224,7 @@ export async function restoreFullBackup(
   manifest: BackupManifest,
   options: RestoreOptions,
 ): Promise<RestoreResult> {
-  await verifyManagerPin(options.managerStaffId, options.managerPin);
+  await assertManagerPin(options.managerStaffId, options.managerPin);
 
   if (!options.applyStructure && !options.restoreData) {
     throw new Error("Select at least one of: Apply infrastructure, Restore table data.");

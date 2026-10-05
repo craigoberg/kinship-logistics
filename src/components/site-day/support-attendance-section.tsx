@@ -5,7 +5,7 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Check, Clock, RotateCcw, Users } from "lucide-react";
+import { Check, Clock, Users } from "lucide-react";
 import { toast } from "sonner";
 import {
   AlertDialog,
@@ -57,6 +57,7 @@ import {
 import { supportPersonKindLabel } from "@/lib/support-person";
 import type { AttendanceRollMode } from "./attendance-roll-panel";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { FloorRollUndoButton } from "./floor-roll-undo-button";
 import {
   DutyOnDutyConfirmSheet,
   type DutyOnDutyPending,
@@ -527,50 +528,26 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                       />
                     )}
                     {isIn && !isOut && mode !== "check_out" && (
-                      <button
-                        type="button"
+                      <FloorRollUndoButton
+                        kind="check_in"
+                        personName={row.displayName}
                         disabled={busy}
                         onClick={() => {
                           setUndoKind("check_in");
                           setUndoTarget(row);
                         }}
-                        className={cn(
-                          "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                          "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                          "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                          "disabled:pointer-events-none disabled:opacity-50",
-                        )}
-                        title="Undo check-in"
-                        aria-label={`Undo check-in for ${row.displayName}`}
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                          Undo
-                        </span>
-                      </button>
+                      />
                     )}
                     {departureDone && (
-                      <button
-                        type="button"
+                      <FloorRollUndoButton
+                        kind="check_out"
+                        personName={row.displayName}
                         disabled={busy}
                         onClick={() => {
                           setUndoKind("check_out");
                           setUndoTarget(row);
                         }}
-                        className={cn(
-                          "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                          "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                          "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                          "disabled:pointer-events-none disabled:opacity-50",
-                        )}
-                        title="Undo check-out"
-                        aria-label={`Undo check-out for ${row.displayName}`}
-                      >
-                        <RotateCcw className="h-3.5 w-3.5" />
-                        <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                          Undo
-                        </span>
-                      </button>
+                      />
                     )}
                     <span
                       role="button"

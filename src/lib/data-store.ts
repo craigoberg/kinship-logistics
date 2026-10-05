@@ -8038,20 +8038,13 @@ export async function verifyCoordinatorPin(
   staffId: string,
   pin: string,
 ): Promise<boolean> {
-  if (!/^\d{4}$|^\d{6}$/.test(pin)) return false;
   try {
-    const { verifyNamedPersonPin } = await import("@/lib/auth/pin-session");
-    const { isManagerLevelAccess } = await import("@/lib/auth/pin-role");
-    const who = await verifyNamedPersonPin({ personKind: "staff", personId: staffId, pin });
-    if (!isManagerLevelAccess(who.personnelType, who.roleTitle)) {
-      throw new Error(
-        "The selected staff member does not hold a Manager or Assistant Manager role and cannot authorise this.",
-      );
-    }
+    const { verifyManagerPin } = await import("@/components/auth/pin-verify");
+    await verifyManagerPin(staffId, pin);
     return true;
   } catch (e) {
     const msg = e instanceof Error ? e.message : "";
-    if (/does not hold|locked|sign in first/i.test(msg)) {
+    if (/does not hold|locked|sign in first|select the authorising/i.test(msg)) {
       throw e instanceof Error ? e : new Error(msg);
     }
     return false;
@@ -8064,7 +8057,7 @@ export async function submitManagerAuthorization(
   managerStaffId: string,
   pin: string,
 ): Promise<AssetDailyClearance> {
-  const ok = await verifyStaffPin(managerStaffId, pin);
+  const ok = await verifyCoordinatorPin(managerStaffId, pin);
   if (!ok) throw new Error("Invalid manager PIN.");
   const { data, error } = await supabase
     .from("asset_daily_clearance")

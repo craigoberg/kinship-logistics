@@ -10,9 +10,15 @@ import { toast } from "sonner";
 import { Checkbox } from "@/components/ui/checkbox";
 import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
-import { verifyOperatorPin } from "@/components/auth/pin-verify";
+import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
 import { cn } from "@/lib/utils";
-import type { TransportTrip, TripLeg } from "@/lib/data-store";
+import {
+  DEFAULT_STAFF_UUID,
+  getActiveUserProfile,
+  getStaffId,
+  type TransportTrip,
+  type TripLeg,
+} from "@/lib/data-store";
 import {
   buildRunCloseSummary,
   closeTransportRun,
@@ -304,7 +310,13 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         title="Close transport run"
         description="Enter the PIN you sign in with. Four digits, or all six, then OK. This locks the manifest."
         length={4}
-        onVerify={verifyOperatorPin}
+        onVerify={async (pin) => {
+          const staffId = getActiveUserProfile()?.staffId || getStaffId();
+          if (!staffId || staffId === DEFAULT_STAFF_UUID) {
+            throw new Error("Sign in first.");
+          }
+          await verifyNamedStaffPin(staffId, pin);
+        }}
         onSuccess={(pin) => {
           setPinOpen(false);
           closeMut.mutate(pin);

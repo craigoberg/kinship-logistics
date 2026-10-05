@@ -31,6 +31,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
+import { FloorRollUndoButton } from "@/components/site-day/floor-roll-undo-button";
 import { TransportMethodPickerSheet } from "@/components/ui/transport-method-picker-sheet";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -821,24 +822,12 @@ function RollCard({
               )}
 
               {editable && isIn && !isOut && (
-                <button
-                  type="button"
+                <FloorRollUndoButton
+                  kind="check_in"
+                  personName={name}
                   disabled={busy}
                   onClick={() => onUndoCheckIn()}
-                  className={cn(
-                    "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                    "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                    "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                    "disabled:opacity-50 disabled:pointer-events-none",
-                  )}
-                  title="Undo check-in"
-                  aria-label={`Undo check-in for ${name}`}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                    Undo
-                  </span>
-                </button>
+                />
               )}
 
               {editable && isAbsent && (

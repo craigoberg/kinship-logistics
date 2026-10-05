@@ -6,7 +6,8 @@ alwaysApply: true
 # UI style guide — ask before inventing
 
 **Guide:** `docs/architecture/UI-STYLE-GUIDE.md`  
-**Normative rules:** `docs/architecture/GUARDRAILS.md` §4 (components), §5.3 (dates/times — honour SIM / operational clock)
+**Normative rules:** `docs/architecture/GUARDRAILS.md` §4 (components), §5.3 (dates/times — honour SIM / operational clock)  
+**Same action, one routine:** `.cursor/rules/shared-routines.mdc` — extend the shared check-in, PIN, Red, or manager-approval path. Do not fork it.
 
 ## Before shipping UI
 
