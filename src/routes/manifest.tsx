@@ -57,10 +57,7 @@ import {
   useLookupParameters,
   useReorderTripPickupLegs,
 } from "@/hooks/use-supabase-data";
-import {
-  useOdoLegGpsWarnKm,
-  useOdoStartVsLastWarnKm,
-} from "@/hooks/use-system-parameters";
+import { useOdoStartVsLastWarnKm } from "@/hooks/use-system-parameters";
 import { absDiffExceeds } from "@/lib/manifest-odometer";
 import {
   CAUTION_CALLOUT_BODY_CLASS,
@@ -71,7 +68,7 @@ import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-
 import { useFleetDutyGap } from "@/hooks/use-fleet-duty-gap";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
-import { haversineKm, tryGetCurrentPosition, manifestGpsFallbackToast } from "@/lib/geo";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
 import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
 import { useChromeVisibility, useHideChromeOnScrollRef } from "@/hooks/chrome-visibility";
@@ -1863,7 +1860,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   };
   // Empty legs (failed hop seed) must not look "complete".
   const allLegsComplete = legs.length > 0 && activeLeg == null;
-  const totalKm = legs.reduce((sum, l) => sum + (l.loggedDistanceKm ?? l.gpsDistanceKm ?? 0), 0);
+  const totalKm = legs.reduce((sum, l) => sum + (l.loggedDistanceKm ?? 0), 0);
   const { requestCancel, dialog: pickupCancelDialog, isCancelling } = usePickupCancelDialog(
     trip.id,
     { eventId: trip.eventId ?? null },
@@ -2414,7 +2411,7 @@ function LegRow({
       {done ? (
         <div className="flex shrink-0 items-center gap-1 text-xs font-semibold text-green-600">
           <CheckCircle2 className="h-4 w-4" />
-          {(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0).toFixed(1)} km
+          {leg.loggedDistanceKm != null ? `${leg.loggedDistanceKm.toFixed(1)} km` : "—"}
         </div>
       ) : (
         <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -2613,45 +2610,26 @@ function ActiveLegCard({
   const patch = usePatchTripLeg();
   const [busy, setBusy] = useState(false);
 
-  const runGps = async (mode: "start" | "end") => {
+  const markStop = async (mode: "start" | "end") => {
     setBusy(true);
     try {
-      const geo = await tryGetCurrentPosition();
-      const pos = geo.ok ? geo.pos : null;
       if (mode === "start") {
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "en_route",
-            startLat: pos?.lat ?? null,
-            startLng: pos?.lng ?? null,
             startAt: operationalNowIso(),
           },
         });
       } else {
-        const km =
-          pos && leg.startLat != null && leg.startLng != null
-            ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos)
-            : null;
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "arrived",
-            endLat: pos?.lat ?? null,
-            endLng: pos?.lng ?? null,
             endAt: operationalNowIso(),
-            gpsDistanceKm: km != null ? Number(km.toFixed(2)) : null,
-            ...(km != null ? { loggedDistanceKm: Number(km.toFixed(2)) } : {}),
           },
-        });
-      }
-      if (!geo.ok) {
-        const copy = manifestGpsFallbackToast(geo, mode);
-        toast.warning(copy.title, {
-          description: copy.description,
-          duration: 16_000,
         });
       }
     } catch (err) {
@@ -2752,7 +2730,7 @@ function ActiveLegCard({
                 variant="caution"
                 pulse={!busy}
                 disabled={busy}
-                onClick={() => void runGps("end")}
+                onClick={() => void markStop("end")}
               >
                 Arrive at Stop
               </FieldActionButton>
@@ -2773,7 +2751,7 @@ function ActiveLegCard({
                 variant="caution"
                 pulse={!busy}
                 disabled={busy}
-                onClick={() => void runGps("start")}
+                onClick={() => void markStop("start")}
               >
                 Depart Stop
               </FieldActionButton>
@@ -2814,7 +2792,7 @@ function ArrivedChecklist({
       }
     }
     return {
-      loggedKm: String(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0),
+      loggedKm: leg.loggedDistanceKm != null ? String(leg.loggedDistanceKm) : "",
       present: leg.passengerPresent ?? true,
       medStatus: leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
       extraMed: leg.unexpectedMedicationLogged ?? false,
@@ -2833,8 +2811,6 @@ function ArrivedChecklist({
   const [showNoShow, setShowNoShow] = useState(false);
   const [showUnsafeDrop, setShowUnsafeDrop] = useState(false);
   const [verbalPending, setVerbalPending] = useState<{ description: string } | null>(null);
-  const [gpsKmWarnAck, setGpsKmWarnAck] = useState(false);
-  const legGpsWarnKm = useOdoLegGpsWarnKm();
 
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
@@ -2853,25 +2829,15 @@ function ArrivedChecklist({
   const unsafeDropBlocked = isReturnRun && !present && !unsafeDropVerbalCleared;
 
   const loggedKmNum = Number(loggedKm);
-  const gpsKm =
-    leg.gpsDistanceKm != null && Number.isFinite(leg.gpsDistanceKm)
-      ? Number(leg.gpsDistanceKm)
-      : null;
-  const gpsKmMismatch =
-    gpsKm != null &&
-    Number.isFinite(loggedKmNum) &&
-    absDiffExceeds(loggedKmNum, gpsKm, legGpsWarnKm);
+  const loggedKmMissing = !loggedKm || Number.isNaN(loggedKmNum);
 
   const blocked =
-    !loggedKm ||
-    Number.isNaN(loggedKmNum) ||
+    loggedKmMissing ||
     (showMedChecks && !expectedMedSatisfied) ||
     (showExtraMed && extraMed && extraNotes.trim().length < 3) ||
-    unsafeDropBlocked ||
-    (gpsKmMismatch && !gpsKmWarnAck);
+    unsafeDropBlocked;
 
   const updateField = (field: string, value: unknown) => {
-    if (field === "loggedKm") setGpsKmWarnAck(false);
     setFormState((prev: Record<string, unknown>) => ({ ...prev, [field]: value }));
   };
 
@@ -2974,43 +2940,16 @@ function ArrivedChecklist({
         onChange={(v) => updateField("loggedKm", v)}
         placeholder="Tap to enter leg distance"
         title="Logged leg kilometres"
-        description="GPS estimate pre-filled — adjust in 0.5 km steps if needed."
+        description="From the odometer, in 0.5 km steps. Close Run adds these up."
         step={0.5}
         allowDecimal
         min={0}
         unit="km"
         variant="dark"
+        className={requiredFieldOutline(loggedKmMissing)}
       />
-      {gpsKmMismatch && gpsKm != null && (
-        <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
-          <div className="flex items-start gap-2">
-            <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-            <p className={CAUTION_CALLOUT_BODY_CLASS}>
-              Logged {loggedKmNum} km differs from GPS estimate {gpsKm.toFixed(1)} km by{" "}
-              {Math.abs(loggedKmNum - gpsKm).toFixed(1)} km (warn at {legGpsWarnKm} km).
-              Re-enter or accept to continue — no Hub issue.
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <FieldActionButton
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                updateField("loggedKm", String(Math.round(gpsKm * 2) / 2));
-                setGpsKmWarnAck(false);
-              }}
-            >
-              Use GPS ({gpsKm.toFixed(1)} km)
-            </FieldActionButton>
-            <FieldActionButton
-              variant={gpsKmWarnAck ? "success" : "caution"}
-              size="sm"
-              onClick={() => setGpsKmWarnAck(true)}
-            >
-              {gpsKmWarnAck ? "Accepted — confirm leg below" : "Accept logged distance"}
-            </FieldActionButton>
-          </div>
-        </div>
+      {loggedKmMissing && (
+        <p className="text-sm font-medium text-destructive">Enter the kilometres for this leg.</p>
       )}
 
       {/* ── Passenger confirmation — context-sensitive ──────────────────── */}

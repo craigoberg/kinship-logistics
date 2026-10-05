@@ -24,13 +24,11 @@ export function absDiffExceeds(
 }
 
 export const ODO_PARAM_KEYS = {
-  legGpsWarn: "manifest.odo_leg_gps_warn_km",
   closeSuggestWarn: "manifest.odo_close_suggest_warn_km",
   startVsLastWarn: "manifest.odo_start_vs_last_warn_km",
 } as const;
 
 export const ODO_PARAM_DEFAULTS = {
-  legGpsWarnKm: 3,
   closeSuggestWarnKm: 5,
   startVsLastWarnKm: 20,
 } as const;

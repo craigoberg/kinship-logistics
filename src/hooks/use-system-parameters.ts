@@ -208,11 +208,6 @@ export function useComplianceHubVisibilityDays(): number {
   return useSystemParameter<number>("compliance_hub_visibility_days", 60);
 }
 
-/** Manifest soft-warn: |logged − GPS| ≥ km (BL-096). */
-export function useOdoLegGpsWarnKm(): number {
-  return useSystemParameter<number>("manifest.odo_leg_gps_warn_km", 3);
-}
-
 /** Manifest Close Run soft-warn: |end − (start+Σ)| ≥ km (BL-096). */
 export function useOdoCloseSuggestWarnKm(): number {
   return useSystemParameter<number>("manifest.odo_close_suggest_warn_km", 5);

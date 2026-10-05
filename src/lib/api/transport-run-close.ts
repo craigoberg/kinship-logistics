@@ -87,10 +87,7 @@ export function buildRunCloseSummary(trip: TransportTrip, legs: TripLeg[]): RunC
     .filter((l) => l.noShowTriggeredAt != null)
     .map((l) => ({ legId: l.id, label: l.toLabel }));
   const unexpectedMedLegs = completed.filter((l) => l.unexpectedMedicationLogged).length;
-  const totalKm = completed.reduce(
-    (sum, l) => sum + (l.loggedDistanceKm ?? l.gpsDistanceKm ?? 0),
-    0,
-  );
+  const totalKm = completed.reduce((sum, l) => sum + (l.loggedDistanceKm ?? 0), 0);
 
   return {
     kind,
