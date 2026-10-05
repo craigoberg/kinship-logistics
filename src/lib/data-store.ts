@@ -10,6 +10,7 @@
 //   id, driver_or_staff_id, device_uuid, action_type, payload (jsonb),
 //   synced_at, created_at
 import { supabase, supabaseUrl } from "@/integrations/supabase/client";
+import { notifyActiveProfileChanged } from "@/lib/active-profile-event";
 import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { assessEventReturnTransport, resolveReturnHomeBusEligibleIds } from "@/lib/api/event-transport";
 import { assertTransportRunSlotStartable } from "@/lib/api/transport-run-exclusivity";
@@ -1182,6 +1183,7 @@ export function persistActiveUserProfile(profile: ActiveUserProfile): void {
   localStorage.setItem(USER_ROLE_KEY, profile.role);
   localStorage.setItem(WORKFLOW_MODE_KEY, profile.role);
   localStorage.setItem(USER_PROFILE_KEY, JSON.stringify(profile));
+  notifyActiveProfileChanged();
 }
 
 /** Persist who is signed in. Carers must not be written into the staff id slot. */
@@ -1279,6 +1281,7 @@ export function clearActiveUserSession(): void {
   localStorage.removeItem(USER_ROLE_KEY);
   localStorage.removeItem(USER_PROFILE_KEY);
   localStorage.removeItem(WORKFLOW_MODE_KEY);
+  notifyActiveProfileChanged();
 }
 
 // ---------- carers_registry ----------

@@ -21,6 +21,8 @@ import {
 } from "lucide-react";
 
 import { StopAddressSheet } from "@/components/address/stop-address-picker";
+import { useCanUseDevTools } from "@/lib/dev-tools-access";
+import { IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   changePendingStopAddress,
   ownerFromLeg,
@@ -3227,8 +3229,10 @@ function ArrivedChecklist({
 /* -------------------- Cancel/Reset Trip -------------------- */
 
 function CancelTripButton({ tripId }: { tripId: string }) {
+  const devTools = useCanUseDevTools();
   const cancel = useCancelTrip();
   const [open, setOpen] = useState(false);
+  if (IS_TEST_BUILD && !devTools) return null;
   return (
     <AlertDialog open={open} onOpenChange={setOpen}>
       <AlertDialogTrigger asChild>

@@ -14,6 +14,7 @@ import {
   getSydneyIsoDate,
   todaysSydneyDayCode,
 } from "@/lib/operational-time";
+import { canUseDevTools } from "@/lib/dev-tools-access";
 import { getOperationalTodayIso, operationalNowIso } from "@/lib/operational-clock";
 
 // ---------------------------------------------------------------------------
@@ -502,6 +503,9 @@ export async function reopenSession(args: {
  * published deployments.
  */
 export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> {
+  if (!canUseDevTools()) {
+    throw new Error("Reset Start of Day is only available to Craig on a test build.");
+  }
   const date = todayIso();
   const existing = await supabase
     .from("site_day_sessions")

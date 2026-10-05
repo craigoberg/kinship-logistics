@@ -1,11 +1,12 @@
 /**
  * DEV/TEST tools bar — fake Sydney date/time + Simulate offline (BL-082).
- * Single amber row. Gated by IS_TEST_BUILD. Never mounts in production builds.
+ * Single amber row. Shown only when Craig is signed in on a test build.
  */
 import { useSyncExternalStore, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock, CloudOff, X } from "lucide-react";
 import { toast } from "sonner";
+import { useCanUseDevTools } from "@/lib/dev-tools-access";
 import { getAppLaneBadge, IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   clearOperationalClockOverride,
@@ -38,7 +39,8 @@ function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
 }
 
 export function DevOperationalClockBar() {
-  if (!IS_TEST_BUILD) return null;
+  const allowed = useCanUseDevTools();
+  if (!IS_TEST_BUILD || !allowed) return null;
   return <DevOperationalClockBarInner />;
 }
 

@@ -3,6 +3,8 @@
  * Gated by IS_TEST_BUILD. Forces the app to treat the device as offline
  * without Airplane Mode — for Manifest outbox / future field offline QA.
  */
+import { ACTIVE_PROFILE_EVENT } from "@/lib/active-profile-event";
+import { canUseDevTools } from "@/lib/dev-tools-access";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 
 const KEY = "yada.simOffline.v1";
@@ -15,7 +17,7 @@ function canSimulate(): boolean {
 }
 
 function readFlag(): boolean {
-  if (!canSimulate()) return false;
+  if (!canSimulate() || !canUseDevTools()) return false;
   try {
     return localStorage.getItem(KEY) === "1";
   } catch {
@@ -32,13 +34,17 @@ function notify() {
   listeners.forEach((l) => l());
 }
 
+if (typeof window !== "undefined") {
+  window.addEventListener(ACTIVE_PROFILE_EVENT, () => notify());
+}
+
 /** True when DEV switch is forcing offline (ignores real navigator.onLine). */
 export function isSimulatedOffline(): boolean {
   return readFlag();
 }
 
 export function setSimulatedOffline(forced: boolean): void {
-  if (!canSimulate()) return;
+  if (!canSimulate() || !canUseDevTools()) return;
   try {
     if (forced) localStorage.setItem(KEY, "1");
     else localStorage.removeItem(KEY);

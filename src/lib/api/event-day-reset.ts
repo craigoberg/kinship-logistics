@@ -13,12 +13,12 @@ import { seedEventAttendanceRoll } from "@/lib/api/event-attendance";
 import { applyOvernightDayStartContinuity } from "@/lib/api/event-day-continuity";
 import { writeToLedger } from "@/lib/api/ledger";
 import { withAuditActorMeta } from "@/lib/api/office-change-log";
+import { canUseDevTools } from "@/lib/dev-tools-access";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
   operationalNowIso,
   setOperationalClockOverride,
 } from "@/lib/operational-clock";
-import { IS_TEST_BUILD } from "@/lib/test-mode";
 import type { EventDaySession } from "@/lib/api/event-outing";
 
 const START_OF_DAY_CLOCK = "07:00";
@@ -169,8 +169,8 @@ async function restoreOvernightStartOfDay(opts: {
 export async function resetEventDayToStartOfDay(
   sessionId: string,
 ): Promise<EventDaySession> {
-  if (!IS_TEST_BUILD) {
-    throw new Error("Reset Start of Day is only available in test builds.");
+  if (!canUseDevTools()) {
+    throw new Error("Reset Start of Day is only available to Craig on a test build.");
   }
 
   const { data: sessionRow, error: sessionErr } = await supabase

@@ -3,7 +3,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { DayCentrePage } from "@/components/site-day/day-centre-page";
 import { DayCentreEndOfDayReport } from "@/components/site-day/day-centre-end-of-day-report";
 import { OperationalTodayLabel } from "@/components/dev/operational-today-label";
-import { IS_TEST_BUILD } from "@/lib/test-mode";
+import { useCanUseDevTools } from "@/lib/dev-tools-access";
 
 const DIAG_STORAGE_KEY = "dev:day-centre-diagnostic-visible";
 
@@ -43,6 +43,7 @@ export const Route = createFileRoute("/day")({
 });
 
 function DayPage() {
+  const devTools = useCanUseDevTools();
   const { visible: showDiagnostic, toggle: toggleDiagnostic } = useDiagnosticToggle();
 
   return (
@@ -55,7 +56,7 @@ function DayPage() {
             className="text-sm text-muted-foreground"
           />
         </div>
-        {IS_TEST_BUILD && (
+        {devTools && (
           <button
             type="button"
             onClick={toggleDiagnostic}
@@ -66,7 +67,7 @@ function DayPage() {
           </button>
         )}
       </header>
-      <DayCentrePage showDiagnostic={showDiagnostic} />
+      <DayCentrePage showDiagnostic={devTools && showDiagnostic} />
       <DayCentreEndOfDayReport />
     </div>
   );
