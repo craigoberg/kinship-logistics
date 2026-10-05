@@ -192,7 +192,9 @@ export interface CloseTransportRunInput {
 export async function closeTransportRun(input: CloseTransportRunInput): Promise<TransportTrip> {
   const operatorStaffId =
     getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
-  if (!/^\d{4}$/.test(input.operatorPin)) {
+  // Sign-in PINs are 6 digits after the one-time upgrade. A 4-digit-only
+  // check accepts the open-run PIN and then rejects Close.
+  if (!/^\d{4}$|^\d{6}$/.test(input.operatorPin)) {
     throw new Error("Incorrect operator PIN. Please try again.");
   }
   const pinOk = await verifyStaffPin(operatorStaffId, input.operatorPin);

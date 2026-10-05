@@ -302,7 +302,7 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         open={pinOpen}
         onOpenChange={setPinOpen}
         title="Close transport run"
-        description="Operator PIN confirms the ending odometer and locks this manifest."
+        description="Enter the PIN you sign in with. Four digits, or all six, then OK. This locks the manifest."
         length={4}
         onVerify={verifyOperatorPin}
         onSuccess={(pin) => {
