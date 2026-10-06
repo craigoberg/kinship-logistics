@@ -1,11 +1,9 @@
-import { operationalNowMs } from "@/lib/operational-clock";
-
 export type FloorRollMode = "all" | "check_in" | "check_out";
 export type FloorEscalation = "yellow" | "red" | null;
 
 /**
- * One colour rule for a Day Centre floor row. Clients pass the stored
- * departure severity. Support derives it from the operational clock.
+ * One colour rule for a Day Centre floor row. Clients pass stored
+ * arrival and departure severity. Non-clients pass null for both.
  */
 export function floorRollStatus(args: {
   mode: FloorRollMode;
@@ -42,21 +40,4 @@ export function floorRollStatus(args: {
     awaitingDeparture,
     hiVisDone,
   };
-}
-
-/** Same yellow/red windows as the client departure sweep, without a second store. */
-export function departureSeverityFromClock(
-  expectedDepartureAt: string | null,
-  checkedIn: boolean,
-  yellowMins: number,
-  redMins: number,
-  nowMs = operationalNowMs(),
-): FloorEscalation {
-  if (!checkedIn || !expectedDepartureAt) return null;
-  const expected = Date.parse(expectedDepartureAt);
-  if (!Number.isFinite(expected)) return null;
-  const overdueMins = Math.floor((nowMs - expected) / 60_000);
-  if (overdueMins >= redMins) return "red";
-  if (overdueMins >= yellowMins) return "yellow";
-  return null;
 }

@@ -2,8 +2,9 @@
  * Day Centre Support roll — staff / volunteer / carer. Not meal/med recipients.
  * Same floor row as the client roll: tap the wide row to confirm, method chip
  * only changes transport, clock defers, Undo puts them back to expected.
+ * Late or early is recorded. It does not turn the row amber or red.
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Clock, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -27,16 +28,8 @@ import { useSystemParameter } from "@/hooks/use-system-parameters";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import { normalizeDayCode } from "@/lib/api/run-planning";
-import {
-  getOperationalClockSnapshot,
-  operationalNowMs,
-  subscribeOperationalClock,
-} from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
-import {
-  departureSeverityFromClock,
-  floorRollStatus,
-} from "@/lib/ui/floor-roll-status";
+import { floorRollStatus } from "@/lib/ui/floor-roll-status";
 import {
   buildBusSelfPickerOptions,
   filterBusRunOptions,
@@ -105,15 +98,6 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
   const [undoKind, setUndoKind] = useState<"check_in" | "check_out">("check_in");
   const [seedError, setSeedError] = useState<string | null>(null);
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
-  const depYellowMins = useSystemParameter<number>(
-    "attendance_departure_yellow_threshold_mins",
-    30,
-  );
-  const depRedMins = useSystemParameter<number>(
-    "attendance_departure_red_threshold_mins",
-    60,
-  );
-  useSyncExternalStore(subscribeOperationalClock, getOperationalClockSnapshot, () => "ssr:live");
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const plannedRuns = useTodaysPlannedBusRunCodes();
   const busOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
@@ -323,13 +307,6 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
       ) : (
         <ul className="space-y-2">
           {visible.map((row) => {
-            const departureSeverity = departureSeverityFromClock(
-              row.expectedDepartureAt,
-              row.status === "checked_in",
-              depYellowMins,
-              depRedMins,
-              operationalNowMs(),
-            );
             const {
               isIn,
               isOut,
@@ -345,8 +322,8 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
             } = floorRollStatus({
               mode,
               status: row.status,
-              escalationSeverity: row.escalationSeverity,
-              departureSeverity,
+              escalationSeverity: null,
+              departureSeverity: null,
             });
             const absentMatch = isAbsent && row.notes
               ? /\[FLOOR ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(row.notes)

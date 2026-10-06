@@ -80,7 +80,6 @@ import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
 import { AddVisitorModal } from "./add-visitor-modal";
 import { SupportAttendanceSection } from "./support-attendance-section";
-import { sweepOverdueSupportArrivals } from "@/lib/api/support-attendance";
 import { PromoteVisitorToEventDialog } from "./promote-visitor-to-event-dialog";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
@@ -153,11 +152,6 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
         toast.error("Departure overdue sweep failed", { description: msg });
       });
       }
-      await sweepOverdueSupportArrivals(sessionId, yellowMins, redMins).catch((e) => {
-        const msg = e instanceof Error ? e.message : String(e);
-        console.error("[AttendanceOverdueSweepHost] support sweep failed", e);
-        toast.error("Support overdue sweep failed", { description: msg });
-      });
       await qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
       await qc.invalidateQueries({ queryKey: ["support-attendance-roll", sessionId] });
       return { swept: true };

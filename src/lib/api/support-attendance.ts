@@ -4,14 +4,13 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
-import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
+import { writeToLedger } from "@/lib/api/ledger";
 import { formatTravelHow, withAuditActorMeta } from "@/lib/api/office-change-log";
-import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
+import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import {
   getOperationalTodayIso,
   operationalNowIso,
   operationalNowMs,
-  operationalRowStamps,
 } from "@/lib/operational-clock";
 import { sydneyTimeTodayFromClock } from "@/lib/operational-time";
 import { getTodayCentreHours } from "@/lib/api/centre-hours";
@@ -1070,124 +1069,16 @@ export async function bulkDeferSupportGroup(
   return { deferredCount: targets.length };
 }
 
+/**
+ * Non-clients are attendance only. A late arrival or an early or late
+ * departure is recorded on the roll. It does not raise yellow or red.
+ */
 export async function sweepOverdueSupportArrivals(
-  sessionId: string,
-  yellowMins: number,
-  redMins: number,
+  _sessionId: string,
+  _yellowMins: number,
+  _redMins: number,
 ): Promise<{ yellowRaised: number; redRaised: number }> {
-  const roll = await listSupportAttendanceRoll(sessionId);
-  const now = operationalNowMs();
-  let yellowRaised = 0;
-  let redRaised = 0;
-  const ledgered = new Set<string>();
-  for (const r of roll) {
-    if (r.status === "checked_in" || r.status === "checked_out" || r.status === "absent") continue;
-    if (!r.expectedArrivalAt) continue;
-    const expected = Date.parse(r.expectedArrivalAt);
-    if (!Number.isFinite(expected)) continue;
-    const overdueMins = Math.floor((now - expected) / 60_000);
-    if (overdueMins < yellowMins) continue;
-    const wantRed = overdueMins >= redMins;
-    const pName = r.displayName;
-    const sweepMeta = {
-      attendance_id: r.id,
-      overdue_mins: overdueMins,
-      automated: true,
-      actor_name: "System",
-      why: "Not arrived by expected time",
-      person_name: pName,
-      person_kind: r.personKind,
-      location: "Day Centre",
-      description: `${pName} (${r.personKind}) not arrived at Day Centre — overdue ${overdueMins} min`,
-    };
-    if (!r.escalationIssueId) {
-      const insertSeverity: EscalationSeverity = wantRed ? "red" : "yellow";
-      const ledgerKey = `${wantRed ? "RED" : "YELLOW"}:${r.id}`;
-      if (ledgered.has(ledgerKey)) continue;
-      if (wantRed) {
-        try {
-          await writeToLedgerOrThrow({
-            staff_id: DEFAULT_STAFF_UUID,
-            category: "CENTRE",
-            severity: "RED",
-            action_type: "SUPPORT_ATTENDANCE_RED_ESCALATED",
-            gps_lat: null,
-            gps_lng: null,
-            metadata: sweepMeta,
-          });
-        } catch {
-          continue;
-        }
-      } else {
-        await writeToLedger({
-          staff_id: DEFAULT_STAFF_UUID,
-          category: "CENTRE",
-          severity: "YELLOW",
-          action_type: "SUPPORT_ATTENDANCE_YELLOW_RAISED",
-          gps_lat: null,
-          gps_lng: null,
-          metadata: sweepMeta,
-        });
-      }
-      ledgered.add(ledgerKey);
-      const userId = (await supabase.auth.getUser()).data.user?.id ?? null;
-      const { data: issue, error: issueErr } = await supabase
-        .from("site_issues_register")
-        .insert({
-          session_id: sessionId,
-          reported_by: userId,
-          severity: insertSeverity,
-          issue_description: `${wantRed ? "[AUTOMATED_RED]" : "[ATTENDANCE]"} ${pName} (support) overdue by ${overdueMins} min.`,
-          workaround_plan: null,
-          owner: "internal",
-          status: "open",
-          update_log: "",
-          ...operationalRowStamps(),
-        })
-        .select("id")
-        .single();
-      if (issueErr || !issue) continue;
-      await supabase
-        .from("support_attendance_log")
-        .update({
-          escalation_issue_id: issue.id as string,
-          escalation_severity: insertSeverity,
-          escalation_raised_at: operationalNowIso(),
-        })
-        .eq("id", r.id);
-      if (wantRed) redRaised += 1;
-      else yellowRaised += 1;
-      continue;
-    }
-    if (wantRed && r.escalationSeverity !== "red") {
-      const ledgerKey = `RED:${r.id}`;
-      if (ledgered.has(ledgerKey)) continue;
-      try {
-        await writeToLedgerOrThrow({
-          staff_id: DEFAULT_STAFF_UUID,
-          category: "CENTRE",
-          severity: "RED",
-          action_type: "SUPPORT_ATTENDANCE_RED_ESCALATED",
-          gps_lat: null,
-          gps_lng: null,
-          metadata: sweepMeta,
-        });
-      } catch {
-        continue;
-      }
-      ledgered.add(ledgerKey);
-      await supabase
-        .from("site_issues_register")
-        .update({ severity: "red" })
-        .eq("id", r.escalationIssueId);
-      await supabase
-        .from("support_attendance_log")
-        .update({ escalation_severity: "red" })
-        .eq("id", r.id);
-      redRaised += 1;
-    }
-  }
-  return { yellowRaised, redRaised };
+  return { yellowRaised: 0, redRaised: 0 };
 }
 
 export async function reinstateSupportArrival(input: {
