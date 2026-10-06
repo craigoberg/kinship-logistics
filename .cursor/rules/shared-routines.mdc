@@ -25,7 +25,7 @@ The same operator action uses one component and one check. Screens differ by who
 | Set or change a PIN | Staff/carer form and `change-pin-dialog` (6 digits). Do not write `pin_hash` from the browser. |
 | Floor Red | `LogAnomalyModal` → `VerbalConsultationDialog` |
 | Manager approval | `verifyManagerPin` for the manager named on the form |
-| Day Centre check-in / check-out | One roll pattern for clients and support. Person type changes the row and duties, not the buttons. |
+| Day Centre check-in / check-out | One roll pattern for clients and support (`floorRollStatus`, `FloorRollOverdueBadges`, `FloorRollUndoButton`). Person type changes the row and duties, not the buttons. |
 | Dates and “today” | `operationalNowIso()` / `todayLocalIso()` |
 
 ## Ask when nothing shared exists

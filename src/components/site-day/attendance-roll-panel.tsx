@@ -73,7 +73,9 @@ import {
   subscribeOperationalClock,
 } from "@/lib/operational-clock";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { FloorRollOverdueBadges } from "./floor-roll-overdue-badges";
 import { FloorRollUndoButton } from "./floor-roll-undo-button";
+import { floorRollStatus } from "@/lib/ui/floor-roll-status";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
 import { AddVisitorModal } from "./add-visitor-modal";
@@ -739,32 +741,28 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
 
       <ul className="space-y-2">
         {rows.map((r) => {
-          const isIn = r.status === "checked_in";
-          const isOut = r.status === "checked_out";
-          const isAbsent = r.status === "absent";
-          // Departure rail takes precedence over arrival rail when the
-          // participant is already checked in (arrival rail is, by
-          // definition, satisfied at that point).
-          const depRed = r.departureSeverity === "red" && isIn;
-          const depYellow = r.departureSeverity === "yellow" && isIn && !depRed;
-          const isRed =
-            !isAbsent && !isOut &&
-            ((r.escalationSeverity === "red" && !isIn) || depRed);
-          const isYellow =
-            !isAbsent && !isOut && !isRed &&
-            ((r.escalationSeverity === "yellow" && !isIn) || depYellow);
-          // Parse the [ABSENT:CODE] tag we wrote into notes for the badge.
+          const {
+            isIn,
+            isOut,
+            isAbsent,
+            depRed,
+            depYellow,
+            isRed,
+            isYellow,
+            arrivalDone,
+            departureDone,
+            awaitingDeparture,
+            hiVisDone,
+          } = floorRollStatus({
+            mode,
+            status: r.status,
+            escalationSeverity: r.escalationSeverity,
+            departureSeverity: r.departureSeverity,
+          });
           const absentMatch = isAbsent && r.notes
             ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
             : null;
           const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
-          // Green means this screen is done. Check-In: arrived. Check-Out: left.
-          // Still on site at Check-Out stays a plain row. Amber/red still wins.
-          const arrivalDone = mode !== "check_out" && isIn && !isYellow && !isRed;
-          const departureDone = mode === "check_out" && isOut;
-          const awaitingDeparture =
-            mode === "check_out" && isIn && !isYellow && !isRed;
-          const hiVisDone = arrivalDone || departureDone;
           const subTextCls = hiVisDone
             ? "text-success-foreground/90"
             : isYellow || isAbsent || (isOut && !departureDone)
@@ -897,26 +895,13 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                       </Badge>
                     )}
 
-                    {depRed && (
-                      <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
-                        Departure Escalated — Manager notified
-                      </Badge>
-                    )}
-                    {depYellow && (
-                      <Badge className="bg-amber-500 text-white text-[10px] uppercase">
-                        Departure Overdue
-                      </Badge>
-                    )}
-                    {isRed && !depRed && (
-                      <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
-                        Escalated — Manager notified
-                      </Badge>
-                    )}
-                    {isYellow && !depYellow && (
-                      <Badge className="bg-amber-500 text-white text-[10px] uppercase">
-                        Overdue
-                      </Badge>
-                    )}
+                    <FloorRollOverdueBadges
+                      depRed={depRed}
+                      depYellow={depYellow}
+                      isRed={isRed}
+                      isYellow={isYellow}
+                      departureManagerNotified
+                    />
                     {isAbsent && (
                       <Badge className="bg-slate-600 text-white text-[10px] uppercase">
                         Absent · {absentLabel}

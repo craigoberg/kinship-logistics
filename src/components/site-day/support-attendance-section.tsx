@@ -3,7 +3,7 @@
  * Same floor row as the client roll: tap the wide row to confirm, method chip
  * only changes transport, clock defers, Undo puts them back to expected.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Check, Clock, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -27,7 +27,16 @@ import { useSystemParameter } from "@/hooks/use-system-parameters";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import { normalizeDayCode } from "@/lib/api/run-planning";
+import {
+  getOperationalClockSnapshot,
+  operationalNowMs,
+  subscribeOperationalClock,
+} from "@/lib/operational-clock";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
+import {
+  departureSeverityFromClock,
+  floorRollStatus,
+} from "@/lib/ui/floor-roll-status";
 import {
   buildBusSelfPickerOptions,
   filterBusRunOptions,
@@ -57,6 +66,7 @@ import {
 import { supportPersonKindLabel } from "@/lib/support-person";
 import type { AttendanceRollMode } from "./attendance-roll-panel";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { FloorRollOverdueBadges } from "./floor-roll-overdue-badges";
 import { FloorRollUndoButton } from "./floor-roll-undo-button";
 import {
   DutyOnDutyConfirmSheet,
@@ -95,6 +105,15 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
   const [undoKind, setUndoKind] = useState<"check_in" | "check_out">("check_in");
   const [seedError, setSeedError] = useState<string | null>(null);
   const yellowMins = useSystemParameter<number>("attendance_yellow_threshold_mins", 30);
+  const depYellowMins = useSystemParameter<number>(
+    "attendance_departure_yellow_threshold_mins",
+    30,
+  );
+  const depRedMins = useSystemParameter<number>(
+    "attendance_departure_red_threshold_mins",
+    60,
+  );
+  useSyncExternalStore(subscribeOperationalClock, getOperationalClockSnapshot, () => "ssr:live");
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const plannedRuns = useTodaysPlannedBusRunCodes();
   const busOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
@@ -304,21 +323,35 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
       ) : (
         <ul className="space-y-2">
           {visible.map((row) => {
-            const isIn = row.status === "checked_in";
-            const isOut = row.status === "checked_out";
-            const isAbsent = row.status === "absent";
-            const isRed = !isAbsent && !isOut && !isIn && row.escalationSeverity === "red";
-            const isYellow =
-              !isAbsent && !isOut && !isRed && row.escalationSeverity === "yellow";
+            const departureSeverity = departureSeverityFromClock(
+              row.expectedDepartureAt,
+              row.status === "checked_in",
+              depYellowMins,
+              depRedMins,
+              operationalNowMs(),
+            );
+            const {
+              isIn,
+              isOut,
+              isAbsent,
+              depRed,
+              depYellow,
+              isRed,
+              isYellow,
+              arrivalDone,
+              departureDone,
+              awaitingDeparture,
+              hiVisDone,
+            } = floorRollStatus({
+              mode,
+              status: row.status,
+              escalationSeverity: row.escalationSeverity,
+              departureSeverity,
+            });
             const absentMatch = isAbsent && row.notes
               ? /\[FLOOR ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(row.notes)
               : null;
             const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
-            const arrivalDone = mode !== "check_out" && isIn && !isYellow && !isRed;
-            const departureDone = mode === "check_out" && isOut;
-            const awaitingDeparture =
-              mode === "check_out" && isIn && !isYellow && !isRed;
-            const hiVisDone = arrivalDone || departureDone;
             const subTextCls = hiVisDone
               ? "text-success-foreground/90"
               : isYellow || isAbsent || (isOut && !departureDone)
@@ -434,16 +467,12 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                           ≠ planned
                         </Badge>
                       )}
-                      {isRed && (
-                        <Badge className="bg-destructive text-[10px] uppercase text-destructive-foreground">
-                          Escalated — Manager notified
-                        </Badge>
-                      )}
-                      {isYellow && (
-                        <Badge className="bg-amber-500 text-[10px] uppercase text-white">
-                          Overdue
-                        </Badge>
-                      )}
+                      <FloorRollOverdueBadges
+                        depRed={depRed}
+                        depYellow={depYellow}
+                        isRed={isRed}
+                        isYellow={isYellow}
+                      />
                       {isAbsent && (
                         <Badge className="bg-slate-600 text-[10px] uppercase text-white">
                           Absent · {absentLabel}
