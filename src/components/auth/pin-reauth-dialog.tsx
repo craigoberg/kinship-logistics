@@ -63,15 +63,13 @@ export function PinReauthDialog({
     setBusy(true);
     setError(null);
     try {
-      if (requiredStaffId) {
-        const profile = getActiveUserProfile();
-        if (profile?.personKind === "carer" && profile.carerId) {
-          await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
-        } else {
-          await verifyNamedStaffPin(requiredStaffId, value);
-        }
+      const profile = getActiveUserProfile();
+      if (profile?.personKind === "carer" && profile.carerId) {
+        await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
       } else {
-        throw new Error("Sign in again from the PIN pad.");
+        const staffId = requiredStaffId || profile?.staffId || "";
+        if (!staffId) throw new Error("Sign in again from the PIN pad.");
+        await verifyNamedStaffPin(staffId, value);
       }
       onAuthenticated();
       onOpenChange(false);

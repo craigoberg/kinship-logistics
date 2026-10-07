@@ -24,6 +24,7 @@ The same operator action uses one component and one check. Screens differ by who
 | PIN check | `verifyStaffPin`, `verifyOperatorPin`, `verifyNamedStaffPin`, `verifyManagerPin` in `src/components/auth/pin-verify.ts` (server: `pin-auth.server.ts`) |
 | Set or change a PIN | Staff/carer form and `change-pin-dialog` (6 digits). Do not write `pin_hash` from the browser. |
 | Floor Red | `LogAnomalyModal` → `VerbalConsultationDialog` |
+| Open issue card | `IssueRegisterCard`. Day Centre passes a site issue. Manifest passes the same card and keeps the vehicle filter. |
 | Manager approval | `verifyManagerPin` for the manager named on the form |
 | Day Centre check-in / check-out | One roll pattern for clients and support (`floorRollStatus`, `FloorRollOverdueBadges`, `FloorRollUndoButton`). Person type changes the row and duties, not the buttons. Non-clients record expected, arrived, and left. They do not take yellow or red for a late arrival or departure. |
 | Dates and “today” | `operationalNowIso()` / `todayLocalIso()` |

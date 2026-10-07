@@ -570,6 +570,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-10-07 | Issue register card | Day Centre and Manifest use `IssueRegisterCard` (severity, time, workaround). Manifest still limits the list to the current vehicle. |
 | 2026-10-06 | Support roll is attendance only | Staff, volunteers, and carers keep the same row and defer clock as clients. Late arrival or early/late departure does not turn the row amber or red and does not open a Hub issue. |
 | 2026-10-06 | Floor departure overdue chips | Clients and support share `floorRollStatus` and `FloorRollOverdueBadges`. Support Check-Out amber/red follows the operational clock and the departure thresholds. Client red still says Manager notified because that sweep writes the Hub issue. |
 | 2026-10-05 | TEST tools + unexpected open | SIM time, Reset Start of Day, Show diag, and test-build Cancel / Reset Trip only when Craig is signed in. Empty-day Start of Day notice is a pulsing yellow caution callout. |
