@@ -1,8 +1,12 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
+import { loadGuestDirectoryContext, type GuestDirectoryContext } from "@/lib/api/guest-directory-context";
 import { iddsiLevel } from "@/lib/iddsi";
 import { dayChronoIndex } from "@/lib/data-store";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
@@ -57,6 +61,17 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
   } | null>(null);
   const pending = usePendingScheduleMap();
   const { data: indicators } = useParticipantDirectoryIndicators();
+  const guestIds = useMemo(
+    () => participants.filter((p) => p.participantKind === "guest").map((p) => p.id).sort(),
+    [participants],
+  );
+  const guestKey = guestIds.join(",");
+  const { data: guestContext } = useQuery({
+    queryKey: ["guest-directory-context", guestKey],
+    queryFn: () => loadGuestDirectoryContext(guestIds),
+    enabled: guestIds.length > 0,
+    staleTime: 30_000,
+  });
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -96,12 +111,14 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
       }
 
       if (!needle) return true;
+      const guestLine = guestContext?.get(p.id)?.line.toLowerCase() ?? "";
       return (
         p.fullName.toLowerCase().includes(needle) ||
-        p.ndisNumber.toLowerCase().includes(needle)
+        p.ndisNumber.toLowerCase().includes(needle) ||
+        guestLine.includes(needle)
       );
     });
-  }, [participants, search, dayFilter, transportFilter, indicators]);
+  }, [participants, search, dayFilter, transportFilter, indicators, guestContext]);
 
   const getInd = (id: string) => indicators?.get(id) ?? EMPTY_INDICATORS;
 
@@ -121,13 +138,14 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 )}
               >
                 <div className="min-w-0 flex-1 space-y-2">
-                  <div className="flex items-center gap-2">
+                  <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate font-semibold">{p.fullName}</span>
                     {p.participantKind === "guest" && (
                       <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                         Guest
                       </Badge>
                     )}
+                    <GuestContext guest={guestContext?.get(p.id) ?? null} />
                     {p.participantKind === "guest" && p.archivedAt && (
                       <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
                         Archived
@@ -197,13 +215,14 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                   )}
                 >
                   <td className="px-3 py-2 font-medium">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate">{p.fullName}</span>
                       {p.participantKind === "guest" && (
                         <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
                           Guest
                         </Badge>
                       )}
+                      <GuestContext guest={guestContext?.get(p.id) ?? null} />
                       {p.participantKind === "guest" && p.archivedAt && (
                         <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
                           Archived
@@ -379,6 +398,26 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
         </span>
       )}
     </div>
+  );
+}
+
+function GuestContext({ guest }: { guest: GuestDirectoryContext | null }) {
+  if (!guest) return null;
+  return (
+    <span className="flex basis-full flex-wrap items-center gap-2 font-normal">
+      <span className="text-xs font-normal text-muted-foreground">{guest.line}</span>
+      {guest.issueId ? (
+        <Button asChild size="sm" variant="outline" className="h-6 px-2 text-[10px]">
+          <Link
+            to="/governance"
+            search={{ tab: "issues", issue: guest.issueId }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Hub issue
+          </Link>
+        </Button>
+      ) : null}
+    </span>
   );
 }
 

@@ -340,6 +340,9 @@ export function UnifiedIssuesPanel({ onManageRenewal, openIssueId }: Props) {
   });
   const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
   const activeIssuesQ = useUnifiedIssues("active");
+  const deepLink = !!openIssueId;
+  const deferredIssuesQ = useUnifiedIssues("deferred", { enabled: deepLink });
+  const resolvedIssuesQ = useUnifiedIssues("resolved", { enabled: deepLink });
   const openedDeepLinkRef = useRef<string | null>(null);
 
   useRealtimeInvalidate({
@@ -365,27 +368,41 @@ export function UnifiedIssuesPanel({ onManageRenewal, openIssueId }: Props) {
       return;
     }
     if (openedDeepLinkRef.current === openIssueId) return;
-    if (activeIssuesQ.isLoading) return;
-    const match = (activeIssuesQ.data ?? []).find(
-      (i) =>
-        (i.source === "day_centre" || i.source === "event") &&
-        i.sourceRowId === openIssueId,
-    );
-    if (!match) {
-      toast.message("Issue not in Active list", {
-        description: "Hard refresh or check Deferred. It may still be loading.",
+    const pools: { tab: "active" | "deferred" | "resolved"; rows: typeof activeIssuesQ.data; loading: boolean }[] = [
+      { tab: "active", rows: activeIssuesQ.data, loading: activeIssuesQ.isLoading },
+      { tab: "deferred", rows: deferredIssuesQ.data, loading: deferredIssuesQ.isLoading },
+      { tab: "resolved", rows: resolvedIssuesQ.data, loading: resolvedIssuesQ.isLoading },
+    ];
+    if (pools.some((pool) => pool.loading)) return;
+    const found = pools
+      .map((pool) => ({
+        tab: pool.tab,
+        issue: (pool.rows ?? []).find(
+          (i) =>
+            (i.source === "day_centre" || i.source === "event") &&
+            i.sourceRowId === openIssueId,
+        ),
+      }))
+      .find((pool) => pool.issue);
+    if (!found?.issue) {
+      toast.message("Hub issue not found", {
+        description: "It is not in Active, Deferred, or Resolved.",
       });
       openedDeepLinkRef.current = openIssueId;
       return;
     }
-    setTab("active");
-    setManaging(match);
-    setManagingWorkflow(deriveIssueWorkflowStatus(match, reviewStartedKeys));
+    setTab(found.tab);
+    setManaging(found.issue);
+    setManagingWorkflow(deriveIssueWorkflowStatus(found.issue, reviewStartedKeys));
     openedDeepLinkRef.current = openIssueId;
   }, [
     openIssueId,
     activeIssuesQ.isLoading,
     activeIssuesQ.data,
+    deferredIssuesQ.isLoading,
+    deferredIssuesQ.data,
+    resolvedIssuesQ.isLoading,
+    resolvedIssuesQ.data,
     reviewStartedKeys,
   ]);
 
