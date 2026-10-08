@@ -58,6 +58,7 @@ import {
   useCouncilSlaHours,
 } from "@/hooks/use-system-parameters";
 import { resolveCouncilMailtoFrom, cleanCouncilIssueText } from "@/lib/governance/council-email";
+import { stripPrimaryContactMarker } from "@/lib/governance/hub-issue-body-lines";
 import { formatDate, formatDateTime, todayLocalIso } from "@/lib/utils";
 import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
 import { toast } from "sonner";
@@ -383,7 +384,8 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
   };
 
   // Parse event context suffix embedded by IncidentIntakeDialog
-  const { cleanText } = parseContextSuffix(issue.description ?? "");
+  const { cleanText: parsedText } = parseContextSuffix(issue.description ?? "");
+  const cleanText = stripPrimaryContactMarker(parsedText);
   const publicForm = parsePublicFormHubText(issue.description ?? "");
   const isPublicWeb = !!publicForm || isPublicFormHubText(issue.description);
   const cleanTitle = publicForm
@@ -569,7 +571,8 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager PIN required to save issue changes."
+        requireManager
+        reason="Enter your PIN to save this issue. Your notes stay on this screen."
         onAuthenticated={handlePinAuthenticated}
       />
 

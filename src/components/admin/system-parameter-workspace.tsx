@@ -34,6 +34,7 @@ import {
   type SystemParameterRow,
 } from "@/lib/api/system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { ClientTime } from "@/components/ui/client-time";
 import { MyobExportWorkspace } from "./myob-export-workspace";
 import { AuditPackWorkspace } from "./audit-pack-workspace";
@@ -69,10 +70,6 @@ const HIDDEN_FROM_JSON_TABLE = new Set<string>([
   ...IDLE_LOCK_PARAM_KEYS,
 ]);
 
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
-
 function formatValue(v: JsonValue): string {
   if (v == null) return "—";
   if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") {
@@ -93,7 +90,7 @@ export function SystemParameterWorkspace() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
   const [editing, setEditing] = useState<SystemParameterRow | null>(null);
 
   if (q.isLoading) {

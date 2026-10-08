@@ -16,6 +16,14 @@ export interface HubIssueBodyLines {
 
 const EMPTY = "—";
 
+/**
+ * Client id stored on a missing-primary-contact ticket so it can be matched
+ * and closed. Operators already see the person's name.
+ */
+export function stripPrimaryContactMarker(text: string): string {
+  return text.replace(/\s*\[PRIMARY CONTACT\]\s+[0-9a-f-]{36}/gi, "").trim();
+}
+
 function stripDecorativePrefixes(text: string): string {
   return text
     .replace(/^\[VERBAL WORKAROUND\]\s*/i, "")
@@ -35,7 +43,7 @@ function stripContextSuffix(text: string): string {
 }
 
 function cleanPrimary(text: string): string {
-  return stripContextSuffix(stripDecorativePrefixes(text)).trim();
+  return stripPrimaryContactMarker(stripContextSuffix(stripDecorativePrefixes(text))).trim();
 }
 
 function parseRedSegments(text: string): {

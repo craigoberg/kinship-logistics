@@ -15,13 +15,10 @@ import {
 } from "@/hooks/use-system-parameters";
 import { FLOOR_MOTD_KEY } from "@/hooks/use-floor-announcement";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { formatUnknownError } from "@/lib/utils";
 
 export const MOTD_PARAM_KEYS = [FLOOR_MOTD_KEY] as const;
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 /**
  * Admin → System Parameters — Message of the Day.
@@ -35,7 +32,7 @@ export function MotdAdminPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const rawSaved = useSystemParameter<string>(FLOOR_MOTD_KEY, "");
   const saved =

@@ -1,19 +1,11 @@
 import type { ActiveUserProfile } from "@/lib/data-store";
-import { normalizeAccessRoleKey } from "@/lib/access-roles";
+import { isManagerOrAssistantAccess, normalizeAccessRoleKey } from "@/lib/access-roles";
 import type { HelpAreaChip, HelpTopic } from "./types";
-
-function normalizeRole(value: string | null | undefined): string {
-  return (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
-}
 
 /** Manager / assistant_manager (and coarse coordinator) see the full catalogue. */
 export function isHelpManagerViewer(profile: ActiveUserProfile | null): boolean {
   if (!profile) return false;
-  const access = normalizeAccessRoleKey(profile.accessRole);
-  if (access === "manager" || access === "assistant_manager") return true;
-  if (profile.role === "coordinator") return true;
-  const staffRole = normalizeRole(profile.staffRole);
-  return staffRole === "manager" || staffRole === "assistant_manager";
+  return isManagerOrAssistantAccess(profile.accessRole);
 }
 
 /**
@@ -30,9 +22,6 @@ export function canViewHelpTopic(
 
   const access = normalizeAccessRoleKey(profile.accessRole);
   if (access && topic.roles.includes(access)) return true;
-
-  const staffRole = normalizeRole(profile.staffRole);
-  if (staffRole && topic.roles.includes(staffRole)) return true;
 
   // Coarse PIN role: support_worker maps to driver in data-store.
   if (profile.role === "driver") {

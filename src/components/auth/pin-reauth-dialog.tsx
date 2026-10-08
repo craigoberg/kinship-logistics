@@ -11,9 +11,10 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/auth/pin-pad";
-import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { verifyManagerPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { floorRoleForStaff } from "@/lib/auth/pin-role";
 import { verifyNamedPersonPin } from "@/lib/auth/pin-session";
-import { getActiveUserProfile } from "@/lib/data-store";
+import { getActiveUserProfile, persistFloorIdentity } from "@/lib/data-store";
 import { ChangePinDialog } from "@/components/auth/change-pin-dialog";
 import { cn } from "@/lib/utils";
 import { useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
@@ -28,6 +29,8 @@ interface Props {
   requiredStaffId?: string;
   /** False = no Cancel / Escape (idle lock). Default true. */
   dismissible?: boolean;
+  /** Manager or Assistant Manager confirm. Does not mean the session timed out. */
+  requireManager?: boolean;
   onAuthenticated: () => void;
 }
 
@@ -40,6 +43,7 @@ export function PinReauthDialog({
   description,
   requiredStaffId,
   dismissible = true,
+  requireManager = false,
   onAuthenticated,
 }: Props) {
   const [pin, setPin] = useState("");
@@ -64,12 +68,27 @@ export function PinReauthDialog({
     setError(null);
     try {
       const profile = getActiveUserProfile();
-      if (profile?.personKind === "carer" && profile.carerId) {
+      if (requireManager && profile?.personKind === "carer") {
+        throw new Error("A carer PIN cannot authorise this.");
+      }
+      if (!requireManager && profile?.personKind === "carer" && profile.carerId) {
         await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
       } else {
         const staffId = requiredStaffId || profile?.staffId || "";
         if (!staffId) throw new Error("Sign in again from the PIN pad.");
-        await verifyNamedStaffPin(staffId, value);
+        if (requireManager) {
+          const who = await verifyManagerPin(staffId, value);
+          if (profile?.staffId === staffId) {
+            const floor = floorRoleForStaff(who.personnelType);
+            persistFloorIdentity({
+              ...profile,
+              accessRole: who.personnelType,
+              role: floor ?? profile.role,
+            });
+          }
+        } else {
+          await verifyNamedStaffPin(staffId, value);
+        }
       }
       onAuthenticated();
       onOpenChange(false);
@@ -83,10 +102,13 @@ export function PinReauthDialog({
     }
   };
 
-  const heading = title ?? "Session expired — please re-enter your PIN";
+  const heading =
+    title ?? (requireManager ? "Enter your PIN" : "Session expired — please re-enter your PIN");
   const body =
     description ??
-    `Your terminal sign-in has timed out.${reason ? ` ${reason}` : ""} Your mandated checks and notes are preserved.`;
+    (requireManager
+      ? (reason ?? "A Manager or Assistant Manager PIN is required.")
+      : `Your terminal sign-in has timed out.${reason ? ` ${reason}` : ""} Your mandated checks and notes are preserved.`);
 
   return (
     <AlertDialog

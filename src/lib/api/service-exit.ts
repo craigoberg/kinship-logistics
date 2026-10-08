@@ -6,6 +6,7 @@
  * Does not restore those plans on reactivate.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import { resolveStaffIdFromPin } from "@/lib/auth/pin-session";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
@@ -35,36 +36,8 @@ function schemaOrThrow(error: PgErr, fallback = "Save failed"): void {
   throw new Error(error.message || fallback);
 }
 
-function isManagerRole(personnelType: string | null, title: string | null): boolean {
-  const access = (personnelType ?? "").trim().toLowerCase().replace(/\s+/g, "_");
-  const roleTitle = (title ?? "").trim().toLowerCase().replace(/\s+/g, "_");
-  if (access === "guardian" || roleTitle === "guardian") return false;
-  if (access === "dashboard" || roleTitle === "dashboard") return false;
-  const primary = access || roleTitle;
-  if (!primary) return false;
-  if (
-    primary === "driver" ||
-    primary === "support_worker" ||
-    primary === "support" ||
-    primary.includes("driver")
-  ) {
-    return false;
-  }
-  if (
-    primary === "coordinator" ||
-    primary === "manager" ||
-    primary === "assistant_manager" ||
-    primary.includes("manager")
-  ) {
-    return true;
-  }
-  const fallback = access ? roleTitle : "";
-  return (
-    fallback === "coordinator" ||
-    fallback === "manager" ||
-    fallback === "assistant_manager" ||
-    fallback.includes("manager")
-  );
+function isManagerRole(personnelType: string | null, _title: string | null): boolean {
+  return isManagerOrAssistantAccess(personnelType);
 }
 
 export async function resolveAuthorisingManager(

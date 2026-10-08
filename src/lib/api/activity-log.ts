@@ -10,6 +10,7 @@ import {
   primeStaffDisplayNames,
   resolveStaffDisplayName,
 } from "@/lib/data-store";
+import { stripPrimaryContactMarker } from "@/lib/governance/hub-issue-body-lines";
 import { parseIsoDateLocal } from "@/lib/utils";
 
 export const ACTIVITY_LOG_KEY = ["activity-log"] as const;
@@ -809,11 +810,11 @@ function quotedTitle(value: string | null | undefined): string | null {
 }
 
 function issueTitleFromMeta(meta: Record<string, unknown>): string | null {
-  return (
+  const raw =
     metaString(meta, "title", "issue_title", "asset_name") ||
     metaString(meta, "description", "issue_description") ||
-    metaString(meta, "resolution_summary")
-  );
+    metaString(meta, "resolution_summary");
+  return raw ? stripPrimaryContactMarker(raw) : null;
 }
 
 function minutesPhrase(meta: Record<string, unknown>): string | null {
@@ -957,7 +958,9 @@ function composeGovernanceSummary(
     ]);
   }
   if (a === "site_day.issue_logged") {
-    const desc = metaString(meta, "description", "issue_description");
+    const desc = stripPrimaryContactMarker(
+      metaString(meta, "description", "issue_description") ?? "",
+    );
     const sev = metaString(meta, "severity");
     return joinParts([
       `Logged ${sev ? `${sev} ` : ""}issue`,
@@ -1881,7 +1884,10 @@ async function listIssueNoteOverlay(
   const titles = new Map<string, string>();
   for (const i of issues) {
     const id = String(i.id ?? "");
-    const desc = typeof i.issue_description === "string" ? i.issue_description.trim() : "";
+    const desc =
+      typeof i.issue_description === "string"
+        ? stripPrimaryContactMarker(i.issue_description.trim())
+        : "";
     if (id && desc) titles.set(id, desc);
   }
   for (const a of assets) {

@@ -15,6 +15,7 @@ import {
   useSystemParameter,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import {
   AUTH_IDLE_LOCK_MINUTES_KEY,
@@ -25,10 +26,6 @@ import {
 } from "@/lib/auth/idle-lock";
 
 export const IDLE_LOCK_PARAM_KEYS = [AUTH_IDLE_LOCK_MINUTES_KEY] as const;
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 function parseMinutes(raw: string): number | null {
   if (raw.trim() === "") return null;
@@ -49,7 +46,7 @@ export function IdleLockAdminPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
   const saved = clampIdleLockMinutes(
     useSystemParameter<number>(
       AUTH_IDLE_LOCK_MINUTES_KEY,

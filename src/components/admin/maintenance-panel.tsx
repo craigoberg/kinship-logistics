@@ -425,7 +425,8 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     <PinReauthDialog
       open={pinOpen}
       onOpenChange={setPinOpen}
-      reason="Manager PIN required to resolve or close a maintenance item."
+      requireManager
+      reason="Enter your PIN to resolve or close this maintenance item."
       onAuthenticated={handlePinAuthenticated}
     />
     <IncidentBoardReportDialog

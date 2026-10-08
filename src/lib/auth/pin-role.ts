@@ -3,6 +3,7 @@
  * Manager and Assistant Manager then confirm with their own email and password.
  * Everyone else who may use the app is PIN-only. Guardian and Dashboard cannot sign in.
  */
+import { isManagerOrAssistantAccess, normalizeAccessRoleKey } from "@/lib/access-roles";
 
 export type FloorRole = "driver" | "coordinator" | "carer";
 
@@ -22,55 +23,34 @@ function norm(value: string | null | undefined): string {
   return (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
 }
 
-/** System access level Manager or Assistant Manager. Job title is used only when access level is blank. */
+/**
+ * System access level only. Role / title is a label and never grants or blocks this.
+ * The second argument is ignored and kept so existing callers still compile.
+ */
 export function isManagerLevelAccess(
   personnelType: string | null | undefined,
-  roleTitle?: string | null,
+  _roleTitle?: string | null,
 ): boolean {
-  const access = norm(personnelType);
-  if (access === "manager" || access === "assistant_manager") return true;
-  if (access) return false;
-  const title = norm(roleTitle);
-  return (
-    title === "manager" ||
-    title === "assistant_manager" ||
-    title === "coordinator" ||
-    title.includes("manager")
-  );
+  return isManagerOrAssistantAccess(personnelType);
 }
 
 export function isBlockedTerminalAccess(
   personnelType: string | null | undefined,
-  roleTitle?: string | null,
+  _roleTitle?: string | null,
 ): "guardian" | "dashboard" | null {
-  const access = norm(personnelType);
-  const title = norm(roleTitle);
-  if (access === "guardian" || title === "guardian") return "guardian";
-  if (access === "dashboard" || title === "dashboard") return "dashboard";
+  const access = normalizeAccessRoleKey(personnelType) ?? norm(personnelType);
+  if (access === "guardian") return "guardian";
+  if (access === "dashboard") return "dashboard";
   return null;
 }
 
-/** Same terminal split the app already uses: support workers and drivers open Manifest. */
+/** Office home for Manager and Assistant Manager. Everyone else who can sign in opens Manifest. */
 export function floorRoleForStaff(
   personnelType: string | null | undefined,
-  roleTitle: string | null | undefined,
+  roleTitle?: string | null,
 ): FloorRole | null {
   if (isBlockedTerminalAccess(personnelType, roleTitle)) return null;
-  if (isManagerLevelAccess(personnelType, roleTitle)) return "coordinator";
-  const access = norm(personnelType);
-  const title = norm(roleTitle);
-  const blob = `${access} ${title}`;
-  if (
-    access === "driver" ||
-    access === "support_worker" ||
-    access === "support" ||
-    blob.includes("driver") ||
-    blob.includes("support") ||
-    blob.includes("volunteer") ||
-    access === "" 
-  ) {
-    return "driver";
-  }
+  if (isManagerLevelAccess(personnelType)) return "coordinator";
   return "driver";
 }
 

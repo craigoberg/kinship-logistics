@@ -32,7 +32,10 @@ export async function verifyNamedStaffPin(
 }
 
 /** Verify a manager or assistant manager PIN for a named person. */
-export async function verifyManagerPin(managerStaffId: string, pin: string): Promise<void> {
+export async function verifyManagerPin(
+  managerStaffId: string,
+  pin: string,
+): Promise<{ personnelType: string | null; roleTitle: string | null }> {
   if (!managerStaffId) throw new Error("Please select the authorising manager.");
   if (!/^\d{4}$|^\d{6}$/.test(pin)) {
     throw new Error("Incorrect manager PIN. Please try again.");
@@ -42,9 +45,11 @@ export async function verifyManagerPin(managerStaffId: string, pin: string): Pro
     personId: managerStaffId,
     pin,
   });
-  if (!isManagerLevelAccess(who.personnelType, who.roleTitle)) {
+  if (!isManagerLevelAccess(who.personnelType)) {
+    const level = who.personnelType?.trim() || "blank";
     throw new Error(
-      "The selected staff member does not hold a Manager or Assistant Manager role and cannot authorise this.",
+      `System access level is ${level}. Only Manager or Assistant Manager can do this.`,
     );
   }
+  return who;
 }

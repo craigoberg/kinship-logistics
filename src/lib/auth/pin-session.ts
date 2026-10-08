@@ -180,5 +180,5 @@ export function managerLevelFromProfile(profile: {
   accessRole?: string | null;
   staffRole?: string | null;
 } | null): boolean {
-  return isManagerLevelAccess(profile?.accessRole, profile?.staffRole);
+  return isManagerLevelAccess(profile?.accessRole);
 }

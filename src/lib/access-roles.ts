@@ -41,6 +41,12 @@ export function isManagerAccessRole(value: string | null | undefined): boolean {
   return normalizeAccessRoleKey(value) === "manager";
 }
 
+/** Manager or Assistant Manager. Job title is not an access level. */
+export function isManagerOrAssistantAccess(value: string | null | undefined): boolean {
+  const key = normalizeAccessRoleKey(value);
+  return key === "manager" || key === "assistant_manager";
+}
+
 export function accessRoleLabel(value: string | null | undefined): string | null {
   const key = normalizeAccessRoleKey(value);
   if (!key) return null;

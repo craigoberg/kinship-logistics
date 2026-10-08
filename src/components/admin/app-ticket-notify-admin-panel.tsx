@@ -17,16 +17,13 @@ import {
   useAppTicketNotifyTo,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import {
   APP_TICKET_NOTIFY_PARAM_KEYS,
   looksLikeEmail,
   parseNotifyEmailList,
 } from "@/lib/app-tickets/notify-params";
 import { formatUnknownError } from "@/lib/utils";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 /**
  * Admin → System Parameters — App ticket notify To / From (server Postmark).
@@ -39,7 +36,7 @@ export function AppTicketNotifyAdminPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const savedTo = useAppTicketNotifyTo();
   const savedFrom = useAppTicketNotifyFrom();

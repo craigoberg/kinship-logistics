@@ -320,7 +320,8 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager PIN required to resolve or close an app ticket."
+        requireManager
+        reason="Enter your PIN to resolve or close this app ticket."
         onAuthenticated={() => {
           if (!isManagerProfile()) {
             operationToasts.managerPinRequired();

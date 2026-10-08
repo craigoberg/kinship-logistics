@@ -450,7 +450,8 @@ export function ManageComplianceAssetDialog({
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager PIN required to save compliance asset changes."
+        requireManager
+        reason="Enter your PIN to save this compliance change."
         onAuthenticated={handlePinAuthenticated}
       />
     </>

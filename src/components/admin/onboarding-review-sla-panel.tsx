@@ -15,16 +15,13 @@ import {
   useOnboardingReviewParams,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import {
   DEFAULT_ONBOARDING_REVIEW_RED_DAYS,
   DEFAULT_ONBOARDING_REVIEW_YELLOW_DAYS,
   ONBOARDING_REVIEW_RED_DAYS_KEY,
   ONBOARDING_REVIEW_YELLOW_DAYS_KEY,
 } from "@/lib/onboarding/review-urgency";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 export const ONBOARDING_REVIEW_PARAM_KEYS = [
   ONBOARDING_REVIEW_YELLOW_DAYS_KEY,
@@ -42,7 +39,7 @@ export function OnboardingReviewSlaPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
   const saved = useOnboardingReviewParams();
   const [yellow, setYellow] = useState(String(saved.yellowDays));
   const [red, setRed] = useState(String(saved.redDays));

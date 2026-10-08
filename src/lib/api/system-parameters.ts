@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { isManagerLevelAccess } from "@/lib/auth/pin-role";
 import { getActiveUserProfile, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 
@@ -70,7 +71,7 @@ export async function canManageSystemParameters(staffIdOverride?: string | null)
   // this short-circuit, managers logged in via PIN (e.g. PIN 1111) fail the
   // is_manager RPC and get locked out of the Governance Hub / System Params.
   const profile = getActiveUserProfile();
-  if ((profile?.staffRole ?? "").toLowerCase().includes("manager")) return true;
+  if (isManagerLevelAccess(profile?.accessRole)) return true;
 
   const ids = new Set<string>();
   if (staffIdOverride) ids.add(staffIdOverride);

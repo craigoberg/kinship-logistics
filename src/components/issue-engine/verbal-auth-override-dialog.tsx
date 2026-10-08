@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/auth/pin-pad";
 import { verifyManagerPin, resolveOperatorStaffIdFromPin } from "@/components/auth/pin-verify";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import {
   Select,
   SelectContent,
@@ -90,13 +91,7 @@ export function VerbalAuthOverrideDialog({
     queryKey: ["staff-registry", "coordinators"],
     queryFn: async () => {
       const all = await listStaffRegistry();
-      return all.filter(
-        (s) =>
-          s.active &&
-          (s.role === "coordinator" ||
-            s.role?.toLowerCase().includes("manager") ||
-            s.role?.toLowerCase().includes("coordinator")),
-      );
+      return all.filter((s) => s.active && isManagerOrAssistantAccess(s.personnelType));
     },
     staleTime: 120_000,
     enabled: open,

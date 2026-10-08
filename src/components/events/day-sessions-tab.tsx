@@ -24,6 +24,7 @@ import { Label } from "@/components/ui/label";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { cn, formatDate } from "@/lib/utils";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
 import {
   listEventDaySessions,
@@ -98,7 +99,7 @@ export function DaySessionsTab({ event: ev }: Props) {
 
   const { data: staff = [] } = useStaffRegistry();
   const managers = useMemo(
-    () => staff.filter((s) => (s.role ?? "").toLowerCase().includes("manager") && s.active),
+    () => staff.filter((s) => s.active && isManagerOrAssistantAccess(s.personnelType)),
     [staff],
   );
 

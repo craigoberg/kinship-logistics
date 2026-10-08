@@ -57,6 +57,8 @@ import {
   type BackupManifest,
 } from "@/lib/api/backup-restore";
 import { getActiveUserProfile, listStaffRegistry } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import {
   Select,
   SelectContent,
@@ -64,10 +66,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 function useAnimatedActiveStep(running: boolean, maxStep: number, intervalMs = 9000) {
   const [step, setStep] = useState(1);
@@ -187,7 +185,7 @@ export function BackupRestoreWorkspace() {
     staleTime: 30_000,
   });
   const canManage =
-    permissionQ.data === true || isManagerRole(profile?.staffRole);
+    permissionQ.data === true || isManagerProfile();
 
   const summaryQ = useQuery({
     queryKey: ["backup-restore", "summary"],
@@ -201,7 +199,7 @@ export function BackupRestoreWorkspace() {
     queryFn: async () => {
       const all = await listStaffRegistry();
       return all.filter(
-        (s) => s.active && (s.role ?? "").toLowerCase().includes("manager"),
+        (s) => s.active && isManagerOrAssistantAccess(s.personnelType),
       );
     },
     enabled: canManage,
