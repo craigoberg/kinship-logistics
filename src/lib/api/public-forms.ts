@@ -42,6 +42,26 @@ export interface PublicFormSubmission {
   createdAt: string;
 }
 
+/** Practical address check: local@domain.tld, no spaces. */
+export function isValidPublicEmail(value: string | null | undefined): boolean {
+  const v = (value ?? "").trim();
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(v);
+}
+
+/**
+ * Public website (yada.org.au) requires a valid email on every form.
+ * An anonymous complaint is the only exception — name and contact are not stored.
+ * Connect rights-and-voice stays optional so office-assisted submits still work.
+ */
+export function publicFormRequiresEmail(args: {
+  channel: "public" | "connect";
+  formKey: string;
+  isAnonymous: boolean;
+}): boolean {
+  if (args.channel !== "public") return false;
+  return !(args.formKey === "complaint" && args.isAnonymous);
+}
+
 function throwSchema(err: unknown): never {
   if (
     isSchemaMismatchError(err) ||
@@ -131,12 +151,28 @@ export async function submitPublicForm(
     throw new Error("Name is required unless you submit anonymously.");
   }
 
+  const email = input.submitterEmail?.trim() ?? "";
+  if (
+    publicFormRequiresEmail({
+      channel: input.channel,
+      formKey: String(def.formKey),
+      isAnonymous,
+    }) &&
+    !isValidPublicEmail(email)
+  ) {
+    throw new Error("A valid email address is required.");
+  }
+  // Anonymous complaints store no contact. Other anonymous public forms
+  // (feedback, compliment) still keep the email so the office can reply.
+  const dropEmail =
+    isAnonymous && (def.formKey === "complaint" || input.channel !== "public");
+
   const { data: rpcRows, error: rpcErr } = await supabase.rpc("submit_public_form", {
     p_form_key: input.formKey,
     p_channel: input.channel,
     p_is_anonymous: isAnonymous,
     p_submitter_name: isAnonymous ? null : input.submitterName?.trim() || null,
-    p_submitter_email: isAnonymous ? null : input.submitterEmail?.trim() || null,
+    p_submitter_email: dropEmail ? null : email || null,
     p_submitter_phone: isAnonymous ? null : input.submitterPhone?.trim() || null,
     p_submitter_role: input.submitterRole?.trim() || null,
     p_message: message,

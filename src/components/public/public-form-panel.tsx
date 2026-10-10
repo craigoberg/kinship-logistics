@@ -8,6 +8,8 @@ import { CharacterCountedTextarea } from "@/components/ui/character-counted-text
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { cn } from "@/lib/utils";
 import {
+  isValidPublicEmail,
+  publicFormRequiresEmail,
   submitPublicForm,
   type PublicFormDefinition,
 } from "@/lib/api/public-forms";
@@ -40,12 +42,20 @@ export function PublicFormPanel({
   const [refCode, setRefCode] = useState<string | null>(null);
 
   const anon = definition.allowAnonymous && anonymous;
+  const anonymousComplaint = anon && definition.formKey === "complaint";
+  const emailRequired = publicFormRequiresEmail({
+    channel,
+    formKey: definition.formKey,
+    isAnonymous: anon,
+  });
   const nameMissing = !anon && !name.trim();
+  const emailInvalid = emailRequired && !isValidPublicEmail(email);
   const messageOk = message.trim().length >= 20;
-  const canSubmit = !busy && !nameMissing && messageOk;
+  const canSubmit = !busy && !nameMissing && !emailInvalid && messageOk;
 
   const missing: string[] = [];
   if (nameMissing) missing.push("Name");
+  if (emailInvalid) missing.push("Valid email");
   if (!messageOk) missing.push("Message (20+ characters)");
 
   const submit = async () => {
@@ -162,46 +172,62 @@ export function PublicFormPanel({
             checked={anonymous}
             onCheckedChange={(c) => setAnonymous(!!c)}
           />
-          Submit anonymously (no name or contact stored)
+          {definition.formKey === "complaint"
+            ? "Submit anonymously (no name or contact stored)"
+            : channel === "public"
+              ? "Submit without your name (a valid email is still required)"
+              : "Submit anonymously (no name or contact stored)"}
         </label>
       ) : null}
 
-      {!anon ? (
+      {!anonymousComplaint ? (
         <div className="grid gap-3 sm:grid-cols-2">
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label className={labelClass}>Name *</Label>
-            <Input
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              className={cn(fieldClass, requiredFieldOutline(nameMissing))}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <Label className={labelClass}>Email</Label>
+          {!anon ? (
+            <div className="space-y-1.5 sm:col-span-2">
+              <Label className={labelClass}>Name *</Label>
+              <Input
+                value={name}
+                onChange={(e) => setName(e.target.value)}
+                autoComplete="name"
+                className={cn(fieldClass, requiredFieldOutline(nameMissing))}
+              />
+            </div>
+          ) : null}
+          <div className={cn("space-y-1.5", anon && "sm:col-span-2")}>
+            <Label className={labelClass}>
+              Email{emailRequired ? " *" : ""}
+            </Label>
             <Input
               type="email"
+              inputMode="email"
+              autoComplete="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
-              className={fieldClass}
+              className={cn(fieldClass, requiredFieldOutline(emailInvalid))}
             />
           </div>
-          <div className="space-y-1.5">
-            <Label className={labelClass}>Phone</Label>
-            <Input
-              value={phone}
-              onChange={(e) => setPhone(e.target.value)}
-              className={fieldClass}
-            />
-          </div>
-          <div className="space-y-1.5 sm:col-span-2">
-            <Label className={labelClass}>I am a…</Label>
-            <Input
-              value={role}
-              onChange={(e) => setRole(e.target.value)}
-              placeholder="Client / Family / Carer / Staff / Volunteer / Public"
-              className={fieldClass}
-            />
-          </div>
+          {!anon ? (
+            <>
+              <div className="space-y-1.5">
+                <Label className={labelClass}>Phone</Label>
+                <Input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  autoComplete="tel"
+                  className={fieldClass}
+                />
+              </div>
+              <div className="space-y-1.5 sm:col-span-2">
+                <Label className={labelClass}>I am a…</Label>
+                <Input
+                  value={role}
+                  onChange={(e) => setRole(e.target.value)}
+                  placeholder="Client / Family / Carer / Staff / Volunteer / Public"
+                  className={fieldClass}
+                />
+              </div>
+            </>
+          ) : null}
         </div>
       ) : null}
 
