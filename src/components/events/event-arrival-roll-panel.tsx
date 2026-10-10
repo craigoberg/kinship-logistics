@@ -17,10 +17,21 @@ import {
   Users,
   UserX,
 } from "lucide-react";
+import {
+  WalkOnBadge,
+  WalkOnFloorButton,
+  WalkOnPersonModal,
+} from "@/components/events/walk-on-person-modal";
+import { EventSupportRoll } from "@/components/events/event-support-roll";
+import {
+  listWalkOnBookings,
+  walkOnParticipantIds,
+} from "@/lib/api/event-walk-on";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
+import { FloorRollUndoButton } from "@/components/site-day/floor-roll-undo-button";
 import { TransportMethodPickerSheet } from "@/components/ui/transport-method-picker-sheet";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
@@ -58,6 +69,10 @@ import { useLookupParameters } from "@/hooks/use-supabase-data";
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 const rollKey = (sessionId: string) => ["event-attendance-log", sessionId] as const;
 
@@ -139,6 +154,17 @@ export function EventArrivalRollPanel({
     staleTime: 60_000,
   });
 
+  const { data: walkOnFlags = [] } = useQuery({
+    queryKey: ["event-walk-ons", eventId],
+    queryFn: () => listWalkOnBookings(eventId),
+    staleTime: 15_000,
+  });
+  const walkOnIds = useMemo(
+    () => walkOnParticipantIds(walkOnFlags),
+    [walkOnFlags],
+  );
+  const [walkOnOpen, setWalkOnOpen] = useState(false);
+
   const priorSessionIds = priorSessions.map((s) => s.id);
   const { data: priorAbsenceMap = {} } = useQuery({
     queryKey: priorAbsencesKey(priorSessionIds),
@@ -184,6 +210,16 @@ export function EventArrivalRollPanel({
       ]),
     );
   }, [participants]);
+
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  const sortedRows = useMemo(
+    () =>
+      sortByParticipantSurname(rows, (r) => r.participantId, surnameById),
+    [rows, surnameById],
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: rollKey(sessionId) });
@@ -412,7 +448,7 @@ export function EventArrivalRollPanel({
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {rows.map((row) => {
+          {sortedRows.map((row) => {
             const absentPriorSessionId = priorAbsenceMap[row.participantId];
             const absentDayLabel = absentPriorSessionId
               ? priorSessionLabel[absentPriorSessionId]
@@ -438,6 +474,7 @@ export function EventArrivalRollPanel({
                 plannedOutbound={
                   plannedOutboundByParticipant.get(row.participantId) ?? null
                 }
+                isWalkOn={walkOnIds.has(row.participantId)}
                 clinicalChips={clinicalFlagsFromParticipant(
                   participants.find((p) => p.id === row.participantId) ?? {},
                 )}
@@ -479,6 +516,20 @@ export function EventArrivalRollPanel({
           })}
         </ul>
       )}
+
+      <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
+
+      <WalkOnFloorButton
+        label="Someone extra arrived"
+        onClick={() => setWalkOnOpen(true)}
+      />
+      <WalkOnPersonModal
+        open={walkOnOpen}
+        onOpenChange={setWalkOnOpen}
+        eventId={eventId}
+        source="venue"
+        eventDaySessionId={sessionId}
+      />
     </div>
   );
 }
@@ -498,6 +549,7 @@ function RollCard({
   arrivalUrgency = null,
   busRunOpts,
   plannedOutbound,
+  isWalkOn = false,
   clinicalChips = [],
   onUndoCheckIn,
   onCheckout,
@@ -517,6 +569,7 @@ function RollCard({
   arrivalUrgency?: ArrivalUrgency;
   busRunOpts: ReturnType<typeof eventBusRunOptions>;
   plannedOutbound: { mode: "bus" | "self"; busRunCode: string | null } | null;
+  isWalkOn?: boolean;
   clinicalChips?: import("@/lib/clinical-flags").ClinicalFlagChip[];
   onUndoCheckIn: () => void;
   onCheckout: (t: ReturnTransport, busRunCode?: string | null) => void;
@@ -618,7 +671,9 @@ function RollCard({
     <li
       className={cn(
         "rounded-lg border px-3 py-2",
-        isIn && "border-emerald-500/40 bg-emerald-500/5",
+        // Hi-vis checked-in — solid success fill (§4.5 / UI-STYLE-GUIDE)
+        isIn &&
+          "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
         isOut && "border-muted bg-muted/20 opacity-80",
         isAbsent && "border-destructive/60 bg-destructive/5",
         !isIn && !isOut && !isAbsent && arrivalUrgency === "warning" && "border-amber-400 bg-amber-50",
@@ -641,6 +696,7 @@ function RollCard({
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{name}</span>
+              {isWalkOn && <WalkOnBadge />}
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Planned{" "}
                 {plannedIsBus
@@ -655,14 +711,14 @@ function RollCard({
                   Absent {absentDayLabel}
                 </Badge>
               )}
-              {clinicalChips.length > 0 && (
-                <ClinicalFlagChips chips={clinicalChips} personName={name} />
-              )}
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               Tap to check in via {arrivalSel.label}
             </p>
           </button>
+          {clinicalChips.length > 0 && (
+            <ClinicalFlagChips chips={clinicalChips} personName={name} />
+          )}
           <EmbeddedMethodButton
             label={arrivalSel.label}
             disabled={busy}
@@ -688,6 +744,7 @@ function RollCard({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1">
                 <span className="font-medium text-sm leading-tight">{name}</span>
+                {isWalkOn && <WalkOnBadge />}
                 {absentDayLabel && (
                   <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
                     Absent {absentDayLabel}
@@ -708,7 +765,14 @@ function RollCard({
                 )}
               </div>
               {row.checkedInAt && (
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                <p
+                  className={cn(
+                    "mt-0.5 text-[11px] leading-snug",
+                    isIn
+                      ? "text-success-foreground/90"
+                      : "text-muted-foreground",
+                  )}
+                >
                   In <ClientTime iso={row.checkedInAt} />
                   {row.checkedOutAt && (
                     <>
@@ -758,24 +822,12 @@ function RollCard({
               )}
 
               {editable && isIn && !isOut && (
-                <button
-                  type="button"
+                <FloorRollUndoButton
+                  kind="check_in"
+                  personName={name}
                   disabled={busy}
                   onClick={() => onUndoCheckIn()}
-                  className={cn(
-                    "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                    "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                    "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                    "disabled:opacity-50 disabled:pointer-events-none",
-                  )}
-                  title="Undo check-in"
-                  aria-label={`Undo check-in for ${name}`}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                    Undo
-                  </span>
-                </button>
+                />
               )}
 
               {editable && isAbsent && (

@@ -21,6 +21,7 @@ import { reopenSession, resetStartOfDay, type SiteDaySession } from "@/lib/api/s
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { TestOnly } from "@/components/dev/test-only";
+import { FloorLeaderLine } from "./floor-leader-bar";
 import { cn } from "@/lib/utils";
 
 interface Props {
@@ -79,11 +80,24 @@ export function DayClosedPanel({ session }: Props) {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       queryClient.invalidateQueries({
-        predicate: (q) => q.queryKey?.[0] === "site-day-activities",
+        predicate: (q) => {
+          const key = String(q.queryKey?.[0] ?? "");
+          return (
+            key === "site-day-activities" ||
+            key === "client-attendance-roll" ||
+            key === "support-attendance-roll" ||
+            key === "site-day-visitors" ||
+            key === "site-issues" ||
+            key === "site-issues-active" ||
+            key === "compliance_audit_logs" ||
+            key === "bus-run-roster" ||
+            key === "transport_trips"
+          );
+        },
       });
       toast.success("Session reset to Start of Day", {
         description:
-          "Activities delivery rewound. Issues, escalations, attendance and billing are preserved.",
+          "Check-ins, check-outs, and today's centre floor are cleared. The roll is seeded again from the weekly plan.",
       });
     },
     onError: (e: Error) => {
@@ -115,6 +129,7 @@ export function DayClosedPanel({ session }: Props) {
               ? "Dual-PIN handshake ended in NO-GO. Centre is hard-locked for clients today. Notify any expected attendees."
               : "Today's attendance has been finalised and flipped to billing-ready. The MYOB Export workspace in Admin can now pick up these rows."}
           </p>
+          <FloorLeaderLine session={session} />
           {session.closeDeclaredAt && (
             <p className="text-xs text-muted-foreground">
               Closed <ClientTime iso={session.closeDeclaredAt} />
@@ -124,6 +139,17 @@ export function DayClosedPanel({ session }: Props) {
 
           {!noGo && (
             <div className="flex flex-wrap items-center gap-2 pt-2">
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={() => {
+                  document
+                    .getElementById("day-centre-end-of-day-report")
+                    ?.scrollIntoView({ behavior: "smooth", block: "start" });
+                }}
+              >
+                View End of Day Report
+              </Button>
               <Button
                 size="sm"
                 variant="outline"
@@ -151,7 +177,7 @@ export function DayClosedPanel({ session }: Props) {
                   className="gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
                   onClick={() => resetMut.mutate()}
                   disabled={resetMut.isPending}
-                  title="TEST ONLY — rewind today's session to Start of Day. Issues, attendance and billing are preserved."
+                  title="TEST ONLY — rewind today to Start of Day. Clears check-ins, check-outs, and today's centre floor."
                 >
                   {resetMut.isPending ? (
                     <Loader2 className="h-4 w-4 animate-spin" />

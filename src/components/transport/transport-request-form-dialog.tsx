@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import { toast } from "sonner";
 import { Save } from "lucide-react";
 import {
@@ -167,7 +168,9 @@ export function TransportRequestFormDialog({
                 <SelectValue placeholder="Select participant…" />
               </SelectTrigger>
               <SelectContent>
-                {participants.map((p) => (
+                {participants
+                  .filter((p) => isOperationalParticipant(p) || p.id === participantId)
+                  .map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.fullName}
                   </SelectItem>

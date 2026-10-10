@@ -182,35 +182,15 @@ export function EventStatusPanel({ event, onStatusChanged, mobileCompact = false
       );
       return { prev };
     },
-    onSuccess: async ({
-      newStatus,
-      guestsArchived,
-      guestsSkipped,
-      guestArchiveError,
-    }) => {
+    onSuccess: async ({ newStatus }) => {
       const closedBits: string[] = [];
       if (newStatus === "Closed") {
         closedBits.push("Billing locked.");
-        if ((guestsArchived ?? 0) > 0) {
-          closedBits.push(
-            `${guestsArchived} guest${guestsArchived === 1 ? "" : "s"} archived — reuse from Add guest.`,
-          );
-        }
-        if ((guestsSkipped ?? 0) > 0) {
-          closedBits.push(
-            `${guestsSkipped} guest${guestsSkipped === 1 ? "" : "s"} still on another Open/Confirmed trip — left active.`,
-          );
-        }
+        closedBits.push("Guests stay on file. The office archives them after follow-up.");
       }
       toast.success(`Event → ${newStatus}`, {
         description: closedBits.length > 0 ? closedBits.join(" ") : undefined,
       });
-      if (guestArchiveError) {
-        toast.warning("Guests were not archived", {
-          description: guestArchiveError,
-          duration: 10_000,
-        });
-      }
       await refetchEventManifest(qc);
       onStatusChanged();
       setConfirmOpen(false);

@@ -2,24 +2,161 @@
 
 import * as React from "react";
 import { ChevronDownIcon, ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
-import { DayButton, DayPicker, getDefaultClassNames } from "react-day-picker";
+import {
+  DayButton,
+  DayPicker,
+  getDefaultClassNames,
+  useDayPicker,
+  type DropdownProps,
+} from "react-day-picker";
 
 import { cn } from "@/lib/utils";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { getOperationalNow } from "@/lib/operational-clock";
+
+/** Years before the operational year when a picker does not set `startMonth`. */
+const DEFAULT_PAST_YEARS = 120;
+/** Years after the operational year when a picker does not set `endMonth`. */
+const DEFAULT_FUTURE_YEARS = 30;
+
+function monthIndex(date: Date): number {
+  return date.getFullYear() * 12 + date.getMonth();
+}
+
+function usesMonthYearDropdowns(layout: string | undefined): boolean {
+  return (
+    layout === "dropdown" ||
+    layout === "dropdown-months" ||
+    layout === "dropdown-years"
+  );
+}
+
+function CaptionStepButton({
+  label,
+  disabled,
+  direction,
+  onClick,
+}: {
+  label: string;
+  disabled: boolean;
+  direction: "left" | "right";
+  onClick: () => void;
+}) {
+  const Icon = direction === "left" ? ChevronLeftIcon : ChevronRightIcon;
+  return (
+    <button
+      type="button"
+      aria-label={label}
+      disabled={disabled}
+      className={cn(
+        buttonVariants({ variant: "ghost" }),
+        "h-8 w-7 shrink-0 p-0",
+      )}
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (!disabled) onClick();
+      }}
+    >
+      <Icon className="size-4" />
+    </button>
+  );
+}
+
+/** Month dropdown with ‹ › that move one month, inside the calendar caption. */
+function CalendarMonthSpinner(props: DropdownProps) {
+  const { components, goToMonth, previousMonth, nextMonth } = useDayPicker();
+  return (
+    <span className="inline-flex items-center">
+      <CaptionStepButton
+        label="Previous month"
+        direction="left"
+        disabled={!previousMonth}
+        onClick={() => {
+          if (previousMonth) goToMonth(previousMonth);
+        }}
+      />
+      <components.Dropdown {...props} />
+      <CaptionStepButton
+        label="Next month"
+        direction="right"
+        disabled={!nextMonth}
+        onClick={() => {
+          if (nextMonth) goToMonth(nextMonth);
+        }}
+      />
+    </span>
+  );
+}
+
+/** Year dropdown with ‹ › that move one year, inside the calendar caption. */
+function CalendarYearSpinner(props: DropdownProps) {
+  const { components, goToMonth, months, dayPickerProps } = useDayPicker();
+  const current = months[0]?.date;
+  const start = dayPickerProps.startMonth;
+  const end = dayPickerProps.endMonth;
+
+  const previousYear = current
+    ? new Date(current.getFullYear() - 1, current.getMonth(), 1)
+    : undefined;
+  const nextYear = current
+    ? new Date(current.getFullYear() + 1, current.getMonth(), 1)
+    : undefined;
+
+  const canPrevious =
+    !!previousYear &&
+    (start ? monthIndex(previousYear) >= monthIndex(start) : true);
+  const canNext =
+    !!nextYear && (end ? monthIndex(nextYear) <= monthIndex(end) : true);
+
+  return (
+    <span className="inline-flex items-center">
+      <CaptionStepButton
+        label="Previous year"
+        direction="left"
+        disabled={!canPrevious}
+        onClick={() => {
+          if (previousYear && canPrevious) goToMonth(previousYear);
+        }}
+      />
+      <components.Dropdown {...props} />
+      <CaptionStepButton
+        label="Next year"
+        direction="right"
+        disabled={!canNext}
+        onClick={() => {
+          if (nextYear && canNext) goToMonth(nextYear);
+        }}
+      />
+    </span>
+  );
+}
 
 function Calendar({
   className,
   classNames,
   showOutsideDays = true,
-  captionLayout = "label",
+  captionLayout = "dropdown",
   buttonVariant = "ghost",
   formatters,
   components,
+  startMonth,
+  endMonth,
   ...props
 }: React.ComponentProps<typeof DayPicker> & {
   buttonVariant?: React.ComponentProps<typeof Button>["variant"];
 }) {
   const defaultClassNames = getDefaultClassNames();
+  const dropdownCaption = usesMonthYearDropdowns(captionLayout);
+  const anchorYear = getOperationalNow().getFullYear();
+  const resolvedStart =
+    startMonth ??
+    (dropdownCaption ? new Date(anchorYear - DEFAULT_PAST_YEARS, 0, 1) : undefined);
+  const resolvedEnd =
+    endMonth ??
+    (dropdownCaption
+      ? new Date(anchorYear + DEFAULT_FUTURE_YEARS, 11, 1)
+      : undefined);
 
   return (
     <DayPicker
@@ -31,6 +168,9 @@ function Calendar({
         className,
       )}
       captionLayout={captionLayout}
+      startMonth={resolvedStart}
+      endMonth={resolvedEnd}
+      hideNavigation={dropdownCaption}
       formatters={{
         formatMonthDropdown: (date) => date.toLocaleString("default", { month: "short" }),
         ...formatters,
@@ -54,11 +194,11 @@ function Calendar({
           defaultClassNames.button_next,
         ),
         month_caption: cn(
-          "flex h-(--cell-size) w-full items-center justify-center px-(--cell-size)",
+          "flex h-auto w-full items-center justify-center px-0",
           defaultClassNames.month_caption,
         ),
         dropdowns: cn(
-          "flex h-(--cell-size) w-full items-center justify-center gap-1.5 text-sm font-medium",
+          "flex h-auto w-full flex-wrap items-center justify-center gap-x-1 gap-y-0.5 text-sm font-medium",
           defaultClassNames.dropdowns,
         ),
         dropdown_root: cn(
@@ -120,6 +260,8 @@ function Calendar({
           return <ChevronDownIcon className={cn("size-4", className)} {...props} />;
         },
         DayButton: CalendarDayButton,
+        MonthsDropdown: CalendarMonthSpinner,
+        YearsDropdown: CalendarYearSpinner,
         WeekNumber: ({ children, ...props }) => {
           return (
             <td {...props}>

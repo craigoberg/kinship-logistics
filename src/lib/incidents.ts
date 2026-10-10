@@ -15,6 +15,8 @@ export interface OperationalIncident {
   affectedParticipantIds: string[];
   assistingStaffIds: string[];
   noParticipantInvolved: boolean;
+  /** Board pack number IR-YYYY-NNN. Human lane only. */
+  incidentNumber: string | null;
 }
 
 interface RaiseIncidentInput {
@@ -39,7 +41,7 @@ interface RaiseIncidentInput {
 export async function raiseOperationalIncident(
   input: RaiseIncidentInput,
 ): Promise<OperationalIncident> {
-  const payload = {
+  const payload: Record<string, unknown> = {
     incident_type: input.incidentType,
     severity: input.severity,
     description: input.description,
@@ -90,6 +92,7 @@ export async function raiseOperationalIncident(
       return legacy ? [legacy] : [];
     })(),
     noParticipantInvolved: Boolean(row.no_participant_involved),
+    incidentNumber: String(row.incident_number ?? "").trim() || null,
   };
 
   if (incident.severity === "sev1") {

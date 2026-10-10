@@ -40,7 +40,9 @@ export function resolveCouncilMailtoFrom(
  * `[AUTOMATED_RED]` and Hub context suffixes. Council only needs the issue body.
  */
 export function cleanCouncilIssueText(text: string | null | undefined): string {
-  let t = (text ?? "").trim();
+  let t = (text ?? "")
+    .replace(/\s*\[PRIMARY CONTACT\]\s+[0-9a-f-]{36}/gi, "")
+    .trim();
   // Leading operational tags (may be stacked).
   while (/^\[[^\]]+\]\s*/.test(t)) {
     t = t.replace(/^\[[^\]]+\]\s*/, "");

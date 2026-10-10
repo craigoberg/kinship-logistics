@@ -15,10 +15,16 @@ export const addParticipantsTopic: HelpTopic = {
     "directory",
     "care profile",
     "roster",
+    "support plan",
   ],
   menus: ["participants", "events", "day"],
   roles: ["manager", "assistant_manager", "support_worker"],
-  relatedIds: ["add-staff", "medication-rounds", "events-create-confirm-open"],
+  relatedIds: [
+    "add-staff",
+    "medication-rounds",
+    "events-create-confirm-open",
+    "client-support-plan",
+  ],
   steps: [
     {
       heading: "Open Participants",
@@ -30,7 +36,7 @@ export const addParticipantsTopic: HelpTopic = {
     },
     {
       heading: "Open a care profile",
-      body: "Tap a row to open the care profile — allergies, diet/IDDSI, medications, transport preferences, and related notes. Office edits here drive chips on Check-In and meal service.",
+      body: "Tap a row to open the care profile — allergies, diet/IDDSI, medications, transport preferences, and related notes. Support plan, communication and risk live on the Support & risk tab. Office edits here drive chips on Check-In and meal service.",
     },
     {
       heading: "Record medication admin (office)",
@@ -39,6 +45,10 @@ export const addParticipantsTopic: HelpTopic = {
     {
       heading: "Put them on a roster",
       body: "Day Centre attendance and Event Manage → Roster book participants from this directory. For bus passengers set Transport med bag before Confirm event.",
+    },
+    {
+      heading: "Client onboarding pack",
+      body: "Print blank client first if you need paper — no draft is created. Then Client onboarding to type the pack in. Close without Save draft and nothing is stored. Hub → Onboarding is the inbox for drafts and reviews coming due.",
     },
     {
       heading: "Guests vs registered clients",

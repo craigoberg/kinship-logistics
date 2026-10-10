@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { IS_TEST_BUILD } from "@/lib/test-mode";
+import { useCanUseDevTools } from "@/lib/dev-tools-access";
 
 interface Props {
   children: ReactNode;
@@ -8,11 +8,12 @@ interface Props {
 }
 
 /**
- * Wrap any UI that should only appear in dev / Lovable preview builds and
- * never in a published build. Renders nothing on published deployments.
+ * Wrap any UI that should only appear for Craig on a DEV/TEST build.
+ * Renders nothing on published deployments and for every other signed-in person.
  */
 export function TestOnly({ children, label = false }: Props) {
-  if (!IS_TEST_BUILD) return null;
+  const allowed = useCanUseDevTools();
+  if (!allowed) return null;
   if (!label) return <>{children}</>;
   return (
     <div className="inline-flex flex-col items-start gap-1">

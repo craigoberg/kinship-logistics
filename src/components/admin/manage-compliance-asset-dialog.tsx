@@ -21,7 +21,8 @@ import { executeComplianceResolution } from "@/lib/api/compliance-resolution";
 import { useComplianceWarningDays } from "@/hooks/use-system-parameters";
 import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
-import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
+import { operationalNowIso } from "@/lib/operational-clock";
+import { FormattedDate, FormattedDateTime, FormattedDeferredUntil } from "@/components/ui/formatted-time";
 import { HubContextMetaGrid } from "@/components/governance/hub-context-meta-grid";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
 import { NextExpiryDateField } from "@/components/governance/next-expiry-date-field";
@@ -182,7 +183,7 @@ export function ManageComplianceAssetDialog({
     mutationFn: () => startComplianceAssetReview(asset.id),
     onSuccess: () => {
       invalidateAll();
-      const waitLabel = formatHubWaitDuration(asset.created_at, new Date().toISOString());
+      const waitLabel = formatHubWaitDuration(asset.created_at, operationalNowIso());
       operationToasts.reviewStarted(waitLabel);
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),
@@ -291,10 +292,17 @@ export function ManageComplianceAssetDialog({
     [complianceNotesForReview],
   );
   const reviewStarted = isHubReviewStarted(complianceNotesForReview);
+  const deferredUntil = useMemo(() => {
+    const notes = timelineQuery.data ?? [];
+    const latest = notes[notes.length - 1];
+    if (!latest || latest.kind !== "defer") return null;
+    const until = latest.metadata?.deferred_until;
+    return typeof until === "string" && until.length > 0 ? until : null;
+  }, [timelineQuery.data]);
   const hubAppearedAt = asset.created_at;
   const waitLabel = reviewStartedNote
     ? formatHubWaitDuration(hubAppearedAt, reviewStartedNote.stampedAt)
-    : formatHubWaitDuration(hubAppearedAt, new Date().toISOString());
+    : formatHubWaitDuration(hubAppearedAt, operationalNowIso());
 
   const renewalSection = (
     <>
@@ -400,6 +408,14 @@ export function ManageComplianceAssetDialog({
                 ),
               }
             : { label: "Waiting", value: `${waitLabel} since in Hub` },
+          ...(deferredUntil
+            ? [
+                {
+                  label: "Deferred until",
+                  value: <FormattedDeferredUntil value={deferredUntil} />,
+                },
+              ]
+            : []),
         ]}
       />
     </div>
@@ -449,7 +465,8 @@ export function ManageComplianceAssetDialog({
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager PIN required to save compliance asset changes."
+        requireManager
+        reason="Enter your PIN to save this compliance change."
         onAuthenticated={handlePinAuthenticated}
       />
     </>

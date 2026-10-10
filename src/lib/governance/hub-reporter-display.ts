@@ -14,7 +14,7 @@ export function hubReporterDisplay(
     if (/^system$/i.test(raw)) return "System";
     if (/^[0-9a-f-]{36}$/i.test(raw)) {
       const name = resolveStaffDisplayName(raw);
-      // Auth UUID that is not a staff row → "Unknown staff"; treat automated as System.
+      // Unlinked auth UUID → "Unknown staff"; treat automated rows as System.
       if (name === "Unknown staff" && issueDescription && AUTOMATED_DESC_RE.test(issueDescription)) {
         return "System";
       }

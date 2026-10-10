@@ -5,7 +5,7 @@
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Loader2 } from "lucide-react";
+import { Loader2 } from "lucide-react";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { Button } from "@/components/ui/button";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
@@ -17,6 +17,7 @@ import {
   verifyNamedStaffPin,
 } from "@/components/auth/pin-verify";
 import { useMealPrepChecks } from "@/hooks/use-system-parameters";
+import { listRequirementsForFunction } from "@/lib/api/duty-roles";
 import { listStaffRegistry } from "@/lib/data-store";
 import {
   MEAL_PREP_CHECKS_PARAM_KEY,
@@ -29,13 +30,12 @@ import {
   type MealSource,
   type PrepAttestationMode,
 } from "@/lib/meal-open";
-import { preparerCertStatusForSource } from "@/lib/meal-sfh-cert";
+import { evaluateMealPrepRequirements } from "@/lib/meal-sfh-cert";
 import {
-  CAUTION_CALLOUT_BODY_CLASS,
-  CAUTION_CALLOUT_CLASS,
-  CAUTION_CALLOUT_ICON_CLASS,
-} from "@/lib/ui/caution-callout";
-import { cn } from "@/lib/utils";
+  DutyRequirementGapPanel,
+  dutyGapApproved,
+  isManagerOnDutyRole,
+} from "@/components/duty/duty-requirement-gap-panel";
 
 type PreparerPick = "staff" | "guest";
 
@@ -49,11 +49,6 @@ type Props = {
   pending?: boolean;
   onConfirm: (payload: MealOpenPayload) => void;
 };
-
-function isManagerOnDutyRole(role: string | null | undefined): boolean {
-  const r = (role ?? "").toLowerCase();
-  return r.includes("manager") || r.includes("coordinator");
-}
 
 export function OpenMealSheet({
   open,
@@ -86,6 +81,12 @@ export function OpenMealSheet({
     staleTime: 60_000,
     enabled: open,
   });
+  const mealReqsQ = useQuery({
+    queryKey: ["duty-roles", "function", "meal_prep"],
+    queryFn: () => listRequirementsForFunction("meal_prep"),
+    staleTime: 30_000,
+    enabled: open,
+  });
 
   const activeStaff = useMemo(
     () => (staffQ.data ?? []).filter((s) => s.active),
@@ -101,9 +102,15 @@ export function OpenMealSheet({
   const needsPreparer = source ? mealSourceNeedsPreparer(source) : false;
   const needsPrepChecks = source ? mealSourceNeedsPrepChecks(source) : false;
   const isGuest = needsPreparer && preparerPick === "guest";
+  const mealEval = evaluateMealPrepRequirements(
+    preparer,
+    mealReqsQ.data,
+  );
   const certStatus = isGuest
     ? "na"
-    : preparerCertStatusForSource(needsPreparer, preparer);
+    : needsPreparer
+      ? mealEval.overall
+      : "na";
   const certWarn =
     !isGuest &&
     (certStatus === "warn_missing" || certStatus === "warn_expired");
@@ -113,11 +120,12 @@ export function OpenMealSheet({
     prepCheckItems.length === 0 ||
     prepTicked.size >= prepCheckItems.length;
 
-  const sfhManagerApproved =
-    !certWarn ||
-    (!!sfhManagerId &&
-      !!sfhManagerPin &&
-      sfhNote.trim().length >= 10);
+  const sfhManagerApproved = dutyGapApproved(
+    certWarn,
+    sfhNote,
+    sfhManagerId,
+    sfhManagerPin,
+  );
 
   const formReadyForPin = (() => {
     if (!source || pending) return false;
@@ -242,7 +250,9 @@ export function OpenMealSheet({
                   setFormError(null);
                   if (!mealSourceNeedsPreparer(opt.id)) {
                     setPreparerId(null);
-                    setAckNote("");
+                    setSfhNote("");
+                    setSfhManagerId(null);
+                    setSfhManagerPin(null);
                     setPrepTicked(new Set());
                     setPreparerPick("staff");
                     setGuestName("");
@@ -433,86 +443,25 @@ export function OpenMealSheet({
           preparerPick === "staff" &&
           preparerId &&
           certWarn && (
-            <div className="space-y-3 rounded-lg border border-amber-500/40 bg-amber-500/5 p-3">
-              <div className={cn("space-y-2", CAUTION_CALLOUT_CLASS, "p-3")}>
-                <div className="flex items-start gap-2">
-                  <AlertTriangle
-                    className={cn(
-                      "mt-0.5 h-4 w-4",
-                      CAUTION_CALLOUT_ICON_CLASS,
-                    )}
-                  />
-                  <p className={cn("text-sm", CAUTION_CALLOUT_BODY_CLASS)}>
-                    {certStatus === "warn_missing"
-                      ? `${preparer?.fullName ?? "This staff member"} has no Safe Food Handling / Food Handling certification on file.`
-                      : `${preparer?.fullName ?? "This staff member"}’s Safe Food Handling certification appears expired.`}{" "}
-                    A Manager / Coordinator must approve before prep attestation.
-                  </p>
-                </div>
-              </div>
-              <CharacterCountedTextarea
-                label="Manager justification"
-                value={sfhNote}
-                onValueChange={(v) => {
-                  setSfhNote(v);
-                  setSfhManagerPin(null);
-                }}
-                minChars={10}
-                maxChars={240}
-                rows={3}
-                required
-                placeholder="Why proceeding with this preparer (min 10 characters)"
-              />
-              <div className="space-y-2">
-                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-                  Manager on Duty
-                </p>
-                <div className="max-h-40 space-y-1.5 overflow-y-auto">
-                  {managers.map((s) => (
-                    <MobileFieldButton
-                      key={s.id}
-                      title={s.fullName}
-                      subtitle={s.role ?? "Manager"}
-                      tone="info"
-                      active={sfhManagerId === s.id}
-                      onClick={() => {
-                        setSfhManagerId(s.id);
-                        setSfhManagerPin(null);
-                        setFormError(null);
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-              <PinEntryTrigger
-                className="w-full"
-                label={
-                  sfhNote.trim().length < 10 || !sfhManagerId
-                    ? "Justification + Manager first"
-                    : sfhManagerPin
-                      ? "SFH approved by Manager"
-                      : "Manager PIN — approve SFH gap"
-                }
-                verified={!!sfhManagerPin}
-                verifiedLabel="SFH approved — hand tablet to preparer"
-                length={4}
-                title="Manager SFH approval"
-                description="Approve proceeding with a preparer whose Safe Food Handling is missing or expired."
-                disabled={
-                  pending ||
-                  !sfhManagerId ||
-                  sfhNote.trim().length < 10 ||
-                  !!sfhManagerPin
-                }
-                onVerify={async (pin) => {
-                  await verifyManagerPin(sfhManagerId!, pin);
-                }}
-                onSuccess={(pin) => {
-                  setSfhManagerPin(pin);
-                  setFormError(null);
-                }}
-              />
-            </div>
+            <DutyRequirementGapPanel
+              actorName={preparer?.fullName ?? "This staff member"}
+              evalResult={mealEval}
+              note={sfhNote}
+              onNoteChange={(v) => {
+                setSfhNote(v);
+                setFormError(null);
+              }}
+              managerId={sfhManagerId}
+              onManagerIdChange={(id) => {
+                setSfhManagerId(id);
+                setFormError(null);
+              }}
+              managerPin={sfhManagerPin}
+              onManagerPin={setSfhManagerPin}
+              managers={managers}
+              title="Food Preparation"
+              disabled={pending}
+            />
           )}
 
         {/* Staff preparer: hand tablet over — Mark ticks + Mark's PIN */}

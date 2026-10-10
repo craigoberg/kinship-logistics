@@ -16,6 +16,10 @@ import {
   mealPrepAttestationPatch,
 } from "@/lib/api/meal-prep-attestation";
 import { writeToLedger } from "@/lib/api/ledger";
+import {
+  lookupParticipantName,
+  withAuditActorMeta,
+} from "@/lib/api/office-change-log";
 
 export type MealServiceStatus =
   | "expected"
@@ -120,11 +124,65 @@ export async function setMealServiceStatus(
     updated_by_id: staffId || null,
   };
   if (notes !== undefined) patch.notes = notes?.trim() || null;
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("event_meal_service_rolls")
     .update(patch)
-    .eq("id", rowId);
+    .eq("id", rowId)
+    .select("id, venue_stop_id, participant_id, status, notes")
+    .single();
   if (error) throw error;
+  if (status === "expected" || !data) return;
+  const row = data as {
+    id: string;
+    venue_stop_id: string;
+    participant_id: string;
+    status: string;
+    notes: string | null;
+  };
+  const personName = await lookupParticipantName(row.participant_id);
+  const { data: stop } = await supabase
+    .from("event_venue_stops")
+    .select("venue_name, meal_slot")
+    .eq("id", row.venue_stop_id)
+    .maybeSingle();
+  const meal =
+    (stop as { venue_name?: string } | null)?.venue_name?.trim() ||
+    ((stop as { meal_slot?: string } | null)?.meal_slot ?? "meal").replace(/_/g, " ");
+  const who = personName ?? "client";
+  const note = (row.notes ?? "").trim();
+  const verb =
+    status === "served"
+      ? "Served"
+      : status === "modified"
+        ? "Served modified"
+        : status === "own_order"
+          ? "Own-order"
+          : status === "declined"
+            ? "Declined"
+            : "N/A";
+  const summary =
+    status === "declined" || status === "na"
+      ? `${verb} ${meal} for ${who} on trip`
+      : `${verb} ${meal} to ${who} on trip`;
+  await writeToLedger({
+    staff_id: staffId,
+    category: "TRIP",
+    severity: "INFO",
+    action_type: "EVENT_MEAL_SERVED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      meal_row_id: row.id,
+      venue_stop_id: row.venue_stop_id,
+      participant_id: row.participant_id,
+      person_name: who,
+      location: "trip",
+      meal_title: meal,
+      meal_status: status,
+      notes: note || null,
+      summary: note ? `${summary} — ${note}` : summary,
+    }),
+  });
 }
 
 /** Open a Programme meal stop with live source/menu/preparer capture. */
@@ -193,10 +251,11 @@ export async function openMealVenueStop(args: {
     action_type: "EVENT_MEAL_OPENED",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       venue_stop_id: args.stopId,
       event_id: args.eventId,
       meal_source: p.mealSource,
+      location: "trip",
       prepared_by_staff_id: p.preparedByStaffId,
       preparer_cert_status: p.preparerCertStatus,
       prep_checks_completed: prepChecksCompleted,
@@ -205,7 +264,8 @@ export async function openMealVenueStop(args: {
       guest_preparer_name: attPatch.guest_preparer_name,
       prep_attestation_note: attPatch.prep_attestation_note,
       sfh_approved_by_staff_id: attPatch.sfh_approved_by_staff_id,
-    },
+      summary: `Opened trip meal (${p.mealSource.replace(/_/g, " ")})`,
+    }),
   });
 }
 

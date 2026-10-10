@@ -13,7 +13,6 @@ import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   useEventTransportRuns,
-  usePrepareEventHop,
   useStartEventVenueHop,
   useStartTrip,
 } from "@/hooks/use-supabase-data";
@@ -38,6 +37,12 @@ interface Props {
   onHopStarted: () => void;
   /** Outbound (Transport IN) only — Depot/Day Centre start picker + submit */
   children?: React.ReactNode;
+  /** BL-126 — same Manager approval as parent Start Run. */
+  dutyGate?: {
+    needsGap: boolean;
+    approved: boolean;
+    ensureApproved: () => Promise<boolean>;
+  };
 }
 
 function statusIcon(status: EventTransportRunCard["status"]) {
@@ -50,6 +55,11 @@ function statusIcon(status: EventTransportRunCard["status"]) {
 
 function canStartRun(status: EventTransportRunCard["status"]): boolean {
   return status === "ready" || status === "released" || status === "active";
+}
+
+/** Venue hops require trip-leader Release first — never auto-prepare from Manifest. */
+function canStartHop(status: EventTransportRunCard["status"]): boolean {
+  return status === "released" || status === "active";
 }
 
 function sameBusRun(
@@ -69,9 +79,9 @@ export function EventTransportRunsStep3({
   onSelect,
   onHopStarted,
   children,
+  dutyGate,
 }: Props) {
   const { data: runs = [], isLoading } = useEventTransportRuns(eventId, sessionId, sessionDate);
-  const prepareHop = usePrepareEventHop();
   const startHop = useStartEventVenueHop();
   const startTrip = useStartTrip();
   const defaultDepotAddress = useSystemParameter<string>("depot_address", "");
@@ -97,7 +107,7 @@ export function EventTransportRunsStep3({
 
   useEffect(() => {
     if (!runs.length) return;
-    const readyHop = hopRuns.find((r) => canStartRun(r.status));
+    const readyHop = hopRuns.find((r) => canStartHop(r.status));
     if (readyHop) {
       const sameHop =
         selected?.kind === "venue_hop" && selected.hopIndex === readyHop.hopIndex;
@@ -145,21 +155,23 @@ export function EventTransportRunsStep3({
   const submitHop = async () => {
     if (!selected || selected.kind !== "venue_hop") return;
     const card = selected.card;
-    if (!canStartRun(card.status)) {
-      toast.error("This hop is not ready yet.");
+    if (!canStartHop(card.status)) {
+      toast.error(
+        card.status === "ready"
+          ? "Waiting for trip leader to Release group to bus on Event Deliver."
+          : "This hop is not ready yet.",
+      );
       return;
     }
 
-    let tripId = card.tripId;
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
+
+    const tripId = card.tripId;
     if (!tripId) {
-      tripId = await prepareHop.mutateAsync({
-        eventId,
-        eventDaySessionId: sessionId,
-        sessionDate,
-        hopIndex: card.hopIndex!,
-        fromStopId: card.fromStopId!,
-        toStopId: card.toStopId!,
-      });
+      toast.error(
+        "Waiting for trip leader to Release group to bus on Event Deliver.",
+      );
+      return;
     }
 
     startHop.mutate(
@@ -180,8 +192,9 @@ export function EventTransportRunsStep3({
     );
   };
 
-  const submitReturn = () => {
+  const submitReturn = async () => {
     if (!selected || selected.kind !== "return") return;
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
     const returnCard = selected.card;
     if (!canStartRun(returnCard.status)) {
       toast.error("Return home is not ready yet — finish Check-Out first.");
@@ -306,37 +319,75 @@ export function EventTransportRunsStep3({
       </div>
 
       {showHopStart && selected.kind === "venue_hop" && (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 space-y-3">
+        <div
+          className={cn(
+            "rounded-lg border px-4 py-3 space-y-3",
+            canStartHop(selected.card.status)
+              ? "border-emerald-500/40 bg-emerald-500/10"
+              : "border-amber-500/40 bg-amber-500/10",
+          )}
+        >
           <div className="flex items-start gap-2 text-sm">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+            <MapPin
+              className={cn(
+                "mt-0.5 h-4 w-4 shrink-0",
+                canStartHop(selected.card.status)
+                  ? "text-emerald-700 dark:text-emerald-300"
+                  : "text-amber-700 dark:text-amber-300",
+              )}
+            />
             <div>
-              <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+              <p
+                className={cn(
+                  "font-semibold",
+                  canStartHop(selected.card.status)
+                    ? "text-emerald-900 dark:text-emerald-100"
+                    : "text-amber-900 dark:text-amber-100",
+                )}
+              >
                 Starting from: {selected.card.originLabel ?? "Where the group is"}
               </p>
-              <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
-                Bus is assumed at this pickup — board here and go. How it got here does not matter.
-              </p>
+              {canStartHop(selected.card.status) ? (
+                <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
+                  Bus is assumed at this pickup — board here and go. How it got here does not matter.
+                </p>
+              ) : (
+                <p className="text-xs text-amber-800/80 dark:text-amber-200/80">
+                  Waiting for trip leader to Release group to bus on Event Deliver
+                  Programme before this hop can start.
+                </p>
+              )}
               {selected.card.originAddress && (
                 <p className="mt-1 text-xs text-muted-foreground">{selected.card.originAddress}</p>
               )}
             </div>
           </div>
-          <button
-            type="button"
-            disabled={
-              prepareHop.isPending ||
-              startHop.isPending ||
-              !canStartRun(selected.card.status)
-            }
-            onClick={() => void submitHop()}
-            className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
-          >
-            {prepareHop.isPending || startHop.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Start hop manifest"
-            )}
-          </button>
+          {canStartHop(selected.card.status) ? (
+            <button
+              type="button"
+              disabled={
+                startHop.isPending ||
+                !selected.card.tripId ||
+                !!(dutyGate?.needsGap && !dutyGate.approved)
+              }
+              onClick={() => void submitHop()}
+              className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
+            >
+              {startHop.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                "Start hop manifest"
+              )}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled
+              className="flex h-12 w-full items-center justify-center rounded-lg bg-muted text-sm font-bold text-muted-foreground opacity-70"
+            >
+              Waiting for Release
+            </button>
+          )}
         </div>
       )}
 
@@ -361,7 +412,11 @@ export function EventTransportRunsStep3({
           </div>
           <button
             type="button"
-            disabled={startTrip.isPending || !canStartRun(selected.card.status)}
+            disabled={
+              startTrip.isPending ||
+              !canStartRun(selected.card.status) ||
+              !!(dutyGate?.needsGap && !dutyGate.approved)
+            }
             onClick={submitReturn}
             className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
           >

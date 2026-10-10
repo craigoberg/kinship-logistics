@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { Plus, Search, CalendarRange, ArrowRight, Compass, X } from "lucide-react";
+import { Plus, Search, CalendarRange, ChevronRight, Compass, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,7 +9,7 @@ import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils"
 import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
 import type { EventManifest } from "@/lib/data-store";
 import { CreateEventModal } from "@/components/events/create-event-modal";
-import { ManageEventModal } from "@/components/events/manage-event-modal";
+import { ManageEventModal, type ManageEventTabKey } from "@/components/events/manage-event-modal";
 
 export const Route = createFileRoute("/events")({
   ssr: false,
@@ -21,6 +21,7 @@ export const Route = createFileRoute("/events")({
       s.tab === "details" ||
       s.tab === "itinerary" ||
       s.tab === "days" ||
+      s.tab === "live" ||
       s.tab === "report"
         ? s.tab
         : undefined,
@@ -30,7 +31,7 @@ export const Route = createFileRoute("/events")({
       { title: "Event Manage — Yada Connect" },
       {
         name: "description",
-        content: "Office event setup — roster, milestones, finance, and Trip Report for the Yada operations team.",
+        content: "Office event setup — roster, milestones, finance, Live watch, and Trip Report for the Yada operations team.",
       },
     ],
   }),
@@ -110,9 +111,7 @@ function EventsPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [selected, setSelected] = useState<EventManifest | null>(null);
   const [manageOpen, setManageOpen] = useState(false);
-  const [manageTab, setManageTab] = useState<
-    "roster" | "finance" | "details" | "itinerary" | "days" | "report" | undefined
-  >(undefined);
+  const [manageTab, setManageTab] = useState<ManageEventTabKey | undefined>(undefined);
   const [query, setQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<Set<EventStatus>>(
     () => new Set(DEFAULT_STATUS_FILTER),
@@ -302,15 +301,41 @@ function EventsPage() {
                 <th className="px-4 py-2 font-medium">Venue</th>
                 <th className="px-4 py-2 font-medium">Dates</th>
                 <th className="px-4 py-2 text-right font-medium">Ticket price</th>
-                <th className="px-4 py-2 text-right font-medium">Actions</th>
+                <th className="px-4 py-2 text-right font-medium">
+                  <span className="sr-only">Open</span>
+                </th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((e) => {
                 const status = e.status || "Planning";
+                const openManage = () => {
+                  setSelected(e);
+                  setManageTab(undefined);
+                  setManageOpen(true);
+                };
                 return (
-                  <tr key={e.id} className="border-t border-border align-top">
-                    <td className="px-4 py-2 font-semibold">{e.title}</td>
+                  <tr
+                    key={e.id}
+                    className="cursor-pointer border-t border-border align-top hover:bg-muted/40"
+                    onClick={openManage}
+                  >
+                    <td className="px-4 py-2 font-semibold">
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Manage ${e.title}`}
+                        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onKeyDown={(ev) => {
+                          if (ev.key === "Enter" || ev.key === " ") {
+                            ev.preventDefault();
+                            openManage();
+                          }
+                        }}
+                      >
+                        {e.title}
+                      </span>
+                    </td>
                     <td className="px-4 py-2">
                       <span
                         className={cn(
@@ -340,32 +365,28 @@ function EventsPage() {
                     </td>
                     <td className="whitespace-nowrap px-4 py-2 text-right align-middle">
                       <div className="inline-flex flex-nowrap items-center justify-end gap-1.5">
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          className="h-8 min-w-[5.75rem] shrink-0 gap-1 px-3"
-                          onClick={() => {
-                            setSelected(e);
-                            setManageTab(undefined);
-                            setManageOpen(true);
-                          }}
-                        >
-                          Manage
-                          <ArrowRight className="h-3.5 w-3.5" />
-                        </Button>
                         {(e.status === "Open" || e.status === "Confirmed") && (
-                          <Button
-                            asChild
-                            size="sm"
-                            variant="default"
-                            className="h-8 shrink-0 gap-1 px-2 text-xs"
+                          <div
+                            onClick={(ev) => ev.stopPropagation()}
+                            onKeyDown={(ev) => ev.stopPropagation()}
                           >
-                            <Link to="/event-deliver" search={{ eventId: e.id }}>
-                              <Compass className="h-3 w-3" />
-                              Run
-                            </Link>
-                          </Button>
+                            <Button
+                              asChild
+                              size="sm"
+                              variant="default"
+                              className="h-8 shrink-0 gap-1 px-2 text-xs"
+                            >
+                              <Link to="/event-deliver" search={{ eventId: e.id }}>
+                                <Compass className="h-3 w-3" />
+                                Run
+                              </Link>
+                            </Button>
+                          </div>
                         )}
+                        <ChevronRight
+                          className="h-4 w-4 text-muted-foreground"
+                          aria-hidden
+                        />
                       </div>
                     </td>
                   </tr>

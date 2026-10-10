@@ -5,6 +5,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { listEventDaySessions } from "@/lib/api/event-outing";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { effectiveReturnBusRun } from "@/lib/event-bus-runs";
 
 export type EventTransportMode = "bus" | "self";
 
@@ -146,9 +147,45 @@ export type ReturnHomeBusEligible = {
   runs: Map<string, string | null>;
 };
 
+async function rosterReturnRunsByParticipant(
+  eventId: string,
+): Promise<Map<string, string | null>> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select("participant_id, return_bus_run_code")
+    .eq("event_id", eventId)
+    .neq("booking_status", "Cancelled");
+  if (error) {
+    if (
+      isSchemaMismatchError(error) ||
+      String(error.message ?? "").includes("return_bus_run_code")
+    ) {
+      return new Map();
+    }
+    throw error;
+  }
+  const map = new Map<string, string | null>();
+  for (const row of data ?? []) {
+    const r = row as { participant_id: string; return_bus_run_code?: string | null };
+    map.set(r.participant_id, (r.return_bus_run_code ?? "").trim() || null);
+  }
+  return map;
+}
+
+async function resolveSessionEventId(sessionId: string): Promise<string | null> {
+  const { data, error } = await supabase
+    .from("event_day_sessions")
+    .select("event_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (error) throw error;
+  return (data as { event_id?: string } | null)?.event_id ?? null;
+}
+
 /** Eligible return-bus passengers for a session; null when no floor rows yet. */
 export async function listReturnHomeBusEligibleParticipantIds(
   sessionId: string,
+  eventId?: string,
 ): Promise<ReturnHomeBusEligible | null> {
   const { data, error } = await supabase
     .from("event_attendance_log")
@@ -174,6 +211,11 @@ export async function listReturnHomeBusEligibleParticipantIds(
   }
   if (!data?.length) return null;
 
+  const resolvedEventId = eventId?.trim() || (await resolveSessionEventId(sessionId));
+  const rosterRuns = resolvedEventId
+    ? await rosterReturnRunsByParticipant(resolvedEventId)
+    : new Map<string, string | null>();
+
   const ids = new Set<string>();
   const runs = new Map<string, string | null>();
   for (const row of data) {
@@ -186,7 +228,11 @@ export async function listReturnHomeBusEligibleParticipantIds(
     if (!isEligibleForReturnHomeBus(r)) continue;
     ids.add(r.participant_id);
     if ((r.status ?? "").toLowerCase() === "checked_out") {
-      runs.set(r.participant_id, (r.return_bus_run_code ?? "").trim() || null);
+      const floor = (r.return_bus_run_code ?? "").trim() || null;
+      runs.set(
+        r.participant_id,
+        effectiveReturnBusRun(floor, rosterRuns.get(r.participant_id)),
+      );
     }
   }
   return { ids, runs };
@@ -199,7 +245,10 @@ export async function resolveReturnHomeBusEligibleIds(opts: {
   sessionId?: string | null;
 }): Promise<ReturnHomeBusEligible | null> {
   if (opts.sessionId?.trim()) {
-    const byId = await listReturnHomeBusEligibleParticipantIds(opts.sessionId.trim());
+    const byId = await listReturnHomeBusEligibleParticipantIds(
+      opts.sessionId.trim(),
+      opts.eventId,
+    );
     if (byId) return byId;
   }
 
@@ -214,7 +263,10 @@ export async function resolveReturnHomeBusEligibleIds(opts: {
     if (error) throw error;
     const sessionId = (data as { id?: string } | null)?.id ?? null;
     if (sessionId) {
-      const byDate = await listReturnHomeBusEligibleParticipantIds(sessionId);
+      const byDate = await listReturnHomeBusEligibleParticipantIds(
+        sessionId,
+        opts.eventId,
+      );
       if (byDate) return byDate;
     }
   }
@@ -224,7 +276,7 @@ export async function resolveReturnHomeBusEligibleIds(opts: {
   for (const s of [...sessions].sort((a, b) =>
     b.session_date.localeCompare(a.session_date),
   )) {
-    const set = await listReturnHomeBusEligibleParticipantIds(s.id);
+    const set = await listReturnHomeBusEligibleParticipantIds(s.id, opts.eventId);
     if (set) return set;
   }
   return null;
@@ -326,3 +378,131 @@ export async function assessEventReturnTransport(
 
 export const eventReturnTransportKey = (eventId: string) =>
   ["event-return-transport", eventId] as const;
+
+// ============================================================================
+// Bus HOME handover gaps — Day Close / Close trip (not last drop-off)
+// ============================================================================
+
+export type BusHomeHandoverGaps = {
+  participantIds: string[];
+  names: string[];
+  /** At least one non-cancelled venue→home trip exists for this day. */
+  homeStarted: boolean;
+};
+
+export const busHomeHandoverGapsKey = (sessionId: string) =>
+  ["bus-home-handover-gaps", sessionId] as const;
+
+function isHomeReturnTrip(row: {
+  status?: string | null;
+  trip_kind?: string | null;
+  hop_index?: number | null;
+  trip_return?: string | null;
+}): boolean {
+  if (String(row.status ?? "").toLowerCase() === "cancelled") return false;
+  if (row.trip_kind === "event_venue_hop" || row.hop_index != null) return false;
+  const ret = row.trip_return ?? "depot";
+  return ret !== "none";
+}
+
+/**
+ * Checked-out + bus people who are not yet on a HOME Manifest passenger leg.
+ * Self-transport is not a gap (venue checkout is the handover).
+ * A pending or completed drop-off leg counts — do not wait for the last drop.
+ */
+export async function listBusHomeHandoverGaps(opts: {
+  eventId: string;
+  sessionId: string;
+  sessionDate: string;
+}): Promise<BusHomeHandoverGaps> {
+  const roll = await supabase
+    .from("event_attendance_log")
+    .select("participant_id, status, return_transport")
+    .eq("event_day_session_id", opts.sessionId);
+  if (roll.error) throw roll.error;
+
+  const busOut = (roll.data ?? []).filter((row) => {
+    const r = row as {
+      participant_id: string;
+      status: string;
+      return_transport: string | null;
+    };
+    return (
+      (r.status ?? "").toLowerCase() === "checked_out" &&
+      (r.return_transport ?? "").toLowerCase() === "bus"
+    );
+  }) as Array<{ participant_id: string }>;
+
+  if (busOut.length === 0) {
+    return { participantIds: [], names: [], homeStarted: false };
+  }
+
+  const sessionDate = opts.sessionDate.slice(0, 10);
+  const [sessionRes, dateRes] = await Promise.all([
+    supabase
+      .from("transport_trips")
+      .select("id, status, trip_return, trip_kind, hop_index")
+      .eq("event_day_session_id", opts.sessionId),
+    supabase
+      .from("transport_trips")
+      .select("id, status, trip_return, trip_kind, hop_index")
+      .eq("event_id", opts.eventId)
+      .eq("trip_date", sessionDate),
+  ]);
+  if (sessionRes.error) throw sessionRes.error;
+  if (dateRes.error) throw dateRes.error;
+
+  const byId = new Map<string, Record<string, unknown>>();
+  for (const row of [...(sessionRes.data ?? []), ...(dateRes.data ?? [])]) {
+    byId.set((row as { id: string }).id, row as Record<string, unknown>);
+  }
+  const homeTrips = [...byId.values()].filter((row) =>
+    isHomeReturnTrip(row as { status?: string; trip_kind?: string; hop_index?: number; trip_return?: string }),
+  );
+  const homeStarted = homeTrips.length > 0;
+
+  const onManifest = new Set<string>();
+  if (homeTrips.length > 0) {
+    const { data: legs, error: legErr } = await supabase
+      .from("trip_legs")
+      .select("to_participant_id")
+      .in(
+        "trip_id",
+        homeTrips.map((t) => String(t.id)),
+      )
+      .not("to_participant_id", "is", null);
+    if (legErr) throw legErr;
+    for (const leg of legs ?? []) {
+      const pid = (leg as { to_participant_id: string | null }).to_participant_id;
+      if (pid) onManifest.add(pid);
+    }
+  }
+
+  const missingIds = busOut
+    .map((r) => r.participant_id)
+    .filter((id) => !onManifest.has(id));
+
+  if (missingIds.length === 0) {
+    return { participantIds: [], names: [], homeStarted };
+  }
+
+  const { data: people, error: peopleErr } = await supabase
+    .from("participants")
+    .select("id, first_name, last_name")
+    .in("id", missingIds);
+  if (peopleErr) throw peopleErr;
+
+  const nameById = new Map(
+    (people ?? []).map((p) => {
+      const row = p as { id: string; first_name?: string | null; last_name?: string | null };
+      const name = `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "Participant";
+      return [row.id, name];
+    }),
+  );
+
+  return {
+    participantIds: missingIds,
+    names: missingIds.map((id) => nameById.get(id) ?? "Participant"),
+    homeStarted,
+  };
+}

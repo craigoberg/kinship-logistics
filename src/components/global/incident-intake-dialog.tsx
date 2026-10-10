@@ -29,6 +29,7 @@ import { CharacterCountedTextarea } from "@/components/ui/character-counted-text
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { raiseOperationalIncident } from "@/lib/incidents";
+import { fileBoardReport } from "@/lib/incident-board-report";
 import {
   listParticipants,
   listStaffRegistry,
@@ -338,6 +339,8 @@ export function IncidentIntakeDialog({
         contextSuffix ? ` [${contextSuffix}]` : ""
       }`;
 
+      let boardNumber: string | null = null;
+
       const incident = await raiseOperationalIncident({
         incidentType: args.lane === "human" ? "human_operational" : "mechanical",
         severity: SEV_TO_HUB[args.finalSev],
@@ -354,9 +357,17 @@ export function IncidentIntakeDialog({
           args.lane === "human" ? args.noParticipantInvolved : false,
       });
 
+      if (args.lane === "human") {
+        boardNumber = await fileBoardReport({
+          lane: "human",
+          hubSource: "incident",
+          hubRowId: incident.id,
+        });
+      }
+
       if (args.lane === "asset") {
         try {
-          await createMaintenanceItem({
+          const item = await createMaintenanceItem({
             title: args.description.slice(0, 120),
             description: args.description,
             severity: SEV_TO_RYGE[args.finalSev],
@@ -368,6 +379,11 @@ export function IncidentIntakeDialog({
               : context.pathLabel,
             reportedBy: reporterName,
             occurredAt: args.occurredAt,
+          });
+          boardNumber = await fileBoardReport({
+            lane: "asset",
+            hubSource: "maintenance",
+            hubRowId: item.id,
           });
           qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
         } catch (maintErr) {
@@ -392,14 +408,15 @@ export function IncidentIntakeDialog({
         }
       }
 
+      const numberBit = boardNumber ? ` (${boardNumber})` : "";
       if (args.finalSev === "red") {
-        toast.error("🚨 RED incident filed — verbal consultation recorded in ledger.", {
+        toast.error(`🚨 RED incident filed${numberBit} — verbal consultation recorded in ledger.`, {
           duration: 6000,
         });
       } else if (args.finalSev === "yellow") {
-        toast.warning("YELLOW incident filed — workaround captured.");
+        toast.warning(`YELLOW incident filed${numberBit} — workaround captured.`);
       } else {
-        toast.success("GREEN note filed.");
+        toast.success(`GREEN note filed${numberBit}.`);
       }
 
       onFiled?.();
@@ -864,9 +881,10 @@ export function IncidentIntakeDialog({
         <BottomSheet
           open={open}
           onOpenChange={onOpenChange}
+          hideTicket
           title="Incident & Fault Utility"
           description={`Context: ${contextLine}`}
-          className="flex flex-col gap-0 overflow-hidden"
+          className="z-[70] flex flex-col gap-0 overflow-hidden"
         >
           <div className="min-h-0 flex-1 overflow-y-auto pb-2">
             {scrollBody}
@@ -883,7 +901,7 @@ export function IncidentIntakeDialog({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[92dvh] max-w-2xl flex-col overflow-hidden p-0 gap-0">
+        <DialogContent hideTicket className="z-[70] flex max-h-[92dvh] max-w-2xl flex-col overflow-hidden p-0 gap-0">
           <DialogHeader className="shrink-0 border-b px-6 py-4">
             <DialogTitle>Incident &amp; Fault Utility</DialogTitle>
             <DialogDescription>Context: {contextLine}</DialogDescription>

@@ -1172,6 +1172,7 @@ function BaselineSignoffDialog({
 
       await submitBaselineSignoff({
         venue_id: venue.id,
+        managerStaffId,
         managerPin: verifiedManagerPinRef.current,
         evidence_ref: evidence.trim(),
         notes: notes.trim() || null,

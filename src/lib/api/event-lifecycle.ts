@@ -40,7 +40,6 @@ import {
   listEventDaySessions,
 } from "@/lib/api/event-outing";
 import { fetchActualTransportForSessions } from "@/lib/api/event-transport";
-import { archiveGuestParticipantsForEvent } from "@/lib/api/event-guest";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso, formatDate } from "@/lib/utils";
 
@@ -428,7 +427,7 @@ export async function promoteEventStatus(
       throw new Error(`Billing lock ledger write failed — event NOT closed. Retry. (${(e as Error).message})`);
     }
     patch.billing_locked = true;
-    patch.closed_at = new Date().toISOString();
+    patch.closed_at = operationalNowIso();
     patch.closed_by_id = staffId;
   }
 
@@ -452,22 +451,8 @@ export async function promoteEventStatus(
     return { newStatus: next };
   }
 
-  // BL-098 — archive guests after Close; never roll back billing lock.
-  try {
-    const archive = await archiveGuestParticipantsForEvent(eventId);
-    return {
-      newStatus: next,
-      guestsArchived: archive.archivedIds.length,
-      guestsSkipped: archive.skippedIds.length,
-    };
-  } catch (e) {
-    return {
-      newStatus: next,
-      guestsArchived: 0,
-      guestsSkipped: 0,
-      guestArchiveError: (e as Error).message,
-    };
-  }
+  // Guests stay on file. Office archives them from the care profile after follow-up.
+  return { newStatus: next };
 }
 
 /** Close a specific event_day_session (orderly or incident). Manager-only. */
@@ -602,6 +587,12 @@ export interface TripReport {
   venueStops: TripReportVenueStop[];
   daySessions: TripReportDaySession[];
   roster: TripReportRosterEntry[];
+  support: Array<{
+    displayName: string;
+    roleLabel: string;
+    outboundTransportMode: string;
+    returnTransportMode: string;
+  }>;
   finance: TripReportFinance;
 
   rosterSummary: {
@@ -795,6 +786,18 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
   const status =
     rawStatus === "Closed" && !allSessionsClosed ? "Open" : rawStatus;
 
+  const { listEventSupportBookings } = await import("@/lib/api/event-support");
+  const { supportPersonKindLabel } = await import("@/lib/support-person");
+  const supportBookings = await listEventSupportBookings(eventId);
+  const support = supportBookings
+    .filter((s) => s.bookingStatus !== "Cancelled")
+    .map((s) => ({
+      displayName: s.displayName,
+      roleLabel: supportPersonKindLabel(s.personKind),
+      outboundTransportMode: s.outboundTransportMode,
+      returnTransportMode: s.returnTransportMode,
+    }));
+
   return {
     eventId,
     title: ev.title as string,
@@ -803,10 +806,11 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
     startDate: ev.start_date as string,
     endDate: (ev.end_date as string | null) ?? null,
     primaryVenueName: vName,
-    generatedAt: new Date().toISOString(),
+    generatedAt: operationalNowIso(),
     venueStops: stops,
     daySessions,
     roster,
+    support,
     finance: {
       ticketRevenue: finance.ticketRevenue,
       vendorExpenses: finance.vendorExpenses,

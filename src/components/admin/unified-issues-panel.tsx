@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, Loader2 } from "lucide-react";
@@ -20,7 +20,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
@@ -31,7 +31,6 @@ import {
   deriveIssueWorkflowStatus,
   HUB_WORKFLOW_STATUS_BADGE,
   HUB_WORKFLOW_STATUS_LABEL,
-  issueDeferredUntil,
   type HubWorkflowStatus,
 } from "@/lib/governance/hub-workflow-status";
 import { useIssueUrgencyParams } from "@/hooks/use-system-parameters";
@@ -46,17 +45,25 @@ import type {
 } from "@/lib/api/unified-issues";
 import { ManageIssueDialog } from "./resolve-issue-dialog";
 import { sortUnifiedIssuesByRygeThenExpiry } from "@/lib/governance-sort";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
+import {
+  isPublicFormHubText,
+  PUBLIC_WEB_HUB_BADGE,
+} from "@/lib/governance/public-form-hub";
+
+type CategoryFilter = UnifiedIssueSource | "all" | "public_web";
 
 interface Props {
   onManageRenewal?: (assetId: string) => void;
+  /** Deep-link from global emergency strip (`/governance?issue=`). */
+  openIssueId?: string | null;
 }
 
-const CATEGORY_OPTIONS: Array<{ value: UnifiedIssueSource | "all"; label: string }> = [
+const CATEGORY_OPTIONS: Array<{ value: CategoryFilter; label: string }> = [
   { value: "all", label: "All categories" },
   { value: "day_centre", label: "Day Centre" },
   { value: "event", label: "Trip Day" },
   { value: "incident", label: "Incident" },
+  { value: "public_web", label: "Public web" },
   { value: "escalation", label: "Escalation" },
 ];
 
@@ -113,9 +120,7 @@ function IssuesList({
     staleTime: 30_000,
   });
   const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
-  const [categoryFilter, setCategoryFilter] = useState<UnifiedIssueSource | "all">(
-    "all",
-  );
+  const [categoryFilter, setCategoryFilter] = useState<CategoryFilter>("all");
   const [severityFilter, setSeverityFilter] = useState<
     "all" | "red" | "yellow" | "green"
   >("all");
@@ -125,7 +130,14 @@ function IssuesList({
   const visible = useMemo(() => {
     const needle = search.trim().toLowerCase();
     const filtered = all.filter((i) => {
-      if (categoryFilter !== "all" && i.source !== categoryFilter) return false;
+      const publicWeb = isPublicFormHubText(i.description);
+      if (categoryFilter === "public_web") {
+        if (!publicWeb) return false;
+      } else if (categoryFilter === "incident") {
+        if (i.source !== "incident" || publicWeb) return false;
+      } else if (categoryFilter !== "all" && i.source !== categoryFilter) {
+        return false;
+      }
       if (severityFilter !== "all" && i.severity !== severityFilter) return false;
       if (needle) {
         const hay = `${i.title} ${i.description} ${i.category} ${i.subCategory ?? ""}`.toLowerCase();
@@ -166,7 +178,7 @@ function IssuesList({
           <Label className="text-xs text-muted-foreground">Category</Label>
           <Select
             value={categoryFilter}
-            onValueChange={(v) => setCategoryFilter(v as UnifiedIssueSource | "all")}
+            onValueChange={(v) => setCategoryFilter(v as CategoryFilter)}
           >
             <SelectTrigger className="h-8 w-40">
               <SelectValue />
@@ -238,10 +250,18 @@ function IssuesList({
       ) : (
         <div className="space-y-2">
           {visible.map((i) => {
-            const { location, reporter } = hubIssueContextMeta(i);
+            const { location, reporter, reference, referenceLabel } = hubIssueContextMeta(i);
             const updatedAt = issueUpdatedAt(i);
             const workflow = deriveIssueWorkflowStatus(i, reviewStartedKeys);
-            const deferredUntil = issueDeferredUntil(i);
+            const deferredUntil =
+              i.deferredUntil &&
+              i.status !== "resolved" &&
+              i.status !== "resolved_approved" &&
+              (i.source === "day_centre" || i.source === "event"
+                ? i.status === "deferred"
+                : true)
+                ? i.deferredUntil
+                : null;
             const bodyLines = unifiedIssueBodyLines(i);
             const nowMs = Date.now();
             const urgency = tab === "resolved" ? "none" : computeHubUrgency({
@@ -264,7 +284,13 @@ function IssuesList({
                 badges={
                   <>
                     {severityBadge(i.severity)}
-                    <Badge className={CATEGORY_BADGE[i.source]}>
+                    <Badge
+                      className={
+                        isPublicFormHubText(i.description)
+                          ? PUBLIC_WEB_HUB_BADGE
+                          : CATEGORY_BADGE[i.source]
+                      }
+                    >
                       {i.sourceLabel}
                     </Badge>
                   </>
@@ -278,8 +304,8 @@ function IssuesList({
                 meta={
                   <HubListMetaRows
                     rows={[
-                      ...(deferredUntil && workflow === "deferred"
-                        ? [{ label: "Deferred to", value: deferredUntil }]
+                      ...(reference
+                        ? [{ label: referenceLabel ?? "Ref", value: reference }]
                         : []),
                       { label: "Location", value: location },
                       { label: "Reported by", value: reporter ?? "Unknown staff" },
@@ -295,6 +321,27 @@ function IssuesList({
                         label: "Updated",
                         value: <FormattedDateTime value={updatedAt} />,
                       },
+                      ...(deferredUntil
+                        ? [
+                            {
+                              label: "Deferred until",
+                              value: <FormattedDeferredUntil value={deferredUntil} />,
+                            },
+                          ]
+                        : []),
+                      ...(workflow === "resolved" && i.resolvedAt
+                        ? [
+                            {
+                              label: "Resolved",
+                              value: (
+                                <FormattedResolvedAt
+                                  resolved={i.resolvedAt}
+                                  openedAt={i.occurredAt}
+                                />
+                              ),
+                            },
+                          ]
+                        : []),
                     ]}
                   />
                 }
@@ -307,7 +354,7 @@ function IssuesList({
   );
 }
 
-export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
+export function UnifiedIssuesPanel({ onManageRenewal, openIssueId }: Props) {
   const [managing, setManaging] = useState<UnifiedIssue | null>(null);
   const [managingWorkflow, setManagingWorkflow] = useState<HubWorkflowStatus>("open");
   const [tab, setTab] = useState<UnifiedIssueTab>("active");
@@ -318,6 +365,10 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
   });
   const reviewStartedKeys = reviewKeysQ.data ?? new Set<string>();
   const activeIssuesQ = useUnifiedIssues("active");
+  const deepLink = !!openIssueId;
+  const deferredIssuesQ = useUnifiedIssues("deferred", { enabled: deepLink });
+  const resolvedIssuesQ = useUnifiedIssues("resolved", { enabled: deepLink });
+  const openedDeepLinkRef = useRef<string | null>(null);
 
   useRealtimeInvalidate({
     table: "site_issues_register",
@@ -336,29 +387,52 @@ export function UnifiedIssuesPanel({ onManageRenewal }: Props) {
     queryKeys: [unifiedIssuesKey],
   });
 
-  const openHubIssueById = (hubIssueId: string) => {
-    const match = (activeIssuesQ.data ?? []).find(
-      (i) =>
-        (i.source === "day_centre" || i.source === "event") &&
-        i.sourceRowId === hubIssueId,
-    );
-    if (!match) {
-      toast.message("Issue not in Active list", {
-        description: "Hard refresh or check Deferred. It may still be loading.",
-      });
+  useEffect(() => {
+    if (!openIssueId) {
+      openedDeepLinkRef.current = null;
       return;
     }
-    setTab("active");
-    setManaging(match);
-    setManagingWorkflow(deriveIssueWorkflowStatus(match, reviewStartedKeys));
-  };
+    if (openedDeepLinkRef.current === openIssueId) return;
+    const pools: { tab: "active" | "deferred" | "resolved"; rows: typeof activeIssuesQ.data; loading: boolean }[] = [
+      { tab: "active", rows: activeIssuesQ.data, loading: activeIssuesQ.isLoading },
+      { tab: "deferred", rows: deferredIssuesQ.data, loading: deferredIssuesQ.isLoading },
+      { tab: "resolved", rows: resolvedIssuesQ.data, loading: resolvedIssuesQ.isLoading },
+    ];
+    if (pools.some((pool) => pool.loading)) return;
+    const found = pools
+      .map((pool) => ({
+        tab: pool.tab,
+        issue: (pool.rows ?? []).find(
+          (i) =>
+            (i.source === "day_centre" || i.source === "event") &&
+            i.sourceRowId === openIssueId,
+        ),
+      }))
+      .find((pool) => pool.issue);
+    if (!found?.issue) {
+      toast.message("Hub issue not found", {
+        description: "It is not in Active, Deferred, or Resolved.",
+      });
+      openedDeepLinkRef.current = openIssueId;
+      return;
+    }
+    setTab(found.tab);
+    setManaging(found.issue);
+    setManagingWorkflow(deriveIssueWorkflowStatus(found.issue, reviewStartedKeys));
+    openedDeepLinkRef.current = openIssueId;
+  }, [
+    openIssueId,
+    activeIssuesQ.isLoading,
+    activeIssuesQ.data,
+    deferredIssuesQ.isLoading,
+    deferredIssuesQ.data,
+    resolvedIssuesQ.isLoading,
+    resolvedIssuesQ.data,
+    reviewStartedKeys,
+  ]);
 
   return (
     <div className="space-y-4">
-      <EmergencyOpsBanner
-        variant="hub"
-        onOpenHubIssue={openHubIssueById}
-      />
       <Tabs value={tab} onValueChange={(v) => setTab(v as UnifiedIssueTab)}>
         <TabsList>
           <TabsTrigger value="active">Active</TabsTrigger>

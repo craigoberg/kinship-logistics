@@ -7,7 +7,7 @@ alwaysApply: true
 
 **User directive:** Quality over speed. Spend credits validating on live Supabase so the user spends time on **new features**, not debugging quick-and-dirty builds.
 
-PIN terminal uses the **anon** publishable key. Every write path needs anon grants + RLS verified on **live** DB.
+PIN terminals use the **publishable** key **plus a day-login JWT**. Operational writes need `authenticated` grants + RLS (not `anon`). Public website pages/forms are the only remaining anon surface (`PUBLIC_ANON_SELECT_TABLES` + `submit_public_form`). Server jobs (backup, SMS, ticket notify) use **service_role**.
 
 This cadence applies to **every implementation** — not backlog items only.
 
@@ -17,7 +17,7 @@ This cadence applies to **every implementation** — not backlog items only.
 
 ### A. Agent ships code + SQL (if any)
 
-1. Trace one user action end-to-end (UI → API → table/RPC → **anon** RLS).
+1. Trace one user action end-to-end (UI → API → table/RPC → **authenticated** RLS, or public RPC for `/public` forms).
 2. Probe live DB **before** handoff when touching schema, RPCs, or saves.
 3. Provide SQL file(s) under `docs/sql/` (idempotent, legacy-safe).
 4. Provide **post-migration validation queries** (see below).
@@ -81,7 +81,8 @@ Use **Shell** + network. Credentials from `.env` (`VITE_SUPABASE_URL`, `VITE_SUP
 | Columns exist | `GET /rest/v1/<table>?select=<cols>&limit=1` |
 | Keys / seed data | Filtered `select` on expected rows |
 | RPC exists | `POST /rest/v1/rpc/<name>` or catalog query |
-| Anon can write | Policy + grant check; test pattern from prior fixes |
+| Anon blocked on PII | `GET /rest/v1/participants?select=id&limit=1` with publishable key only — must **not** return rows |
+| Public CMS still readable | `GET /rest/v1/cms_pages?select=slug,status&status=eq.published&limit=1` with publishable key |
 
 `docs/architecture/live_supabase_schema.json` is a hint — **live queries win**.
 
@@ -89,11 +90,12 @@ Never assume column names (`full_name`, `auth_user_id`, etc.) — verify on live
 
 ---
 
-## Anon write checklist
+## Public-surface checklist (anon)
 
-- [ ] `GRANT` to `anon`
-- [ ] Permissive RLS for `anon` OR `SECURITY DEFINER` RPC granted to `anon`
-- [ ] `authenticated`-only policies **break** PIN sessions
+- [ ] Anon **SELECT** only on `PUBLIC_ANON_SELECT_TABLES` (published CMS + enabled public form defs)
+- [ ] Anon **EXECUTE** only `submit_public_form` (no anon INSERT on `operational_incidents`)
+- [ ] Operational / PII tables: **no** `GRANT` to `anon`
+- [ ] Server routes that read ops data: **service_role**, not publishable key
 
 ---
 

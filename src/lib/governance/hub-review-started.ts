@@ -19,6 +19,40 @@ export function findHubReviewStartedNote<T extends HubReviewNoteLike>(
   return null;
 }
 
+/**
+ * Elapsed or remaining span. `40m`, `3h 0m`, `2d 4h 15m`.
+ * Days always keep hours and minutes, including zeros.
+ */
+export function formatSpanMinutes(totalMins: number): string {
+  const minsTotal = Math.max(0, Math.floor(totalMins));
+  const days = Math.floor(minsTotal / 1440);
+  const hours = Math.floor((minsTotal % 1440) / 60);
+  const mins = minsTotal % 60;
+  if (days > 0) return `${days}d ${hours}h ${mins}m`;
+  if (hours > 0) return `${hours}h ${mins}m`;
+  return `${mins}m`;
+}
+
+/**
+ * Time left until a defer deadline. Past the deadline: `overdue`.
+ * `nowMs` must be the operational clock (SIM-aware).
+ */
+export function formatDeferRemaining(untilIso: string, nowMs: number): string {
+  const until = Date.parse(untilIso);
+  if (!Number.isFinite(until)) return "—";
+  const ms = until - nowMs;
+  if (ms <= 0) return "overdue";
+  return formatSpanMinutes(ms / 60_000);
+}
+
+/** How long a ticket was open: occurred (or logged) through resolved. */
+export function formatOpenDuration(fromIso: string, toIso: string): string {
+  const from = Date.parse(fromIso);
+  const to = Date.parse(toIso);
+  if (!Number.isFinite(from) || !Number.isFinite(to)) return "—";
+  return formatSpanMinutes(Math.max(0, to - from) / 60_000);
+}
+
 export function formatHubWaitDuration(fromIso: string, toIso: string): string {
   const ms = Math.max(0, Date.parse(toIso) - Date.parse(fromIso));
   const mins = Math.floor(ms / 60_000);

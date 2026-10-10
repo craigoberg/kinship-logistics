@@ -20,6 +20,7 @@ import {
 } from "@/lib/data-store";
 import { supabase } from "@/integrations/supabase/client";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 const MIN_NOTES = 20;
 
@@ -55,7 +56,7 @@ export function UngroundVehicleModal({ escalation, onClose, onUngrounded }: Prop
           status: "resolved_approved",
           resolution_notes: trimmed,
           resolved_by: staffId,
-          resolved_at: new Date().toISOString(),
+          resolved_at: operationalNowIso(),
         })
         .eq("id", escalation.id);
       if (error) throw error;

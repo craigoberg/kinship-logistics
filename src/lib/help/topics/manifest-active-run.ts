@@ -16,6 +16,8 @@ export const manifestActiveRunTopic: HelpTopic = {
     "leg",
     "boarding",
     "return",
+    "maps",
+    "directions",
   ],
   menus: ["manifest"],
   roles: ["driver", "support_worker", "manager", "assistant_manager"],
@@ -23,11 +25,11 @@ export const manifestActiveRunTopic: HelpTopic = {
   steps: [
     {
       heading: "Work the current leg",
-      body: "The active leg shows from → to. Use Depart Stop when leaving, Arrive when you reach the next stop. Maps deep-link is available while en route.",
+      body: "The active leg shows from → to. Use Depart Stop when leaving, Arrive when you reach the next stop. While en route, Open in Google Maps uses the start and end addresses. The app does not calculate kilometres from the phone’s GPS.",
     },
     {
       heading: "Confirm passengers",
-      body: "On outbound pickups, confirm boarding as required. On return/drop-off runs, complete On Bus / at drop-off checks before the next Depart unlocks.",
+      body: "Everyone on the run boards — participants, staff, volunteers and carers — unless marked not travelling (same Skip path as a client). On outbound pickups, confirm boarding at each stop. On return/drop-off runs and venue hops, complete the boarding roll before Depart unlocks. Overnight morning/evening rolls are participants only.",
     },
     {
       heading: "Cancel pickup or no-show",
@@ -35,7 +37,7 @@ export const manifestActiveRunTopic: HelpTopic = {
     },
     {
       heading: "Log leg distance",
-      body: "After a leg, enter logged km on the numeric pad (half-km steps). Totals feed the Close Run odometer suggestion.",
+      body: "After a leg, enter the kilometres from the odometer on the numeric pad (half-km steps). Totals feed the Close Run odometer suggestion. There is no GPS estimate.",
     },
     {
       heading: "Close Run",

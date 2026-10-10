@@ -1,0 +1,32 @@
+---
+description: Everyone on a bus run/hop boards unless marked not travelling; overnight rolls stay participants-only
+alwaysApply: true
+---
+
+# No one left behind (bus boarding)
+
+**Locked 2026-09-03.** Spec: GUARDRAILS §11.10 / §12.4.3.
+
+## Bus boarding (every run)
+
+Anyone **on that bus** must appear on the boarding / head-count list until they are **on the bus** or **not travelling** (same Skip / not-travelling path as a participant).
+
+Includes participants, staff, volunteers, and carers. Day Centre morning/afternoon, event Transport IN / HOME, and **every multi-day venue hop**.
+
+Do **not** filter boarding to `toParticipantId` / `participant_id` only.
+
+```ts
+// ❌ BAD — staff/volunteer/carer vanish from the head count
+legs.filter((l) => l.toParticipantId != null)
+
+// ✅ GOOD — same person test as isPassengerPickupLeg / event_bus_manifest
+leg.toParticipantId ?? leg.toStaffId ?? leg.toCarerId
+```
+
+Off the bus only when explicitly **not travelling** (or cancelled pickup / Left trip) — not because of role.
+
+## Not boarding — overnight / floor rolls
+
+**Morning roll, evening/curfew roll, meal, meds:** participants (clients) only. Do not add staff/volunteers/carers to those rolls to “match” boarding.
+
+Support people still have their own **floor check-in** and **own Manifest stop** when they travel. That is not overnight roll call.

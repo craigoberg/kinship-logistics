@@ -80,9 +80,16 @@ export function EmergencyOpsBanner(props: {
         )}
       >
         <div className="flex flex-wrap items-center gap-2">
-          <Siren className="h-4 w-4 shrink-0" />
+          <Siren
+            className={cn("h-4 w-4 shrink-0", !isDrill && "animate-pulse")}
+          />
           <div className="min-w-0 flex-1">
-            <p className="text-[11px] font-black uppercase tracking-wider">
+            <p
+              className={cn(
+                "text-[11px] font-black uppercase tracking-wider",
+                !isDrill && "animate-pulse",
+              )}
+            >
               {isDrill ? "DRILL" : "LIVE EMERGENCY"} · {emergency.severity}
             </p>
             <p className="truncate text-sm font-semibold">
@@ -179,6 +186,8 @@ function MusterSheet(props: {
   });
 
   const lines = musterQ.data ?? [];
+  const isRed = emergency.severity === "red";
+  const isDrill = emergency.mode === "drill";
   const counts = useMemo(() => {
     let accounted = 0;
     let missing = 0;
@@ -191,14 +200,35 @@ function MusterSheet(props: {
     return { accounted, missing, expected };
   }, [lines]);
 
+  const title = isRed
+    ? isDrill
+      ? "Drill — evacuate & muster"
+      : "Evacuate — muster at muster point"
+    : isDrill
+      ? "Drill — light muster"
+      : "Standby — light muster";
+
+  const description = isRed
+    ? "Move people in care to the muster point, then mark each person Accounted or Missing. This is the care roll — not a whole-site visitor list."
+    : "Account for people in care while on standby. Escalate to Red when you need a full evacuate-to-muster-point call.";
+
+  const emptyHint = isRed
+    ? "No people-in-care roll was linked when this emergency was activated (e.g. opened from Dashboard/Manifest without an open Day Centre or trip day). Physically evacuate to the muster point using centre procedure; use Stand down when the incident is complete. To get a tap list next time, activate from Day Centre or Event Deliver with people checked in."
+    : "No roll names to muster for this context (e.g. activated without an open Day Centre or trip day). Use Stand down when the drill/incident is complete.";
+
   return (
     <BottomSheet
       open={open}
       onOpenChange={onOpenChange}
-      title="Light muster"
-      description="Account for people in care — not a full park evacuation."
+      title={title}
+      description={description}
     >
       <div className="space-y-3 pb-4">
+        {isRed ? (
+          <p className="rounded-md border border-red-600/40 bg-red-600/15 px-3 py-2 text-sm font-semibold text-red-950 dark:text-red-100">
+            EVACUATE TO MUSTER POINT — then tick Accounted / Missing below.
+          </p>
+        ) : null}
         <p className="text-xs text-muted-foreground">
           Accounted {counts.accounted} · Missing {counts.missing} · Still expected{" "}
           {counts.expected}
@@ -206,10 +236,7 @@ function MusterSheet(props: {
         {musterQ.isLoading ? (
           <Loader2 className="mx-auto h-6 w-6 animate-spin text-muted-foreground" />
         ) : lines.length === 0 ? (
-          <p className="text-sm text-muted-foreground">
-            No roll names to muster for this context (e.g. Manifest-only). Use
-            Stand down when the drill/incident is complete.
-          </p>
+          <p className="text-sm text-muted-foreground">{emptyHint}</p>
         ) : (
           <ul className="space-y-2">
             {lines.map((line) => (

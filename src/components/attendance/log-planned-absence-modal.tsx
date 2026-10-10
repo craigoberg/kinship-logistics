@@ -31,6 +31,7 @@ import {
 } from "@/hooks/use-supabase-data";
 import { formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { DatePicker } from "@/components/ui/date-picker";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
 
 interface Props {
   open: boolean;
@@ -40,11 +41,6 @@ interface Props {
 }
 
 const EXCEPTION_STATUSES: AttendanceStatus[] = ["Sick", "Cancelled", "Suspended"];
-
-function todayIso(): string {
-  const d = new Date();
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
 
 /**
  * Single-date Sick / Cancelled or multi-date Suspension exception writer.
@@ -60,8 +56,9 @@ export function LogPlannedAbsenceModal({
   participantId,
   participantName,
 }: Props) {
-  const [startDate, setStartDate] = useState(todayIso());
-  const [endDate, setEndDate] = useState(todayIso());
+  const today = useOperationalTodayIso();
+  const [startDate, setStartDate] = useState(today);
+  const [endDate, setEndDate] = useState(today);
   const [status, setStatus] = useState<AttendanceStatus>("Sick");
   const [reason, setReason] = useState("");
   const [dirty, setDirty] = useState(false);
@@ -70,14 +67,13 @@ export function LogPlannedAbsenceModal({
 
   useEffect(() => {
     if (open) {
-      const t = todayIso();
-      setStartDate(t);
-      setEndDate(t);
+      setStartDate(today);
+      setEndDate(today);
       setStatus("Sick");
       setReason("");
       setDirty(false);
     }
-  }, [open]);
+  }, [open, today]);
 
   const dates = useMemo(() => eachDateInRange(startDate, endDate), [startDate, endDate]);
   const pending = singleInsert.isPending || bulkInsert.isPending;

@@ -1,0 +1,40 @@
+---
+description: Reuse the shared routine for the same operator action so one change updates every screen
+alwaysApply: true
+---
+
+# Shared routines — change one, change all
+
+The same operator action uses one component and one check. Screens differ by who is listed and which duties apply. They do not get a private copy of the control.
+
+**Look:** `docs/architecture/UI-STYLE-GUIDE.md` and `.cursor/rules/ui-style-guide.mdc`.
+
+## Before adding a control or a check
+
+1. Search for the existing routine (table below).
+2. Call it. Pass the person, place, and duty into that routine.
+3. If it is missing a case, extend the shared routine. A second dialog, pad, or PIN test beside it is a fork.
+4. After fixing a shared routine, search every caller. A local gate in front of the shared call is how Close Run kept rejecting a 6-digit PIN after the shared verifier already accepted it.
+
+## Canonical routines
+
+| Action | Use |
+|---|---|
+| PIN capture | `PinPad` / `PinEntryDialog` / `PinEntryTrigger` |
+| PIN check | `verifyStaffPin`, `verifyOperatorPin`, `verifyNamedStaffPin`, `verifyManagerPin` in `src/components/auth/pin-verify.ts` (server: `pin-auth.server.ts`) |
+| Set or change a PIN | Staff/carer form and `change-pin-dialog` (6 digits). Do not write `pin_hash` from the browser. |
+| Floor Red | `LogAnomalyModal` → `VerbalConsultationDialog` |
+| Open issue card | `IssueRegisterCard`. Day Centre passes a site issue. Manifest passes the same card and keeps the vehicle filter. |
+| Manager approval | `verifyManagerPin` for the manager named on the form |
+| Day Centre check-in / check-out | One roll pattern for clients and support (`floorRollStatus`, `FloorRollOverdueBadges`, `FloorRollUndoButton`). Person type changes the row and duties, not the buttons. Non-clients record expected, arrived, and left. They do not take yellow or red for a late arrival or departure. |
+| Dates and “today” | `operationalNowIso()` / `todayLocalIso()` |
+
+## Ask when nothing shared exists
+
+Stop and ask, the same way the UI style guide asks for an unlisted pattern. Name the existing routine you would extend, and the one-off you would otherwise build.
+
+## Do not
+
+- Copy check-in, Red, or PIN steps into a new file because the person is staff, a volunteer, or a carer.
+- Add a local length test, hash compare, or “4-digit” label that disagrees with the shared verifier.
+- Treat “the pad is shared” as done while the screen still checks the PIN itself.

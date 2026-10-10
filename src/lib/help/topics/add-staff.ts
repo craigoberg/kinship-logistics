@@ -5,7 +5,7 @@ export const addStaffTopic: HelpTopic = {
   kind: "howto",
   title: "Staff — add personnel and set role / PIN",
   summary:
-    "Managers add staff and volunteers in Staff → Add personnel with role, system access level, and a 4-digit PIN.",
+    "Managers add staff and volunteers in Staff → Add personnel with role, system access level, and a 6-digit PIN.",
   keywords: [
     "staff",
     "personnel",
@@ -33,16 +33,20 @@ export const addStaffTopic: HelpTopic = {
       body: "Enter Full name, Role / title, and SYSTEM ACCESS LEVEL (Manager, Assistant Manager, Support Worker, Driver, etc.). Optional: Phone, Email, Street address; keep Active on for working staff.",
     },
     {
-      heading: "4-digit PIN",
-      body: "Enter a 4-digit PIN on the Pin pad (required for new personnel). Used for terminal sign-in, med witness, and step-up dialogs. Guardian PINs cannot log into the staff terminal.",
+      heading: "6-digit PIN",
+      body: "Enter a 6-digit PIN on the Pin pad (required for new personnel). Used for terminal sign-in, med witness, and step-up dialogs. Guardian PINs cannot log into the staff terminal.",
     },
     {
       heading: "Save and verify",
       body: "Tap Add personnel. Have the person sign in on Auth with their PIN (after day email login when enabled). Managers can reopen a row later via Edit personnel / Save changes.",
     },
     {
+      heading: "Staff onboarding pack",
+      body: "Print a blank staff or volunteer pack first if you need paper — no draft is created. Then Staff onboarding or Volunteer onboarding to type it in. The form is local until Save draft. The inbox is Hub → Onboarding (not Admin).",
+    },
+    {
       heading: "Certifications later",
-      body: "WWC, First Aid, SFH, licence and similar certs are tracked via compliance / Hub after intake — get identity and PIN correct first.",
+      body: "After identity and PIN, add certificates and orientations from the Lookups list (Admin → Lookups → Certificates & orientations). You pick a name; you do not type one. Assign Duty roles separately from System access. Hub still tracks expiry.",
     },
   ],
 };

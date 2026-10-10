@@ -15,10 +15,7 @@ import {
   useSystemParameter,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
+import { isManagerProfile } from "@/lib/governance/is-manager";
 
 /**
  * Depot + Day Centre default addresses — shown at the top of the
@@ -32,7 +29,7 @@ export function TransportSiteAddressesPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const savedDepot = useSystemParameter<string>("depot_address", "");
   const savedCentre = useSystemParameter<string>("day_centre_address", "");

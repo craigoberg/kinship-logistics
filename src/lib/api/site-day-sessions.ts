@@ -1,10 +1,20 @@
 import { supabase } from "@/integrations/supabase/client";
 import {
+  DEFAULT_STAFF_UUID,
+  getActiveUserProfile,
   resolveStaffIdWithFallback,
   verifyStaffPin,
 } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
-import { getSydneyIsoDate, todaysSydneyDayCode } from "@/lib/operational-time";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import {
+  dateAtSydneyMidday,
+  getSydneyDayIndex,
+  getSydneyIsoDate,
+  todaysSydneyDayCode,
+} from "@/lib/operational-time";
+import { canUseDevTools } from "@/lib/dev-tools-access";
 import { getOperationalTodayIso, operationalNowIso } from "@/lib/operational-clock";
 
 // ---------------------------------------------------------------------------
@@ -70,6 +80,8 @@ export interface SiteDaySession {
   leaderDecision: HandshakeDecision | null;
   leaderAuthStaffId: string | null;
   leaderAuthAt: string | null;
+  floorLeaderStaffId: string | null;
+  floorLeaderSince: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -91,6 +103,8 @@ interface SiteDaySessionRow {
   leader_decision: HandshakeDecision | null;
   leader_auth_staff_id: string | null;
   leader_auth_at: string | null;
+  floor_leader_staff_id?: string | null;
+  floor_leader_since?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -113,13 +127,79 @@ function rowToSession(r: SiteDaySessionRow): SiteDaySession {
     leaderDecision: r.leader_decision,
     leaderAuthStaffId: r.leader_auth_staff_id,
     leaderAuthAt: r.leader_auth_at,
+    floorLeaderStaffId: r.floor_leader_staff_id ?? null,
+    floorLeaderSince: r.floor_leader_since ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
 }
 
+const FLOOR_LEADER_SQL = "Run docs/sql/2026-10-04_floor_leader.sql on this database, then hard-refresh.";
+
+export async function assignFloorLeader(input: {
+  sessionId: string;
+  staffId: string;
+  staffName: string;
+  previousName: string | null;
+}): Promise<SiteDaySession> {
+  const nowIso = operationalNowIso();
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .update({
+      floor_leader_staff_id: input.staffId,
+      floor_leader_since: nowIso,
+    })
+    .eq("id", input.sessionId)
+    .select("*")
+    .single();
+  if (error) {
+    if (isSchemaMismatchError(error)) throw new Error(FLOOR_LEADER_SQL);
+    throw new Error(error.message);
+  }
+  const next = rowToSession(data as SiteDaySessionRow);
+  try {
+    const summary = input.previousName
+      ? `${input.previousName} handed the floor to ${input.staffName}.`
+      : `${input.staffName} is Floor Leader.`;
+    const metadata = await withAuditActorMeta({
+      location: "Day Centre",
+      session_id: next.id,
+      person_name: input.staffName,
+      previous_name: input.previousName,
+      summary,
+    });
+    await writeToLedger({
+      staff_id: input.staffId,
+      category: "CENTRE",
+      severity: "INFO",
+      action_type: "site_day.floor_leader",
+      metadata,
+    });
+  } catch (err) {
+    console.warn("[assignFloorLeader] activity log", err);
+  }
+  return next;
+}
+
 function todayIso(): string {
   return getOperationalTodayIso();
+}
+
+/** Weekday and clock for a centre session, falling back to operational today. */
+export async function centreSessionClock(sessionId: string): Promise<{
+  dateIso: string;
+  at: Date;
+  dow: number;
+}> {
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .select("session_date")
+    .eq("id", sessionId)
+    .maybeSingle();
+  const stored = (data as { session_date?: string } | null)?.session_date;
+  const dateIso = !error && stored ? String(stored) : getOperationalTodayIso();
+  const at = dateAtSydneyMidday(dateIso);
+  return { dateIso, at, dow: getSydneyDayIndex(at) };
 }
 
 /**
@@ -146,9 +226,11 @@ async function siteLedger(
   action: string,
   metadata: Record<string, unknown>,
   severity: "RED" | "YELLOW" | "GREEN" | "INFO" = "INFO",
+  opts?: { automated?: boolean },
 ): Promise<void> {
   try {
-    const staffId = await resolveStaffIdWithFallback();
+    const automated = opts?.automated === true;
+    const staffId = automated ? DEFAULT_STAFF_UUID : await resolveStaffIdWithFallback();
     const gps = await tryGetGps();
     await writeToLedger({
       staff_id: staffId,
@@ -157,7 +239,11 @@ async function siteLedger(
       action_type: `site_day.${action}`,
       gps_lat: gps?.lat ?? null,
       gps_lng: gps?.lng ?? null,
-      metadata,
+      metadata: {
+        location: "Day Centre",
+        ...metadata,
+        ...(automated ? { automated: true, actor_name: "System" } : {}),
+      },
     });
   } catch (err) {
     console.error("[site_day.ledger] write failed", err);
@@ -183,6 +269,22 @@ export async function getTodaySession(): Promise<SiteDaySession | null> {
 }
 
 /**
+ * Fetch a Day Centre session for any calendar date (YYYY-MM-DD).
+ * Read-only — does not provision a row. Used by the End of Day Report.
+ */
+export async function getSessionByDate(
+  date: string,
+): Promise<SiteDaySession | null> {
+  const { data, error } = await supabase
+    .from("site_day_sessions")
+    .select("*")
+    .eq("session_date", date)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? rowToSession(data as SiteDaySessionRow) : null;
+}
+
+/**
  * Return today's session row if it exists, otherwise insert a fresh row in
  * `open_pending` phase. Written from the browser client under RLS — same
  * path the dual-PIN handshake updates use.
@@ -200,8 +302,13 @@ export async function ensureTodaySession(): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "initialize",
-    { session_id: next.id, session_date: next.sessionDate },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      why: "Day Centre session row created for the operational day",
+    },
     "INFO",
+    { automated: true },
   );
   return next;
 }
@@ -246,7 +353,12 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "open",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "Leader declared the centre open",
+    },
     "GREEN",
   );
   // BL-100 / BL-073 — seed Activities template (meals + med round) if empty.
@@ -257,6 +369,20 @@ export async function openSession(notes: string): Promise<SiteDaySession> {
     await ensureSiteDayActivitiesSeeded(next.id);
   } catch (e) {
     console.warn("[openSession] activity seed", e);
+  }
+  const profile = getActiveUserProfile();
+  const staffId = profile?.personKind === "carer" ? "" : (profile?.staffId ?? "");
+  if (staffId && staffId !== DEFAULT_STAFF_UUID) {
+    try {
+      return await assignFloorLeader({
+        sessionId: next.id,
+        staffId,
+        staffName: profile?.fullName?.trim() || "Floor Leader",
+        previousName: null,
+      });
+    } catch (e) {
+      console.warn("[openSession] floor leader", e);
+    }
   }
   return next;
 }
@@ -277,7 +403,7 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
     .update({
       phase: "closed_orderly",
       closed_by_id: closedByUserId,
-      close_declared_at: new Date().toISOString(),
+      close_declared_at: operationalNowIso(),
       close_leader_notes: notes || null,
     })
     .eq("id", existing.data.id)
@@ -287,7 +413,12 @@ export async function closeSession(notes: string): Promise<SiteDaySession> {
   const next = rowToSession(data as SiteDaySessionRow);
   await siteLedger(
     "close",
-    { session_id: next.id, session_date: next.sessionDate, notes: notes || null },
+    {
+      session_id: next.id,
+      session_date: next.sessionDate,
+      notes: notes || null,
+      why: notes || "All clients accounted",
+    },
     "GREEN",
   );
   return next;
@@ -352,6 +483,7 @@ export async function reopenSession(args: {
       session_date: next.sessionDate,
       manager_staff_id: args.managerStaffId,
       reason: args.reason,
+      why: args.reason,
       prior_close_at: priorCloseAt,
       prior_closed_by: priorClosedBy,
     },
@@ -361,15 +493,19 @@ export async function reopenSession(args: {
 }
 
 /**
- * TEST-ONLY rewind. Flip today's session row back to `open_pending` and
- * clear all open/close/handshake stamps so the Start of Day flow renders
- * fresh. Also rewinds Activities delivery (`site_day_activities` → pending).
- * Does NOT touch issues, escalations, attendance, or billing.
+ * TEST-ONLY rewind. Flip today's session row back to `open_pending`,
+ * clear open/close stamps, rewind activities, and wipe the centre floor
+ * for that date (check-in/out, support, visitors, meals, doses, issues,
+ * roster exceptions, and Day Centre bus runs). Weekly schedules stay.
+ * The roll is seeded again from those schedules.
  *
  * UI for this action is gated by `IS_TEST_BUILD` so it never appears on
  * published deployments.
  */
 export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> {
+  if (!canUseDevTools()) {
+    throw new Error("Reset Start of Day is only available to Craig on a test build.");
+  }
   const date = todayIso();
   const existing = await supabase
     .from("site_day_sessions")
@@ -379,6 +515,9 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
   if (existing.error) throw existing.error;
   if (!existing.data) throw new Error("No session row to reset.");
   const prior = rowToSession(existing.data as SiteDaySessionRow);
+
+  const { resetCentreFloorForSession } = await import("@/lib/api/centre-day-reset");
+  const floor = await resetCentreFloorForSession(prior.id, prior.sessionDate);
 
   const { data, error } = await supabase
     .from("site_day_sessions")
@@ -404,6 +543,15 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
   if (error) throw error;
   const next = rowToSession(data as SiteDaySessionRow);
 
+  await supabase
+    .from("site_day_sessions")
+    .update({
+      lockdown_active: false,
+      lockdown_reason: null,
+      lockdown_severity: null,
+    })
+    .eq("id", prior.id);
+
   const { resetSiteDayActivitiesDelivery } = await import(
     "@/lib/api/site-day-activities"
   );
@@ -418,8 +566,11 @@ export async function resetStartOfDay(reason?: string): Promise<SiteDaySession> 
       prior_open_at: prior.openDeclaredAt,
       prior_close_at: prior.closeDeclaredAt,
       activities_reset: activitiesReset,
+      floor_reset: floor,
       reason: reason ?? null,
       test_only: true,
+      location: "Day Centre",
+      summary: `Reset start of day for ${next.sessionDate} — cleared ${floor.clientAttendance} client and ${floor.supportAttendance} support attendance rows`,
     },
     "YELLOW",
   );
@@ -473,7 +624,7 @@ export async function submitManagerHandshake(
     manager_plan_text: args.plan,
     manager_decision: args.decision,
     manager_auth_staff_id: args.managerStaffId,
-    manager_auth_at: new Date().toISOString(),
+    manager_auth_at: operationalNowIso(),
   };
   console.debug("[submitManagerHandshake] update payload", payload);
   const { data, error } = await supabase
@@ -548,13 +699,13 @@ export async function submitLeaderHandshake(
     .update({
       leader_decision: args.decision,
       leader_auth_staff_id: args.leaderStaffId,
-      leader_auth_at: new Date().toISOString(),
+      leader_auth_at: operationalNowIso(),
       phase: nextPhase,
       ...(bothGo
-        ? { open_declared_at: new Date().toISOString() }
+        ? { open_declared_at: operationalNowIso() }
         : {
             closed_by_id: args.leaderStaffId,
-            close_declared_at: new Date().toISOString(),
+            close_declared_at: operationalNowIso(),
           }),
     })
     .eq("id", args.sessionId)

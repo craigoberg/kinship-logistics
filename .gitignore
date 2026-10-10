@@ -25,6 +25,9 @@ dist-ssr
 .wrangler/
 .dev.vars
 
+# Local NDIS policy extract — do not commit
+.tmp-ndis-docs/
+
 # Editor directories and files
 .vscode/*
 !.vscode/extensions.json

@@ -1,4 +1,5 @@
 import { runSetStaffAuthPassword } from "@/lib/api/staff-auth.functions";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 export type SetStaffAuthPasswordOutcome = {
   authUserId: string;
@@ -21,5 +22,17 @@ export async function setStaffDayLoginPassword(args: {
   if (!json.ok || !json.result) {
     throw new Error(json.error ?? "Set password failed.");
   }
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "staff",
+    recordId: args.targetStaffId,
+    recordName: json.result.email,
+    summary: `Set day-login password for ${json.result.email}`,
+    after: {
+      email: json.result.email,
+      createdAuthUser: json.result.createdAuthUser,
+      linkedAuthUserId: json.result.linkedAuthUserId,
+    },
+  });
   return json.result;
 }

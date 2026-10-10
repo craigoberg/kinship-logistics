@@ -1,17 +1,21 @@
 /**
  * EventHopReleasePanel — trip leader releases group to bus (§12.4.3).
+ * Manifest/trip is created only on Release. Before then, Change method
+ * clears the Bus plan and re-opens the movement picker.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Bus, Loader2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
+import { FieldActionButton } from "@/components/ui/field-action-button";
 import { cn } from "@/lib/utils";
 import {
   eventTransportRunsKey,
   listEventTransportRuns,
   prepareEventHopManifest,
 } from "@/lib/api/event-hop-transport";
+import { clearPlannedVenueBusMovement } from "@/lib/api/event-activity-roll";
 import { listBusManifest } from "@/lib/api/event-day-ops";
 import { invalidateTransportCaches } from "@/lib/query/invalidation";
 
@@ -24,6 +28,10 @@ interface Props {
   toStopId: string;
   label: string;
   className?: string;
+  /** Called after successful Release (from-stop completed). */
+  onReleased?: () => void;
+  /** Called after Bus plan cleared — parent re-shows movement picker. */
+  onChangedMethod?: () => void;
 }
 
 export function EventHopReleasePanel({
@@ -35,6 +43,8 @@ export function EventHopReleasePanel({
   toStopId,
   label,
   className,
+  onReleased,
+  onChangedMethod,
 }: Props) {
   const qc = useQueryClient();
   const runsKey = eventTransportRunsKey(eventId, sessionDate, sessionId);
@@ -67,11 +77,31 @@ export function EventHopReleasePanel({
       }),
     onSuccess: (id) => {
       toast.success("Group released to bus", {
-        description: "Driver can start this hop from Manifest.",
+        description: "This stop is closed. Driver boards on Manifest.",
       });
       qc.invalidateQueries({ queryKey: runsKey });
       qc.invalidateQueries({ queryKey: ["event-bus-manifest", id] });
       invalidateTransportCaches(qc);
+      onReleased?.();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const changeMethodMut = useMutation({
+    mutationFn: () =>
+      clearPlannedVenueBusMovement({
+        toStopId,
+        eventId,
+        sessionDate,
+        hopIndex,
+        eventDaySessionId: sessionId,
+        venueName: label.split("→").pop()?.trim() ?? null,
+      }),
+    onSuccess: () => {
+      toast.message("Choose how you get there again.");
+      qc.invalidateQueries({ queryKey: runsKey });
+      invalidateTransportCaches(qc);
+      onChangedMethod?.();
     },
     onError: (e: Error) => toast.error(e.message),
   });
@@ -147,13 +177,15 @@ export function EventHopReleasePanel({
         Ready — {label}
       </div>
       <p className="text-xs text-amber-100/70">
-        Release the group to the bus. The driver boards each person in Manifest (§11).
+        Confirm Release to create the bus Manifest and hand the group over.
+        Closes this activity. Driver boards each person in Manifest (§11).
       </p>
       <Button
         type="button"
         className="w-full"
         disabled={
           releaseMut.isPending ||
+          changeMethodMut.isPending ||
           hopCard?.status === "blocked" ||
           hopCard?.status === "waiting"
         }
@@ -168,6 +200,17 @@ export function EventHopReleasePanel({
           "Release group to bus"
         )}
       </Button>
+      <FieldActionButton
+        variant="secondary"
+        size="sm"
+        disabled={releaseMut.isPending || changeMethodMut.isPending}
+        onClick={() => changeMethodMut.mutate()}
+      >
+        {changeMethodMut.isPending ? (
+          <Loader2 className="h-4 w-4 animate-spin" />
+        ) : null}
+        Change how we get there…
+      </FieldActionButton>
     </div>
   );
 }

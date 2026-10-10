@@ -58,6 +58,21 @@ export function matchesEventBusRun(
   return person === trip;
 }
 
+/**
+ * Floor run when checked out; fall back to roster when floor says bus but
+ * the run code was never written (seed ignoreDuplicates / generic Bus tap).
+ * `floorRun === undefined` means not yet handed over — use roster.
+ */
+export function effectiveReturnBusRun(
+  floorRun: string | null | undefined,
+  rosterRun: string | null | undefined,
+): string | null {
+  const floor = (floorRun ?? "").trim() || null;
+  const roster = (rosterRun ?? "").trim() || null;
+  if (floorRun === undefined) return roster;
+  return floor ?? roster;
+}
+
 /** Distinct non-null run codes from a list (preserves first-seen order). */
 export function distinctBusRunCodes(
   codes: Array<string | null | undefined>,

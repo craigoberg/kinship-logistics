@@ -2,7 +2,7 @@
  * In-app Help content model (BL-105).
  *
  * v1 ships `howto` only. `policy` / `form` are reserved for BL-092 / BL-065.
- * Soft role filtering uses ACCESS_ROLES keys today; BL-002 hardens later.
+ * Soft role filtering uses ACCESS_ROLES / accessRole; Help deep-links honour MenuGate.
  */
 
 export type HelpKind = "howto" | "policy" | "form";

@@ -23,6 +23,11 @@ interface HubListCardProps {
   disabled?: boolean;
   ariaLabel: string;
   className?: string;
+  /**
+   * Extra actions that are not "open this record" (Delete, Review/Update).
+   * Clicks here do not open the card.
+   */
+  actions?: ReactNode;
 }
 
 /** Governance Hub list row — whole card opens Manage (BL-060). */
@@ -37,6 +42,7 @@ export function HubListCard({
   disabled = false,
   ariaLabel,
   className,
+  actions,
 }: HubListCardProps) {
   const urgencyBadge =
     urgency && urgency !== "none" ? HUB_URGENCY_BADGE[urgency] : null;
@@ -52,21 +58,34 @@ export function HubListCard({
 
   return (
     <div
-      role={interactive ? "button" : undefined}
-      tabIndex={interactive ? 0 : undefined}
-      aria-label={interactive ? ariaLabel : undefined}
+      role={interactive && !actions ? "button" : undefined}
+      tabIndex={interactive && !actions ? 0 : undefined}
+      aria-label={interactive && !actions ? ariaLabel : undefined}
       aria-disabled={disabled || undefined}
       onClick={interactive ? onClick : undefined}
-      onKeyDown={handleKeyDown}
+      onKeyDown={actions ? undefined : handleKeyDown}
       className={cn(
         "rounded-lg border bg-card p-3 transition-colors",
+        interactive && "cursor-pointer hover:bg-muted/40",
         interactive &&
-          "cursor-pointer hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+          !actions &&
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
         disabled && "opacity-70",
         className,
       )}
     >
-      <div className="flex items-start gap-3">
+      <div
+        className={cn(
+          "flex items-start gap-3",
+          interactive &&
+            actions &&
+            "rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+        )}
+        role={interactive && actions ? "button" : undefined}
+        tabIndex={interactive && actions ? 0 : undefined}
+        aria-label={interactive && actions ? ariaLabel : undefined}
+        onKeyDown={actions ? handleKeyDown : undefined}
+      >
         {badges && (
           <div className="flex w-[4.5rem] shrink-0 flex-col items-start gap-1.5">
             {badges}
@@ -99,6 +118,15 @@ export function HubListCard({
           </div>
         </div>
       </div>
+      {actions ? (
+        <div
+          className="mt-2 flex flex-wrap justify-end gap-1"
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => e.stopPropagation()}
+        >
+          {actions}
+        </div>
+      ) : null}
       <span className="sr-only">{summary}</span>
     </div>
   );

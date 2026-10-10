@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 export type VendorStatus = "active" | "archived";
 
@@ -90,7 +91,15 @@ export async function createVendor(name: string): Promise<Vendor> {
     throw error;
   }
 
-  return rowToVendor(data as VendorRow);
+  const created = rowToVendor(data as VendorRow);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "vendor",
+    recordId: created.id,
+    recordName: created.name,
+    after: { name: created.name, status: created.status },
+  });
+  return created;
 }
 
 export async function updateVendor(
@@ -121,5 +130,13 @@ export async function updateVendor(
     }
     throw error;
   }
-  return rowToVendor(data as VendorRow);
+  const updated = rowToVendor(data as VendorRow);
+  void recordOfficeChangeBestEffort({
+    action: patch.status === "archived" ? "archived" : "updated",
+    entity: "vendor",
+    recordId: updated.id,
+    recordName: updated.name,
+    after: { name: updated.name, status: updated.status },
+  });
+  return updated;
 }

@@ -20,6 +20,7 @@ export const eventsCreateConfirmOpenTopic: HelpTopic = {
   menus: ["events", "event-deliver"],
   roles: ["manager", "assistant_manager", "support_worker"],
   relatedIds: [
+    "event-live-watch",
     "event-overnight-hotel",
     "event-open-checks",
     "admin-venues",
@@ -48,7 +49,7 @@ export const eventsCreateConfirmOpenTopic: HelpTopic = {
     },
     {
       heading: "Floor still needs Open location",
-      body: "After Open event, field ops use Event Deliver (or Run this event). The trip leader opens the location with walkthrough ticks + PIN. Finance & P&L and Trip Report stay on Event Manage for office work.",
+      body: "After Open event, field ops use Event Deliver (or Run this event). The trip leader opens the location with walkthrough ticks + PIN. Office watch is Event Manage → Live (read-only). Finance & P&L and Trip Report stay on Event Manage.",
     },
   ],
 };

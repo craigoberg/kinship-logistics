@@ -6,28 +6,21 @@ import {
   AlertTriangle,
   ArrowRight,
   DoorClosed,
-  Info,
   Loader2,
   ShieldAlert,
   ShieldCheck,
 } from "lucide-react";
 
 import { Button } from "@/components/ui/button";
+import {
+  CAUTION_CALLOUT_CLASS,
+  CAUTION_CALLOUT_ICON_CLASS,
+} from "@/lib/ui/caution-callout";
 import { Card } from "@/components/ui/card";
-import { Label } from "@/components/ui/label";
 import { FieldActionButton } from "@/components/ui/field-action-button";
 import { ManagerOpsChip } from "@/components/ui/manager-ops-chip";
 import { SiteOpsDeclareSheet } from "@/components/ops/site-ops-declare-sheet";
-import {
-  AlertDialog,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyOperatorPin } from "@/components/auth/pin-verify";
 import { MandatedChecksList } from "./mandated-checks-list";
 import { LogAnomalyModal } from "./log-anomaly-modal";
@@ -48,7 +41,7 @@ import { useQuery } from "@tanstack/react-query";
 import {
   fetchApprovedRedWorkarounds,
   isDayCentreScopedIssue,
-  redHasAcceptedWorkaround,
+  doesIssueBlockDayCentreOpen,
 } from "@/lib/site-day/red-workaround";
 import { DayCentreBlockingRedResolveButton } from "./day-centre-blocking-red-resolve-button";
 import { ClientTime } from "@/components/ui/client-time";
@@ -61,6 +54,8 @@ import {
   resolveStaffDisplayName,
 } from "@/lib/data-store";
 import { sortSiteIssuesByRygeNewestFirst } from "@/lib/governance-sort";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 interface Props {
   sessionId: string;
@@ -88,8 +83,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
 
   const queryClient = useQueryClient();
-  const [confirmOpen, setConfirmOpen] = useState(false);
-  const [openerPinVerified, setOpenerPinVerified] = useState(false);
+  const [pinOpen, setPinOpen] = useState(false);
   const [anomalyOpen, setAnomalyOpen] = useState(false);
   const [doNotOpenSheet, setDoNotOpenSheet] = useState(false);
   const [verbalOverrideOpen, setVerbalOverrideOpen] = useState(false);
@@ -124,15 +118,17 @@ export function StartOfDayPanel({ sessionId }: Props) {
     staleTime: 5_000,
   });
   const escMap = escMapQ.data ?? null;
-  // Deferred REDs are parked in Hub — they must not hold Open Centre (parity
-  // with fetchDayCentreBlockingReds). Accepted workarounds also clear the gate.
-  const blockingIssues = dayScopedOpen.filter((i) => {
-    if (i.status === "deferred") return false;
-    if (i.severity === "red") return !redHasAcceptedWorkaround(i, escMap);
-    if (i.severity === "yellow") return !i.workaroundPlan?.trim();
-    return false;
-  });
+  const blockingIssues = dayScopedOpen.filter((i) =>
+    doesIssueBlockDayCentreOpen(i, escMap),
+  );
   const hasBlocking = blockingIssues.length > 0;
+  const openDuty = useDutyFunctionGap({
+    functionKey: "centre_open",
+    staffId: getStaffId(),
+    subjectLabel: "Day Centre open",
+    enabled: (allChecked && !hasBlocking) || pinOpen,
+    ledgerCategory: "CENTRE",
+  });
   const blockingHasRed = blockingIssues.some((i) => i.severity === "red");
   const registerIssues = sortSiteIssuesByRygeNewestFirst(dayScopedOpen);
 
@@ -150,8 +146,6 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
 
 
-  // PIN success opens immediately — do not gate on openerPinVerified state
-  // (setState is async; mutate in the same tick would see a stale false).
   const openMut = useMutation({
     mutationFn: () => openSession(""),
     onSuccess: (next: SiteDaySession) => {
@@ -160,13 +154,11 @@ export function StartOfDayPanel({ sessionId }: Props) {
       toast.success("Day Centre opened", {
         description: "Site declared safe & compliant.",
       });
-      setConfirmOpen(false);
-      setOpenerPinVerified(false);
+      setPinOpen(false);
     },
     onError: (e: unknown) => {
       const msg = formatServerError(e);
-      setConfirmOpen(false);
-      setOpenerPinVerified(false);
+      setPinOpen(false);
       setErrorMessage(msg);
       toast.error("Could not open the day", { description: msg });
     },
@@ -190,8 +182,10 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
       {/* Empty-Day Opening Shield — passive notice, no anomaly raised. */}
       {isEmptyDay && (
-        <div className="flex items-start gap-2 rounded-md border border-blue-500/40 bg-blue-500/10 p-3 text-sm text-blue-900 dark:text-blue-200">
-          <Info className="mt-0.5 h-4 w-4 shrink-0 text-blue-600" />
+        <div
+          className={`${CAUTION_CALLOUT_CLASS} flex animate-pulse items-start gap-2 p-3 text-sm`}
+        >
+          <AlertTriangle className={`mt-0.5 h-4 w-4 ${CAUTION_CALLOUT_ICON_CLASS}`} />
           <p>
             <span className="font-semibold">No participants rostered today.</span>{" "}
             The centre is not expected to open — no missed-open anomaly will be
@@ -254,7 +248,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
                     </span>
                     <div className="flex items-center gap-2">
                       <ClientTime
-                        iso={issue.createdAt}
+                        iso={issue.occurredAt}
                         className="text-xs text-muted-foreground"
                       />
                       {isManager ? (
@@ -294,8 +288,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
                 variant="outline"
                 onClick={() => {
                   setErrorMessage(null);
-                  setOpenerPinVerified(false);
-                  setConfirmOpen(true);
+                  setPinOpen(true);
                 }}
                 disabled={openMut.isPending}
               >
@@ -371,14 +364,39 @@ export function StartOfDayPanel({ sessionId }: Props) {
 
       {/* Primary open action — full-width, turns green only when all checks confirmed */}
       <div className="space-y-3">
+        {openDuty.needsGap && (
+          <DutyRequirementGapPanel
+            actorName={openDuty.actor?.fullName ?? "Check Leader"}
+            evalResult={openDuty.evalResult}
+            note={openDuty.note}
+            onNoteChange={openDuty.setNote}
+            managerId={openDuty.managerId}
+            onManagerIdChange={openDuty.setManagerId}
+            managerPin={openDuty.managerPin}
+            onManagerPin={openDuty.setManagerPin}
+            managers={openDuty.managers}
+            title="Centre open"
+            disabled={openMut.isPending}
+          />
+        )}
         <FieldActionButton
           variant={allChecked && !hasBlocking ? "success" : "secondary"}
-          onClick={() => setConfirmOpen(true)}
-          disabled={openMut.isPending || !allChecked || hasBlocking}
+          onClick={() => setPinOpen(true)}
+          disabled={
+            openMut.isPending ||
+            !allChecked ||
+            hasBlocking ||
+            (openDuty.needsGap && !openDuty.approved)
+          }
+          className="h-auto min-h-24 flex-col gap-1 whitespace-normal px-4 py-4"
         >
-          <span className="flex items-center justify-center gap-3">
-            <ShieldCheck className="h-6 w-6 shrink-0" />
+          <span className="flex items-center justify-center gap-3 text-lg">
+            <ShieldCheck className="h-7 w-7 shrink-0" />
             Declare Site Safe &amp; Open Day Centre
+          </span>
+          <span className="max-w-xl text-center text-sm font-normal leading-snug opacity-90">
+            Your Check Leader PIN is the sign-off. It declares the site safe and
+            opens the centre. Your name and the time go on the Activity log.
           </span>
         </FieldActionButton>
 
@@ -421,51 +439,26 @@ export function StartOfDayPanel({ sessionId }: Props) {
         )}
       </div>
 
-      {/* PIN = declare safe & open — no second Confirm tap (field UX) */}
-      <AlertDialog
-        open={confirmOpen}
+      <PinEntryDialog
+        open={pinOpen}
         onOpenChange={(open) => {
           if (openMut.isPending) return;
-          setConfirmOpen(open);
-          if (!open) setOpenerPinVerified(false);
+          setPinOpen(open);
         }}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Open the Day Centre?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Enter your Check Leader PIN to declare the site safe and open for
-              the day. That sign-off is the confirmation — identity and timestamp
-              go to the operational ledger.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <div className="space-y-2 py-1">
-            <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Check Leader PIN <span className="text-rose-600">*</span>
-            </Label>
-            <PinEntryTrigger
-              label="Tap to enter PIN and open"
-              verified={openerPinVerified || openMut.isPending}
-              verifiedLabel={openMut.isPending ? "Opening…" : "Check Leader PIN verified"}
-              length={4}
-              title="Declare site safe"
-              description="PIN confirms the walkthrough is complete and opens the centre."
-              required
-              disabled={openMut.isPending}
-              onVerify={verifyOperatorPin}
-              onSuccess={() => {
-                setOpenerPinVerified(true);
-                openMut.mutate();
-              }}
-            />
-          </div>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={openMut.isPending}>
-              Cancel
-            </AlertDialogCancel>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        title="Declare site safe"
+        description="PIN confirms the walkthrough is complete and opens the centre."
+        length={4}
+        busy={openMut.isPending}
+        onVerify={async (pin) => {
+          await verifyOperatorPin(pin);
+          if (!(await openDuty.ensureApproved())) {
+            throw new Error("Manager must approve the duty requirement gap first.");
+          }
+        }}
+        onSuccess={() => {
+          openMut.mutate();
+        }}
+      />
 
       {/* LogAnomalyModal */}
       <LogAnomalyModal
@@ -559,7 +552,7 @@ export function StartOfDayPanel({ sessionId }: Props) {
         titleOverride="Verbal Consultation — Open Despite Blockers"
         descriptionOverride="Blocking issues remain. Select the manager you contacted (or attempted to reach), record the outcome, and sign with your operator PIN. The manager confirms in the Governance Hub later."
         onAccepted={() => {
-          setConfirmOpen(true);
+          setPinOpen(true);
         }}
       />
 

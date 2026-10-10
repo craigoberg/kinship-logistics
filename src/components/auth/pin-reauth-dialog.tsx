@@ -11,22 +11,47 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/auth/pin-pad";
-import { verifyLoginPin } from "@/components/auth/pin-verify";
+import { verifyManagerPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { floorRoleForStaff } from "@/lib/auth/pin-role";
+import { verifyNamedPersonPin } from "@/lib/auth/pin-session";
+import { getActiveUserProfile, persistFloorIdentity } from "@/lib/data-store";
+import { ChangePinDialog } from "@/components/auth/change-pin-dialog";
 import { cn } from "@/lib/utils";
+import { useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
 
 interface Props {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   reason?: string;
+  title?: string;
+  description?: string;
+  /** When set, only this staff member's PIN unlocks (idle lock). */
+  requiredStaffId?: string;
+  /** False = no Cancel / Escape (idle lock). Default true. */
+  dismissible?: boolean;
+  /** Manager or Assistant Manager confirm. Does not mean the session timed out. */
+  requireManager?: boolean;
   onAuthenticated: () => void;
 }
 
 /** Session re-auth — on-screen PinPad (GUARDRAILS §2.3). */
-export function PinReauthDialog({ open, onOpenChange, reason, onAuthenticated }: Props) {
+export function PinReauthDialog({
+  open,
+  onOpenChange,
+  reason,
+  title,
+  description,
+  requiredStaffId,
+  dismissible = true,
+  requireManager = false,
+  onAuthenticated,
+}: Props) {
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
+  const [changeOpen, setChangeOpen] = useState(false);
+  useHideGlobalFabs(open);
 
   useEffect(() => {
     if (open) {
@@ -42,7 +67,29 @@ export function PinReauthDialog({ open, onOpenChange, reason, onAuthenticated }:
     setBusy(true);
     setError(null);
     try {
-      await verifyLoginPin(value);
+      const profile = getActiveUserProfile();
+      if (requireManager && profile?.personKind === "carer") {
+        throw new Error("A carer PIN cannot authorise this.");
+      }
+      if (!requireManager && profile?.personKind === "carer" && profile.carerId) {
+        await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
+      } else {
+        const staffId = requiredStaffId || profile?.staffId || "";
+        if (!staffId) throw new Error("Sign in again from the PIN pad.");
+        if (requireManager) {
+          const who = await verifyManagerPin(staffId, value);
+          if (profile?.staffId === staffId) {
+            const floor = floorRoleForStaff(who.personnelType);
+            persistFloorIdentity({
+              ...profile,
+              accessRole: who.personnelType,
+              role: floor ?? profile.role,
+            });
+          }
+        } else {
+          await verifyNamedStaffPin(staffId, value);
+        }
+      }
       onAuthenticated();
       onOpenChange(false);
     } catch (e) {
@@ -55,26 +102,39 @@ export function PinReauthDialog({ open, onOpenChange, reason, onAuthenticated }:
     }
   };
 
+  const heading =
+    title ?? (requireManager ? "Enter your PIN" : "Session expired — please re-enter your PIN");
+  const body =
+    description ??
+    (requireManager
+      ? (reason ?? "A Manager or Assistant Manager PIN is required.")
+      : `Your terminal sign-in has timed out.${reason ? ` ${reason}` : ""} Your mandated checks and notes are preserved.`);
+
   return (
     <AlertDialog
       open={open}
       onOpenChange={(next) => {
         if (busy) return;
+        if (!next && !dismissible) return;
         onOpenChange(next);
       }}
     >
-      <AlertDialogContent className="max-w-sm pb-[max(1rem,env(safe-area-inset-bottom))]">
+      <AlertDialogContent
+        className={cn(
+          "max-w-sm pb-[max(1rem,env(safe-area-inset-bottom))]",
+          !dismissible && "z-[80]",
+        )}
+        overlayClassName={!dismissible ? "z-[80]" : undefined}
+        onEscapeKeyDown={(e) => {
+          if (!dismissible) e.preventDefault();
+        }}
+      >
         <AlertDialogHeader>
           <div className="mx-auto mb-1 rounded-full bg-primary/10 p-2.5 text-primary">
             <ShieldCheck className="h-6 w-6" />
           </div>
-          <AlertDialogTitle className="text-center">
-            Session expired — please re-enter your PIN
-          </AlertDialogTitle>
-          <AlertDialogDescription className="text-center">
-            Your terminal sign-in has timed out.
-            {reason ? ` ${reason}` : ""} Your mandated checks and notes are preserved.
-          </AlertDialogDescription>
+          <AlertDialogTitle className="text-center">{heading}</AlertDialogTitle>
+          <AlertDialogDescription className="text-center">{body}</AlertDialogDescription>
         </AlertDialogHeader>
 
         <div className={cn(shake && "animate-[shake_0.4s_ease-in-out]")}>
@@ -100,17 +160,31 @@ export function PinReauthDialog({ open, onOpenChange, reason, onAuthenticated }:
           <p className="text-center text-sm font-medium text-destructive">{error}</p>
         )}
 
-        <AlertDialogFooter>
-          <Button
-            type="button"
-            variant="outline"
-            className="w-full"
-            onClick={() => onOpenChange(false)}
-            disabled={busy}
-          >
-            Cancel
-          </Button>
-        </AlertDialogFooter>
+        <Button
+          type="button"
+          variant="ghost"
+          className="w-full text-xs"
+          disabled={busy}
+          onClick={() => setChangeOpen(true)}
+        >
+          Change PIN
+        </Button>
+
+        <ChangePinDialog open={changeOpen} onOpenChange={setChangeOpen} />
+
+        {dismissible && (
+          <AlertDialogFooter>
+            <Button
+              type="button"
+              variant="outline"
+              className="w-full"
+              onClick={() => onOpenChange(false)}
+              disabled={busy}
+            >
+              Cancel
+            </Button>
+          </AlertDialogFooter>
+        )}
       </AlertDialogContent>
     </AlertDialog>
   );

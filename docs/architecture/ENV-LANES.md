@@ -2,6 +2,17 @@
 
 **Status:** Day login shipped on DEV. TEST Supabase (Australia) stood up. **App host = Vercel** (Hobby → Pro for commercial/PROD). Lovable abandoned as host.
 
+**Local disk (2026-09-23):** the working copy is `C:\Users\Craig\kinship-logistics`. Do not edit `C:\Users\Craig\OneDrive\Documents\kinship-logistics`. See `docs/LOCAL-WORKSPACE.md`. `localhost:8080` is `bun run dev` from the Users folder.
+
+## Public vs Connect domains (BL-110 — Phase 2 cutover)
+
+| Hostname | App | Notes |
+|----------|-----|--------|
+| **yada.org.au** | Public site | Serves `/public/*` (CMS pages + forms). No day-login / PIN. Content published from Connect Admin → Public website. |
+| **connect.yada.org.au** | Yada Connect CRM/ops | Full AppShell, Hub, onboarding, floor. |
+
+Until DNS cutover: preview public pages at `https://<connect-host>/public`. Publish snapshots store the intended domain mapping in `cms_publish_snapshots.payload.domains`.
+
 ## Lane map
 
 | Lane | Purpose | Supabase | App flags |
@@ -11,6 +22,19 @@
 | **PROD** | Live field (later) | Third project | `VITE_APP_LANE=prod` + `VITE_IS_PRODUCTION=true` |
 
 Renaming a Supabase **display name** does not change URL or keys.
+
+## TEST host protection (required while TEST holds real people)
+
+Thin day-login is a UI door. Put a **host password** on `crm-test.yada.org.au` so strangers never load the app (or the public key inside it).
+
+1. Vercel → the **TEST** project → **Settings → Deployment Protection**.
+2. Enable **Password Protection** (or Vercel Authentication) on **Production**.
+3. Share that host password only with the office planners. They still do email + PIN after that.
+4. If Hobby will not protect Production, use **Cloudflare Access** on the same hostname (email allow-list). Same idea.
+
+`/public` on TEST sits behind that password too — acceptable for Alpha. PROD later splits `yada.org.au` (public) from `connect.yada.org.au` (ops).
+
+Database lock (BL-117): run `docs/sql/2026-08-20_day_login_operational_rls.sql` on **DEV then TEST**. After that, the publishable key without a day-login JWT cannot read participants. Re-run this SQL after restoring infrastructure from an **old** backup.
 
 ## What never copies to TEST / PROD
 
@@ -69,6 +93,10 @@ VITE_SHOW_TEST_TOOLS=true
 SUPABASE_URL=https://YOUR_TEST_REF.supabase.co
 SUPABASE_PUBLISHABLE_KEY=...
 SUPABASE_SERVICE_ROLE_KEY=...   # host secrets only — never VITE_
+POSTMARK_SERVER_TOKEN=...       # App ticket notify (BL-116); never VITE_
+POSTMARK_FROM=...               # verified Postmark Sender Signature
+APP_PUBLIC_URL=https://crm-test.yada.org.au   # optional Hub link in ticket emails
+# APP_TICKET_NOTIFY_SECRET=...  # only if you add a Supabase Database Webhook to the same route
 ```
 
 Do **not** paste service_role into chat or commit it.
@@ -109,6 +137,7 @@ Auth users still created in TEST Supabase Authentication.
 3. Hub open issue + note  
 4. Infectious exclusion declare (optional)  
 5. Log out → confirms both Auth + PIN cleared  
+6. **Security:** without logging in, `/public` still loads published pages; a REST dump of `participants` with only the publishable key returns empty / permission denied.  
 
 ## Long-term promotion model (code vs DB)
 

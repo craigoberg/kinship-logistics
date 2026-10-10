@@ -1,0 +1,12 @@
+---
+description: Local working copy is C:\Users\Craig\kinship-logistics
+alwaysApply: true
+---
+
+# Local working copy
+
+Edit **this** folder only: `C:\Users\Craig\kinship-logistics`.
+
+Do **not** edit `C:\Users\Craig\OneDrive\Documents\kinship-logistics`. That path is an older checkout of the same repo. The dev server on `localhost:8080` (`bun run dev`) is this folder. Saves in OneDrive do not appear in the app.
+
+Full note: `docs/LOCAL-WORKSPACE.md`. This folder is the only working space (locked 2026-09-24).

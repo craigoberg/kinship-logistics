@@ -18,6 +18,7 @@ import {
   summarizeMedicationRound,
   type MedicationRoundSummary,
 } from "@/lib/medication/todays-medication-round";
+import { isOperationalParticipant } from "@/lib/service-exit";
 
 /**
  * @param presenceIds — when provided, use this set instead of Day Centre checked-in.
@@ -73,8 +74,14 @@ export function useMedicationRound(presenceIds?: Set<string> | null): Medication
         allManaged: false,
       };
     }
+    const schedules = (schedulesQ.data ?? []).filter((schedule) => {
+      if (!schedule.participantId) return true;
+      const person = participantById.get(schedule.participantId);
+      if (!person) return true;
+      return isOperationalParticipant(person);
+    });
     const rows = buildMedicationRoundRows({
-      schedules: schedulesQ.data ?? [],
+      schedules,
       logs: logsQ.data ?? [],
       checkedInIds,
       participantById,

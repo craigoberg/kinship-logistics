@@ -10,7 +10,6 @@ import {
   Clock,
   Loader2,
   LogOut,
-  RotateCcw,
   Users,
   Bus,
   UserPlus,
@@ -36,19 +35,21 @@ import { TransportMethodPickerSheet } from "@/components/ui/transport-method-pic
 import { cn, formatUnknownError } from "@/lib/utils";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
-import { useLookupParameters } from "@/hooks/use-supabase-data";
+import { useLookupParameters, useTodaysPlannedBusRunCodes } from "@/hooks/use-supabase-data";
 import {
   arrivalMethodBadgeLabel,
   checkOutParticipant,
   listAttendanceRoll,
   loadInboundTransportLabelsForToday,
   loadOutboundTransportLabelsForToday,
+  persistDepartureMethod,
   recordClientArrival,
   scheduleLabelIsSelf,
   seedRollFromSchedules,
   sweepOverdueArrivals,
   sweepOverdueDepartures,
   toggleCheckIn,
+  undoClientCheckOut,
   type ClientAttendanceRow,
   type DepartureVector,
 } from "@/lib/api/client-attendance";
@@ -62,6 +63,7 @@ import {
 import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
 import {
   buildBusSelfPickerOptions,
+  filterBusRunOptions,
   selectionFromScheduleLabel,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
@@ -71,12 +73,20 @@ import {
   subscribeOperationalClock,
 } from "@/lib/operational-clock";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
+import { FloorRollOverdueBadges } from "./floor-roll-overdue-badges";
+import { FloorRollUndoButton } from "./floor-roll-undo-button";
+import { floorRollStatus } from "@/lib/ui/floor-roll-status";
 import { BulkDeferGroupModal } from "./bulk-defer-group-modal";
 import { AddAttendeeModal } from "./add-attendee-modal";
 import { AddVisitorModal } from "./add-visitor-modal";
+import { SupportAttendanceSection } from "./support-attendance-section";
 import { PromoteVisitorToEventDialog } from "./promote-visitor-to-event-dialog";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 export type AttendanceRollMode = "all" | "check_in" | "check_out";
 
@@ -123,7 +133,7 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
   useQuery({
     queryKey: ["attendance-overdue-sweep", sessionId, clockSnap],
     queryFn: async () => {
-      if (Object.keys(nameMap).length === 0) return { swept: false };
+      if (Object.keys(nameMap).length > 0) {
       await sweepOverdueArrivals(sessionId, yellowMins, redMins, nameMap).catch(
         (e) => {
           const msg = e instanceof Error ? e.message : String(e);
@@ -141,14 +151,16 @@ export function AttendanceOverdueSweepHost({ sessionId }: { sessionId: string })
         console.error("[AttendanceOverdueSweepHost] departure sweep failed", e);
         toast.error("Departure overdue sweep failed", { description: msg });
       });
+      }
       await qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+      await qc.invalidateQueries({ queryKey: ["support-attendance-roll", sessionId] });
       return { swept: true };
     },
     refetchInterval: 60_000,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
     staleTime: 0,
-    enabled: !!sessionId && participantsQ.isSuccess,
+    enabled: !!sessionId,
   });
 
   return null;
@@ -175,24 +187,34 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   } | null>(null);
   /** Undo check-in: chip → AlertDialog confirm (two taps / fat-finger safe). */
   const [undoTarget, setUndoTarget] = useState<ClientAttendanceRow | null>(null);
+  const [undoKind, setUndoKind] = useState<"check_in" | "check_out">("check_in");
 
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busRunOpts = useMemo(
     () => eventBusRunOptions(busRunLookups),
     [busRunLookups],
   );
+  const plannedRuns = useTodaysPlannedBusRunCodes();
+  const arrivalBusOpts = useMemo(
+    () => filterBusRunOptions(busRunOpts, plannedRuns.morningCodes),
+    [busRunOpts, plannedRuns.morningCodes],
+  );
+  const departureBusOpts = useMemo(
+    () => filterBusRunOptions(busRunOpts, plannedRuns.afternoonCodes),
+    [busRunOpts, plannedRuns.afternoonCodes],
+  );
   const arrivalPickerOptions = useMemo(
     () =>
-      buildBusSelfPickerOptions(busRunOpts, "dayCentre", {
+      buildBusSelfPickerOptions(arrivalBusOpts, "dayCentre", {
         busTitlePrefix: "Arrived on",
         selfTitle: "Self / family",
         selfSubtitle: "Not on the centre bus",
       }),
-    [busRunOpts],
+    [arrivalBusOpts],
   );
   const departurePickerOptions = useMemo(
     () => [
-      ...buildBusSelfPickerOptions(busRunOpts, "dayCentre", {
+      ...buildBusSelfPickerOptions(departureBusOpts, "dayCentre", {
         busTitlePrefix: "Departing on",
         selfTitle: "Family / carer",
         selfSubtitle: "Collected by family or carer",
@@ -206,7 +228,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         label: "Indep",
       },
     ],
-    [busRunOpts],
+    [departureBusOpts],
   );
 
   const participantsQ = useQuery({
@@ -340,6 +362,32 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
     },
   });
 
+  /** Undo check-out only (checked_out → checked_in). Arrival and home method stay. */
+  const undoOutMut = useMutation({
+    mutationFn: (row: ClientAttendanceRow) => undoClientCheckOut(row),
+    onMutate: async (row) => {
+      await qc.cancelQueries({ queryKey: ROLL_KEY(sessionId) });
+      const prev = qc.getQueryData<ClientAttendanceRow[]>(ROLL_KEY(sessionId));
+      const flipped: ClientAttendanceRow = {
+        ...row,
+        status: "checked_in",
+        checkedOutAt: null,
+        checkedOutBy: null,
+      };
+      qc.setQueryData<ClientAttendanceRow[]>(ROLL_KEY(sessionId), (prevRows) =>
+        (prevRows ?? []).map((r) => (r.id === row.id ? flipped : r)),
+      );
+      return { prev };
+    },
+    onError: (e: Error, _row, ctx) => {
+      if (ctx?.prev) qc.setQueryData(ROLL_KEY(sessionId), ctx.prev);
+      toast.error("Could not undo check-out", { description: e.message });
+    },
+    onSettled: () => {
+      qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+    },
+  });
+
   const arrivalMut = useMutation({
     mutationFn: ({
       row,
@@ -353,11 +401,26 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         busRunCode: selection.kind === "bus" ? selection.busRunCode : null,
         alsoCheckIn: true,
       }),
-    onSuccess: (_data, vars) => {
+    onSuccess: (result, vars) => {
+      const wasAbsent = vars.row.status === "absent";
+      const home = result.lateArrivalHome;
+      const homeHint =
+        home?.kind === "added_to_live_run"
+          ? "Added to the afternoon home run — confirm boarding on Manifest."
+          : home?.kind === "will_seed"
+            ? "They will appear on the afternoon Manifest when that run starts."
+            : home?.kind === "run_already_underway"
+              ? "Afternoon bus already left. Check out via family, or call the driver."
+              : home?.kind === "not_needed"
+                ? "Going home with family / self — not on the afternoon bus."
+                : undefined;
       toast.success(
-        vars.selection.kind === "self"
-          ? "Checked in — self / family."
-          : "Checked in — arrived by bus.",
+        wasAbsent
+          ? "Late arrival — checked in."
+          : vars.selection.kind === "self"
+            ? "Checked in — self / family."
+            : "Checked in — arrived by bus.",
+        { description: homeHint },
       );
       qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
     },
@@ -399,9 +462,23 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   function arrivalSelectionFor(row: ClientAttendanceRow): FloorTransportSelection {
     const key = methodKey("arrival", row.id);
     if (methodByKey[key]) return methodByKey[key];
+    if (row.status === "absent") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
+    if (row.arrivalMethod === "private" || row.arrivalMethod === "walk_in") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
+    if (row.arrivalBusRunCode) {
+      return selectionFromScheduleLabel(
+        row.arrivalBusRunCode,
+        arrivalBusOpts,
+        "dayCentre",
+        scheduleLabelIsSelf,
+      );
+    }
     return selectionFromScheduleLabel(
       transportLabelMap[row.participantId],
-      busRunOpts,
+      arrivalBusOpts,
       "dayCentre",
       scheduleLabelIsSelf,
     );
@@ -410,53 +487,90 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
   function departureSelectionFor(row: ClientAttendanceRow): FloorTransportSelection {
     const key = methodKey("departure", row.id);
     if (methodByKey[key]) return methodByKey[key];
+    if (row.departureVector === "independent") {
+      return { kind: "independent", busRunCode: null, label: "Indep" };
+    }
+    if (row.departureVector === "family") {
+      return { kind: "self", busRunCode: null, label: "Self" };
+    }
+    if (row.departureVector === "bus") {
+      return selectionFromScheduleLabel(
+        row.departureBusRunCode,
+        departureBusOpts,
+        "dayCentre",
+        scheduleLabelIsSelf,
+      );
+    }
     return selectionFromScheduleLabel(
       outboundLabelMap[row.participantId] ||
         transportLabelMap[row.participantId],
-      busRunOpts,
+      departureBusOpts,
       "dayCentre",
       scheduleLabelIsSelf,
     );
   }
 
   const allRows = rollQ.data ?? [];
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participantsQ.data ?? []),
+    [participantsQ.data],
+  );
+  // Surname A–Z; status only changes row style — never move checked-in into a
+  // second section (that bounce was distracting on the floor).
   const rows = useMemo(() => {
+    let filtered: ClientAttendanceRow[];
     if (mode === "check_in") {
-      // Still need arrival (expected / absent placeholders).
-      return allRows.filter(
-        (r) =>
-          r.status !== "checked_in" &&
-          r.status !== "checked_out" &&
-          !r.checkedOutAt,
+      // Expected + checked-in + absent stay in one fixed list; departed go below.
+      filtered = allRows.filter(
+        (r) => r.status !== "checked_out" && !r.checkedOutAt,
       );
+    } else if (mode === "check_out") {
+      // Still here and already left stay in one list. Green means they have left.
+      filtered = allRows.filter(
+        (r) => r.status === "checked_in" || r.status === "checked_out",
+      );
+    } else {
+      filtered = allRows;
     }
-    if (mode === "check_out") {
-      return allRows.filter((r) => r.status === "checked_in");
-    }
-    return allRows;
-  }, [allRows, mode]);
-  /** Check-In tab: people already on site (visible record; actions on Check-Out). */
-  const alreadyInRows = useMemo(() => {
-    if (mode !== "check_in") return [];
-    return allRows.filter((r) => r.status === "checked_in");
-  }, [allRows, mode]);
+    return sortByParticipantSurname(
+      filtered,
+      (r) => r.participantId,
+      surnameById,
+    );
+  }, [allRows, mode, surnameById]);
   const leftTodayRows = useMemo(() => {
     if (mode !== "check_in") return [];
-    return allRows.filter((r) => r.status === "checked_out");
-  }, [allRows, mode]);
-  const visitors = visitorsQ.data ?? [];
+    return sortByParticipantSurname(
+      allRows.filter((r) => r.status === "checked_out"),
+      (r) => r.participantId,
+      surnameById,
+    );
+  }, [allRows, mode, surnameById]);
+  const visitors = useMemo(() => {
+    const list = visitorsQ.data ?? [];
+    return [...list].sort((a, b) =>
+      a.displayName.localeCompare(b.displayName, undefined, {
+        sensitivity: "base",
+      }),
+    );
+  }, [visitorsQ.data]);
   const visitorsPresent = visitors.filter((v) => !v.leftAt);
   const showVisitors = mode !== "check_out";
   const showCheckInActions = mode !== "check_out";
   const pickerRow = picker
     ? allRows.find((r) => r.id === picker.rowId) ?? null
     : null;
-  const pickerSelection = pickerRow
+  const pickerSelection = picker && pickerRow
     ? picker.phase === "arrival"
       ? arrivalSelectionFor(pickerRow)
       : departureSelectionFor(pickerRow)
     : null;
-  const checkedIn = allRows.filter((r) => r.status === "checked_in").length;
+  const booked = allRows.length;
+  const arrived = allRows.filter((r) => r.status === "checked_in").length;
+  const absentCount = allRows.filter((r) => r.status === "absent").length;
+  const stillExpected = allRows.filter((r) => r.status === "expected").length;
+  const leftCount = allRows.filter((r) => r.status === "checked_out").length;
+  const accountedCount = allRows.filter((r) => r.status === "accounted").length;
   // Arrival overdue only — exclude departed / absent; ignore stale severity
   // left on rows that already have an Out stamp.
   const overdue = allRows.filter(
@@ -467,9 +581,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       r.status !== "checked_out" &&
       r.status !== "absent",
   );
-  const hasUnarrived = allRows.some(
-    (r) => r.status !== "checked_in" && r.status !== "accounted",
-  );
+  const hasUnarrived = stillExpected > 0;
   const title =
     mode === "check_in"
       ? "Check-In"
@@ -479,13 +591,14 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
 
   return (
     <div className="space-y-3">
-      <div className="flex items-center justify-between gap-2">
-        <h3 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="min-w-0 text-sm font-semibold uppercase tracking-wide text-muted-foreground">
           {title}{" "}
-          <span className="ml-1 font-mono normal-case text-muted-foreground/70">
+          <span className="ml-1 font-mono font-medium normal-case text-muted-foreground/70">
             {mode === "check_out" ? (
               <>
-                ({rows.length} on site
+                ({arrived} on site
+                {leftCount > 0 && <> · {leftCount} left</>}
                 {visitorsPresent.length > 0 && showVisitors && (
                   <>
                     {" "}· {visitorsPresent.length} visitor
@@ -496,7 +609,17 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
               </>
             ) : (
               <>
-                ({checkedIn}/{allRows.length} in
+                (Booked: {booked} / Arrived: {arrived} / Absent: {absentCount}
+                {leftCount > 0 && <> / Left: {leftCount}</>}
+                {accountedCount > 0 && <> / Accounted: {accountedCount}</>}
+                {" / "}
+                <span
+                  className={
+                    stillExpected > 0 ? "text-warning" : undefined
+                  }
+                >
+                  Still expected: {stillExpected}
+                </span>
                 {visitorsPresent.length > 0 && showVisitors && (
                   <>
                     {" "}· {visitorsPresent.length} visitor
@@ -585,10 +708,13 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       {!rollQ.isError &&
         mode === "check_in" &&
         allRows.length > 0 &&
-        rows.length === 0 &&
-        alreadyInRows.length > 0 && (
+        rows.length > 0 &&
+        rows.every(
+          (r) => r.status === "checked_in" || r.status === "absent",
+        ) &&
+        rows.some((r) => r.status === "checked_in") && (
           <Card className="border-dashed border-emerald-500/40 bg-emerald-500/5 p-3 text-sm text-muted-foreground">
-            All expected arrivals are checked in. Names below — use{" "}
+            All expected arrivals are checked in. Use{" "}
             <span className="font-semibold text-foreground">Check-Out</span> to
             depart people still on site.
           </Card>
@@ -609,39 +735,41 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
 
       <ul className="space-y-2">
         {rows.map((r) => {
-          const isIn = r.status === "checked_in";
-          const isOut = r.status === "checked_out";
-          const isAbsent = r.status === "absent";
-          // Departure rail takes precedence over arrival rail when the
-          // participant is already checked in (arrival rail is, by
-          // definition, satisfied at that point).
-          const depRed = r.departureSeverity === "red" && isIn;
-          const depYellow = r.departureSeverity === "yellow" && isIn && !depRed;
-          const isRed =
-            !isAbsent && !isOut &&
-            ((r.escalationSeverity === "red" && !isIn) || depRed);
-          const isYellow =
-            !isAbsent && !isOut && !isRed &&
-            ((r.escalationSeverity === "yellow" && !isIn) || depYellow);
-          // Parse the [ABSENT:CODE] tag we wrote into notes for the badge.
+          const {
+            isIn,
+            isOut,
+            isAbsent,
+            depRed,
+            depYellow,
+            isRed,
+            isYellow,
+            arrivalDone,
+            departureDone,
+            awaitingDeparture,
+            hiVisDone,
+          } = floorRollStatus({
+            mode,
+            status: r.status,
+            escalationSeverity: r.escalationSeverity,
+            departureSeverity: r.departureSeverity,
+          });
           const absentMatch = isAbsent && r.notes
             ? /\[ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(r.notes)
             : null;
           const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
-          // WCAG: on Green/Yellow/Absent tinted surfaces, force solid charcoal
-          // so text + timestamp both clear AA contrast.
-          const subTextCls =
-            isIn || isYellow || isAbsent || isOut
+          const subTextCls = hiVisDone
+            ? "text-success-foreground/90"
+            : isYellow || isAbsent || (isOut && !departureDone)
               ? "text-slate-900/80"
               : "text-muted-foreground";
           const busy =
             undoMut.isPending ||
+            undoOutMut.isPending ||
             arrivalMut.isPending ||
             checkoutMut.isPending;
           const canConfirmArrival =
             mode !== "check_out" &&
             !busy &&
-            !isAbsent &&
             !isOut &&
             !isIn &&
             !r.checkedOutAt;
@@ -677,9 +805,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                 className={cn(
                   "w-full min-h-[56px] rounded-lg border-2 px-4 py-3 text-left",
                   "flex items-center justify-between gap-3",
-                  isIn && !isYellow && !isRed &&
-                    "border-green-600 bg-green-50 text-slate-900",
-                  !isIn && !isRed && !isYellow && !isAbsent && !isOut &&
+                  hiVisDone &&
+                    "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
+                  (awaitingDeparture ||
+                    (!hiVisDone && !isRed && !isYellow && !isAbsent && !isOut)) &&
                     "border-border bg-card",
                   isYellow &&
                     "border-amber-500 bg-amber-50 text-slate-900",
@@ -687,7 +816,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     "border-2 border-destructive bg-destructive/10 text-destructive",
                   isAbsent &&
                     "border-slate-400 bg-slate-200/70 text-slate-900",
-                  isOut &&
+                  isOut && !departureDone &&
                     "border-slate-400 bg-slate-100 text-slate-900",
                 )}
               >
@@ -712,12 +841,14 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     }
                   }}
                   disabled={!canConfirmArrival && !canConfirmDeparture}
-                  aria-pressed={isIn}
+                  aria-pressed={mode === "check_out" ? isOut : isIn}
                   aria-label={
                     canConfirmDeparture
                       ? `Check out ${displayName} via ${departureSel.label}`
                       : canConfirmArrival
-                        ? `Check in ${displayName} via ${arrivalSel.label}`
+                        ? isAbsent
+                          ? `Late arrival check-in for ${displayName} via ${arrivalSel.label}`
+                          : `Check in ${displayName} via ${arrivalSel.label}`
                         : `${displayName}`
                   }
                   className={cn(
@@ -731,7 +862,8 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     <span
                       className={cn(
                         "truncate text-base font-semibold",
-                        (isAbsent || isOut) && "line-through decoration-slate-500/60",
+                        (isAbsent || (isOut && !departureDone)) &&
+                          "line-through decoration-slate-500/60",
                       )}
                     >
                       {nameMap[r.participantId] ?? "Loading…"}
@@ -757,33 +889,31 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                       </Badge>
                     )}
 
-                    {depRed && (
-                      <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
-                        Departure Escalated — Manager notified
-                      </Badge>
-                    )}
-                    {depYellow && (
-                      <Badge className="bg-amber-500 text-white text-[10px] uppercase">
-                        Departure Overdue
-                      </Badge>
-                    )}
-                    {isRed && !depRed && (
-                      <Badge className="bg-destructive text-destructive-foreground text-[10px] uppercase">
-                        Escalated — Manager notified
-                      </Badge>
-                    )}
-                    {isYellow && !depYellow && (
-                      <Badge className="bg-amber-500 text-white text-[10px] uppercase">
-                        Overdue
-                      </Badge>
-                    )}
+                    <FloorRollOverdueBadges
+                      depRed={depRed}
+                      depYellow={depYellow}
+                      isRed={isRed}
+                      isYellow={isYellow}
+                      departureManagerNotified
+                    />
                     {isAbsent && (
                       <Badge className="bg-slate-600 text-white text-[10px] uppercase">
                         Absent · {absentLabel}
                       </Badge>
                     )}
+                    {isIn && (
+                      <Badge className="border border-slate-400 bg-white text-[10px] uppercase text-slate-900">
+                        Checked in
+                      </Badge>
+                    )}
                     {isOut && (
-                      <Badge className="bg-slate-600 text-white text-[10px] uppercase">
+                      <Badge
+                        className={
+                          departureDone
+                            ? "border border-slate-400 bg-white text-[10px] uppercase text-slate-900"
+                            : "bg-slate-600 text-[10px] uppercase text-white"
+                        }
+                      >
                         Checked out
                       </Badge>
                     )}
@@ -827,8 +957,8 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                         />
                       </>
                     )}
-                    {isAbsent && absentMatch && (
-                      <> · Not attending today (PIN verified)</>
+                    {isAbsent && (
+                      <> · Tap row to record a late arrival (PIN already on file)</>
                     )}
                     {isAbsent && !absentMatch && r.notes?.trim() && (
                       <> · {r.notes.trim()}</>
@@ -836,7 +966,7 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   </div>
                 </button>
                 <div className="flex items-center gap-2 shrink-0">
-                  {!isAbsent && !isOut && (canConfirmArrival || canConfirmDeparture) && (
+                  {!isOut && (canConfirmArrival || canConfirmDeparture) && (
                     <EmbeddedMethodButton
                       label={
                         canConfirmDeparture
@@ -858,24 +988,26 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                     />
                   )}
                   {isIn && !isOut && mode !== "check_out" && (
-                    <button
-                      type="button"
+                    <FloorRollUndoButton
+                      kind="check_in"
+                      personName={displayName}
                       disabled={busy}
-                      onClick={() => setUndoTarget(r)}
-                      className={cn(
-                        "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                        "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                        "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                        "disabled:pointer-events-none disabled:opacity-50",
-                      )}
-                      title="Undo check-in"
-                      aria-label={`Undo check-in for ${displayName}`}
-                    >
-                      <RotateCcw className="h-3.5 w-3.5" />
-                      <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                        Undo
-                      </span>
-                    </button>
+                      onClick={() => {
+                        setUndoKind("check_in");
+                        setUndoTarget(r);
+                      }}
+                    />
+                  )}
+                  {departureDone && (
+                    <FloorRollUndoButton
+                      kind="check_out"
+                      personName={displayName}
+                      disabled={busy}
+                      onClick={() => {
+                        setUndoKind("check_out");
+                        setUndoTarget(r);
+                      }}
+                    />
                   )}
                   <span
                     role="button"
@@ -900,9 +1032,9 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                   <div
                     className={cn(
                       "rounded-full p-2",
-                      isIn
+                      hiVisDone
                         ? "bg-green-600 text-white"
-                        : isAbsent || isOut
+                        : isAbsent || (isOut && !departureDone)
                           ? "bg-slate-400 text-white"
                           : "bg-muted text-muted-foreground",
                     )}
@@ -916,76 +1048,6 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
           );
         })}
       </ul>
-
-      {mode === "check_in" && alreadyInRows.length > 0 && (
-        <div className="space-y-2 pt-1">
-          <h4 className="text-sm font-semibold uppercase tracking-wide text-muted-foreground">
-            Already checked in{" "}
-            <span className="font-mono normal-case text-muted-foreground/70">
-              ({alreadyInRows.length})
-            </span>
-          </h4>
-          <ul className="space-y-1.5">
-            {alreadyInRows.map((r) => {
-              const displayName = nameMap[r.participantId] ?? "client";
-              const clinicalChips = clinicalFlagsFromParticipant(
-                participantById.get(r.participantId) ?? {},
-              );
-              const busy = undoMut.isPending;
-              return (
-                <li
-                  key={r.id}
-                  className="flex items-center justify-between gap-2 rounded-lg border-2 border-green-600/50 bg-green-50 px-3 py-2.5 text-slate-900"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex flex-wrap items-center gap-1.5">
-                      <span className="truncate text-sm font-semibold">
-                        {displayName}
-                      </span>
-                      <Badge className="bg-green-600 text-[10px] uppercase text-white">
-                        In
-                      </Badge>
-                      {clinicalChips.length > 0 && (
-                        <ClinicalFlagChips
-                          chips={clinicalChips}
-                          personName={displayName}
-                        />
-                      )}
-                    </div>
-                    {r.checkedInAt && (
-                      <p className="mt-0.5 text-xs text-slate-900/80">
-                        In{" "}
-                        <ClientTime
-                          iso={r.checkedInAt}
-                          options={{ hour: "2-digit", minute: "2-digit" }}
-                        />
-                      </p>
-                    )}
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={() => setUndoTarget(r)}
-                    className={cn(
-                      "inline-flex min-h-11 min-w-11 shrink-0 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                      "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                      "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                      "disabled:pointer-events-none disabled:opacity-50",
-                    )}
-                    title="Undo check-in"
-                    aria-label={`Undo check-in for ${displayName}`}
-                  >
-                    <RotateCcw className="h-3.5 w-3.5" />
-                    <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                      Undo
-                    </span>
-                  </button>
-                </li>
-              );
-            })}
-          </ul>
-        </div>
-      )}
 
       {mode === "check_in" && leftTodayRows.length > 0 && (
         <div className="space-y-2 pt-1">
@@ -1150,7 +1212,10 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
         yellowThresholdMins={yellowMins}
         onClose={(changed: boolean) => {
           setBulkOpen(false);
-          if (changed) qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+          if (changed) {
+            qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+            qc.invalidateQueries({ queryKey: ["support-attendance-roll", sessionId] });
+          }
         }}
       />
 
@@ -1207,8 +1272,32 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
             ...prev,
             [methodKey(picker.phase, picker.rowId)]: next,
           }));
+          const saved = pickerRow;
+          const phase = picker.phase;
+          if (!saved) return;
+          const refresh = () => {
+            void qc.invalidateQueries({ queryKey: ROLL_KEY(sessionId) });
+            void qc.invalidateQueries({ queryKey: ["bus-run-roster"] });
+          };
+          if (phase === "departure") {
+            void persistDepartureMethod(saved, next).then(refresh, (e: Error) => {
+              toast.error("Could not save home transport", {
+                description: e.message,
+              });
+            });
+          } else if (saved.status !== "absent") {
+            void recordClientArrival(saved, {
+              arrival: next.kind === "self" ? "self" : "bus",
+              busRunCode: next.kind === "bus" ? next.busRunCode : null,
+              alsoCheckIn: false,
+            }).then(refresh, (e: Error) => {
+              toast.error("Could not save arrival", { description: e.message });
+            });
+          }
         }}
       />
+
+      <SupportAttendanceSection sessionId={sessionId} mode={mode} />
 
       <AlertDialog
         open={!!undoTarget}
@@ -1218,24 +1307,33 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Undo check-in?</AlertDialogTitle>
+            <AlertDialogTitle>
+              {undoKind === "check_out" ? "Undo check-out?" : "Undo check-in?"}
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              {undoTarget
-                ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to expected — not yet arrived.`
-                : "This person will go back to expected — not yet arrived."}
+              {undoKind === "check_out"
+                ? undoTarget
+                  ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to still on site — checked in, not yet left.`
+                  : "This person will go back to still on site — checked in, not yet left."
+                : undoTarget
+                  ? `${nameMap[undoTarget.participantId] ?? "This person"} will go back to expected — not yet arrived.`
+                  : "This person will go back to expected — not yet arrived."}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={undoMut.isPending}>Cancel</AlertDialogCancel>
+            <AlertDialogCancel disabled={undoMut.isPending || undoOutMut.isPending}>
+              Cancel
+            </AlertDialogCancel>
             <AlertDialogAction
-              disabled={undoMut.isPending || !undoTarget}
+              disabled={(undoMut.isPending || undoOutMut.isPending) || !undoTarget}
               onClick={() => {
                 if (!undoTarget) return;
-                undoMut.mutate(undoTarget);
+                if (undoKind === "check_out") undoOutMut.mutate(undoTarget);
+                else undoMut.mutate(undoTarget);
                 setUndoTarget(null);
               }}
             >
-              Undo check-in
+              {undoKind === "check_out" ? "Undo check-out" : "Undo check-in"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

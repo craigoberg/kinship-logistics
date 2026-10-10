@@ -27,6 +27,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
 import { listParticipants } from "@/lib/data-store";
+import { isOperationalParticipant } from "@/lib/service-exit";
 import {
   addSiteDayVisitor,
   siteDayVisitorsKey,
@@ -64,6 +65,7 @@ export function AddVisitorModal({ open, sessionId, onClose }: Props) {
   const activeParticipants = useMemo(() => {
     const rows = participantsQ.data ?? [];
     return rows
+      .filter((p) => isOperationalParticipant(p))
       .map((p) => ({ id: p.id, fullName: p.fullName }))
       .sort((a, b) => a.fullName.localeCompare(b.fullName));
   }, [participantsQ.data]);

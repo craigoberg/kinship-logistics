@@ -1,0 +1,862 @@
+[
+  {
+    "tablename": "asset_checkpoints",
+    "indexname": "asset_checkpoints_pkey",
+    "indexdef": "CREATE UNIQUE INDEX asset_checkpoints_pkey ON public.asset_checkpoints USING btree (id)"
+  },
+  {
+    "tablename": "asset_clearance_items",
+    "indexname": "asset_clearance_items_pkey",
+    "indexdef": "CREATE UNIQUE INDEX asset_clearance_items_pkey ON public.asset_clearance_items USING btree (id)"
+  },
+  {
+    "tablename": "asset_daily_clearance",
+    "indexname": "asset_daily_clearance_pkey",
+    "indexdef": "CREATE UNIQUE INDEX asset_daily_clearance_pkey ON public.asset_daily_clearance USING btree (id)"
+  },
+  {
+    "tablename": "asset_daily_clearance",
+    "indexname": "unique_asset_daily_clearance",
+    "indexdef": "CREATE UNIQUE INDEX unique_asset_daily_clearance ON public.asset_daily_clearance USING btree (asset_id, clearance_date)"
+  },
+  {
+    "tablename": "asset_maintenance_logs",
+    "indexname": "asset_maintenance_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX asset_maintenance_logs_pkey ON public.asset_maintenance_logs USING btree (id)"
+  },
+  {
+    "tablename": "asset_maintenance_logs",
+    "indexname": "idx_maintenance_asset",
+    "indexdef": "CREATE INDEX idx_maintenance_asset ON public.asset_maintenance_logs USING btree (asset_id, log_type)"
+  },
+  {
+    "tablename": "assets",
+    "indexname": "assets_pkey",
+    "indexdef": "CREATE UNIQUE INDEX assets_pkey ON public.assets USING btree (id)"
+  },
+  {
+    "tablename": "assets",
+    "indexname": "idx_asset_type_status",
+    "indexdef": "CREATE INDEX idx_asset_type_status ON public.assets USING btree (asset_type, status)"
+  },
+  {
+    "tablename": "attendance_roster_logs",
+    "indexname": "attendance_roster_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX attendance_roster_logs_pkey ON public.attendance_roster_logs USING btree (id)"
+  },
+  {
+    "tablename": "carers_registry",
+    "indexname": "carers_registry_one_primary_per_participant",
+    "indexdef": "CREATE UNIQUE INDEX carers_registry_one_primary_per_participant ON public.carers_registry USING btree (participant_id) WHERE ((is_primary_contact = true) AND (participant_id IS NOT NULL))"
+  },
+  {
+    "tablename": "carers_registry",
+    "indexname": "carers_registry_pkey",
+    "indexdef": "CREATE UNIQUE INDEX carers_registry_pkey ON public.carers_registry USING btree (id)"
+  },
+  {
+    "tablename": "centre_operating_hours",
+    "indexname": "centre_operating_hours_pkey",
+    "indexdef": "CREATE UNIQUE INDEX centre_operating_hours_pkey ON public.centre_operating_hours USING btree (day_of_week)"
+  },
+  {
+    "tablename": "charge_codes",
+    "indexname": "charge_codes_code_key",
+    "indexdef": "CREATE UNIQUE INDEX charge_codes_code_key ON public.charge_codes USING btree (code)"
+  },
+  {
+    "tablename": "charge_codes",
+    "indexname": "charge_codes_pkey",
+    "indexdef": "CREATE UNIQUE INDEX charge_codes_pkey ON public.charge_codes USING btree (id)"
+  },
+  {
+    "tablename": "checklist_items",
+    "indexname": "checklist_items_category_idx",
+    "indexdef": "CREATE INDEX checklist_items_category_idx ON public.checklist_items USING btree (category, sort_order)"
+  },
+  {
+    "tablename": "checklist_items",
+    "indexname": "checklist_items_pkey",
+    "indexdef": "CREATE UNIQUE INDEX checklist_items_pkey ON public.checklist_items USING btree (id)"
+  },
+  {
+    "tablename": "checklist_responses",
+    "indexname": "checklist_responses_ledger_idx",
+    "indexdef": "CREATE INDEX checklist_responses_ledger_idx ON public.checklist_responses USING btree (ledger_id)"
+  },
+  {
+    "tablename": "checklist_responses",
+    "indexname": "checklist_responses_pkey",
+    "indexdef": "CREATE UNIQUE INDEX checklist_responses_pkey ON public.checklist_responses USING btree (id)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_expected_dep_idx",
+    "indexdef": "CREATE INDEX client_attendance_log_expected_dep_idx ON public.client_attendance_log USING btree (expected_departure_at)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_expected_idx",
+    "indexdef": "CREATE INDEX client_attendance_log_expected_idx ON public.client_attendance_log USING btree (expected_arrival_at)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX client_attendance_log_pkey ON public.client_attendance_log USING btree (id)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_session_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX client_attendance_log_session_id_participant_id_key ON public.client_attendance_log USING btree (session_id, participant_id)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_session_idx",
+    "indexdef": "CREATE INDEX client_attendance_log_session_idx ON public.client_attendance_log USING btree (session_id)"
+  },
+  {
+    "tablename": "client_attendance_log",
+    "indexname": "client_attendance_log_status_idx",
+    "indexdef": "CREATE INDEX client_attendance_log_status_idx ON public.client_attendance_log USING btree (status)"
+  },
+  {
+    "tablename": "compliance_assets",
+    "indexname": "compliance_assets_action_module_idx",
+    "indexdef": "CREATE INDEX compliance_assets_action_module_idx ON public.compliance_assets USING btree (action_module)"
+  },
+  {
+    "tablename": "compliance_assets",
+    "indexname": "compliance_assets_active_next_action_idx",
+    "indexdef": "CREATE INDEX compliance_assets_active_next_action_idx ON public.compliance_assets USING btree (status, next_action_at)"
+  },
+  {
+    "tablename": "compliance_assets",
+    "indexname": "compliance_assets_category_idx",
+    "indexdef": "CREATE INDEX compliance_assets_category_idx ON public.compliance_assets USING btree (category)"
+  },
+  {
+    "tablename": "compliance_assets",
+    "indexname": "compliance_assets_pkey",
+    "indexdef": "CREATE UNIQUE INDEX compliance_assets_pkey ON public.compliance_assets USING btree (id)"
+  },
+  {
+    "tablename": "compliance_assets",
+    "indexname": "compliance_assets_subject_idx",
+    "indexdef": "CREATE INDEX compliance_assets_subject_idx ON public.compliance_assets USING btree (subject_table, subject_id)"
+  },
+  {
+    "tablename": "compliance_audit_logs",
+    "indexname": "compliance_audit_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX compliance_audit_logs_pkey ON public.compliance_audit_logs USING btree (id)"
+  },
+  {
+    "tablename": "event_activity_rolls",
+    "indexname": "event_activity_rolls_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_activity_rolls_pkey ON public.event_activity_rolls USING btree (id)"
+  },
+  {
+    "tablename": "event_activity_rolls",
+    "indexname": "event_activity_rolls_unique_person_per_stop",
+    "indexdef": "CREATE UNIQUE INDEX event_activity_rolls_unique_person_per_stop ON public.event_activity_rolls USING btree (venue_stop_id, participant_id)"
+  },
+  {
+    "tablename": "event_attendance_log",
+    "indexname": "event_attendance_log_event_day_session_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_attendance_log_event_day_session_id_participant_id_key ON public.event_attendance_log USING btree (event_day_session_id, participant_id)"
+  },
+  {
+    "tablename": "event_attendance_log",
+    "indexname": "event_attendance_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_attendance_log_pkey ON public.event_attendance_log USING btree (id)"
+  },
+  {
+    "tablename": "event_attendance_log",
+    "indexname": "event_attendance_log_session_idx",
+    "indexdef": "CREATE INDEX event_attendance_log_session_idx ON public.event_attendance_log USING btree (event_day_session_id)"
+  },
+  {
+    "tablename": "event_attendance_log",
+    "indexname": "event_attendance_log_status_idx",
+    "indexdef": "CREATE INDEX event_attendance_log_status_idx ON public.event_attendance_log USING btree (status)"
+  },
+  {
+    "tablename": "event_bus_manifest",
+    "indexname": "event_bus_manifest_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_bus_manifest_pkey ON public.event_bus_manifest USING btree (id)"
+  },
+  {
+    "tablename": "event_bus_manifest",
+    "indexname": "event_bus_manifest_session_idx",
+    "indexdef": "CREATE INDEX event_bus_manifest_session_idx ON public.event_bus_manifest USING btree (event_day_session_id)"
+  },
+  {
+    "tablename": "event_bus_manifest",
+    "indexname": "event_bus_manifest_trip_carer_uidx",
+    "indexdef": "CREATE UNIQUE INDEX event_bus_manifest_trip_carer_uidx ON public.event_bus_manifest USING btree (transport_trip_id, carer_id) WHERE (carer_id IS NOT NULL)"
+  },
+  {
+    "tablename": "event_bus_manifest",
+    "indexname": "event_bus_manifest_trip_participant_uidx",
+    "indexdef": "CREATE UNIQUE INDEX event_bus_manifest_trip_participant_uidx ON public.event_bus_manifest USING btree (transport_trip_id, participant_id) WHERE (participant_id IS NOT NULL)"
+  },
+  {
+    "tablename": "event_bus_manifest",
+    "indexname": "event_bus_manifest_trip_status_idx",
+    "indexdef": "CREATE INDEX event_bus_manifest_trip_status_idx ON public.event_bus_manifest USING btree (transport_trip_id, status)"
+  },
+  {
+    "tablename": "event_curfew_log",
+    "indexname": "event_curfew_log_event_day_session_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_curfew_log_event_day_session_id_participant_id_key ON public.event_curfew_log USING btree (event_day_session_id, participant_id)"
+  },
+  {
+    "tablename": "event_curfew_log",
+    "indexname": "event_curfew_log_expected_idx",
+    "indexdef": "CREATE INDEX event_curfew_log_expected_idx ON public.event_curfew_log USING btree (expected_accounted_at)"
+  },
+  {
+    "tablename": "event_curfew_log",
+    "indexname": "event_curfew_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_curfew_log_pkey ON public.event_curfew_log USING btree (id)"
+  },
+  {
+    "tablename": "event_curfew_log",
+    "indexname": "event_curfew_log_session_idx",
+    "indexdef": "CREATE INDEX event_curfew_log_session_idx ON public.event_curfew_log USING btree (event_day_session_id)"
+  },
+  {
+    "tablename": "event_curfew_log",
+    "indexname": "event_curfew_log_status_idx",
+    "indexdef": "CREATE INDEX event_curfew_log_status_idx ON public.event_curfew_log USING btree (status)"
+  },
+  {
+    "tablename": "event_day_med_alternate_plans",
+    "indexname": "event_day_med_alternate_plans_event_day_session_id_particip_key",
+    "indexdef": "CREATE UNIQUE INDEX event_day_med_alternate_plans_event_day_session_id_particip_key ON public.event_day_med_alternate_plans USING btree (event_day_session_id, participant_id)"
+  },
+  {
+    "tablename": "event_day_med_alternate_plans",
+    "indexname": "event_day_med_alternate_plans_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_day_med_alternate_plans_pkey ON public.event_day_med_alternate_plans USING btree (id)"
+  },
+  {
+    "tablename": "event_day_med_alternate_plans",
+    "indexname": "idx_event_day_med_alternate_plans_session",
+    "indexdef": "CREATE INDEX idx_event_day_med_alternate_plans_session ON public.event_day_med_alternate_plans USING btree (event_day_session_id)"
+  },
+  {
+    "tablename": "event_day_sessions",
+    "indexname": "event_day_sessions_event_date_idx",
+    "indexdef": "CREATE INDEX event_day_sessions_event_date_idx ON public.event_day_sessions USING btree (event_id, session_date)"
+  },
+  {
+    "tablename": "event_day_sessions",
+    "indexname": "event_day_sessions_event_id_session_date_key",
+    "indexdef": "CREATE UNIQUE INDEX event_day_sessions_event_id_session_date_key ON public.event_day_sessions USING btree (event_id, session_date)"
+  },
+  {
+    "tablename": "event_day_sessions",
+    "indexname": "event_day_sessions_phase_idx",
+    "indexdef": "CREATE INDEX event_day_sessions_phase_idx ON public.event_day_sessions USING btree (phase)"
+  },
+  {
+    "tablename": "event_day_sessions",
+    "indexname": "event_day_sessions_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_day_sessions_pkey ON public.event_day_sessions USING btree (id)"
+  },
+  {
+    "tablename": "event_financial_ledger",
+    "indexname": "event_financial_ledger_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_financial_ledger_pkey ON public.event_financial_ledger USING btree (id)"
+  },
+  {
+    "tablename": "event_manifest",
+    "indexname": "event_manifest_event_kind_idx",
+    "indexdef": "CREATE INDEX event_manifest_event_kind_idx ON public.event_manifest USING btree (event_kind)"
+  },
+  {
+    "tablename": "event_manifest",
+    "indexname": "event_manifest_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_manifest_pkey ON public.event_manifest USING btree (id)"
+  },
+  {
+    "tablename": "event_manifest",
+    "indexname": "event_manifest_primary_venue_idx",
+    "indexdef": "CREATE INDEX event_manifest_primary_venue_idx ON public.event_manifest USING btree (primary_venue_id) WHERE (primary_venue_id IS NOT NULL)"
+  },
+  {
+    "tablename": "event_meal_service_rolls",
+    "indexname": "event_meal_service_rolls_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_meal_service_rolls_pkey ON public.event_meal_service_rolls USING btree (id)"
+  },
+  {
+    "tablename": "event_meal_service_rolls",
+    "indexname": "event_meal_service_rolls_venue_stop_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_meal_service_rolls_venue_stop_id_participant_id_key ON public.event_meal_service_rolls USING btree (venue_stop_id, participant_id)"
+  },
+  {
+    "tablename": "event_meal_service_rolls",
+    "indexname": "idx_event_meal_service_rolls_stop",
+    "indexdef": "CREATE INDEX idx_event_meal_service_rolls_stop ON public.event_meal_service_rolls USING btree (venue_stop_id)"
+  },
+  {
+    "tablename": "event_morning_log",
+    "indexname": "event_morning_log_event_day_session_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_morning_log_event_day_session_id_participant_id_key ON public.event_morning_log USING btree (event_day_session_id, participant_id)"
+  },
+  {
+    "tablename": "event_morning_log",
+    "indexname": "event_morning_log_expected_idx",
+    "indexdef": "CREATE INDEX event_morning_log_expected_idx ON public.event_morning_log USING btree (expected_accounted_at)"
+  },
+  {
+    "tablename": "event_morning_log",
+    "indexname": "event_morning_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_morning_log_pkey ON public.event_morning_log USING btree (id)"
+  },
+  {
+    "tablename": "event_morning_log",
+    "indexname": "event_morning_log_session_idx",
+    "indexdef": "CREATE INDEX event_morning_log_session_idx ON public.event_morning_log USING btree (event_day_session_id)"
+  },
+  {
+    "tablename": "event_morning_log",
+    "indexname": "event_morning_log_status_idx",
+    "indexdef": "CREATE INDEX event_morning_log_status_idx ON public.event_morning_log USING btree (status)"
+  },
+  {
+    "tablename": "event_roster_bookings",
+    "indexname": "event_roster_bookings_carer_id_idx",
+    "indexdef": "CREATE INDEX event_roster_bookings_carer_id_idx ON public.event_roster_bookings USING btree (carer_id)"
+  },
+  {
+    "tablename": "event_roster_bookings",
+    "indexname": "event_roster_bookings_event_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_roster_bookings_event_id_participant_id_key ON public.event_roster_bookings USING btree (event_id, participant_id)"
+  },
+  {
+    "tablename": "event_roster_bookings",
+    "indexname": "event_roster_bookings_event_pickup_order_idx",
+    "indexdef": "CREATE INDEX event_roster_bookings_event_pickup_order_idx ON public.event_roster_bookings USING btree (event_id, pickup_order)"
+  },
+  {
+    "tablename": "event_roster_bookings",
+    "indexname": "event_roster_bookings_guest_idx",
+    "indexdef": "CREATE INDEX event_roster_bookings_guest_idx ON public.event_roster_bookings USING btree (event_id) WHERE (is_guest_booking = true)"
+  },
+  {
+    "tablename": "event_roster_bookings",
+    "indexname": "event_roster_bookings_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_roster_bookings_pkey ON public.event_roster_bookings USING btree (id)"
+  },
+  {
+    "tablename": "event_venue_reconfirmations",
+    "indexname": "event_venue_reconfirmations_event_id_venue_id_key",
+    "indexdef": "CREATE UNIQUE INDEX event_venue_reconfirmations_event_id_venue_id_key ON public.event_venue_reconfirmations USING btree (event_id, venue_id)"
+  },
+  {
+    "tablename": "event_venue_reconfirmations",
+    "indexname": "event_venue_reconfirmations_event_idx",
+    "indexdef": "CREATE INDEX event_venue_reconfirmations_event_idx ON public.event_venue_reconfirmations USING btree (event_id)"
+  },
+  {
+    "tablename": "event_venue_reconfirmations",
+    "indexname": "event_venue_reconfirmations_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_venue_reconfirmations_pkey ON public.event_venue_reconfirmations USING btree (id)"
+  },
+  {
+    "tablename": "event_venue_stops",
+    "indexname": "event_venue_stops_event_date_idx",
+    "indexdef": "CREATE INDEX event_venue_stops_event_date_idx ON public.event_venue_stops USING btree (event_id, session_date, stop_order)"
+  },
+  {
+    "tablename": "event_venue_stops",
+    "indexname": "event_venue_stops_event_id_session_date_stop_order_key",
+    "indexdef": "CREATE UNIQUE INDEX event_venue_stops_event_id_session_date_stop_order_key ON public.event_venue_stops USING btree (event_id, session_date, stop_order)"
+  },
+  {
+    "tablename": "event_venue_stops",
+    "indexname": "event_venue_stops_pkey",
+    "indexdef": "CREATE UNIQUE INDEX event_venue_stops_pkey ON public.event_venue_stops USING btree (id)"
+  },
+  {
+    "tablename": "hub_issue_notes",
+    "indexname": "hub_issue_notes_pkey",
+    "indexdef": "CREATE UNIQUE INDEX hub_issue_notes_pkey ON public.hub_issue_notes USING btree (id)"
+  },
+  {
+    "tablename": "hub_issue_notes",
+    "indexname": "hub_issue_notes_source_row_idx",
+    "indexdef": "CREATE INDEX hub_issue_notes_source_row_idx ON public.hub_issue_notes USING btree (source, source_row_id, stamped_at)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_created_at_idx",
+    "indexdef": "CREATE INDEX maintenance_items_created_at_idx ON public.maintenance_items USING btree (created_at DESC)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_event_id_idx",
+    "indexdef": "CREATE INDEX maintenance_items_event_id_idx ON public.maintenance_items USING btree (event_id) WHERE (event_id IS NOT NULL)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_pkey",
+    "indexdef": "CREATE UNIQUE INDEX maintenance_items_pkey ON public.maintenance_items USING btree (id)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_severity_idx",
+    "indexdef": "CREATE INDEX maintenance_items_severity_idx ON public.maintenance_items USING btree (severity)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_source_idx",
+    "indexdef": "CREATE INDEX maintenance_items_source_idx ON public.maintenance_items USING btree (source)"
+  },
+  {
+    "tablename": "maintenance_items",
+    "indexname": "maintenance_items_status_idx",
+    "indexdef": "CREATE INDEX maintenance_items_status_idx ON public.maintenance_items USING btree (status)"
+  },
+  {
+    "tablename": "maintenance_notes",
+    "indexname": "maintenance_notes_item_id_idx",
+    "indexdef": "CREATE INDEX maintenance_notes_item_id_idx ON public.maintenance_notes USING btree (item_id, created_at)"
+  },
+  {
+    "tablename": "maintenance_notes",
+    "indexname": "maintenance_notes_pkey",
+    "indexdef": "CREATE UNIQUE INDEX maintenance_notes_pkey ON public.maintenance_notes USING btree (id)"
+  },
+  {
+    "tablename": "medication_administration_log",
+    "indexname": "medication_administration_log_pkey",
+    "indexdef": "CREATE UNIQUE INDEX medication_administration_log_pkey ON public.medication_administration_log USING btree (id)"
+  },
+  {
+    "tablename": "myob_export_batches",
+    "indexname": "myob_export_batches_pkey",
+    "indexdef": "CREATE UNIQUE INDEX myob_export_batches_pkey ON public.myob_export_batches USING btree (id)"
+  },
+  {
+    "tablename": "offline_sync_logs",
+    "indexname": "offline_sync_logs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX offline_sync_logs_pkey ON public.offline_sync_logs USING btree (id)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "idx_op_emergencies_active",
+    "indexdef": "CREATE INDEX idx_op_emergencies_active ON public.operational_emergencies USING btree (status) WHERE (status = 'active'::text)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "idx_op_emergencies_event_day",
+    "indexdef": "CREATE INDEX idx_op_emergencies_event_day ON public.operational_emergencies USING btree (event_day_session_id) WHERE (event_day_session_id IS NOT NULL)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "idx_op_emergencies_hub",
+    "indexdef": "CREATE INDEX idx_op_emergencies_hub ON public.operational_emergencies USING btree (hub_issue_id) WHERE (hub_issue_id IS NOT NULL)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "idx_op_emergencies_site_day",
+    "indexdef": "CREATE INDEX idx_op_emergencies_site_day ON public.operational_emergencies USING btree (site_day_session_id) WHERE (site_day_session_id IS NOT NULL)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "operational_emergencies_pkey",
+    "indexdef": "CREATE UNIQUE INDEX operational_emergencies_pkey ON public.operational_emergencies USING btree (id)"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "uq_op_emergencies_one_active_centre",
+    "indexdef": "CREATE UNIQUE INDEX uq_op_emergencies_one_active_centre ON public.operational_emergencies USING btree (site_day_session_id) WHERE ((status = 'active'::text) AND (site_day_session_id IS NOT NULL))"
+  },
+  {
+    "tablename": "operational_emergencies",
+    "indexname": "uq_op_emergencies_one_active_event_day",
+    "indexdef": "CREATE UNIQUE INDEX uq_op_emergencies_one_active_event_day ON public.operational_emergencies USING btree (event_day_session_id) WHERE ((status = 'active'::text) AND (event_day_session_id IS NOT NULL))"
+  },
+  {
+    "tablename": "operational_emergency_muster",
+    "indexname": "idx_op_emergency_muster_emergency",
+    "indexdef": "CREATE INDEX idx_op_emergency_muster_emergency ON public.operational_emergency_muster USING btree (emergency_id)"
+  },
+  {
+    "tablename": "operational_emergency_muster",
+    "indexname": "operational_emergency_muster_emergency_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX operational_emergency_muster_emergency_id_participant_id_key ON public.operational_emergency_muster USING btree (emergency_id, participant_id)"
+  },
+  {
+    "tablename": "operational_emergency_muster",
+    "indexname": "operational_emergency_muster_pkey",
+    "indexdef": "CREATE UNIQUE INDEX operational_emergency_muster_pkey ON public.operational_emergency_muster USING btree (id)"
+  },
+  {
+    "tablename": "operational_escalations",
+    "indexname": "idx_op_escalations_source",
+    "indexdef": "CREATE INDEX idx_op_escalations_source ON public.operational_escalations USING btree (source_kind, source_issue_id)"
+  },
+  {
+    "tablename": "operational_escalations",
+    "indexname": "operational_escalations_pkey",
+    "indexdef": "CREATE UNIQUE INDEX operational_escalations_pkey ON public.operational_escalations USING btree (id)"
+  },
+  {
+    "tablename": "operational_escalations",
+    "indexname": "operational_escalations_raised_by_idx",
+    "indexdef": "CREATE INDEX operational_escalations_raised_by_idx ON public.operational_escalations USING btree (raised_by)"
+  },
+  {
+    "tablename": "operational_incidents",
+    "indexname": "operational_incidents_pkey",
+    "indexdef": "CREATE UNIQUE INDEX operational_incidents_pkey ON public.operational_incidents USING btree (id)"
+  },
+  {
+    "tablename": "operational_ledger",
+    "indexname": "operational_ledger_category_action_idx",
+    "indexdef": "CREATE INDEX operational_ledger_category_action_idx ON public.operational_ledger USING btree (category, action_type)"
+  },
+  {
+    "tablename": "operational_ledger",
+    "indexname": "operational_ledger_created_at_idx",
+    "indexdef": "CREATE INDEX operational_ledger_created_at_idx ON public.operational_ledger USING btree (created_at DESC)"
+  },
+  {
+    "tablename": "operational_ledger",
+    "indexname": "operational_ledger_pkey",
+    "indexdef": "CREATE UNIQUE INDEX operational_ledger_pkey ON public.operational_ledger USING btree (id)"
+  },
+  {
+    "tablename": "operational_ledger",
+    "indexname": "operational_ledger_staff_created_idx",
+    "indexdef": "CREATE INDEX operational_ledger_staff_created_idx ON public.operational_ledger USING btree (staff_id, created_at DESC)"
+  },
+  {
+    "tablename": "participant_attendance_schedules",
+    "indexname": "participant_attendance_schedules_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participant_attendance_schedules_pkey ON public.participant_attendance_schedules USING btree (id)"
+  },
+  {
+    "tablename": "participant_compliance_and_alerts",
+    "indexname": "idx_part_compliance_type",
+    "indexdef": "CREATE INDEX idx_part_compliance_type ON public.participant_compliance_and_alerts USING btree (participant_id, record_type)"
+  },
+  {
+    "tablename": "participant_compliance_and_alerts",
+    "indexname": "participant_compliance_and_alerts_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participant_compliance_and_alerts_pkey ON public.participant_compliance_and_alerts USING btree (id)"
+  },
+  {
+    "tablename": "participant_financial_ledger",
+    "indexname": "participant_financial_ledger_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participant_financial_ledger_pkey ON public.participant_financial_ledger USING btree (id)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "idx_infectious_exclusions_active",
+    "indexdef": "CREATE INDEX idx_infectious_exclusions_active ON public.participant_infectious_exclusions USING btree (status) WHERE (status = 'active'::text)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "idx_infectious_exclusions_event_day",
+    "indexdef": "CREATE INDEX idx_infectious_exclusions_event_day ON public.participant_infectious_exclusions USING btree (event_day_session_id) WHERE (event_day_session_id IS NOT NULL)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "idx_infectious_exclusions_hub_issue",
+    "indexdef": "CREATE INDEX idx_infectious_exclusions_hub_issue ON public.participant_infectious_exclusions USING btree (hub_issue_id) WHERE (hub_issue_id IS NOT NULL)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "idx_infectious_exclusions_participant",
+    "indexdef": "CREATE INDEX idx_infectious_exclusions_participant ON public.participant_infectious_exclusions USING btree (participant_id)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "participant_infectious_exclusions_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participant_infectious_exclusions_pkey ON public.participant_infectious_exclusions USING btree (id)"
+  },
+  {
+    "tablename": "participant_infectious_exclusions",
+    "indexname": "uq_infectious_exclusions_one_active",
+    "indexdef": "CREATE UNIQUE INDEX uq_infectious_exclusions_one_active ON public.participant_infectious_exclusions USING btree (participant_id) WHERE (status = 'active'::text)"
+  },
+  {
+    "tablename": "participant_medication_schedules",
+    "indexname": "participant_medication_schedules_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participant_medication_schedules_pkey ON public.participant_medication_schedules USING btree (id)"
+  },
+  {
+    "tablename": "participants",
+    "indexname": "participants_kind_archived_idx",
+    "indexdef": "CREATE INDEX participants_kind_archived_idx ON public.participants USING btree (participant_kind, archived_at)"
+  },
+  {
+    "tablename": "participants",
+    "indexname": "participants_ndis_number_key",
+    "indexdef": "CREATE UNIQUE INDEX participants_ndis_number_key ON public.participants USING btree (ndis_number)"
+  },
+  {
+    "tablename": "participants",
+    "indexname": "participants_pkey",
+    "indexdef": "CREATE UNIQUE INDEX participants_pkey ON public.participants USING btree (id)"
+  },
+  {
+    "tablename": "site_day_activities",
+    "indexname": "idx_site_day_activities_session",
+    "indexdef": "CREATE INDEX idx_site_day_activities_session ON public.site_day_activities USING btree (session_id, sort_order)"
+  },
+  {
+    "tablename": "site_day_activities",
+    "indexname": "site_day_activities_pkey",
+    "indexdef": "CREATE UNIQUE INDEX site_day_activities_pkey ON public.site_day_activities USING btree (id)"
+  },
+  {
+    "tablename": "site_day_meal_service_rolls",
+    "indexname": "idx_site_day_meal_service_rolls_activity",
+    "indexdef": "CREATE INDEX idx_site_day_meal_service_rolls_activity ON public.site_day_meal_service_rolls USING btree (activity_id)"
+  },
+  {
+    "tablename": "site_day_meal_service_rolls",
+    "indexname": "site_day_meal_service_rolls_activity_id_participant_id_key",
+    "indexdef": "CREATE UNIQUE INDEX site_day_meal_service_rolls_activity_id_participant_id_key ON public.site_day_meal_service_rolls USING btree (activity_id, participant_id)"
+  },
+  {
+    "tablename": "site_day_meal_service_rolls",
+    "indexname": "site_day_meal_service_rolls_pkey",
+    "indexdef": "CREATE UNIQUE INDEX site_day_meal_service_rolls_pkey ON public.site_day_meal_service_rolls USING btree (id)"
+  },
+  {
+    "tablename": "site_day_sessions",
+    "indexname": "site_day_sessions_pkey",
+    "indexdef": "CREATE UNIQUE INDEX site_day_sessions_pkey ON public.site_day_sessions USING btree (id)"
+  },
+  {
+    "tablename": "site_day_sessions",
+    "indexname": "site_day_sessions_session_date_key",
+    "indexdef": "CREATE UNIQUE INDEX site_day_sessions_session_date_key ON public.site_day_sessions USING btree (session_date)"
+  },
+  {
+    "tablename": "site_day_visitors",
+    "indexname": "site_day_visitors_pkey",
+    "indexdef": "CREATE UNIQUE INDEX site_day_visitors_pkey ON public.site_day_visitors USING btree (id)"
+  },
+  {
+    "tablename": "site_day_visitors",
+    "indexname": "site_day_visitors_present_idx",
+    "indexdef": "CREATE INDEX site_day_visitors_present_idx ON public.site_day_visitors USING btree (session_id) WHERE (left_at IS NULL)"
+  },
+  {
+    "tablename": "site_day_visitors",
+    "indexname": "site_day_visitors_session_idx",
+    "indexdef": "CREATE INDEX site_day_visitors_session_idx ON public.site_day_visitors USING btree (session_id)"
+  },
+  {
+    "tablename": "site_issues_register",
+    "indexname": "site_issues_register_event_day_session_idx",
+    "indexdef": "CREATE INDEX site_issues_register_event_day_session_idx ON public.site_issues_register USING btree (event_day_session_id) WHERE (event_day_session_id IS NOT NULL)"
+  },
+  {
+    "tablename": "site_issues_register",
+    "indexname": "site_issues_register_event_id_idx",
+    "indexdef": "CREATE INDEX site_issues_register_event_id_idx ON public.site_issues_register USING btree (event_id) WHERE (event_id IS NOT NULL)"
+  },
+  {
+    "tablename": "site_issues_register",
+    "indexname": "site_issues_register_pkey",
+    "indexdef": "CREATE UNIQUE INDEX site_issues_register_pkey ON public.site_issues_register USING btree (id)"
+  },
+  {
+    "tablename": "staff_compliance_and_certs",
+    "indexname": "idx_staff_compliance_type",
+    "indexdef": "CREATE INDEX idx_staff_compliance_type ON public.staff_compliance_and_certs USING btree (staff_id, cert_type)"
+  },
+  {
+    "tablename": "staff_compliance_and_certs",
+    "indexname": "staff_compliance_and_certs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX staff_compliance_and_certs_pkey ON public.staff_compliance_and_certs USING btree (id)"
+  },
+  {
+    "tablename": "staff_registry",
+    "indexname": "staff_registry_auth_user_id_key",
+    "indexdef": "CREATE UNIQUE INDEX staff_registry_auth_user_id_key ON public.staff_registry USING btree (auth_user_id) WHERE (auth_user_id IS NOT NULL)"
+  },
+  {
+    "tablename": "staff_registry",
+    "indexname": "staff_registry_auth_user_id_uidx",
+    "indexdef": "CREATE UNIQUE INDEX staff_registry_auth_user_id_uidx ON public.staff_registry USING btree (auth_user_id) WHERE (auth_user_id IS NOT NULL)"
+  },
+  {
+    "tablename": "staff_registry",
+    "indexname": "staff_registry_pkey",
+    "indexdef": "CREATE UNIQUE INDEX staff_registry_pkey ON public.staff_registry USING btree (id)"
+  },
+  {
+    "tablename": "system_lookup_parameters",
+    "indexname": "system_lookup_parameters_code_key",
+    "indexdef": "CREATE UNIQUE INDEX system_lookup_parameters_code_key ON public.system_lookup_parameters USING btree (code)"
+  },
+  {
+    "tablename": "system_lookup_parameters",
+    "indexname": "system_lookup_parameters_pkey",
+    "indexdef": "CREATE UNIQUE INDEX system_lookup_parameters_pkey ON public.system_lookup_parameters USING btree (id)"
+  },
+  {
+    "tablename": "system_operational_settings",
+    "indexname": "system_operational_settings_pkey",
+    "indexdef": "CREATE UNIQUE INDEX system_operational_settings_pkey ON public.system_operational_settings USING btree (key)"
+  },
+  {
+    "tablename": "system_parameters",
+    "indexname": "system_parameters_pkey",
+    "indexdef": "CREATE UNIQUE INDEX system_parameters_pkey ON public.system_parameters USING btree (key)"
+  },
+  {
+    "tablename": "transport_assets",
+    "indexname": "transport_assets_name_key",
+    "indexdef": "CREATE UNIQUE INDEX transport_assets_name_key ON public.transport_assets USING btree (name)"
+  },
+  {
+    "tablename": "transport_assets",
+    "indexname": "transport_assets_pkey",
+    "indexdef": "CREATE UNIQUE INDEX transport_assets_pkey ON public.transport_assets USING btree (id)"
+  },
+  {
+    "tablename": "transport_assets",
+    "indexname": "transport_assets_rego_expiry_idx",
+    "indexdef": "CREATE INDEX transport_assets_rego_expiry_idx ON public.transport_assets USING btree (registration_expiry) WHERE (registration_expiry IS NOT NULL)"
+  },
+  {
+    "tablename": "transport_assets",
+    "indexname": "transport_assets_rego_plate_key",
+    "indexdef": "CREATE UNIQUE INDEX transport_assets_rego_plate_key ON public.transport_assets USING btree (rego_plate)"
+  },
+  {
+    "tablename": "transport_assets",
+    "indexname": "transport_assets_vin_uniq",
+    "indexdef": "CREATE UNIQUE INDEX transport_assets_vin_uniq ON public.transport_assets USING btree (vin) WHERE (vin IS NOT NULL)"
+  },
+  {
+    "tablename": "transport_requests",
+    "indexname": "transport_requests_date_status_idx",
+    "indexdef": "CREATE INDEX transport_requests_date_status_idx ON public.transport_requests USING btree (request_date, status)"
+  },
+  {
+    "tablename": "transport_requests",
+    "indexname": "transport_requests_participant_idx",
+    "indexdef": "CREATE INDEX transport_requests_participant_idx ON public.transport_requests USING btree (participant_id)"
+  },
+  {
+    "tablename": "transport_requests",
+    "indexname": "transport_requests_pkey",
+    "indexdef": "CREATE UNIQUE INDEX transport_requests_pkey ON public.transport_requests USING btree (id)"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "idx_transport_trips_bus_run_code",
+    "indexdef": "CREATE INDEX idx_transport_trips_bus_run_code ON public.transport_trips USING btree (bus_run_code) WHERE (bus_run_code IS NOT NULL)"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "transport_trips_asset_id_idx",
+    "indexdef": "CREATE INDEX transport_trips_asset_id_idx ON public.transport_trips USING btree (asset_id) WHERE (asset_id IS NOT NULL)"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "transport_trips_event_day_session_idx",
+    "indexdef": "CREATE INDEX transport_trips_event_day_session_idx ON public.transport_trips USING btree (event_day_session_id) WHERE (event_day_session_id IS NOT NULL)"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "transport_trips_one_active_per_driver",
+    "indexdef": "CREATE UNIQUE INDEX transport_trips_one_active_per_driver ON public.transport_trips USING btree (driver_staff_id) WHERE (status <> ALL (ARRAY['completed'::text, 'cancelled'::text]))"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "transport_trips_pkey",
+    "indexdef": "CREATE UNIQUE INDEX transport_trips_pkey ON public.transport_trips USING btree (id)"
+  },
+  {
+    "tablename": "transport_trips",
+    "indexname": "transport_trips_trip_kind_idx",
+    "indexdef": "CREATE INDEX transport_trips_trip_kind_idx ON public.transport_trips USING btree (trip_kind) WHERE (trip_kind IS NOT NULL)"
+  },
+  {
+    "tablename": "trip_legs",
+    "indexname": "trip_legs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX trip_legs_pkey ON public.trip_legs USING btree (id)"
+  },
+  {
+    "tablename": "trip_legs",
+    "indexname": "trip_legs_trip_id_idx",
+    "indexdef": "CREATE INDEX trip_legs_trip_id_idx ON public.trip_legs USING btree (trip_id, leg_index)"
+  },
+  {
+    "tablename": "vendors",
+    "indexname": "vendors_name_lower_unique",
+    "indexdef": "CREATE UNIQUE INDEX vendors_name_lower_unique ON public.vendors USING btree (lower(TRIM(BOTH FROM name)))"
+  },
+  {
+    "tablename": "vendors",
+    "indexname": "vendors_pkey",
+    "indexdef": "CREATE UNIQUE INDEX vendors_pkey ON public.vendors USING btree (id)"
+  },
+  {
+    "tablename": "vendors",
+    "indexname": "vendors_status_idx",
+    "indexdef": "CREATE INDEX vendors_status_idx ON public.vendors USING btree (status)"
+  },
+  {
+    "tablename": "venue_safety_answers",
+    "indexname": "venue_safety_answers_pkey",
+    "indexdef": "CREATE UNIQUE INDEX venue_safety_answers_pkey ON public.venue_safety_answers USING btree (id)"
+  },
+  {
+    "tablename": "venue_safety_answers",
+    "indexname": "venue_safety_answers_signoff_id_field_id_key",
+    "indexdef": "CREATE UNIQUE INDEX venue_safety_answers_signoff_id_field_id_key ON public.venue_safety_answers USING btree (signoff_id, field_id)"
+  },
+  {
+    "tablename": "venue_safety_answers",
+    "indexname": "venue_safety_answers_signoff_idx",
+    "indexdef": "CREATE INDEX venue_safety_answers_signoff_idx ON public.venue_safety_answers USING btree (signoff_id)"
+  },
+  {
+    "tablename": "venue_safety_baseline_signoffs",
+    "indexname": "venue_safety_baseline_signoffs_pkey",
+    "indexdef": "CREATE UNIQUE INDEX venue_safety_baseline_signoffs_pkey ON public.venue_safety_baseline_signoffs USING btree (id)"
+  },
+  {
+    "tablename": "venue_safety_baseline_signoffs",
+    "indexname": "venue_safety_baseline_signoffs_venue_idx",
+    "indexdef": "CREATE INDEX venue_safety_baseline_signoffs_venue_idx ON public.venue_safety_baseline_signoffs USING btree (venue_id, signed_off_at DESC)"
+  },
+  {
+    "tablename": "venue_template_fields",
+    "indexname": "venue_template_fields_pkey",
+    "indexdef": "CREATE UNIQUE INDEX venue_template_fields_pkey ON public.venue_template_fields USING btree (id)"
+  },
+  {
+    "tablename": "venue_template_fields",
+    "indexname": "venue_template_fields_venue_idx",
+    "indexdef": "CREATE INDEX venue_template_fields_venue_idx ON public.venue_template_fields USING btree (venue_id, sort_order)"
+  },
+  {
+    "tablename": "venues",
+    "indexname": "venues_name_idx",
+    "indexdef": "CREATE INDEX venues_name_idx ON public.venues USING btree (lower(name))"
+  },
+  {
+    "tablename": "venues",
+    "indexname": "venues_pkey",
+    "indexdef": "CREATE UNIQUE INDEX venues_pkey ON public.venues USING btree (id)"
+  },
+  {
+    "tablename": "venues",
+    "indexname": "venues_status_idx",
+    "indexdef": "CREATE INDEX venues_status_idx ON public.venues USING btree (status)"
+  }
+]

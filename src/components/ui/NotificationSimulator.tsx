@@ -10,6 +10,7 @@
  *                                  the app (attendance RED, manifest Sev 1,
  *                                  future pipelines). Queued so multiple
  *                                  recipients display one after another.
+ *   • `lovable:mock-email`       — App ticket notify and other server emails.
  */
 
 import { useCallback, useState } from "react";
@@ -23,6 +24,10 @@ import {
   useMockSmsListener,
   type MockSmsPayload,
 } from "@/lib/notifications/mock-sms";
+import {
+  useMockEmailListener,
+  type MockEmailPayload,
+} from "@/lib/notifications/mock-email";
 import { ClientTime } from "@/components/ui/client-time";
 
 interface SmsCard {
@@ -53,6 +58,41 @@ function fromMockSms(p: MockSmsPayload): SmsCard {
   };
 }
 
+function showMockEmailToast(payload: {
+  recipient: string;
+  subject: string;
+  body: string;
+  reason?: string;
+}) {
+  toast(
+    <div className="flex flex-col gap-1 text-xs">
+      <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
+        <Mail className="h-3.5 w-3.5" /> MOCK EMAIL DISPATCHED
+      </div>
+      <div>
+        <span className="font-semibold">TO:</span> {payload.recipient}
+      </div>
+      {payload.subject ? (
+        <div>
+          <span className="font-semibold">SUBJECT:</span> {payload.subject}
+        </div>
+      ) : null}
+      {payload.reason ? (
+        <div className="text-muted-foreground">
+          <span className="font-semibold">ROUTE:</span> {payload.reason}
+        </div>
+      ) : null}
+      <div className="mt-1 whitespace-pre-wrap text-muted-foreground">
+        {payload.body}
+      </div>
+    </div>,
+    {
+      duration: 12_000,
+      className: "border-amber-500/60 bg-amber-50 dark:bg-amber-950/40",
+    },
+  );
+}
+
 export function NotificationSimulator() {
   const [queue, setQueue] = useState<SmsCard[]>([]);
 
@@ -67,28 +107,11 @@ export function NotificationSimulator() {
         return;
       }
       if (payload.channel === "email") {
-        toast(
-          <div className="flex flex-col gap-1 text-xs">
-            <div className="flex items-center gap-1.5 font-bold text-amber-700 dark:text-amber-300">
-              <Mail className="h-3.5 w-3.5" /> 📧 MOCK EMAIL DISPATCHED
-            </div>
-            <div>
-              <span className="font-semibold">TO:</span> {payload.recipient}
-            </div>
-            {payload.subject && (
-              <div>
-                <span className="font-semibold">SUBJECT:</span> {payload.subject}
-              </div>
-            )}
-            <div className="mt-1 whitespace-pre-wrap text-muted-foreground">
-              {payload.body}
-            </div>
-          </div>,
-          {
-            duration: 12_000,
-            className: "border-amber-500/60 bg-amber-50 dark:bg-amber-950/40",
-          },
-        );
+        showMockEmailToast({
+          recipient: payload.recipient,
+          subject: payload.subject ?? "",
+          body: payload.body,
+        });
       }
     },
     [pushCard],
@@ -101,8 +124,18 @@ export function NotificationSimulator() {
     [pushCard],
   );
 
+  const handleMockEmail = useCallback((payload: MockEmailPayload) => {
+    showMockEmailToast({
+      recipient: payload.recipient,
+      subject: payload.subject,
+      body: payload.body,
+      reason: payload.reason,
+    });
+  }, []);
+
   useInspectionAlertListener(handleInspection);
   useMockSmsListener(handleMockSms);
+  useMockEmailListener(handleMockEmail);
 
   const current = queue[0];
   const advance = () => setQueue((q) => q.slice(1));

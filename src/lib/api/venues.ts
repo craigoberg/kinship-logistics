@@ -8,7 +8,8 @@
  *   - clone (field structure only — never copies answers §12.2.2)
  */
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
+import { operationalNowIso } from "@/lib/operational-clock";
+import { resolveStaffIdWithFallback, verifyCoordinatorPin } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
 import { writeToLedgerOrThrow, writeToLedger } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
@@ -358,7 +359,9 @@ export interface BaselineSignoffAnswer {
 
 export interface BaselineSignoffInput {
   venue_id: string;
-  /** Manager 4-digit PIN — verified before write. */
+  /** Manager named on the sign-off form. */
+  managerStaffId: string;
+  /** That manager's sign-in PIN (4 or 6 digits) — verified before write. */
   managerPin: string;
   evidence_ref: string;
   notes?: string | null;
@@ -372,9 +375,9 @@ export async function submitBaselineSignoff(
     throw new Error(`Evidence reference must be at least ${MIN_EVIDENCE} characters.`);
   }
 
-  // Verify manager PIN.
-  const staffId = await resolveStaffIdWithFallback();
-  const pinOk = await verifyStaffPin(staffId, input.managerPin);
+  const staffId = input.managerStaffId;
+  if (!staffId) throw new Error("Select the authorising manager.");
+  const pinOk = await verifyCoordinatorPin(staffId, input.managerPin);
   if (!pinOk) {
     throw new Error("Invalid Manager PIN.");
   }
@@ -390,7 +393,7 @@ export async function submitBaselineSignoff(
     .insert({
       venue_id: input.venue_id,
       signed_off_by_staff_id: staffId || null,
-      signed_off_at: new Date().toISOString(),
+      signed_off_at: operationalNowIso(),
       evidence_ref: input.evidence_ref.trim(),
       notes: input.notes?.trim() || null,
     })

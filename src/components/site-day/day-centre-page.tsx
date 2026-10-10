@@ -45,6 +45,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
     (issuesQ.data ?? []).find((i) => i.severity === "red" && i.status !== "resolved") ?? null;
 
   // Cross-session Day Centre REDs only — trip/event REDs never block Open Centre.
+  // Lost Soul attendance overdue REDs also never block (Hub review only).
   // Queryable even without today's session row, so we can show guidance
   // BEFORE provisioning.
   const openRedsQ = useQuery({
@@ -170,7 +171,8 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
   }
 
   // Blocking RED check — show BEFORE provisioning today's session. The
-  // Day Centre cannot open while any RED issue has no agreed workaround.
+  // Day Centre cannot open while a site RED has no agreed workaround.
+  // Lost Soul attendance REDs are excluded from this list.
   if (hasBlockingRed && (!session || session.phase === "open_pending")) {
     return (
       <div className="space-y-4">
@@ -202,7 +204,7 @@ export function DayCentrePage({ showDiagnostic = true }: DayCentrePageProps) {
                   RED
                 </span>
                 <div className="flex items-center gap-2">
-                  <ClientTime iso={r.created_at} className="text-xs text-muted-foreground" />
+                  <ClientTime iso={r.occurred_at ?? r.created_at} className="text-xs text-muted-foreground" />
                   {userIsManager ? (
                     <DayCentreBlockingRedResolveButton issue={r} />
                   ) : null}

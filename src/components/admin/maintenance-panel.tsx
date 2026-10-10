@@ -34,10 +34,11 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubContextMetaGrid, HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
+import { IncidentBoardReportDialog } from "@/components/governance/incident-board-report-dialog";
 import { maintenanceItemBodyLines } from "@/lib/governance/hub-maintenance-item-body";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
@@ -56,7 +57,8 @@ import {
 import { useMaintenanceUrgencyParams } from "@/hooks/use-system-parameters";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
-import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { isManagerProfile } from "@/lib/governance/is-manager";
 import { resolveStaffIdWithFallback, getStaffId, resolveStaffDisplayName } from "@/lib/data-store";
@@ -123,6 +125,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   const [deferAt, setDeferAt] = useState<string>(defaultDeferIso());
   const [deferDatetimeValid, setDeferDatetimeValid] = useState(true);
   const [pinOpen, setPinOpen] = useState(false);
+  const [boardOpen, setBoardOpen] = useState(false);
   const [pendingAction, setPendingAction] = useState<"resolve" | "close">("resolve");
 
   useEffect(() => {
@@ -131,6 +134,7 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       setDeferOn(false);
       setDeferAt(defaultDeferIso());
       setDeferDatetimeValid(true);
+      setBoardOpen(false);
     }
   }, [open, item.id]);
 
@@ -164,9 +168,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
   );
   const reviewStarted =
     item.status === "in_progress" || isHubReviewStarted(maintenanceNotesForReview);
+  const waitFrom = item.occurredAt || item.createdAt;
   const waitLabel = reviewStartedNote
-    ? formatHubWaitDuration(item.createdAt, reviewStartedNote.stampedAt)
-    : formatHubWaitDuration(item.createdAt, new Date().toISOString());
+    ? formatHubWaitDuration(waitFrom, reviewStartedNote.stampedAt)
+    : formatHubWaitDuration(waitFrom, operationalNowIso());
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: MAINTENANCE_ITEMS_KEY });
@@ -213,7 +218,10 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
     },
     onSuccess: () => {
       invalidate();
-      const waitLabel = formatHubWaitDuration(item.createdAt, new Date().toISOString());
+      const waitLabel = formatHubWaitDuration(
+        item.occurredAt || item.createdAt,
+        operationalNowIso(),
+      );
       operationToasts.reviewStarted(waitLabel);
     },
     onError: (e: Error) => operationToasts.actionFailed(e.message),
@@ -308,12 +316,6 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
         <Badge className={STATUS_BADGE[maintenanceWorkflowStatus(item.status)]}>
           {STATUS_LABEL[maintenanceWorkflowStatus(item.status)]}
         </Badge>
-        {item.deferredUntil && item.status === "deferred" && (
-          <span className="text-xs text-amber-600 font-medium">
-            ↻ Deferred to {formatDate(item.deferredUntil)}
-            {item.deferCount > 1 && ` (×${item.deferCount})`}
-          </span>
-        )}
       </div>
       <p className="font-medium leading-snug">{item.title}</p>
       {item.description !== item.title && (
@@ -321,6 +323,9 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       )}
       <HubContextMetaGrid
         rows={[
+          ...(item.incidentNumber
+            ? [{ label: "Incident no.", value: item.incidentNumber }]
+            : []),
           { label: "Location", value: item.locationLabel },
           { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
           { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
@@ -344,9 +349,24 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
           item.resolvedAt
             ? {
                 label: "Resolved",
-                value: <FormattedDateTime value={item.resolvedAt} />,
+                value: (
+                  <FormattedResolvedAt resolved={item.resolvedAt} openedAt={item.occurredAt} />
+                ),
               }
             : { label: "Resolved", value: null },
+          ...(item.deferredUntil && item.status === "deferred"
+            ? [
+                {
+                  label: "Deferred until",
+                  value: (
+                    <>
+                      <FormattedDeferredUntil value={item.deferredUntil} />
+                      {item.deferCount > 1 ? ` (×${item.deferCount})` : ""}
+                    </>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>
@@ -389,24 +409,40 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
       resolveCloseLabel="Mark Resolved"
       canResolve={canResolve}
       extraFooterStart={
-        item.status === "resolved" ? (
-          <Button
-            size="sm"
-            variant="outline"
-            disabled={busy}
-            onClick={handleCloseClick}
-          >
-            {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
-            Close Item
-          </Button>
+        item.source === "incident_fault" || item.incidentNumber || item.status === "resolved" ? (
+          <>
+            {item.source === "incident_fault" || item.incidentNumber ? (
+              <Button type="button" variant="outline" size="sm" onClick={() => setBoardOpen(true)}>
+                Board report
+              </Button>
+            ) : null}
+            {item.status === "resolved" ? (
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={busy}
+                onClick={handleCloseClick}
+              >
+                {closeMut.isPending && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                Close Item
+              </Button>
+            ) : null}
+          </>
         ) : undefined
       }
     />
     <PinReauthDialog
       open={pinOpen}
       onOpenChange={setPinOpen}
-      reason="Manager PIN required to resolve or close a maintenance item."
+      requireManager
+      reason="Enter your PIN to resolve or close this maintenance item."
       onAuthenticated={handlePinAuthenticated}
+    />
+    <IncidentBoardReportDialog
+      hubSource="maintenance"
+      hubRowId={item.id}
+      open={boardOpen}
+      onOpenChange={setBoardOpen}
     />
     </>
   );
@@ -697,22 +733,39 @@ function ItemsList({ tab, onManage }: ItemsListProps) {
               meta={
                 <HubListMetaRows
                   rows={[
-                    ...(item.deferredUntil && item.status === "deferred"
-                      ? [
-                          {
-                            label: "Deferred to",
-                            value: formatDate(item.deferredUntil),
-                          },
-                        ]
+                    ...(item.incidentNumber
+                      ? [{ label: "Incident no.", value: item.incidentNumber }]
                       : []),
                     { label: "Location", value: item.locationLabel },
                     { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
                     { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
-          { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
+                    { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
                     {
                       label: "Updated",
                       value: <FormattedDateTime value={item.updatedAt} />,
                     },
+                    ...(item.deferredUntil && item.status === "deferred"
+                      ? [
+                          {
+                            label: "Deferred until",
+                            value: <FormattedDeferredUntil value={item.deferredUntil} />,
+                          },
+                        ]
+                      : []),
+                    ...((item.status === "resolved" || item.status === "closed") &&
+                    item.resolvedAt
+                      ? [
+                          {
+                            label: "Resolved",
+                            value: (
+                              <FormattedResolvedAt
+                                resolved={item.resolvedAt}
+                                openedAt={item.occurredAt}
+                              />
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               }

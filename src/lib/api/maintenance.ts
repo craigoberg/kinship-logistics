@@ -9,7 +9,9 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { formatDate, formatDateTime } from "@/lib/utils";
+import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -49,6 +51,8 @@ export interface MaintenanceItem {
   updatedAt: string;
   /** When the fault actually happened. Falls back to createdAt when unset. */
   occurredAt: string;
+  /** Board pack number when filed from the Red Button. */
+  incidentNumber: string | null;
   /** Timestamp of the most recent maintenance note; null if no notes yet. */
   lastNoteAt: string | null;
 }
@@ -101,6 +105,7 @@ function rowToItem(r: Record<string, any>): MaintenanceItem {
     updatedAt: r.updated_at,
     occurredAt: r.occurred_at ?? r.created_at,
     lastNoteAt: r.last_note_at ?? null,
+    incidentNumber: r.incident_number ? String(r.incident_number) : null,
   };
 }
 
@@ -176,12 +181,9 @@ export async function listMaintenanceItems(
 
   // Fetch broadly; tab filtering is done client-side so the rewarn window
   // and overdue deferrals can be applied without a server-side date expression.
-  let q = supabase
-    .from("maintenance_items")
-    .select(
-      "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, occurred_at, last_note_at",
-    )
-    .order("created_at", { ascending: false });
+  const cols =
+    "id, title, description, severity, status, source, source_ref_id, venue_id, event_id, location_label, reported_by, assigned_to, resolution_notes, deferred_until, deferred_reason, defer_count, resolved_at, created_at, updated_at, occurred_at, last_note_at, incident_number";
+  let q = supabase.from("maintenance_items").select(cols).order("created_at", { ascending: false });
 
   // Pre-filter server-side where unambiguous
   if (args.tab === "resolved") {
@@ -197,7 +199,21 @@ export async function listMaintenanceItems(
   if (args.source) q = q.eq("source", args.source);
   if (args.eventId) q = q.eq("event_id", args.eventId);
 
-  const { data, error } = await q;
+  let { data, error } = await q;
+  if (error && isSchemaMismatchError(error)) {
+    let retry = supabase
+      .from("maintenance_items")
+      .select(cols.replace(", incident_number", ""))
+      .order("created_at", { ascending: false });
+    if (args.tab === "resolved") retry = retry.in("status", ["resolved", "closed"]);
+    else if (args.tab !== "all") retry = retry.not("status", "in", '("resolved","closed")');
+    if (args.severity) retry = retry.eq("severity", args.severity);
+    if (args.source) retry = retry.eq("source", args.source);
+    if (args.eventId) retry = retry.eq("event_id", args.eventId);
+    const second = await retry;
+    data = second.data as typeof data;
+    error = second.error;
+  }
   if (error) throw error;
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -252,7 +268,7 @@ export async function createMaintenanceItem(
     location_label: item.locationLabel ?? null,
     reported_by: item.reportedBy ?? null,
     defer_count: 0,
-    occurred_at: item.occurredAt ?? new Date().toISOString(),
+    occurred_at: item.occurredAt ?? operationalNowIso(),
   };
 
   let { data, error } = await supabase
@@ -275,7 +291,15 @@ export async function createMaintenanceItem(
 
   if (error) throw error;
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  return rowToItem(data as Record<string, any>);
+  const created = rowToItem(data as Record<string, any>);
+  void recordOfficeChangeBestEffort({
+    action: "created",
+    entity: "maintenance",
+    recordId: created.id,
+    recordName: created.title,
+    summary: `Logged maintenance item ${created.title}`,
+  });
+  return created;
 }
 
 export async function addMaintenanceNote(
@@ -291,7 +315,7 @@ export async function addMaintenanceNote(
   if (error) throw error;
 
   // Touch last_note_at so the list-view urgency staleness timer resets.
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   await supabase
     .from("maintenance_items")
     .update({ last_note_at: nowIso })
@@ -310,13 +334,20 @@ export async function updateMaintenanceStatus(
   const patch: Record<string, unknown> = { status };
   if (resolutionNotes !== undefined) patch.resolution_notes = resolutionNotes;
   if (status === "resolved" || status === "closed") {
-    patch.resolved_at = new Date().toISOString();
+    patch.resolved_at = operationalNowIso();
   }
   const { error } = await supabase
     .from("maintenance_items")
     .update(patch)
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Set maintenance status to ${status}`,
+  });
 }
 
 export async function deferMaintenanceItem(
@@ -352,6 +383,13 @@ export async function deferMaintenanceItem(
     `Deferred to ${formatDate(untilDate)}. Reason: ${reason}`,
     author,
   );
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Deferred maintenance to ${untilDate}`,
+  });
 }
 
 export async function assignMaintenanceItem(
@@ -363,6 +401,13 @@ export async function assignMaintenanceItem(
     .update({ assigned_to: assignedTo, status: "in_progress" })
     .eq("id", id);
   if (error) throw error;
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "maintenance",
+    recordId: id,
+    recordName: "maintenance item",
+    summary: `Assigned maintenance to ${assignedTo}`,
+  });
 }
 
 // ── Query key ─────────────────────────────────────────────────────────────────

@@ -9,6 +9,7 @@ import {
   type AttendanceStatus,
 } from "@/lib/data-store";
 import { createIssue, markResolved } from "@/lib/api/site-issues";
+import { fileBoardReport, siteIssueHubSource } from "@/lib/incident-board-report";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { getSydneyIsoDate } from "@/lib/operational-time";
 import { operationalNowIso } from "@/lib/operational-clock";
@@ -391,6 +392,12 @@ export async function declareInfectiousExclusion(
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: siteIssueHubSource(input.eventId, input.eventDaySessionId),
+    hubRowId: issue.id,
+  });
+
   const now = operationalNowIso();
   // Base columns only from Phase A. Trip/home-safe columns (A.1) are omitted
   // when unused so declare still works if …_home_safe.sql is not applied yet.
@@ -510,11 +517,15 @@ export async function declareInfectiousExclusion(
       metadata: {
         exclusion_id: (data as ExclusionRow).id,
         participant_id: input.participantId,
+        person_name: input.participantName,
         hub_issue_id: issue.id,
         category: input.category,
         exclude_centre: input.excludeCentre,
         exclude_trips: input.excludeTrips,
         surface: input.surface,
+        notes: input.notes.trim(),
+        why: input.notes.trim(),
+        location: input.surface === "trip" ? "trip" : "Day Centre",
         home_safe: inCare.inCare,
         home_safe_disposition: input.homeSafe?.disposition ?? null,
       },
@@ -619,6 +630,9 @@ export async function clearInfectiousExclusion(
         participant_id: row.participant_id,
         hub_issue_id: row.hub_issue_id,
         clearance_method: input.method,
+        clearance_note: note,
+        why: note,
+        location: "Day Centre",
       },
     });
   } catch (err) {
