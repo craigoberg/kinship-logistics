@@ -169,6 +169,7 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | Field single-select rows    | `src/components/manifest/mobile-field-button.tsx`             | `MobileFieldButton` / `MobileOptionButton` — high-contrast tap lists (§4.5).                     |
 | Field route CTA             | `src/components/ui/field-action-button.tsx`                   | Floor next-action = `caution` (+ `pulse`). Green `success` = already done. Blue `primary` = chrome / navigate. See UI-STYLE-GUIDE Floor CTA colours. |
 | Hide chrome on scroll       | `src/hooks/chrome-visibility.tsx`                             | Dashboard + Manifest: hide SIM / AppShell / BottomNav / Cancel on scroll down; reveal on scroll up. Do not hide Close Run or Incident/Raise. |
+| Click to open a record      | `src/components/governance/hub-list-card.tsx`                 | Hub lists, Event Manage, and the Onboarding inbox table: click the row to open. No Open/Manage button. Other actions stay buttons. Onboarding keeps its columns. Admin registries keep icon actions. |
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 

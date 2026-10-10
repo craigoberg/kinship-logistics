@@ -20,7 +20,7 @@ import {
   TabsTrigger,
   TabsContent,
 } from "@/components/ui/tabs";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
@@ -31,7 +31,6 @@ import {
   deriveIssueWorkflowStatus,
   HUB_WORKFLOW_STATUS_BADGE,
   HUB_WORKFLOW_STATUS_LABEL,
-  issueDeferredUntil,
   type HubWorkflowStatus,
 } from "@/lib/governance/hub-workflow-status";
 import { useIssueUrgencyParams } from "@/hooks/use-system-parameters";
@@ -254,7 +253,15 @@ function IssuesList({
             const { location, reporter, reference, referenceLabel } = hubIssueContextMeta(i);
             const updatedAt = issueUpdatedAt(i);
             const workflow = deriveIssueWorkflowStatus(i, reviewStartedKeys);
-            const deferredUntil = issueDeferredUntil(i);
+            const deferredUntil =
+              i.deferredUntil &&
+              i.status !== "resolved" &&
+              i.status !== "resolved_approved" &&
+              (i.source === "day_centre" || i.source === "event"
+                ? i.status === "deferred"
+                : true)
+                ? i.deferredUntil
+                : null;
             const bodyLines = unifiedIssueBodyLines(i);
             const nowMs = Date.now();
             const urgency = tab === "resolved" ? "none" : computeHubUrgency({
@@ -297,9 +304,6 @@ function IssuesList({
                 meta={
                   <HubListMetaRows
                     rows={[
-                      ...(deferredUntil && workflow === "deferred"
-                        ? [{ label: "Deferred to", value: deferredUntil }]
-                        : []),
                       ...(reference
                         ? [{ label: referenceLabel ?? "Ref", value: reference }]
                         : []),
@@ -317,6 +321,27 @@ function IssuesList({
                         label: "Updated",
                         value: <FormattedDateTime value={updatedAt} />,
                       },
+                      ...(deferredUntil
+                        ? [
+                            {
+                              label: "Deferred until",
+                              value: <FormattedDeferredUntil value={deferredUntil} />,
+                            },
+                          ]
+                        : []),
+                      ...(workflow === "resolved" && i.resolvedAt
+                        ? [
+                            {
+                              label: "Resolved",
+                              value: (
+                                <FormattedResolvedAt
+                                  resolved={i.resolvedAt}
+                                  openedAt={i.occurredAt}
+                                />
+                              ),
+                            },
+                          ]
+                        : []),
                     ]}
                   />
                 }

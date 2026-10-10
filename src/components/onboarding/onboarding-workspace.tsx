@@ -3,7 +3,6 @@ import { toast } from "sonner";
 import {
   ClipboardList,
   Plus,
-  RefreshCw,
   Trash2,
   UserPlus,
   Users,
@@ -11,6 +10,8 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import {
   Select,
   SelectContent,
@@ -29,13 +30,13 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import {
-  deleteEmptyOnboardingDrafts,
   deleteOnboardingDraft,
   listOnboardingCases,
   startOnboardingReview,
   type OnboardingCase,
 } from "@/lib/api/onboarding";
 import {
+  displayNameFromPayload,
   ONBOARDING_PACK_LABELS,
   type OnboardingCaseStatus,
   type OnboardingPackType,
@@ -48,7 +49,6 @@ import {
   onboardingReviewUrgency,
 } from "@/lib/onboarding/review-urgency";
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
-import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
 import { FormattedDate } from "@/components/ui/formatted-time";
 import { isActiveUserManager } from "@/lib/data-store";
 import { useOnboardingReviewParams } from "@/hooks/use-system-parameters";
@@ -62,16 +62,24 @@ const STATUS_LABEL: Record<OnboardingCaseStatus, string> = {
   superseded: "Superseded",
 };
 
+/** Person column: the name typed on the draft, once it has been saved. */
+function personLabel(row: OnboardingCase): string {
+  const fromForm = displayNameFromPayload(row.formPayload);
+  if (!isUnnamedOnboardingDraft(fromForm)) return fromForm;
+  if (row.displayName && !isUnnamedOnboardingDraft(row.displayName)) return row.displayName;
+  return fromForm || "—";
+}
+
 export function OnboardingWorkspace() {
   const [rows, setRows] = useState<OnboardingCase[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState<string>("inbox");
   const [packFilter, setPackFilter] = useState<string>("all");
+  const [search, setSearch] = useState("");
   const [active, setActive] = useState<OnboardingCase | null>(null);
   const [dialogPack, setDialogPack] = useState<OnboardingPackType | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [deleteTarget, setDeleteTarget] = useState<OnboardingCase | null>(null);
-  const [emptyDeleteOpen, setEmptyDeleteOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const isManager = isActiveUserManager();
   const sla = useOnboardingReviewParams();
@@ -143,11 +151,6 @@ export function OnboardingWorkspace() {
     [rows],
   );
 
-  const emptyDraftCount = useMemo(
-    () => rows.filter((r) => r.status === "draft" && isUnnamedOnboardingDraft(r.displayName)).length,
-    [rows],
-  );
-
   const filtered = rows.filter((r) => {
     if (statusFilter === "inbox") {
       if (r.status !== "draft" && r.status !== "office_confirmed") return false;
@@ -163,6 +166,12 @@ export function OnboardingWorkspace() {
       return false;
     }
     if (packFilter !== "all" && r.packType !== packFilter) return false;
+    const needle = search.trim().toLowerCase();
+    if (needle) {
+      const hay =
+        `${personLabel(r)} ${ONBOARDING_PACK_LABELS[r.packType]} ${STATUS_LABEL[r.status]} ${r.filingLocation ?? ""}`.toLowerCase();
+      if (!hay.includes(needle)) return false;
+    }
     return true;
   });
 
@@ -186,57 +195,16 @@ export function OnboardingWorkspace() {
     }
   };
 
-  const runEmptyDelete = async () => {
-    setBusy(true);
-    try {
-      const n = await deleteEmptyOnboardingDrafts();
-      toast.success(n === 0 ? "No unnamed drafts" : `Deleted ${n} unnamed draft${n === 1 ? "" : "s"}`);
-      await reload();
-    } catch (e) {
-      toast.error("Could not delete unnamed drafts", {
-        description: (e as Error).message,
-      });
-    } finally {
-      setBusy(false);
-      setEmptyDeleteOpen(false);
-    }
-  };
-
   return (
     <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <h2 className="text-lg font-semibold tracking-tight">Onboarding</h2>
-          <p className="text-sm text-muted-foreground">
-            Office inbox: drafts, waiting to file, and annual reviews coming due.
-            Print a blank pack any time — no draft is created. Fill by hand,
-            then start a pack and type it in. Search by name comes later.
-          </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          {emptyDraftCount > 0 ? (
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              className="gap-1.5"
-              onClick={() => setEmptyDeleteOpen(true)}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Delete unnamed drafts ({emptyDraftCount})
-            </Button>
-          ) : null}
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="gap-1.5"
-            onClick={() => void reload()}
-          >
-            <RefreshCw className="h-3.5 w-3.5" />
-            Refresh
-          </Button>
-        </div>
+      <div>
+        <h2 className="text-lg font-semibold tracking-tight">Onboarding</h2>
+        <p className="text-sm text-muted-foreground">
+          Start a pack to type a form. Nothing is stored until you Save draft.
+          Click a row to open it. Delete removes that draft. Review/Update
+          copies a signed pack for the next year. Print a blank form from
+          inside the open pack.
+        </p>
       </div>
 
       {!isManager ? (
@@ -286,33 +254,23 @@ export function OnboardingWorkspace() {
         </Button>
       </div>
 
-      <div className="space-y-1.5">
-        <p className="text-xs font-medium text-muted-foreground">
-          Paper first — no draft created
-        </p>
-        <div className="flex flex-wrap gap-2">
-          <OnboardingBlankPrintButton pack="client" />
-          <OnboardingBlankPrintButton pack="staff" />
-          <OnboardingBlankPrintButton pack="volunteer" />
-          <OnboardingBlankPrintButton pack="accompanying" />
-        </div>
-      </div>
-
       {reviewDue.length > 0 ? (
         <section className="space-y-2 rounded-lg border border-amber-400/50 bg-amber-500/5 p-3">
           <h3 className="text-sm font-semibold">Review due</h3>
           <p className="text-xs text-muted-foreground">
             Signed packs inside the Admin yellow/red window (default 30 days
-            before due, red on the due date). Open or start Review/Update.
+            before due, red on the due date). Click a row to open, or start
+            Review/Update.
           </p>
           <ul className="space-y-1.5">
             {reviewDue.map(({ row, days, urgency }) => (
               <li
                 key={row.id}
-                className="flex flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2"
+                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 hover:bg-muted/40"
+                onClick={() => openCase(row)}
               >
                 <div className="min-w-0">
-                  <p className="font-medium">{row.displayName ?? "—"}</p>
+                  <p className="font-medium">{personLabel(row)}</p>
                   <p className="text-xs text-muted-foreground">
                     {ONBOARDING_PACK_LABELS[row.packType]} · due{" "}
                     {row.reviewDueAt ? <FormattedDate value={row.reviewDueAt} /> : "—"}
@@ -325,7 +283,11 @@ export function OnboardingWorkspace() {
                       : null}
                   </p>
                 </div>
-                <div className="flex flex-wrap items-center gap-2">
+                <div
+                  className="flex flex-wrap items-center gap-2"
+                  onClick={(ev) => ev.stopPropagation()}
+                  onKeyDown={(ev) => ev.stopPropagation()}
+                >
                   <Badge
                     className={
                       urgency === "red"
@@ -335,14 +297,6 @@ export function OnboardingWorkspace() {
                   >
                     {urgency === "red" ? "Red" : "Yellow"}
                   </Badge>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    onClick={() => openCase(row)}
-                  >
-                    Open
-                  </Button>
                   <Button
                     type="button"
                     size="sm"
@@ -366,37 +320,52 @@ export function OnboardingWorkspace() {
         </p>
       ) : null}
 
-      <div className="flex flex-wrap gap-2">
-        <Select value={statusFilter} onValueChange={setStatusFilter}>
-          <SelectTrigger className="h-9 w-52">
-            <SelectValue placeholder="Status" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="inbox">Inbox (draft / to file)</SelectItem>
-            <SelectItem value="review_due">Review due</SelectItem>
-            <SelectItem value="active">Active (hide superseded)</SelectItem>
-            <SelectItem value="all">All statuses</SelectItem>
-            <SelectItem value="draft">Draft</SelectItem>
-            <SelectItem value="office_confirmed">Office confirmed</SelectItem>
-            <SelectItem value="signed_filed">Signed &amp; filed</SelectItem>
-            <SelectItem value="superseded">Superseded</SelectItem>
-          </SelectContent>
-        </Select>
-        <Select value={packFilter} onValueChange={setPackFilter}>
-          <SelectTrigger className="h-9 w-48">
-            <SelectValue placeholder="Pack" />
-          </SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">All packs</SelectItem>
-            {(Object.keys(ONBOARDING_PACK_LABELS) as OnboardingPackType[]).map(
-              (k) => (
-                <SelectItem key={k} value={k}>
-                  {ONBOARDING_PACK_LABELS[k]}
-                </SelectItem>
-              ),
-            )}
-          </SelectContent>
-        </Select>
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Show</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger className="h-9 w-52">
+              <SelectValue placeholder="Show" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="inbox">Inbox (draft / to file)</SelectItem>
+              <SelectItem value="review_due">Review due</SelectItem>
+              <SelectItem value="active">Active (hide superseded)</SelectItem>
+              <SelectItem value="all">All statuses</SelectItem>
+              <SelectItem value="draft">Draft</SelectItem>
+              <SelectItem value="office_confirmed">Office confirmed</SelectItem>
+              <SelectItem value="signed_filed">Signed &amp; filed</SelectItem>
+              <SelectItem value="superseded">Superseded</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="space-y-1">
+          <Label className="text-xs text-muted-foreground">Pack</Label>
+          <Select value={packFilter} onValueChange={setPackFilter}>
+            <SelectTrigger className="h-9 w-52">
+              <SelectValue placeholder="Pack" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All packs</SelectItem>
+              {(Object.keys(ONBOARDING_PACK_LABELS) as OnboardingPackType[]).map(
+                (k) => (
+                  <SelectItem key={k} value={k}>
+                    {ONBOARDING_PACK_LABELS[k]}
+                  </SelectItem>
+                ),
+              )}
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-w-[12rem] flex-1 space-y-1">
+          <Label className="text-xs text-muted-foreground">Search</Label>
+          <Input
+            className="h-9"
+            placeholder="Search person, pack, filing…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
       </div>
 
       <div className="overflow-x-auto rounded-lg border">
@@ -409,7 +378,9 @@ export function OnboardingWorkspace() {
               <th className="px-3 py-2 font-medium">Review due</th>
               <th className="px-3 py-2 font-medium">Filing</th>
               <th className="px-3 py-2 font-medium">Updated</th>
-              <th className="px-3 py-2 font-medium" />
+              <th className="px-3 py-2 font-medium">
+                <span className="sr-only">Actions</span>
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -422,74 +393,86 @@ export function OnboardingWorkspace() {
             ) : filtered.length === 0 ? (
               <tr>
                 <td colSpan={7} className="px-3 py-8 text-center text-muted-foreground">
-                  {statusFilter === "inbox"
-                    ? "No drafts waiting. Close a form without Save draft and nothing is stored."
-                    : "No onboarding cases match these filters."}
+                  {search.trim()
+                    ? "No packs match this search."
+                    : statusFilter === "inbox"
+                      ? "No drafts waiting. Close a form without Save draft and nothing is stored."
+                      : "No onboarding cases match these filters."}
                 </td>
               </tr>
             ) : (
-              filtered.map((r) => (
-                <tr key={r.id} className="border-t">
-                  <td className="px-3 py-2 font-medium">
-                    {r.displayName ?? "—"}
-                  </td>
-                  <td className="px-3 py-2">
-                    {ONBOARDING_PACK_LABELS[r.packType]}
-                  </td>
-                  <td className="px-3 py-2">
-                    <Badge variant="secondary">{STATUS_LABEL[r.status]}</Badge>
-                  </td>
-                  <td className="px-3 py-2">
-                    {r.reviewDueAt ? (
-                      <FormattedDate value={r.reviewDueAt} />
-                    ) : (
-                      "—"
-                    )}
-                  </td>
-                  <td className="max-w-[12rem] truncate px-3 py-2 text-xs text-muted-foreground">
-                    {r.filingLocation ?? "—"}
-                  </td>
-                  <td className="px-3 py-2 text-xs text-muted-foreground">
-                    <FormattedDate value={r.updatedAt.slice(0, 10)} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <div className="flex flex-wrap justify-end gap-1">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => openCase(r)}
+              filtered.map((r) => {
+                const name = personLabel(r);
+                return (
+                  <tr
+                    key={r.id}
+                    className="cursor-pointer border-t hover:bg-muted/40"
+                    onClick={() => openCase(r)}
+                  >
+                    <td className="px-3 py-2 font-medium">
+                      <span
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open ${name}`}
+                        className="rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                        onKeyDown={(ev) => {
+                          if (ev.key === "Enter" || ev.key === " ") {
+                            ev.preventDefault();
+                            openCase(r);
+                          }
+                        }}
                       >
-                        Open
-                      </Button>
-                      {r.status === "draft" ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="ghost"
-                          className={cn("gap-1 text-destructive")}
-                          onClick={() => setDeleteTarget(r)}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                          Delete
-                        </Button>
-                      ) : null}
-                      {r.status === "signed_filed" ? (
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="secondary"
-                          className="gap-1"
-                          onClick={() => void review(r)}
-                        >
-                          <Plus className="h-3.5 w-3.5" />
-                          Review/Update
-                        </Button>
-                      ) : null}
-                    </div>
-                  </td>
-                </tr>
-              ))
+                        {name}
+                      </span>
+                    </td>
+                    <td className="px-3 py-2">{ONBOARDING_PACK_LABELS[r.packType]}</td>
+                    <td className="px-3 py-2">
+                      <Badge variant="secondary">{STATUS_LABEL[r.status]}</Badge>
+                    </td>
+                    <td className="px-3 py-2">
+                      {r.reviewDueAt ? <FormattedDate value={r.reviewDueAt} /> : "—"}
+                    </td>
+                    <td className="max-w-[12rem] truncate px-3 py-2 text-xs text-muted-foreground">
+                      {r.filingLocation ?? "—"}
+                    </td>
+                    <td className="px-3 py-2 text-xs text-muted-foreground">
+                      <FormattedDate value={r.updatedAt.slice(0, 10)} />
+                    </td>
+                    <td className="px-3 py-2">
+                      <div
+                        className="flex flex-wrap justify-end gap-1"
+                        onClick={(ev) => ev.stopPropagation()}
+                        onKeyDown={(ev) => ev.stopPropagation()}
+                      >
+                        {r.status === "draft" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className={cn("gap-1 text-destructive")}
+                            onClick={() => setDeleteTarget(r)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                            Delete
+                          </Button>
+                        ) : null}
+                        {r.status === "signed_filed" ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="secondary"
+                            className="gap-1"
+                            onClick={() => void review(r)}
+                          >
+                            <Plus className="h-3.5 w-3.5" />
+                            Review/Update
+                          </Button>
+                        ) : null}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })
             )}
           </tbody>
         </table>
@@ -523,7 +506,7 @@ export function OnboardingWorkspace() {
           <AlertDialogHeader>
             <AlertDialogTitle>Delete this draft?</AlertDialogTitle>
             <AlertDialogDescription>
-              {deleteTarget?.displayName ?? "This pack"} will be removed. Nothing
+              {deleteTarget ? personLabel(deleteTarget) : "This pack"} will be removed. Nothing
               has been confirmed to the live record yet.
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -539,23 +522,6 @@ export function OnboardingWorkspace() {
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={emptyDeleteOpen} onOpenChange={setEmptyDeleteOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete unnamed drafts?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Removes leftover empty packs (named “Client draft” and similar)
-              from the old open-to-create path. Named drafts are kept.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction disabled={busy} onClick={() => void runEmptyDelete()}>
-              Delete unnamed
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
   );
 }

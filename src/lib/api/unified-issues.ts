@@ -43,6 +43,8 @@ export interface UnifiedIssue {
   lastActivityAt: string | null;
   /** ISO timestamp of the current active defer deadline; null = not deferred. */
   deferredUntil: string | null;
+  /** When the Hub marked it resolved. Null while it is still open. */
+  resolvedAt?: string | null;
 }
 
 const SOURCE_LABELS: Record<UnifiedIssueSource, string> = {
@@ -118,6 +120,24 @@ function occurredAtFromRow(
   return createdAt;
 }
 
+function isoStamp(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+/** Row stamp first, then the latest Hub resolve note. */
+function resolvedAtFor(
+  row: Record<string, unknown>,
+  key: string,
+  resolveAt: Map<string, string>,
+): string | null {
+  return (
+    isoStamp(row.resolved_at) ??
+    isoStamp(row.operator_acknowledged_at) ??
+    resolveAt.get(key) ??
+    null
+  );
+}
+
 function incidentListDisplay(
   description: string,
   opts?: { deferred?: boolean },
@@ -158,7 +178,7 @@ export async function listOpenUnifiedIssues(
   await primeStaffDisplayNames();
 
   // Combined note-state: latest defer + latest activity per issue.
-  const { deferState, activityAt } = await fetchNoteStateMaps();
+  const { deferState, activityAt, resolveAt } = await fetchNoteStateMaps();
 
   if (tab === "deferred") {
     const { data, error } = await supabase
@@ -215,13 +235,14 @@ export async function listOpenUnifiedIssues(
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
         lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
         deferredUntil: (r.deferred_until as string | null) ?? deferState.get(key)?.deferredUntil.toISOString() ?? null,
       });
     }
 
     // Cross-source deferrals: surface any non-day_centre issue whose
     // latest timeline note is a still-live defer.
-    const extras = await fetchDeferredNonDayCentreIssues(deferState, activityAt);
+    const extras = await fetchDeferredNonDayCentreIssues(deferState, activityAt, resolveAt);
     out.push(...extras);
     return out;
   }
@@ -290,6 +311,7 @@ export async function listOpenUnifiedIssues(
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
         lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
         deferredUntil: null,
       });
     }
@@ -316,6 +338,7 @@ export async function listOpenUnifiedIssues(
           eventId: (r.event_id as string | null) ?? null,
           raw: r,
           lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
           deferredUntil: null,
         });
       }
@@ -339,6 +362,7 @@ export async function listOpenUnifiedIssues(
           sourceRowId: String(r.id),
           raw: r,
           lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
           deferredUntil: null,
         });
       }
@@ -434,6 +458,7 @@ export async function listOpenUnifiedIssues(
       eventId,
       raw: r,
       lastActivityAt: activityAt.get(key) ?? null,
+      resolvedAt: resolvedAtFor(r, key, resolveAt),
       deferredUntil: (r.deferred_until as string | null) ?? null,
     });
   }
@@ -461,6 +486,7 @@ export async function listOpenUnifiedIssues(
         eventId: (r.event_id as string | null) ?? null,
         raw: r,
         lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
         deferredUntil: deferEntry?.deferredUntil.toISOString() ?? null,
       });
     }
@@ -494,6 +520,7 @@ export async function listOpenUnifiedIssues(
         sourceRowId: String(r.id),
         raw: r,
         lastActivityAt: activityAt.get(key) ?? null,
+        resolvedAt: resolvedAtFor(r, key, resolveAt),
         deferredUntil: deferEntry?.deferredUntil.toISOString() ?? null,
       });
     }
@@ -548,6 +575,8 @@ interface NoteStateMaps {
   deferState: Map<string, LiveDefer>;
   /** Latest stamped_at (any kind) per `${source}:${sourceRowId}`. */
   activityAt: Map<string, string>;
+  /** Latest kind=resolve stamped_at per `${source}:${sourceRowId}`. */
+  resolveAt: Map<string, string>;
 }
 
 /**
@@ -557,6 +586,7 @@ interface NoteStateMaps {
 async function fetchNoteStateMaps(): Promise<NoteStateMaps> {
   const deferState = new Map<string, LiveDefer>();
   const activityAt = new Map<string, string>();
+  const resolveAt = new Map<string, string>();
 
   const { data, error } = await supabase
     .from("hub_issue_notes")
@@ -565,7 +595,7 @@ async function fetchNoteStateMaps(): Promise<NoteStateMaps> {
     .limit(2000);
   if (error) {
     console.warn("[unified-issues] fetchNoteStateMaps failed", error);
-    return { deferState, activityAt };
+    return { deferState, activityAt, resolveAt };
   }
 
   const seenForDefer = new Set<string>();
@@ -575,6 +605,9 @@ async function fetchNoteStateMaps(): Promise<NoteStateMaps> {
     // Latest activity: first occurrence (desc order) wins.
     if (!activityAt.has(key)) {
       activityAt.set(key, String(r.stamped_at));
+    }
+    if (r.kind === "resolve" && !resolveAt.has(key)) {
+      resolveAt.set(key, String(r.stamped_at));
     }
 
     // Defer state: only the LATEST note per issue matters. If it is kind='defer'
@@ -597,7 +630,7 @@ async function fetchNoteStateMaps(): Promise<NoteStateMaps> {
     }
   }
 
-  return { deferState, activityAt };
+  return { deferState, activityAt, resolveAt };
 }
 
 /**
@@ -636,6 +669,7 @@ export async function fetchLatestHubActivityMap(
 async function fetchDeferredNonDayCentreIssues(
   deferState: Map<string, LiveDefer>,
   activityAt: Map<string, string>,
+  resolveAt: Map<string, string>,
 ): Promise<UnifiedIssue[]> {
   const now = Date.now();
   const targets: Array<{ source: UnifiedIssueSource; id: string; until: Date }> = [];
@@ -691,6 +725,7 @@ async function fetchDeferredNonDayCentreIssues(
       eventId: (r.event_id as string | null) ?? null,
       raw: r,
       lastActivityAt: activityAt.get(key) ?? null,
+      resolvedAt: resolvedAtFor(r, key, resolveAt),
       deferredUntil: meta.deferredUntil.toISOString(),
     });
   }
@@ -713,6 +748,7 @@ async function fetchDeferredNonDayCentreIssues(
       sourceRowId: String(r.id),
       raw: r,
       lastActivityAt: activityAt.get(key) ?? null,
+      resolvedAt: resolvedAtFor(r, key, resolveAt),
       deferredUntil: meta.deferredUntil.toISOString(),
     });
   }
@@ -735,6 +771,7 @@ async function fetchDeferredNonDayCentreIssues(
       sourceRowId: a.id,
       raw: a,
       lastActivityAt: activityAt.get(key) ?? null,
+      resolvedAt: resolveAt.get(key) ?? null,
       deferredUntil: meta.deferredUntil.toISOString(),
     });
   }

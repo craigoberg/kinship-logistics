@@ -270,7 +270,11 @@ export async function deleteOnboardingDraft(id: string): Promise<void> {
 /** Remove leftover unnamed drafts created by the old open-insert path. */
 export async function deleteEmptyOnboardingDrafts(): Promise<number> {
   const drafts = await listOnboardingCases({ status: "draft" });
-  const empty = drafts.filter((c) => isUnnamedOnboardingDraft(c.displayName));
+  const empty = drafts.filter(
+    (c) =>
+      isUnnamedOnboardingDraft(c.displayName) &&
+      isUnnamedOnboardingDraft(displayNameFromPayload(c.formPayload)),
+  );
   let deleted = 0;
   for (const row of empty) {
     await deleteOnboardingDraft(row.id);

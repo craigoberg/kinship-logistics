@@ -17,7 +17,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubContextMetaGrid, HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
@@ -233,12 +233,6 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
         <Badge className={HUB_WORKFLOW_STATUS_BADGE[maintenanceWorkflowStatus(ticket.status)]}>
           {HUB_WORKFLOW_STATUS_LABEL[maintenanceWorkflowStatus(ticket.status)]}
         </Badge>
-        {ticket.deferredUntil && ticket.status === "deferred" && (
-          <span className="text-xs font-medium text-amber-600">
-            ↻ Deferred to {formatDate(ticket.deferredUntil)}
-            {ticket.deferCount > 1 && ` (×${ticket.deferCount})`}
-          </span>
-        )}
       </div>
       <p className="font-medium leading-snug">{ticket.title}</p>
       <p className="whitespace-pre-wrap text-xs text-muted-foreground">{ticket.description}</p>
@@ -255,8 +249,26 @@ function ManageAppTicketDialog({ ticket, open, onOpenChange }: ManageDialogProps
           },
           { label: "Logged", value: <FormattedDateTime value={ticket.createdAt} /> },
           ticket.resolvedAt
-            ? { label: "Resolved", value: <FormattedDateTime value={ticket.resolvedAt} /> }
+            ? {
+                label: "Resolved",
+                value: (
+                  <FormattedResolvedAt resolved={ticket.resolvedAt} openedAt={ticket.createdAt} />
+                ),
+              }
             : { label: "Resolved", value: null },
+          ...(ticket.deferredUntil && ticket.status === "deferred"
+            ? [
+                {
+                  label: "Deferred until",
+                  value: (
+                    <>
+                      <FormattedDeferredUntil value={ticket.deferredUntil} />
+                      {ticket.deferCount > 1 ? ` (×${ticket.deferCount})` : ""}
+                    </>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>
@@ -431,6 +443,28 @@ function TicketsList({
                     { label: "Form", value: ticket.formTitle },
                     { label: "Raised by", value: ticket.reportedByName },
                     { label: "Logged", value: <FormattedDateTime value={ticket.createdAt} /> },
+                    ...(ticket.deferredUntil && ticket.status === "deferred"
+                      ? [
+                          {
+                            label: "Deferred until",
+                            value: <FormattedDeferredUntil value={ticket.deferredUntil} />,
+                          },
+                        ]
+                      : []),
+                    ...((ticket.status === "resolved" || ticket.status === "closed") &&
+                    ticket.resolvedAt
+                      ? [
+                          {
+                            label: "Resolved",
+                            value: (
+                              <FormattedResolvedAt
+                                resolved={ticket.resolvedAt}
+                                openedAt={ticket.createdAt}
+                              />
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               }

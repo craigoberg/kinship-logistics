@@ -158,7 +158,9 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Event Finance expense row** | **Defined** | `IconActionButton` Edit + Delete + `AlertDialog` confirm; `LogEventExpenseModal` create/edit | Events Manage → Finance | Writable until Closed (`billing_locked`). Locked: banner + no money actions. §4.3 on expense form. |
 | **Event Roster payment history** | **Defined** | `BookingPaymentHistory` Edit/Delete + edit dialog; `$` Record payment / Record refund | Events Manage → Roster | Same finance lock. Refund via `RecordRefundMilestoneModal`. Paid balance recomputed from ledger. |
 | **Tables (dense data)** | Defined (office) | `Table` | Admin matrices, export views | Field routes + Governance Hub: use card rows |
-| **Governance Hub list row** | **Defined** | `HubListCard` + `HubListCardBody` | Human Incidents, Maintenance | Status badge + chevron **pinned top-right**; severity badges left; meta rows below |
+| **Click to open a record** | **Defined** | Whole row or `HubListCard` | Hub lists, Event Manage, Onboarding inbox | Click anywhere on the row opens that record. No separate Open or Manage button for that action. A different action (Run, Delete, Review/Update) stays a button on the row and does not open the record. Dense tables keep their columns (Onboarding inbox). Hub issue cards keep the chevron. Admin registries stay icon actions (Edit, Remove) — those rows have several peer edits, not one open. |
+| **Governance Hub list row** | **Defined** | `HubListCard` + `HubListCardBody` | Human Incidents, Maintenance, Compliance, App tickets | Status badge + chevron **pinned top-right**; click the card to open. When the item is resolved or closed, the date list on the card ends with **Resolved**: `dd-MMM-yy / HH:mm` plus how long it was open from occurred to close, `(9d 14h 22m)`. App tickets count from logged, because they have no occurred time. |
+| **Onboarding inbox** | **Defined** | Column table in `OnboardingWorkspace` | Hub → Onboarding | Same columns (Person, Pack, Status, Review due, Filing, Updated). Click the row to open. Delete (drafts) and Review/Update (signed packs) stay on the row. Filters match Hub lists: labelled **Show**, **Pack**, and **Search** on the right. Blank print stays inside the open pack. Person shows the name saved on the form (client: first + surname; staff, volunteer, accompanying: full name). Until a name is saved, the placeholder stays (`Client draft`, `staff draft`, and so on). |
 | **Hub list issue body** | **Defined** | `parseHubIssueBody` / `HubListCardBody` | Human + Maintenance cards | **Green:** `Issue:` only · **Yellow:** + `Workaround:` · **Red:** + `Authorising manager:` + `Plan:` (always 3 lines; empty → `—`) |
 | **Hub Public web voice** | **Defined** | Indigo `Public web` badge + Issue preview | `/public/forms` → Human Incidents | Not an Incident badge. Complaints stay **Yellow**; compliments/enquiries **Green**. Card = **Issue preview only** (~140 chars of the message) — no empty Workaround. Open Manage for full text + ref. |
 | **Incident board report** | **Defined** | `IncidentBoardReportDialog` from Manage **Board report** | Every Big Red Button filing: Human, Equipment/asset, and Health & Safety (centre or trip). | Number `IR-YYYY-NNN`. Office fields save on that paper. **Print** uses the YADA Incident Report layout (Version 1, 23.07.2024). |
@@ -305,7 +307,8 @@ These patterns are **banned app-wide** — do not use in any new code, and remov
 
 | UI element | Component | Style guide |
 |------------|-----------|-------------|
-| Hub list (all tabs) | `HubListCard` | Governance Hub list row |
+| Hub issue lists | `HubListCard` | Click to open a record |
+| Onboarding inbox | Column table | Click to open a record |
 | Severity | `Badge` / RYGE chips | RYGE tokens |
 | Category | `Badge` per source colour | Hub category badges |
 | Timestamps | `FormattedDateTime` | 24h `dd-Mmm-yy / hh:mm` |
@@ -570,6 +573,9 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-10-10 | Hub resolved date | Resolved and closed Hub cards show **Resolved** date/time plus how long it was open, occurred to close, in the same `(9d 14h 22m)` style as Deferred. |
+| 2026-10-10 | Onboarding inbox | Column table, click the row. Show / Pack / Search filters. No bulk delete, no Refresh, no paper-first prints on the list. Blank print stays inside the open pack. |
+| 2026-10-10 | Click to open a record | Hub and Event Manage: the row opens the record. No Open or Manage button. Run, Delete, and Review/Update stay separate buttons. Onboarding inbox keeps its column table; click the row. Admin registry tables keep icon actions. |
 | 2026-10-07 | Issue register card | Day Centre and Manifest use `IssueRegisterCard` (severity, time, workaround). Manifest still limits the list to the current vehicle. |
 | 2026-10-06 | Support roll is attendance only | Staff, volunteers, and carers keep the same row and defer clock as clients. Late arrival or early/late departure does not turn the row amber or red and does not open a Hub issue. |
 | 2026-10-08 | Guest row on Participants | Under the name: why they are a guest, Event, the event title, and the day. Hub issue opens the ticket. Close event still does not archive them. |

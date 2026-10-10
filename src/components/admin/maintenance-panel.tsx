@@ -34,7 +34,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { HubListCardBody } from "@/components/governance/hub-list-card-body";
 import { HubContextMetaGrid, HubListMetaRows } from "@/components/governance/hub-context-meta-grid";
@@ -57,7 +57,7 @@ import {
 import { useMaintenanceUrgencyParams } from "@/hooks/use-system-parameters";
 import { MIN_TIMELINE_NOTE } from "@/lib/governance/constants";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
-import { cn, formatDate, formatDateTime } from "@/lib/utils";
+import { cn, formatDateTime } from "@/lib/utils";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { isManagerProfile } from "@/lib/governance/is-manager";
@@ -316,12 +316,6 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
         <Badge className={STATUS_BADGE[maintenanceWorkflowStatus(item.status)]}>
           {STATUS_LABEL[maintenanceWorkflowStatus(item.status)]}
         </Badge>
-        {item.deferredUntil && item.status === "deferred" && (
-          <span className="text-xs text-amber-600 font-medium">
-            ↻ Deferred to {formatDate(item.deferredUntil)}
-            {item.deferCount > 1 && ` (×${item.deferCount})`}
-          </span>
-        )}
       </div>
       <p className="font-medium leading-snug">{item.title}</p>
       {item.description !== item.title && (
@@ -355,9 +349,24 @@ function ManageMaintenanceDialog({ item, open, onOpenChange }: ManageDialogProps
           item.resolvedAt
             ? {
                 label: "Resolved",
-                value: <FormattedDateTime value={item.resolvedAt} />,
+                value: (
+                  <FormattedResolvedAt resolved={item.resolvedAt} openedAt={item.occurredAt} />
+                ),
               }
             : { label: "Resolved", value: null },
+          ...(item.deferredUntil && item.status === "deferred"
+            ? [
+                {
+                  label: "Deferred until",
+                  value: (
+                    <>
+                      <FormattedDeferredUntil value={item.deferredUntil} />
+                      {item.deferCount > 1 ? ` (×${item.deferCount})` : ""}
+                    </>
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>
@@ -724,25 +733,39 @@ function ItemsList({ tab, onManage }: ItemsListProps) {
               meta={
                 <HubListMetaRows
                   rows={[
-                    ...(item.deferredUntil && item.status === "deferred"
-                      ? [
-                          {
-                            label: "Deferred to",
-                            value: formatDate(item.deferredUntil),
-                          },
-                        ]
-                      : []),
                     ...(item.incidentNumber
                       ? [{ label: "Incident no.", value: item.incidentNumber }]
                       : []),
                     { label: "Location", value: item.locationLabel },
                     { label: "Reported by", value: item.reportedBy ?? "Unknown staff" },
                     { label: "Occurred", value: <FormattedDateTime value={item.occurredAt} /> },
-          { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
+                    { label: "Logged", value: <FormattedDateTime value={item.createdAt} /> },
                     {
                       label: "Updated",
                       value: <FormattedDateTime value={item.updatedAt} />,
                     },
+                    ...(item.deferredUntil && item.status === "deferred"
+                      ? [
+                          {
+                            label: "Deferred until",
+                            value: <FormattedDeferredUntil value={item.deferredUntil} />,
+                          },
+                        ]
+                      : []),
+                    ...((item.status === "resolved" || item.status === "closed") &&
+                    item.resolvedAt
+                      ? [
+                          {
+                            label: "Resolved",
+                            value: (
+                              <FormattedResolvedAt
+                                resolved={item.resolvedAt}
+                                openedAt={item.occurredAt}
+                              />
+                            ),
+                          },
+                        ]
+                      : []),
                   ]}
                 />
               }

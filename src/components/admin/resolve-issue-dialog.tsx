@@ -25,7 +25,7 @@ import { invalidateIssueCaches } from "@/lib/query/invalidation";
 import { PinReauthDialog } from "@/components/auth/pin-reauth-dialog";
 import { HubContextMetaGrid } from "@/components/governance/hub-context-meta-grid";
 import { ManageItemShell } from "@/components/governance/manage-item-shell";
-import { FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDateTime, FormattedDeferredUntil, FormattedResolvedAt } from "@/components/ui/formatted-time";
 import { defaultDeferIso } from "@/lib/governance/default-defer-iso";
 import { hubIssueContextMeta } from "@/lib/governance/hub-issue-context";
 import {
@@ -494,6 +494,30 @@ export function ManageIssueDialog({ issue, open, onOpenChange, autoStartReview =
                 ),
               }
             : { label: "Waiting", value: `${waitLabel} since logged` },
+          ...(issue.deferredUntil &&
+          issue.status !== "resolved" &&
+          issue.status !== "resolved_approved" &&
+          (issue.source === "day_centre" || issue.source === "event"
+            ? issue.status === "deferred"
+            : true)
+            ? [
+                {
+                  label: "Deferred until",
+                  value: <FormattedDeferredUntil value={issue.deferredUntil} />,
+                },
+              ]
+            : []),
+          ...((issue.status === "resolved" || issue.status === "resolved_approved") &&
+          issue.resolvedAt
+            ? [
+                {
+                  label: "Resolved",
+                  value: (
+                    <FormattedResolvedAt resolved={issue.resolvedAt} openedAt={issue.occurredAt} />
+                  ),
+                },
+              ]
+            : []),
         ]}
       />
     </div>
