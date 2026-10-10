@@ -48,7 +48,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     },
     {
       heading: "Onboarding — drafts and annual reviews",
-      body: "Hub → Onboarding is the office inbox for intake packs (drafts, waiting to file) and signed packs whose annual review is inside the yellow/red window. Start a pack from Participants or Staff; Admin is config only. The Dashboard Band 3 Onboarding review tile opens this tab.",
+      body: "Hub → Onboarding is the office inbox for intake packs (drafts, waiting to file) and signed packs whose annual review is inside the yellow/red window. Start a pack from Participants or Staff; Admin is config only. On the inbox, use Show, Pack, and Search, then click a row to open the pack. Delete stays a button. Print a blank form from inside the open pack. The Dashboard Band 3 Onboarding review tile opens this tab.",
     },
     {
       heading: "App tickets — the software, not the bus",
@@ -64,7 +64,7 @@ export const hubThreeStreamsTopic: HelpTopic = {
     },
     {
       heading: "Active vs Deferred vs resolved",
-      body: "Active lists what needs attention now — and open Active items need regular Log Notes or they show Update Due / Stale (see Hub regular updates). Defer parks an item until a next-action date (see Defer how-to). Resolve closes the operational loop with justification; Compliance may archive/renew instead of a simple resolve.",
+      body: "Click a card to open it. Active lists what needs attention now — open items need regular Log Notes or they show Update Due / Stale (see Hub regular updates). A deferred card shows Deferred until at the bottom of the dates, with time left in brackets (for example 2d 4h 15m, 3h 0m, 40m, or overdue). That clock follows SIM TIME. A resolved or closed card shows Resolved with how long it was open, from Occurred to close (App tickets count from Logged). You do not have to open the card to see those times. Compliance may archive or renew instead of a simple resolve.",
     },
   ],
 };

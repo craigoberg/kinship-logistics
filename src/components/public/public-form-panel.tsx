@@ -174,9 +174,7 @@ export function PublicFormPanel({
           />
           {definition.formKey === "complaint"
             ? "Submit anonymously (no name or contact stored)"
-            : channel === "public"
-              ? "Submit without your name (a valid email is still required)"
-              : "Submit anonymously (no name or contact stored)"}
+            : "Submit without your name (a valid email is still required)"}
         </label>
       ) : null}
 

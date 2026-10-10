@@ -38,6 +38,8 @@ import { CarerFormSheet } from "./carer-form-sheet";
 import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
 import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
 import { type OnboardingCase } from "@/lib/api/onboarding";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import type { OnboardingPackType } from "@/lib/onboarding/form-types";
 
 const EXPIRY_WARN_DAYS = 30;
@@ -259,10 +261,10 @@ export function DirectoryWorkspace() {
                     return (
                       <TableRow
                         key={s.id}
-                        className={[
-                          isManager ? "cursor-pointer transition-colors hover:bg-accent/40" : "",
-                          !s.active ? "bg-secondary/20" : "",
-                        ].join(" ")}
+                        className={cn(
+                          isManager && officeClickRowClass,
+                          !s.active && "bg-secondary/20",
+                        )}
                         onClick={openStaff}
                       >
                         <TableCell className="font-medium">{s.fullName}</TableCell>
@@ -357,7 +359,7 @@ export function DirectoryWorkspace() {
                     return (
                       <TableRow
                         key={c.id}
-                        className="cursor-pointer transition-colors hover:bg-accent/40"
+                        className={officeClickRowClass}
                         onClick={openCarer}
                       >
                         <TableCell className="font-medium">{c.fullName}</TableCell>

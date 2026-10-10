@@ -1,7 +1,7 @@
 /**
  * Office: add staff / volunteer / carer to a Day Centre bus run (weekly plan).
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -27,19 +27,11 @@ import {
 import { useLookupParameters } from "@/hooks/use-supabase-data";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { SUPPORT_SCHEDULES_KEY, upsertSupportSchedule } from "@/lib/api/support-attendance";
-import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
+import { operatingBoardDays, RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
 import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
 import { busRunRouteQueryKey, type BusRunRouteDirection } from "@/lib/api/bus-run-routes";
 import { classifyWorkforceKind, type SupportPersonKind } from "@/lib/support-person";
 import { cn } from "@/lib/utils";
-
-const DAYS = [
-  ["DAY-MON", "Mon"],
-  ["DAY-TUE", "Tue"],
-  ["DAY-WED", "Wed"],
-  ["DAY-THU", "Thu"],
-  ["DAY-FRI", "Fri"],
-] as const;
 
 interface Props {
   open: boolean;
@@ -74,6 +66,16 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
     staleTime: 60_000,
   });
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [] } = useLookupParameters(LOOKUP_CATEGORIES.operatingDay);
+  const boardDays = useMemo(() => operatingBoardDays(operatingDays), [operatingDays]);
+  useEffect(() => {
+    if (operatingDays.length === 0) return;
+    const open = new Set<string>(boardDays.map((d) => d.code));
+    setDays((prev) => {
+      const next = prev.filter((d) => open.has(d));
+      return next.length === prev.length ? prev : next;
+    });
+  }, [operatingDays, boardDays]);
 
   const people = useMemo(() => {
     if (kind === "carer") {
@@ -188,25 +190,30 @@ export function AddSupportToRunDialog({ open, onClose, busRunCode, direction }: 
           <div>
             <Label className="mb-2 block">Days</Label>
             <div className={cn("flex flex-wrap gap-2", requiredFieldOutline(days.length === 0))}>
-              {DAYS.map(([code, label]) => (
+              {boardDays.map((d) => (
                 <button
-                  key={code}
+                  key={d.code}
                   type="button"
                   onClick={() =>
                     setDays((prev) =>
-                      prev.includes(code) ? prev.filter((d) => d !== code) : [...prev, code],
+                      prev.includes(d.code) ? prev.filter((x) => x !== d.code) : [...prev, d.code],
                     )
                   }
                   className={cn(
                     "rounded-full border-2 px-3 py-1 text-xs font-semibold",
-                    days.includes(code)
+                    days.includes(d.code)
                       ? "border-foreground bg-foreground text-background"
                       : "border-border bg-card",
                   )}
                 >
-                  {label}
+                  {d.label}
                 </button>
               ))}
+              {boardDays.length === 0 && (
+                <p className="text-xs text-muted-foreground">
+                  No centre operating days. Set them in Admin → Lookups → Operating days.
+                </p>
+              )}
             </div>
           </div>
 

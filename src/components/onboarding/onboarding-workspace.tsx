@@ -54,6 +54,7 @@ import { isActiveUserManager } from "@/lib/data-store";
 import { useOnboardingReviewParams } from "@/hooks/use-system-parameters";
 import { useOperationalTodayIso } from "@/lib/operational-clock";
 import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 
 const STATUS_LABEL: Record<OnboardingCaseStatus, string> = {
   draft: "Draft",
@@ -266,7 +267,10 @@ export function OnboardingWorkspace() {
             {reviewDue.map(({ row, days, urgency }) => (
               <li
                 key={row.id}
-                className="flex cursor-pointer flex-wrap items-center justify-between gap-2 rounded-md border bg-background px-3 py-2 hover:bg-muted/40"
+                className={cn(
+                  officeClickRowClass,
+                  "flex flex-wrap items-center justify-between gap-2 rounded-md border px-3 py-2",
+                )}
                 onClick={() => openCase(row)}
               >
                 <div className="min-w-0">
@@ -406,7 +410,7 @@ export function OnboardingWorkspace() {
                 return (
                   <tr
                     key={r.id}
-                    className="cursor-pointer border-t hover:bg-muted/40"
+                    className={cn(officeClickRowClass, "border-t")}
                     onClick={() => openCase(r)}
                   >
                     <td className="px-3 py-2 font-medium">

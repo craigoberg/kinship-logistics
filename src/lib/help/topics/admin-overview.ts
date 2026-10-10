@@ -33,15 +33,15 @@ export const adminOverviewTopic: HelpTopic = {
   steps: [
     {
       heading: "Lookups",
-      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Certificates & orientations is the official ticket-name list for Duty roles and Staff. Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days drive the calendar Centre chips, staff Centre run, and attendance seeder defaults.",
+      body: "Editable code lists (operating days + open/close times, event types, financial codes, Day Centre Bus Runs / bus_runs, transport types, colours). Click a row to open its edit dialog. Remove stays a button, and the badge colour picker saves on its own. Certificates & orientations is the official ticket-name list for Duty roles and Staff. Named runs (R1, R2, …) feed multi-bus events and directory filters. Operating days are the only weekdays offered on Run Planning, the Participants day filter and day columns, staff Centre run, the calendar Centre chips, and attendance seeder defaults.",
     },
     {
       heading: "Fleet Register",
-      body: "Vehicles for Manifest — rego/compliance context, current odometer hints, and odometer corrections. Depot/bus-run name lists often live under Lookups.",
+      body: "Vehicles for Manifest — rego/compliance context, current odometer hints, and odometer corrections. Click a vehicle row to edit it. Depot/bus-run name lists often live under Lookups.",
     },
     {
       heading: "Venues, Vendors & Duty roles",
-      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, On the floor, Bus Driver) bound to floor functions — not menu access.",
+      body: "Venues = destination registry + safety baseline. Vendors = MYOB-aligned supplier names for Finance & P&L expenses. Duty roles = jobs (Food Preparation, On the floor, Bus Driver) bound to floor functions — not menu access. On each of these lists, click the row to open the edit dialog. Archive, Restore, Clone, and the venue folder (template and baseline) stay their own buttons.",
     },
     {
       heading: "System Parameters — structured panels",
@@ -49,7 +49,7 @@ export const adminOverviewTopic: HelpTopic = {
     },
     {
       heading: "System Parameters — JSON table",
-      body: "Other tunable keys live in the parameter table. Managers edit with justification; changes are ledgered. Do not put secrets (alarm codes) in checklist text — that belongs in the secrets backlog item.",
+      body: "Other tunable keys live in the parameter table. Click a row to edit. Managers save with justification; changes are ledgered. Do not put secrets (alarm codes) in checklist text — that belongs in the secrets backlog item.",
     },
     {
       heading: "Menu Access",

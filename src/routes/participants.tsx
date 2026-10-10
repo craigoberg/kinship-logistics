@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -22,6 +22,7 @@ import { useParticipantDirectory, useLookupParameters } from "@/hooks/use-supaba
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { operatingBoardDays } from "@/lib/api/run-planning";
 import type { Participant } from "@/lib/data-store";
 
 const DIRECTORY_INDICATORS_KEY = ["participant-directory-indicators", "v3-split-transport"] as const;
@@ -39,15 +40,6 @@ export const Route = createFileRoute("/participants")({
 
 const DIRECTORY_FILTER_CLASS =
   "h-11 !border-transparent !bg-muted px-3 !text-foreground !shadow-none hover:!bg-muted hover:!text-foreground data-[state=on]:!border-success data-[state=on]:!bg-success data-[state=on]:!text-success-foreground data-[state=on]:hover:!bg-success data-[state=on]:hover:!text-success-foreground";
-
-const DAY_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "All Days" },
-  { value: "DAY-MON", label: "Monday" },
-  { value: "DAY-TUE", label: "Tuesday" },
-  { value: "DAY-WED", label: "Wednesday" },
-  { value: "DAY-THU", label: "Thursday" },
-  { value: "DAY-FRI", label: "Friday" },
-];
 
 function isArchivedDirectoryRow(p: Participant): boolean {
   if (p.participantKind === "guest") return !!p.archivedAt;
@@ -88,6 +80,16 @@ function ParticipantsPage() {
   const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [], isLoading: daysLoading } = useLookupParameters(
+    LOOKUP_CATEGORIES.operatingDay,
+  );
+  const boardDays = useMemo(() => operatingBoardDays(operatingDays), [operatingDays]);
+  useEffect(() => {
+    if (daysLoading) return;
+    if (dayFilter !== "all" && !boardDays.some((d) => d.code === dayFilter)) {
+      setDayFilter("all");
+    }
+  }, [boardDays, dayFilter, daysLoading]);
   const [directoryFilters, setDirectoryFilters] = useState<string[]>(["participants", "guests"]);
   const showParticipants = directoryFilters.includes("participants");
   const showGuests = directoryFilters.includes("guests");
@@ -195,9 +197,10 @@ function ParticipantsPage() {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {DAY_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
+            <SelectItem value="all">All Days</SelectItem>
+            {boardDays.map((d) => (
+              <SelectItem key={d.code} value={d.code}>
+                {d.long}
               </SelectItem>
             ))}
           </SelectContent>
@@ -238,6 +241,7 @@ function ParticipantsPage() {
         participants={visibleParticipants}
         search={search}
         dayFilter={dayFilter}
+        boardDays={boardDays}
         transportFilter={transportFilter}
         onSelect={(p) => {
           setSelected(p);

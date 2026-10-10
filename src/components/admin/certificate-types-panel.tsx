@@ -4,12 +4,14 @@
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus } from "lucide-react";
+import { Archive, ChevronRight, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -155,7 +157,11 @@ export function CertificateTypesPanel() {
               </TableRow>
             ) : (
               types.map((t) => (
-                <TableRow key={t.id}>
+                <TableRow
+                  key={t.id}
+                  className={cn(canEdit && officeClickRowClass)}
+                  onClick={canEdit ? () => openEdit(t) : undefined}
+                >
                   <TableCell className="font-medium">{t.name}</TableCell>
                   <TableCell className="capitalize">{t.kind}</TableCell>
                   <TableCell className="text-xs text-muted-foreground">
@@ -169,24 +175,20 @@ export function CertificateTypesPanel() {
                     )}
                   </TableCell>
                   <TableCell>
-                    {canEdit && (
-                      <div className="flex justify-end gap-1">
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => openEdit(t)}
-                          tooltip="Edit type"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </IconActionButton>
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => archiveMut.mutate(t)}
-                          tooltip={t.active ? "Archive" : "Restore"}
-                        >
-                          <Archive className="h-4 w-4" />
-                        </IconActionButton>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {canEdit && (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <IconActionButton
+                            className="h-8 w-8"
+                            onClick={() => archiveMut.mutate(t)}
+                            tooltip={t.active ? "Archive" : "Restore"}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </IconActionButton>
+                        </div>
+                      )}
+                      {canEdit && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

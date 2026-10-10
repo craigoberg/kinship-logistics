@@ -15,6 +15,7 @@ import {
 } from "@/lib/reporting/board-pack";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { formatDate, parseIsoDateLocal, todayLocalIso, toIsoDateString } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 
 export function ReportingPage() {
   const [openPack, setOpenPack] = useState(false);
@@ -34,7 +35,7 @@ export function ReportingPage() {
         <button
           type="button"
           onClick={() => setOpenPack(true)}
-          className="flex w-full max-w-xl items-start gap-3 rounded-lg border bg-card p-4 text-left hover:bg-accent/40"
+          className={`${officeClickRowClass} flex w-full max-w-xl items-start gap-3 rounded-lg border p-4 text-left`}
         >
           <ClipboardList className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
           <span className="space-y-1">

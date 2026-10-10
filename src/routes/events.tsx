@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DatePicker } from "@/components/ui/date-picker";
 import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
 import type { EventManifest } from "@/lib/data-store";
 import { CreateEventModal } from "@/components/events/create-event-modal";
@@ -317,7 +318,7 @@ function EventsPage() {
                 return (
                   <tr
                     key={e.id}
-                    className="cursor-pointer border-t border-border align-top hover:bg-muted/40"
+                    className={cn(officeClickRowClass, "border-t border-border align-top")}
                     onClick={openManage}
                   >
                     <td className="px-4 py-2 font-semibold">

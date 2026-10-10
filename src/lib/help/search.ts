@@ -89,6 +89,8 @@ const AREA_LABELS: Record<string, string> = {
   admin: "Admin",
   participants: "Participants",
   staff: "Staff",
+  run_planning: "Run Planning",
+  rights_voice: "Rights & voice",
 };
 
 export function buildHelpAreaChips(topics: readonly HelpTopic[]): HelpAreaChip[] {

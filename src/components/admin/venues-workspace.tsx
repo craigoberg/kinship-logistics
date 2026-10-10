@@ -13,6 +13,7 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Copy,
+  ChevronRight,
   FolderOpen,
   Loader2,
   Pencil,
@@ -24,6 +25,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -306,7 +309,8 @@ export function VenuesWorkspace() {
               visible.map((v) => (
                 <TableRow
                   key={v.id}
-                  className={selected?.id === v.id ? "bg-muted/50" : undefined}
+                  className={cn(officeClickRowClass, selected?.id === v.id && "bg-muted/50")}
+                  onClick={() => setEditing(v)}
                 >
                   <TableCell>
                     <div className="font-medium">{v.name}</div>
@@ -331,37 +335,33 @@ export function VenuesWorkspace() {
                   </TableCell>
                   <TableCell>{statusBadge(v.status)}</TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setSelected(v)}
-                        tooltip="Open template & baseline"
-                      >
-                        <FolderOpen className="h-4 w-4" />
-                      </IconActionButton>
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setEditing(v)}
-                        tooltip="Edit venue"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </IconActionButton>
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setCloneSource(v)}
-                        tooltip="Clone venue"
-                      >
-                        <Copy className="h-4 w-4" />
-                      </IconActionButton>
-                      {v.status === "active" && (
+                    <div className="flex items-center justify-end gap-1">
+                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                         <IconActionButton
                           className="h-8 w-8"
-                          onClick={() => setArchiveTarget(v)}
-                          tooltip="Archive venue"
+                          onClick={() => setSelected(v)}
+                          tooltip="Open template & baseline"
                         >
-                          <Archive className="h-4 w-4" />
+                          <FolderOpen className="h-4 w-4" />
                         </IconActionButton>
-                      )}
+                        <IconActionButton
+                          className="h-8 w-8"
+                          onClick={() => setCloneSource(v)}
+                          tooltip="Clone venue"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </IconActionButton>
+                        {v.status === "active" && (
+                          <IconActionButton
+                            className="h-8 w-8"
+                            onClick={() => setArchiveTarget(v)}
+                            tooltip="Archive venue"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </IconActionButton>
+                        )}
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </TableCell>
                 </TableRow>

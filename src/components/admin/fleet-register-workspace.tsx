@@ -1,9 +1,10 @@
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
-import { Pencil, Plus, Search, Accessibility } from "lucide-react";
+import { ChevronRight, Plus, Search, Accessibility } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -153,7 +154,11 @@ export function FleetRegisterWorkspace() {
               </TableRow>
             ) : (
               visible.map((a) => (
-                <TableRow key={a.id}>
+                <TableRow
+                  key={a.id}
+                  className={cn(canEdit && officeClickRowClass)}
+                  onClick={canEdit ? () => setEditing(a) : undefined}
+                >
                   <TableCell>
                     <div className="font-medium">{a.name}</div>
                     <div className="text-xs text-muted-foreground">
@@ -201,16 +206,8 @@ export function FleetRegisterWorkspace() {
                       <Badge variant="secondary">Inactive</Badge>
                     )}
                   </TableCell>
-                  <TableCell>
-                    {canEdit && (
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setEditing(a)}
-                        tooltip="Edit vehicle"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </IconActionButton>
-                    )}
+                  <TableCell className="text-right">
+                    {canEdit && <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground" />}
                   </TableCell>
                 </TableRow>
               ))

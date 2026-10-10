@@ -5,7 +5,7 @@ export const addStaffTopic: HelpTopic = {
   kind: "howto",
   title: "Staff — add personnel and set role / PIN",
   summary:
-    "Managers add staff and volunteers in Staff → Add personnel with role, system access level, and a 6-digit PIN.",
+    "Managers add staff and volunteers with Quick add (role, system access, 6-digit PIN). Click a row to open the person again.",
   keywords: [
     "staff",
     "personnel",
@@ -18,15 +18,15 @@ export const addStaffTopic: HelpTopic = {
   ],
   menus: ["staff", "admin"],
   roles: ["manager", "assistant_manager"],
-  relatedIds: ["sign-in-pin", "add-participants", "admin-overview"],
+  relatedIds: ["sign-in-pin", "add-participants", "admin-overview", "run-planning"],
   steps: [
     {
       heading: "Open Staff",
       body: "From the menu open Staff. Use Staff & Volunteers for employees/volunteers; Carers & Support Networks is a separate list for family/support contacts.",
     },
     {
-      heading: "Add personnel (manager-only)",
-      body: "Managers see Add personnel. Non-managers see a Manager-only badge. Writes go to staff_registry.",
+      heading: "Quick add (manager-only)",
+      body: "Managers see Quick add on Staff & Volunteers, and Quick add carer on Carers. Non-managers see a Manager-only badge on the staff list. Writes go to staff_registry. Click a row to open that person. There is no separate Edit button.",
     },
     {
       heading: "Name, role, system access",
@@ -38,11 +38,11 @@ export const addStaffTopic: HelpTopic = {
     },
     {
       heading: "Save and verify",
-      body: "Tap Add personnel. Have the person sign in on Auth with their PIN (after day email login when enabled). Managers can reopen a row later via Edit personnel / Save changes.",
+      body: "On Quick add, tap Add personnel. Have the person sign in on Auth with their PIN (after day email login when enabled). To change them later, click their row and Save changes.",
     },
     {
       heading: "Staff onboarding pack",
-      body: "Print a blank staff or volunteer pack first if you need paper — no draft is created. Then Staff onboarding or Volunteer onboarding to type it in. The form is local until Save draft. The inbox is Hub → Onboarding (not Admin).",
+      body: "Staff onboarding or Volunteer onboarding types the pack. Nothing is stored until Save draft. Print blank staff or Print blank volunteer on this page, or from inside the open pack, if you need paper. The inbox is Hub → Onboarding (not Admin): click the row to open, Delete stays, and Search sits beside Show and Pack.",
     },
     {
       heading: "Certifications later",

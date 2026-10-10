@@ -24,15 +24,16 @@ export const addParticipantsTopic: HelpTopic = {
     "medication-rounds",
     "events-create-confirm-open",
     "client-support-plan",
+    "run-planning",
   ],
   steps: [
     {
       heading: "Open Participants",
-      body: "From the menu open Participants. Search by name or NDIS number; filter by day or transport/run if needed.",
+      body: "From the menu open Participants. Search by name or NDIS number. Under the search, turn on Participants, Guests, and Archived — selected is green. The day filter and the day columns only list days set in Admin → Lookups → Operating days (not every weekday). Transport / run is a separate filter.",
     },
     {
-      heading: "Add new participant",
-      body: "Tap Add new participant. First name, Last name, and NDIS number are required before Add participant enables. Optional fields include street address and IDDSI liquids/foods levels.",
+      heading: "Quick add",
+      body: "Tap Quick add. First name, Last name, and NDIS number are required before Add participant enables. Optional fields include street address and IDDSI liquids/foods levels. Quick add is a short record. The full intake pack is Client onboarding.",
     },
     {
       heading: "Open a care profile",
@@ -44,11 +45,11 @@ export const addParticipantsTopic: HelpTopic = {
     },
     {
       heading: "Put them on a roster",
-      body: "Day Centre attendance and Event Manage → Roster book participants from this directory. For bus passengers set Transport med bag before Confirm event.",
+      body: "Day Centre attendance and Event Manage (click the event row → Roster) book participants from this directory. For bus passengers set Transport med bag before Confirm event. Weekly IN/OUT for the centre is on Run Planning, and only on operating days.",
     },
     {
       heading: "Client onboarding pack",
-      body: "Print blank client first if you need paper — no draft is created. Then Client onboarding to type the pack in. Close without Save draft and nothing is stored. Hub → Onboarding is the inbox for drafts and reviews coming due.",
+      body: "Client onboarding types the pack. Nothing is stored until Save draft. Print blank client on this page, or print a blank form from inside the open pack, if you need paper first. Hub → Onboarding is the inbox: Show, Pack, and Search, then click a row to open it. Delete stays on the row. The Person column shows the name saved on the form.",
     },
     {
       heading: "Guests vs registered clients",

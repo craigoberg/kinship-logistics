@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Pencil } from "lucide-react";
+import { ChevronRight } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -9,6 +9,8 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { CharacterCountedTextarea } from "@/components/ui/character-counted-textarea";
 import { Badge } from "@/components/ui/badge";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import {
   Dialog,
   DialogContent,
@@ -151,7 +153,11 @@ export function SystemParameterWorkspace() {
               </TableRow>
             ) : (
               rows.map((r) => (
-                <TableRow key={r.key}>
+                <TableRow
+                  key={r.key}
+                  className={cn(canEdit && officeClickRowClass)}
+                  onClick={canEdit ? () => setEditing(r) : undefined}
+                >
                   <TableCell className="align-top font-mono text-xs break-all">
                     {r.key}
                   </TableCell>
@@ -165,11 +171,7 @@ export function SystemParameterWorkspace() {
                     <ClientTime iso={r.updated_at} />
                   </TableCell>
                   <TableCell className="align-top text-right">
-                    {canEdit && (
-                      <Button variant="ghost" size="sm" onClick={() => setEditing(r)}>
-                        <Pencil className="mr-1 h-3 w-3" /> Edit
-                      </Button>
-                    )}
+                    {canEdit && <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground" />}
                   </TableCell>
                 </TableRow>
               ))

@@ -27,7 +27,7 @@ export const eventLiveWatchTopic: HelpTopic = {
   steps: [
     {
       heading: "Open Live on the event card",
-      body: "Event Manage → open the outing → Live tab. Multi-day events show day chips; the default is operational today (or the open day).",
+      body: "Event Manage → click the outing row → Live tab. Multi-day events show day chips; the default is operational today (or the open day).",
     },
     {
       heading: "What you can see",

@@ -29,7 +29,7 @@ export const eventsCreateConfirmOpenTopic: HelpTopic = {
   steps: [
     {
       heading: "Create New Event",
-      body: "Event Manage → Create New Event. Fill Event title, Event type, dates, optional Primary venue and ticket price. Optional Clone roster from prior event. Save Event — status starts as Planning.",
+      body: "Event Manage → Create New Event. Fill Event title, Event type, dates, optional Primary venue and ticket price. Optional Clone roster from prior event. Save Event — status starts as Planning. Afterwards, click the event row to open it. There is no Manage button. Run stays a separate button on Confirmed and Open events.",
     },
     {
       heading: "Details, Roster, Itinerary, Trip Days",
@@ -49,7 +49,7 @@ export const eventsCreateConfirmOpenTopic: HelpTopic = {
     },
     {
       heading: "Floor still needs Open location",
-      body: "After Open event, field ops use Event Deliver (or Run this event). The trip leader opens the location with walkthrough ticks + PIN. Office watch is Event Manage → Live (read-only). Finance & P&L and Trip Report stay on Event Manage.",
+      body: "After Open event, field ops use Event Deliver (or the Run button on that row). The trip leader opens the location with walkthrough ticks + PIN. Office watch is the Live tab inside the event (read-only). Finance & P&L and Trip Report stay on that same event card.",
     },
   ],
 };

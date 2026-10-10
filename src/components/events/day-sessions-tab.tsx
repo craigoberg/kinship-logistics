@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { cn, formatDate } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
@@ -375,7 +376,7 @@ function DaySessionRow({ event, session, managers, multiDay, onSaved }: RowProps
     <div>
       {/* Collapsed row */}
       <div
-        className="flex cursor-pointer items-start gap-3 px-4 py-3 hover:bg-muted/30"
+        className={cn(officeClickRowClass, "flex items-start gap-3 px-4 py-3")}
         onClick={() => setExpanded((p) => !p)}
         role="button"
         tabIndex={0}

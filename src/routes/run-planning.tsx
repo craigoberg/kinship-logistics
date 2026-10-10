@@ -80,8 +80,9 @@ function RunPlanningPage() {
         <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Run Planning</h2>
         <p className="text-sm text-muted-foreground">
           Everyone who comes in and out — clients, staff, volunteers and carers.
-          Pencil opens the person&apos;s record to change IN/OUT. Drag the run order
-          below. Ad-hoc medical runs stay on{" "}
+          Click a row to open the person&apos;s record and change IN/OUT. Days follow
+          Admin → Lookups → Operating days. Drag the run order below. Ad-hoc medical
+          runs stay on{" "}
           <Link to="/transport" className="underline underline-offset-2">
             Transport
           </Link>

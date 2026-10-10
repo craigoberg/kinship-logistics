@@ -23,6 +23,8 @@ import { manifestStartRunTopic } from "./manifest-start-run";
 import { mealsServiceTopic } from "./meals-service";
 import { medicationRoundsTopic } from "./medication-rounds";
 import { redVerbalConsultationTopic } from "./red-verbal-consultation";
+import { rightsVoiceTopic } from "./rights-voice";
+import { runPlanningTopic } from "./run-planning";
 import { rygePhilosophyTopic } from "./ryge-philosophy";
 import { signInPinTopic } from "./sign-in-pin";
 
@@ -36,6 +38,8 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   checkinRollEscalationsTopic,
   addStaffTopic,
   addParticipantsTopic,
+  runPlanningTopic,
+  rightsVoiceTopic,
   clientSupportPlanTopic,
   adminOverviewTopic,
   adminVenuesTopic,

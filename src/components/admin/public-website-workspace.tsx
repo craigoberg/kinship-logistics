@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { ExternalLink, Globe, RefreshCw, Upload } from "lucide-react";
+import { ChevronRight, ExternalLink, Globe, RefreshCw, Upload } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -228,21 +230,18 @@ export function PublicWebsiteWorkspace() {
                 </thead>
                 <tbody>
                   {pages.map((p) => (
-                    <tr key={p.id} className="border-t">
+                    <tr
+                      key={p.id}
+                      className={cn(officeClickRowClass, "border-t")}
+                      onClick={() => startEdit(p)}
+                    >
                       <td className="px-3 py-2 font-mono text-xs">{p.slug}</td>
                       <td className="px-3 py-2">{p.title}</td>
                       <td className="px-3 py-2">
                         <Badge variant="secondary">{p.status}</Badge>
                       </td>
                       <td className="px-3 py-2 text-right">
-                        <Button
-                          type="button"
-                          size="sm"
-                          variant="outline"
-                          onClick={() => startEdit(p)}
-                        >
-                          Edit
-                        </Button>
+                        <ChevronRight className="ml-auto h-4 w-4 text-muted-foreground" />
                       </td>
                     </tr>
                   ))}

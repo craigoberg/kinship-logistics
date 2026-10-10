@@ -30,7 +30,7 @@ export const appTicketsTopic: HelpTopic = {
     },
     {
       heading: "Find it in Hub → App tickets",
-      body: "Everyone can see the list. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. Log Note and Resolve open a draft email To the person who raised the ticket, with this update and the notes so far — edit or send. This tab is not Maintenance & Repairs and is not part of the Human Incidents register. Open tickets also light the Dashboard **App tickets** tile (Band 3).",
+      body: "Everyone can see the list. Click a card to open it. The office adds Log Notes, can Defer, and Resolve / Close with a manager PIN. A deferred card shows Deferred until and the time left. A resolved card shows Resolved and how long it was open, counted from Logged. Log Note and Resolve open a draft email To the person who raised the ticket, with this update and the notes so far — edit or send. This tab is not Maintenance & Repairs and is not part of the Human Incidents register. Open tickets also light the Dashboard App tickets tile (Band 3).",
     },
     {
       heading: "Office email (optional)",

@@ -2,6 +2,11 @@
  * Run Planning board — every person with a Day Centre IN/OUT default.
  */
 import { supabase } from "@/integrations/supabase/client";
+import {
+  DAY_CODE_LABEL,
+  DAY_CODE_ORDER,
+  type DayCode,
+} from "@/lib/api/centre-hours";
 import { listSupportSchedules } from "@/lib/api/support-attendance";
 import { supportPersonKindLabel, type RoutePersonKind } from "@/lib/support-person";
 
@@ -26,15 +31,43 @@ function planningDayRank(value: string): number {
   return PLANNING_DAY_RANK[value.trim().toLowerCase()] ?? 99;
 }
 
-export const WEEK_BOARD_DAYS = [
-  { code: "DAY-MON", label: "Mon" },
-  { code: "DAY-TUE", label: "Tue" },
-  { code: "DAY-WED", label: "Wed" },
-  { code: "DAY-THU", label: "Thu" },
-  { code: "DAY-FRI", label: "Fri" },
-] as const;
+const DAY_BOARD_SHORT: Record<DayCode, string> = {
+  "DAY-MON": "Mon",
+  "DAY-TUE": "Tue",
+  "DAY-WED": "Wed",
+  "DAY-THU": "Thu",
+  "DAY-FRI": "Fri",
+  "DAY-SAT": "Sat",
+  "DAY-SUN": "Sun",
+};
 
-export type WeekBoardDayCode = (typeof WEEK_BOARD_DAYS)[number]["code"];
+export type WeekBoardDayCode = DayCode;
+
+export interface OperatingBoardDay {
+  code: DayCode;
+  label: string;
+  long: string;
+}
+
+/** Columns and filters follow Admin → Lookups → Operating days. */
+export function operatingBoardDays(
+  rows: { code: string; displayName?: string }[],
+): OperatingBoardDay[] {
+  const seen = new Set<DayCode>();
+  const out: OperatingBoardDay[] = [];
+  for (const row of rows) {
+    const code = normalizeDayCode(row.code);
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    out.push({
+      code,
+      label: DAY_BOARD_SHORT[code],
+      long: DAY_CODE_LABEL[code] || row.displayName || code,
+    });
+  }
+  out.sort((a, b) => DAY_CODE_ORDER.indexOf(a.code) - DAY_CODE_ORDER.indexOf(b.code));
+  return out;
+}
 
 export function normalizeDayCode(raw: string): WeekBoardDayCode | null {
   const v = raw.trim().toLowerCase();

@@ -23,7 +23,7 @@ export const clientSupportPlanTopic: HelpTopic = {
   steps: [
     {
       heading: "Use the Client intake pack for signed evidence",
-      body: "Participants → Client onboarding (or Care Profile → onboarding). Inbox is Hub → Onboarding — not Admin. Print blank anytime (no fields required), fill by hand, then type it in. Continue to confirm: tick the office box in the footer (red until ticked), then Confirm fields — PIN. Print the filled pack, wet-sign, then Signed & filed with a Filing location.",
+      body: "Participants → Client onboarding (or Care Profile → onboarding). Inbox is Hub → Onboarding — not Admin. Click a row to open a pack. Show, Pack, and Search narrow the list. Print blank from Participants, or from inside the open pack (no fields required), fill by hand, then type it in. Continue to confirm: tick the office box in the footer (red until ticked), then Confirm fields — PIN. Print the filled pack, wet-sign, then Signed & filed with a Filing location. Review/Update on a signed pack copies it for the next year; that button does not just open the old pack.",
     },
     {
       heading: "What to write (keep it thin)",

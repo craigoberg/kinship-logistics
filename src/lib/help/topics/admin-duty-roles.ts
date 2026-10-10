@@ -42,7 +42,7 @@ export const adminDutyRolesTopic: HelpTopic = {
     },
     {
       heading: "Duty roles",
-      body: "Create the job (Food Preparation, Bus Driver, Car Driver) and tick which Lookups types it needs. A person can hold several Duty roles.",
+      body: "Create the job (Food Preparation, Bus Driver, Car Driver) and tick which Lookups types it needs. Click a role row to edit it. Archive or Restore stays a button. A person can hold several Duty roles.",
     },
     {
       heading: "Bindings",

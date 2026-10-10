@@ -1,9 +1,10 @@
 /**
- * One person per row, Mon–Fri IN/OUT. Edit opens that person’s record.
+ * One person per row. Columns are Admin → Lookups → Operating days.
+ * Click the row to open that person’s record.
  */
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { Pencil, Search, Users } from "lucide-react";
+import { ChevronRight, Search, Users } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import {
@@ -13,14 +14,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { IconActionButton } from "@/components/ui/icon-action-button";
-import { useBusRunMap } from "@/hooks/use-supabase-data";
+import { useBusRunMap, useLookupParameters } from "@/hooks/use-supabase-data";
 import { TransportCodeBadge } from "@/components/transport/schedule-transport-pills";
+import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import {
   groupRunPlanningPeople,
   listRunPlanningRows,
+  operatingBoardDays,
   RUN_PLANNING_PEOPLE_KEY,
-  WEEK_BOARD_DAYS,
   type RunPlanningPerson,
 } from "@/lib/api/run-planning";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
@@ -41,6 +44,10 @@ export function RunPlanningPeopleTable({
   const [search, setSearch] = useState("");
   const [kindFilter, setKindFilter] = useState("all");
   const busRunMap = useBusRunMap();
+  const { data: operatingDays = [], isLoading: daysLoading } = useLookupParameters(
+    LOOKUP_CATEGORIES.operatingDay,
+  );
+  const boardDays = useMemo(() => operatingBoardDays(operatingDays), [operatingDays]);
   const { data: rows = [], isLoading, error } = useQuery({
     queryKey: RUN_PLANNING_PEOPLE_KEY,
     queryFn: listRunPlanningRows,
@@ -73,7 +80,8 @@ export function RunPlanningPeopleTable({
           Everyone on the board
         </h3>
         <p className="mt-1 text-xs text-muted-foreground">
-          One person per row. Pencil opens their Participant or Staff record to change IN/OUT.
+          One person per row. Click a row to open their Participant or Staff record and change IN/OUT.
+          Days are the centre operating days.
         </p>
       </div>
 
@@ -108,7 +116,13 @@ export function RunPlanningPeopleTable({
         </div>
       )}
 
-      {isLoading ? (
+      {!daysLoading && boardDays.length === 0 && (
+        <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground">
+          No centre operating days on file. Set them in Admin → Lookups → Operating days.
+        </div>
+      )}
+
+      {isLoading || daysLoading ? (
         <p className="py-6 text-center text-sm text-muted-foreground">Loading people…</p>
       ) : people.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-muted/30 p-4 text-center text-xs text-muted-foreground">
@@ -124,7 +138,7 @@ export function RunPlanningPeopleTable({
                 <th className="px-3 py-2 font-medium" rowSpan={2}>
                   Person
                 </th>
-                {WEEK_BOARD_DAYS.map((d) => (
+                {boardDays.map((d) => (
                   <th
                     key={d.code}
                     className="border-l border-border px-2 py-1 text-center font-medium"
@@ -133,12 +147,12 @@ export function RunPlanningPeopleTable({
                     {d.label}
                   </th>
                 ))}
-                <th className="w-12 px-2 py-2" rowSpan={2}>
-                  <span className="sr-only">Edit</span>
+                <th className="w-10 px-2 py-2" rowSpan={2}>
+                  <span className="sr-only">Open</span>
                 </th>
               </tr>
               <tr>
-                {WEEK_BOARD_DAYS.map((d) => (
+                {boardDays.map((d) => (
                   <th
                     key={`${d.code}-io`}
                     className="border-l border-border px-2 py-1 text-center font-normal"
@@ -154,12 +168,25 @@ export function RunPlanningPeopleTable({
             </thead>
             <tbody>
               {people.map((p) => (
-                <tr key={p.personKey} className="border-t border-border">
+                <tr
+                  key={p.personKey}
+                  className={cn(officeClickRowClass, "border-t border-border")}
+                  onClick={() => onEdit(p)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onEdit(p);
+                    }
+                  }}
+                  tabIndex={0}
+                  role="button"
+                  aria-label={`Open ${p.name}`}
+                >
                   <td className="px-3 py-2">
                     <div className="font-medium">{p.name}</div>
                     <div className="text-xs text-muted-foreground">{p.roleLabel}</div>
                   </td>
-                  {WEEK_BOARD_DAYS.map((d) => {
+                  {boardDays.map((d) => {
                     const cell = p.cells[d.code];
                     return (
                       <td
@@ -179,12 +206,7 @@ export function RunPlanningPeopleTable({
                     );
                   })}
                   <td className="px-1 py-1 text-center">
-                    <IconActionButton
-                      tooltip={`Edit ${p.name} centre transport`}
-                      onClick={() => onEdit(p)}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </IconActionButton>
+                    <ChevronRight className="mx-auto h-4 w-4 text-muted-foreground" />
                   </td>
                 </tr>
               ))}

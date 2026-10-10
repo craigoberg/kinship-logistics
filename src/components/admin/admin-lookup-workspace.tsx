@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, RefreshCw } from "lucide-react";
+import { ChevronRight, Plus, Trash2, RefreshCw } from "lucide-react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -51,6 +51,7 @@ import {
 } from "@/lib/ui/caution-callout";
 import { busRunEffectiveColor } from "@/lib/bus-run-palette";
 import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 
 /** Categories where each entry can have a badge color configured. */
 const COLOR_ENABLED_CATEGORIES = new Set(["bus_runs", "transport_types"]);
@@ -289,7 +290,11 @@ function CategoryPanel({
                     : row.badgeColor;
 
                 return (
-                  <tr key={row.id} className="border-t border-border/60">
+                  <tr
+                    key={row.id}
+                    className={cn(officeClickRowClass, "border-t border-border/60")}
+                    onClick={() => setEditTarget(row)}
+                  >
                     <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
                     <td className="px-3 py-2">
                       <div className="flex items-center gap-2">
@@ -305,7 +310,7 @@ function CategoryPanel({
                       </div>
                     </td>
                     {showColor && (
-                      <td className="px-3 py-2">
+                      <td className="px-3 py-2" onClick={(e) => e.stopPropagation()}>
                         <ColorCell
                           row={row}
                           fallback={effectiveColor}
@@ -317,25 +322,20 @@ function CategoryPanel({
                       </td>
                     )}
                     <td className="px-3 py-2 text-right">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setEditTarget(row)}
-                          className="gap-1.5"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setRemoveTarget(row)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRemoveTarget(row);
+                          }}
                           className="gap-1.5 text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Remove
                         </Button>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </td>
                   </tr>

@@ -4,13 +4,15 @@
  */
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Archive, Pencil, Plus, Trash2 } from "lucide-react";
+import { Archive, ChevronRight, Plus, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import {
@@ -237,7 +239,11 @@ function RolesPanel({
               </TableRow>
             ) : (
               roles.map((r) => (
-                <TableRow key={r.id}>
+                <TableRow
+                  key={r.id}
+                  className={cn(canEdit && officeClickRowClass)}
+                  onClick={canEdit ? () => openEdit(r) : undefined}
+                >
                   <TableCell>
                     <p className="font-medium">{r.name}</p>
                     {r.description ? (
@@ -257,24 +263,20 @@ function RolesPanel({
                     )}
                   </TableCell>
                   <TableCell>
-                    {canEdit && (
-                      <div className="flex justify-end gap-1">
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => openEdit(r)}
-                          tooltip="Edit Duty role"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </IconActionButton>
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => archiveMut.mutate(r)}
-                          tooltip={r.active ? "Archive" : "Restore"}
-                        >
-                          <Archive className="h-4 w-4" />
-                        </IconActionButton>
-                      </div>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {canEdit && (
+                        <div onClick={(e) => e.stopPropagation()}>
+                          <IconActionButton
+                            className="h-8 w-8"
+                            onClick={() => archiveMut.mutate(r)}
+                            tooltip={r.active ? "Archive" : "Restore"}
+                          >
+                            <Archive className="h-4 w-4" />
+                          </IconActionButton>
+                        </div>
+                      )}
+                      {canEdit && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

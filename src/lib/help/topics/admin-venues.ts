@@ -29,7 +29,7 @@ export const adminVenuesTopic: HelpTopic = {
   steps: [
     {
       heading: "Open Admin → Venues",
-      body: "Admin Configuration → Venues lists the destination registry. Search before creating a duplicate.",
+      body: "Admin Configuration → Venues lists the destination registry. Search before creating a duplicate. Click a row to edit the venue. The folder button opens the template and baseline. Clone and Archive stay their own buttons.",
     },
     {
       heading: "Add venue → Create venue",
@@ -37,7 +37,7 @@ export const adminVenuesTopic: HelpTopic = {
     },
     {
       heading: "Template, sign-offs, compliance",
-      body: "Open the venue and use its template / sign-offs / compliance areas. A new venue has template structure only until someone signs a baseline.",
+      body: "Use the folder button for template, sign-offs, and compliance. A new venue has template structure only until someone signs a baseline. Clicking the row opens the venue edit, not that folder.",
     },
     {
       heading: "Sign baseline",

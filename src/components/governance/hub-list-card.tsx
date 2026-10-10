@@ -2,6 +2,7 @@ import type { ReactNode, KeyboardEvent } from "react";
 import { ChevronRight } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import {
   HUB_URGENCY_BADGE,
   type HubUrgency,
@@ -66,7 +67,7 @@ export function HubListCard({
       onKeyDown={actions ? undefined : handleKeyDown}
       className={cn(
         "rounded-lg border bg-card p-3 transition-colors",
-        interactive && "cursor-pointer hover:bg-muted/40",
+        interactive && officeClickRowClass,
         interactive &&
           !actions &&
           "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",

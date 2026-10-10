@@ -49,16 +49,14 @@ export function isValidPublicEmail(value: string | null | undefined): boolean {
 }
 
 /**
- * Public website (yada.org.au) requires a valid email on every form.
+ * Public site and Connect Rights & voice require a valid email on every form.
  * An anonymous complaint is the only exception — name and contact are not stored.
- * Connect rights-and-voice stays optional so office-assisted submits still work.
  */
 export function publicFormRequiresEmail(args: {
   channel: "public" | "connect";
   formKey: string;
   isAnonymous: boolean;
 }): boolean {
-  if (args.channel !== "public") return false;
   return !(args.formKey === "complaint" && args.isAnonymous);
 }
 
@@ -162,10 +160,9 @@ export async function submitPublicForm(
   ) {
     throw new Error("A valid email address is required.");
   }
-  // Anonymous complaints store no contact. Other anonymous public forms
+  // Anonymous complaints store no contact. Other anonymous forms
   // (feedback, compliment) still keep the email so the office can reply.
-  const dropEmail =
-    isAnonymous && (def.formKey === "complaint" || input.channel !== "public");
+  const dropEmail = isAnonymous && def.formKey === "complaint";
 
   const { data: rpcRows, error: rpcErr } = await supabase.rpc("submit_public_form", {
     p_form_key: input.formKey,

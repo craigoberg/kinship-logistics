@@ -4,9 +4,11 @@
  */
 import { useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
-import { Pencil, Plus, Trash2, RefreshCw } from "lucide-react";
+import { ChevronRight, Plus, Trash2, RefreshCw } from "lucide-react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
@@ -272,7 +274,11 @@ export function OperatingDaysPanel() {
               data.map((row) => {
                 const h = hoursFor(hours, row.code);
                 return (
-                  <tr key={row.id} className="border-t border-border/60">
+                  <tr
+                    key={row.id}
+                    className={cn(officeClickRowClass, "border-t border-border/60")}
+                    onClick={() => setEditTarget(row)}
+                  >
                     <td className="px-3 py-2 font-mono text-xs">{row.code}</td>
                     <td className="px-3 py-2">{row.displayName}</td>
                     <td className="px-3 py-2 font-mono text-xs">{h?.openTime ?? "—"}</td>
@@ -281,25 +287,20 @@ export function OperatingDaysPanel() {
                       {h?.updatedAt ? <ClientTime iso={h.updatedAt} /> : "—"}
                     </td>
                     <td className="px-3 py-2 text-right">
-                      <div className="flex justify-end gap-1">
+                      <div className="flex items-center justify-end gap-1">
                         <Button
                           variant="ghost"
                           size="sm"
-                          onClick={() => setEditTarget(row)}
-                          className="gap-1.5"
-                        >
-                          <Pencil className="h-3.5 w-3.5" />
-                          Edit
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          onClick={() => setRemoveTarget(row)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRemoveTarget(row);
+                          }}
                           className="gap-1.5 text-destructive hover:text-destructive"
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                           Remove
                         </Button>
+                        <ChevronRight className="h-4 w-4 text-muted-foreground" />
                       </div>
                     </td>
                   </tr>
