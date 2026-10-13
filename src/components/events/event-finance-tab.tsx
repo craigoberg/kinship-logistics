@@ -1,5 +1,6 @@
 import { useMemo, useState } from "react";
-import { Plus, Search, BadgeDollarSign, Wallet, TrendingUp, Pencil, Trash2 } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Search, BadgeDollarSign, CircleDollarSign, Wallet, TrendingUp, Pencil, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,10 +17,18 @@ import {
 } from "@/components/ui/alert-dialog";
 import {
   useDeleteEventLedger,
+  useEventBookings,
   useEventLedger,
   useEventPaymentLedgerForEvent,
 } from "@/hooks/use-supabase-data";
 import { isEventFinanceLocked, summarizeEventFinance } from "@/lib/data-store";
+import {
+  EVENT_SUPPORT_KEY,
+  EVENT_SUPPORT_PAYMENTS_KEY,
+  listEventSupportBookings,
+  listEventSupportPayments,
+  supportBookingCost,
+} from "@/lib/api/event-support";
 import type { EventLedgerEntry, EventManifest } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
 import { LogEventExpenseModal } from "./log-event-expense-modal";
@@ -45,16 +54,33 @@ export function EventFinanceTab({ event }: Props) {
   const [query, setQuery] = useState("");
   const { data: ledger = [], isLoading, error } = useEventLedger(event.id);
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
+  const { data: bookings = [] } = useEventBookings(event.id);
+  const { data: supportBookings = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_KEY(event.id),
+    queryFn: () => listEventSupportBookings(event.id),
+  });
+  const { data: supportPayments = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_PAYMENTS_KEY(event.id),
+    queryFn: () => listEventSupportPayments(event.id),
+  });
   const deleteMut = useDeleteEventLedger();
 
-  const { revenue, expenses, net } = useMemo(() => {
-    const totals = summarizeEventFinance(paymentLedger, ledger);
+  const { expected, revenue, expenses, net } = useMemo(() => {
+    const totals = summarizeEventFinance([...paymentLedger, ...supportPayments], ledger);
+    const ticket = event.ticketPrice ?? 0;
+    const booked = bookings
+      .filter((b) => b.bookingStatus !== "Cancelled")
+      .reduce((sum, b) => sum + (b.customPrice ?? ticket), 0);
+    const support = supportBookings
+      .filter((b) => b.bookingStatus !== "Cancelled")
+      .reduce((sum, b) => sum + supportBookingCost(b, ticket), 0);
     return {
+      expected: Number((booked + support).toFixed(2)),
       revenue: totals.ticketRevenue,
       expenses: totals.vendorExpenses,
       net: totals.netPnl,
     };
-  }, [paymentLedger, ledger]);
+  }, [paymentLedger, supportPayments, ledger, bookings, supportBookings, event.ticketPrice]);
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
@@ -75,14 +101,19 @@ export function EventFinanceTab({ event }: Props) {
         </div>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-3">
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
-          label="Ticket revenue"
+          label="Expected Income"
+          value={`$${fmtMoney(expected)}`}
+          icon={<CircleDollarSign className="h-4 w-4" />}
+        />
+        <SummaryCard
+          label="Actual Income"
           value={`$${fmtMoney(revenue)}`}
           icon={<BadgeDollarSign className="h-4 w-4" />}
         />
         <SummaryCard
-          label="Vendor expenses"
+          label="Expenses"
           value={`$${fmtMoney(expenses)}`}
           tone="expense"
           icon={<Wallet className="h-4 w-4" />}

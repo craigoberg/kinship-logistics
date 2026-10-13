@@ -1,8 +1,8 @@
 /**
- * CloseRunCard — end-of-manifest reconciliation + operator PIN (§11 / BL-096).
- * Prefills ending odo = start + Σ logged leg km; soft-warn if driver changes far off.
+ * CloseRunCard — end-of-manifest reconciliation + operator PIN (§11).
+ * Ending odometer is the dash reading. Kilometres travelled = end − start.
  */
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck } from "lucide-react";
 import { toast } from "sonner";
@@ -26,13 +26,8 @@ import {
   listOpenTransportRedBlocks,
 } from "@/lib/api/transport-run-close";
 import { invalidateTransportCaches, invalidateFleetCaches } from "@/lib/query/invalidation";
-import { useOdoCloseSuggestWarnKm } from "@/hooks/use-system-parameters";
-import { absDiffExceeds, suggestedEndOdometer } from "@/lib/manifest-odometer";
-import {
-  CAUTION_CALLOUT_BODY_CLASS,
-  CAUTION_CALLOUT_CLASS,
-  CAUTION_CALLOUT_ICON_CLASS,
-} from "@/lib/ui/caution-callout";
+import { tripDistanceKm } from "@/lib/manifest-odometer";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { FieldActionButton } from "@/components/ui/field-action-button";
 import { useManifestOffline } from "@/hooks/use-manifest-offline";
 import { clearSnapshotForTrip } from "@/lib/manifest-offline";
@@ -52,23 +47,11 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
     flushing,
     flush,
   } = useManifestOffline(trip.id);
-  const closeSuggestWarnKm = useOdoCloseSuggestWarnKm();
   const summary = useMemo(() => buildRunCloseSummary(trip, legs), [trip, legs]);
-  const suggested = useMemo(
-    () => suggestedEndOdometer(trip.startOdometerKm, summary.totalKm),
-    [trip.startOdometerKm, summary.totalKm],
-  );
 
-  const [odo, setOdo] = useState(() => String(suggested));
-  const [suggestWarnAck, setSuggestWarnAck] = useState(false);
+  const [odo, setOdo] = useState("");
   const [cancellationsAck, setCancellationsAck] = useState(false);
   const [pinOpen, setPinOpen] = useState(false);
-
-  // Keep suggestion in sync if legs complete after mount.
-  useEffect(() => {
-    setOdo(String(suggested));
-    setSuggestWarnAck(false);
-  }, [suggested]);
 
   const redQ = useQuery({
     queryKey: ["transport-run-red-blocks", trip.id],
@@ -87,14 +70,12 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
   const hasCancellations = summary.cancelledPickups.length > 0;
   const odoNum = odo === "" ? NaN : Number(odo);
   const validOdo = Number.isFinite(odoNum) && odoNum >= trip.startOdometerKm;
-  const suggestMismatch =
-    validOdo && absDiffExceeds(odoNum, suggested, closeSuggestWarnKm);
+  const travelledKm = validOdo ? tripDistanceKm(trip.startOdometerKm, odoNum) : null;
   const outboxBlocksClose = !online || hasPending || flushing;
   const canClose =
     validOdo &&
     redBlocks.length === 0 &&
     (!hasCancellations || cancellationsAck) &&
-    !(suggestMismatch && !suggestWarnAck) &&
     !redQ.isLoading &&
     !outboxBlocksClose;
 
@@ -114,7 +95,6 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         description: "Manifest reconciled and locked to the ledger.",
       });
       setCancellationsAck(false);
-      setSuggestWarnAck(false);
     },
     onError: (e: Error) => {
       toast.error("Could not close run", { description: e.message });
@@ -143,8 +123,8 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
           </span>
         </li>
         <li>
-          <span className="text-muted-foreground">Distance</span>{" "}
-          <span className="font-semibold">{summary.totalKm.toFixed(1)} km</span>
+          <span className="text-muted-foreground">Start odometer</span>{" "}
+          <span className="font-semibold tabular-nums">{trip.startOdometerKm}</span>
         </li>
         <li className="col-span-2">
           <span className="text-muted-foreground">Issues logged this run</span>{" "}
@@ -201,55 +181,27 @@ export function CloseRunCard({ trip, legs, eventTitle }: Props) {
         id="endodo"
         label="Ending odometer"
         value={odo}
-        onChange={(v) => {
-          setOdo(v);
-          setSuggestWarnAck(false);
-        }}
-        placeholder={`Suggested ${suggested} km`}
+        onChange={setOdo}
+        placeholder="Tap to enter the reading"
         title="Ending odometer"
-        description={`Suggested ${suggested} km (start ${trip.startOdometerKm} + ${summary.totalKm.toFixed(1)} km legs). Must be at least ${trip.startOdometerKm} km.`}
+        description={`Read the number on the odometer. This is the reading, not the kilometres travelled. Must be at least ${trip.startOdometerKm}.`}
         step={1}
         allowDecimal={false}
         min={trip.startOdometerKm}
         unit="km"
+        className={requiredFieldOutline(!validOdo)}
       />
-      <p className="text-[11px] text-muted-foreground">
-        Suggested:{" "}
-        <span className="tabular-nums font-medium">{suggested} km</span>
-        {" "}(start + Σ logged legs)
-        {validOdo && odoNum === suggested && " · matches"}
-      </p>
-
-      {suggestMismatch && (
-        <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
-          <div className="flex items-start gap-2">
-            <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-            <p className={CAUTION_CALLOUT_BODY_CLASS}>
-              Ending {odoNum} km differs from suggested {suggested} km by{" "}
-              {Math.abs(odoNum - suggested)} km (warn at {closeSuggestWarnKm} km). Re-enter or
-              accept — no Hub issue. Admin can correct on Fleet later.
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <FieldActionButton
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                setOdo(String(suggested));
-                setSuggestWarnAck(false);
-              }}
-            >
-              Use suggested ({suggested} km)
-            </FieldActionButton>
-            <FieldActionButton
-              variant={suggestWarnAck ? "success" : "caution"}
-              size="sm"
-              onClick={() => setSuggestWarnAck(true)}
-            >
-              {suggestWarnAck ? "Accepted — close with PIN below" : "Accept this ending reading"}
-            </FieldActionButton>
-          </div>
-        </div>
+      {!validOdo ? (
+        <p className="text-sm font-medium text-destructive">
+          {odo.trim() === ""
+            ? "Enter the odometer reading on the dash."
+            : `Ending reading must be at least the start reading (${trip.startOdometerKm}).`}
+        </p>
+      ) : (
+        <p className="text-[11px] text-muted-foreground">
+          Start {trip.startOdometerKm} → end {odoNum}
+          {travelledKm != null ? ` · ${travelledKm} km this trip` : ""}
+        </p>
       )}
 
       {outboxBlocksClose && (

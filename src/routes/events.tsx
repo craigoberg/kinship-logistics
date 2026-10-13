@@ -12,20 +12,26 @@ import type { EventManifest } from "@/lib/data-store";
 import { CreateEventModal } from "@/components/events/create-event-modal";
 import { ManageEventModal, type ManageEventTabKey } from "@/components/events/manage-event-modal";
 
+function eventManageTab(raw: unknown): ManageEventTabKey | undefined {
+  if (raw === "days") return "itinerary";
+  if (
+    raw === "roster" ||
+    raw === "finance" ||
+    raw === "details" ||
+    raw === "itinerary" ||
+    raw === "live" ||
+    raw === "report"
+  ) {
+    return raw;
+  }
+  return undefined;
+}
+
 export const Route = createFileRoute("/events")({
   ssr: false,
   validateSearch: (s: Record<string, unknown>) => ({
     manage: typeof s.manage === "string" ? s.manage : undefined,
-    tab:
-      s.tab === "roster" ||
-      s.tab === "finance" ||
-      s.tab === "details" ||
-      s.tab === "itinerary" ||
-      s.tab === "days" ||
-      s.tab === "live" ||
-      s.tab === "report"
-        ? s.tab
-        : undefined,
+    tab: eventManageTab(s.tab),
   }),
   head: () => ({
     meta: [

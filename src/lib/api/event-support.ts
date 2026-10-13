@@ -3,12 +3,13 @@
  * Own IN/HOME methods. Not guest participants.
  */
 import { supabase } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
-import { formatTravelHow, withAuditActorMeta } from "@/lib/api/office-change-log";
+import { formatTravelHow, recordOfficeChangeBestEffort, withAuditActorMeta } from "@/lib/api/office-change-log";
+import { assertEventFinanceWritable } from "@/lib/data-store";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { operationalNowIso } from "@/lib/operational-clock";
-import { matchesEventBusRun, effectiveReturnBusRun } from "@/lib/event-bus-runs";
+import { todayLocalIso } from "@/lib/utils";
 import type { ArrivalMethod } from "@/lib/api/client-attendance";
 import {
   supportRosterPerson,
@@ -18,6 +19,8 @@ import {
 
 export const EVENT_SUPPORT_KEY = (eventId: string) =>
   ["event-support-bookings", eventId] as const;
+export const EVENT_SUPPORT_PAYMENTS_KEY = (eventId: string) =>
+  ["event-support-payments", eventId] as const;
 export const EVENT_SUPPORT_ROLL_KEY = (sessionId: string) =>
   ["event-support-attendance", sessionId] as const;
 
@@ -35,7 +38,23 @@ export interface EventSupportBooking {
   returnBusRunCode: string | null;
   pickupOrder: number | null;
   tripPickupAddressOverride: string | null;
+  /** Null means the full event ticket price. */
+  customPrice: number | null;
+  notes: string | null;
+  amountPaid: number;
+  isFullyPaid: boolean;
   displayName: string;
+}
+
+export interface EventSupportPayment {
+  id: string;
+  supportBookingId: string;
+  eventId: string;
+  transactionDate: string;
+  financialCode: "EVENT_PMT" | "EVENT_REFUND";
+  description: string;
+  amount: number;
+  createdAt: string;
 }
 
 export interface EventSupportAttendanceRow {
@@ -70,6 +89,10 @@ interface BookingDb {
   return_bus_run_code: string | null;
   pickup_order: number | null;
   trip_pickup_address_override: string | null;
+  custom_price?: number | string | null;
+  notes?: string | null;
+  amount_paid?: number | string | null;
+  is_fully_paid?: boolean | null;
 }
 
 interface AttDb {
@@ -138,6 +161,10 @@ function toBooking(r: BookingDb, names: NameMaps): EventSupportBooking {
     returnBusRunCode: r.return_bus_run_code,
     pickupOrder: r.pickup_order,
     tripPickupAddressOverride: r.trip_pickup_address_override,
+    customPrice: r.custom_price == null || r.custom_price === "" ? null : Number(r.custom_price),
+    notes: r.notes ?? null,
+    amountPaid: Number(r.amount_paid ?? 0),
+    isFullyPaid: !!r.is_fully_paid,
     displayName: bookingName(r, names),
   };
 }
@@ -230,6 +257,248 @@ export async function removeEventSupportBooking(id: string): Promise<void> {
   if (error) throw new Error(error.message);
 }
 
+export function supportBookingCost(booking: EventSupportBooking, ticketPrice: number): number {
+  return booking.customPrice ?? ticketPrice;
+}
+
+interface PaymentDb {
+  id: string;
+  support_booking_id: string;
+  event_id: string;
+  transaction_date: string;
+  financial_code: "EVENT_PMT" | "EVENT_REFUND";
+  description: string;
+  amount: number | string;
+  created_at: string;
+}
+
+function toPayment(r: PaymentDb): EventSupportPayment {
+  return {
+    id: r.id,
+    supportBookingId: r.support_booking_id,
+    eventId: r.event_id,
+    transactionDate: r.transaction_date,
+    financialCode: r.financial_code,
+    description: r.description,
+    amount: Number(r.amount ?? 0),
+    createdAt: r.created_at,
+  };
+}
+
+export async function listEventSupportPayments(eventId: string): Promise<EventSupportPayment[]> {
+  const { data, error } = await supabase
+    .from("event_support_payment_ledger")
+    .select("*")
+    .eq("event_id", eventId)
+    .order("transaction_date", { ascending: true })
+    .order("created_at", { ascending: true });
+  if (error) {
+    if (isSchemaMismatchError(error)) return [];
+    throw new Error(error.message);
+  }
+  return (data ?? []).map((r) => toPayment(r as PaymentDb));
+}
+
+async function recomputeSupportPaid(bookingId: string, baseline: number): Promise<number> {
+  const { data, error } = await supabase
+    .from("event_support_payment_ledger")
+    .select("amount")
+    .eq("support_booking_id", bookingId);
+  if (error) throw new Error(error.message);
+  const net = Number(
+    (data ?? []).reduce((sum, row) => sum + Number((row as { amount: number }).amount ?? 0), 0).toFixed(2),
+  );
+  const amountPaid = Math.max(0, net);
+  const isFullyPaid = baseline > 0 && amountPaid + 0.001 >= baseline;
+  const { error: updErr } = await supabase
+    .from("event_support_bookings")
+    .update({ amount_paid: amountPaid, is_fully_paid: isFullyPaid })
+    .eq("id", bookingId);
+  if (updErr) throw new Error(updErr.message);
+  return amountPaid;
+}
+
+export async function updateEventSupportBooking(input: {
+  booking: EventSupportBooking;
+  eventTitle: string;
+  ticketPrice: number;
+  bookingStatus: string;
+  notes: string | null;
+  /** Null keeps the full event price. */
+  customPrice: number | null;
+  outboundTransportMode: "bus" | "self";
+  returnTransportMode: "bus" | "self";
+  outboundBusRunCode: string | null;
+  returnBusRunCode: string | null;
+  tripPickupAddressOverride: string | null;
+  refundOnCancel?: { amount: number; date: string } | null;
+}): Promise<void> {
+  const priceChanging = input.customPrice !== input.booking.customPrice;
+  const moneyTouch = priceChanging || input.bookingStatus === "Cancelled" || !!input.refundOnCancel;
+  if (moneyTouch) await assertEventFinanceWritable(input.booking.eventId);
+
+  const baseline = input.customPrice ?? input.ticketPrice;
+  const { error } = await supabase
+    .from("event_support_bookings")
+    .update({
+      booking_status: input.bookingStatus,
+      notes: input.notes,
+      custom_price: input.customPrice,
+      outbound_transport_mode: input.outboundTransportMode,
+      return_transport_mode: input.returnTransportMode,
+      outbound_bus_run_code:
+        input.outboundTransportMode === "bus" ? input.outboundBusRunCode : null,
+      return_bus_run_code: input.returnTransportMode === "bus" ? input.returnBusRunCode : null,
+      trip_pickup_address_override: (input.tripPickupAddressOverride ?? "").trim() || null,
+    })
+    .eq("id", input.booking.id);
+  if (error) throw new Error(error.message);
+
+  const paidNow = input.booking.amountPaid;
+  if (input.bookingStatus === "Cancelled" && input.refundOnCancel && input.refundOnCancel.amount > 0) {
+    await insertSupportPayment({
+      bookingId: input.booking.id,
+      eventId: input.booking.eventId,
+      eventTitle: input.eventTitle,
+      personName: input.booking.displayName,
+      transactionDate: input.refundOnCancel.date,
+      financialCode: "EVENT_REFUND",
+      amount: input.refundOnCancel.amount,
+      description: `Cancelled — refund`,
+      baseline: 0,
+    });
+  } else if (baseline + 0.001 < paidNow) {
+    await insertSupportPayment({
+      bookingId: input.booking.id,
+      eventId: input.booking.eventId,
+      eventTitle: input.eventTitle,
+      personName: input.booking.displayName,
+      transactionDate: todayLocalIso(),
+      financialCode: "EVENT_REFUND",
+      amount: Number((paidNow - baseline).toFixed(2)),
+      description: `Price reduced below amount paid`,
+      baseline,
+    });
+  } else {
+    await recomputeSupportPaid(input.booking.id, input.bookingStatus === "Cancelled" ? 0 : baseline);
+  }
+
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.booking.id,
+    recordName: input.booking.displayName,
+    category: "TRIP",
+    before: {
+      bookingStatus: input.booking.bookingStatus,
+      customPrice: input.booking.customPrice,
+      notes: input.booking.notes,
+      outboundTransportMode: input.booking.outboundTransportMode,
+      returnTransportMode: input.booking.returnTransportMode,
+    },
+    after: {
+      bookingStatus: input.bookingStatus,
+      customPrice: input.customPrice,
+      notes: input.notes,
+      outboundTransportMode: input.outboundTransportMode,
+      returnTransportMode: input.returnTransportMode,
+    },
+  });
+}
+
+async function insertSupportPayment(input: {
+  bookingId: string;
+  eventId: string;
+  eventTitle: string;
+  personName: string;
+  transactionDate: string;
+  financialCode: "EVENT_PMT" | "EVENT_REFUND";
+  amount: number;
+  description: string;
+  baseline: number;
+}): Promise<void> {
+  const signed = input.financialCode === "EVENT_REFUND" ? -Math.abs(input.amount) : Math.abs(input.amount);
+  const { error } = await supabase.from("event_support_payment_ledger").insert({
+    support_booking_id: input.bookingId,
+    event_id: input.eventId,
+    transaction_date: input.transactionDate,
+    financial_code: input.financialCode,
+    description: `${input.description} — ${input.personName} — ${input.eventTitle}`,
+    amount: signed,
+  });
+  if (error) throw new Error(error.message);
+  await recomputeSupportPaid(input.bookingId, input.baseline);
+}
+
+export async function recordEventSupportPayment(input: {
+  booking: EventSupportBooking;
+  eventTitle: string;
+  ticketPrice: number;
+  amount: number;
+  paymentDate: string;
+}): Promise<void> {
+  await assertEventFinanceWritable(input.booking.eventId);
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("Payment amount must be greater than zero.");
+  }
+  await insertSupportPayment({
+    bookingId: input.booking.id,
+    eventId: input.booking.eventId,
+    eventTitle: input.eventTitle,
+    personName: input.booking.displayName,
+    transactionDate: input.paymentDate,
+    financialCode: "EVENT_PMT",
+    amount: input.amount,
+    description: "Payment",
+    baseline: supportBookingCost(input.booking, input.ticketPrice),
+  });
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.booking.id,
+    recordName: input.booking.displayName,
+    category: "TRIP",
+    summary: `Recorded $${input.amount.toFixed(2)} payment for ${input.booking.displayName}`,
+  });
+}
+
+export async function recordEventSupportRefund(input: {
+  booking: EventSupportBooking;
+  eventTitle: string;
+  ticketPrice: number;
+  amount: number;
+  refundDate: string;
+}): Promise<void> {
+  await assertEventFinanceWritable(input.booking.eventId);
+  if (!Number.isFinite(input.amount) || input.amount <= 0) {
+    throw new Error("Refund amount must be greater than zero.");
+  }
+  if (input.amount > input.booking.amountPaid + 0.001) {
+    throw new Error(
+      `Refund cannot exceed amount paid ($${Math.max(0, input.booking.amountPaid).toFixed(2)}).`,
+    );
+  }
+  await insertSupportPayment({
+    bookingId: input.booking.id,
+    eventId: input.booking.eventId,
+    eventTitle: input.eventTitle,
+    personName: input.booking.displayName,
+    transactionDate: input.refundDate,
+    financialCode: "EVENT_REFUND",
+    amount: input.amount,
+    description: "Refund",
+    baseline: supportBookingCost(input.booking, input.ticketPrice),
+  });
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.booking.id,
+    recordName: input.booking.displayName,
+    category: "TRIP",
+    summary: `Recorded $${input.amount.toFixed(2)} refund for ${input.booking.displayName}`,
+  });
+}
+
 export async function listEventSupportAttendance(
   sessionId: string,
 ): Promise<EventSupportAttendanceRow[]> {
@@ -237,7 +506,8 @@ export async function listEventSupportAttendance(
     .from("event_support_attendance_log")
     .select("*")
     .eq("event_day_session_id", sessionId)
-    .order("created_at", { ascending: true });
+    .order("created_at", { ascending: true })
+    .order("id", { ascending: true });
   if (error) {
     if (isSchemaMismatchError(error)) return [];
     throw new Error(error.message);
@@ -254,6 +524,32 @@ export async function seedEventSupportRoll(
     (b) => b.bookingStatus !== "Cancelled",
   );
   if (!bookings.length) return 0;
+
+  const { data: existing, error: existErr } = await supabase
+    .from("event_support_attendance_log")
+    .select("staff_id, carer_id")
+    .eq("event_day_session_id", sessionId);
+  if (existErr) {
+    if (isSchemaMismatchError(existErr)) return 0;
+    throw new Error(existErr.message);
+  }
+  const haveStaff = new Set(
+    (existing ?? [])
+      .map((r) => (r as { staff_id?: string | null }).staff_id)
+      .filter((id): id is string => !!id),
+  );
+  const haveCarer = new Set(
+    (existing ?? [])
+      .map((r) => (r as { carer_id?: string | null }).carer_id)
+      .filter((id): id is string => !!id),
+  );
+  const missing = bookings.filter((b) => {
+    if (b.staffId) return !haveStaff.has(b.staffId);
+    if (b.carerId) return !haveCarer.has(b.carerId);
+    return false;
+  });
+  if (!missing.length) return 0;
+
   const { data: session } = await supabase
     .from("event_day_sessions")
     .select("expected_arrival_by")
@@ -262,7 +558,7 @@ export async function seedEventSupportRoll(
   const expectedArrivalAt =
     (session as { expected_arrival_by?: string | null } | null)?.expected_arrival_by ??
     operationalNowIso();
-  const payload = bookings.map((b) => ({
+  const payload = missing.map((b) => ({
     event_day_session_id: sessionId,
     person_kind: b.personKind,
     staff_id: b.staffId,
@@ -275,11 +571,14 @@ export async function seedEventSupportRoll(
     return_transport: b.returnTransportMode,
     return_bus_run_code: b.returnBusRunCode,
   }));
-  const { error } = await supabase.from("event_support_attendance_log").insert(payload);
-  if (error && error.code !== "23505" && !isSchemaMismatchError(error)) {
+  const { data: inserted, error } = await supabase
+    .from("event_support_attendance_log")
+    .insert(payload)
+    .select("id");
+  if (error && !isDuplicateKeyError(error) && !isSchemaMismatchError(error)) {
     throw new Error(error.message);
   }
-  return payload.length;
+  return inserted?.length ?? 0;
 }
 
 export async function recordEventSupportArrival(input: {
@@ -376,17 +675,167 @@ export async function checkOutEventSupport(input: {
 
 export async function markEventSupportAbsent(
   rowId: string,
+  notes?: string,
 ): Promise<EventSupportAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
   const now = operationalNowIso();
   const { data, error } = await supabase
     .from("event_support_attendance_log")
-    .update({ status: "absent", updated_at: now })
+    .update({
+      status: "absent",
+      notes: notes?.trim() || null,
+      updated_at: now,
+    })
     .eq("id", rowId)
     .select("*")
     .single();
   if (error) throw new Error(error.message);
   const names = await resolveNames();
-  return toAtt(data as AttDb, names);
+  const logged = toAtt(data as AttDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "EVENT_SUPPORT_ABSENT",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      summary: `Marked ${logged.displayName} (${logged.personKind}) absent from the trip`,
+    }),
+  });
+  return logged;
+}
+
+/** Put a checked-in support person back to expected. Arrival method stays. */
+export async function undoEventSupportCheckIn(
+  rowId: string,
+): Promise<EventSupportAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { data, error } = await supabase
+    .from("event_support_attendance_log")
+    .update({
+      status: "expected",
+      checked_in_at: null,
+      checked_in_by: null,
+      updated_at: now,
+    })
+    .eq("id", rowId)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const names = await resolveNames();
+  const logged = toAtt(data as AttDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "EVENT_SUPPORT_CHECKIN_UNDO",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      summary: `Undid check-in for ${logged.displayName} (${logged.personKind}) on trip`,
+    }),
+  });
+  return logged;
+}
+
+/** Bring an absent support person back to expected. */
+export async function reinstateEventSupport(
+  rowId: string,
+): Promise<EventSupportAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { data, error } = await supabase
+    .from("event_support_attendance_log")
+    .update({ status: "expected", updated_at: now })
+    .eq("id", rowId)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const names = await resolveNames();
+  const logged = toAtt(data as AttDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "EVENT_SUPPORT_REINSTATE",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      summary: `Reinstated ${logged.displayName} (${logged.personKind}) on the trip`,
+    }),
+  });
+  return logged;
+}
+
+/** Put a checked-out support person back to checked in. */
+export async function undoEventSupportCheckOut(
+  rowId: string,
+): Promise<EventSupportAttendanceRow> {
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { data, error } = await supabase
+    .from("event_support_attendance_log")
+    .update({
+      status: "checked_in",
+      checked_out_at: null,
+      checked_out_by: null,
+      updated_at: now,
+    })
+    .eq("id", rowId)
+    .select("*")
+    .single();
+  if (error) throw new Error(error.message);
+  const names = await resolveNames();
+  const logged = toAtt(data as AttDb, names);
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CENTRE",
+    severity: "GREEN",
+    action_type: "EVENT_SUPPORT_CHECKOUT_UNDO",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      row_id: rowId,
+      person_name: logged.displayName,
+      person_kind: logged.personKind,
+      location: "trip",
+      summary: `Undid check-out for ${logged.displayName} (${logged.personKind}) on trip`,
+    }),
+  });
+  return logged;
+}
+
+/** Correct how a support person arrived without changing the check-in time. */
+export async function updateEventSupportArrivalMethod(input: {
+  rowId: string;
+  arrivalMethod: "bus" | "private";
+  arrivalBusRunCode?: string | null;
+}): Promise<void> {
+  const now = operationalNowIso();
+  const { error } = await supabase
+    .from("event_support_attendance_log")
+    .update({
+      arrival_method: input.arrivalMethod,
+      arrival_bus_run_code:
+        input.arrivalMethod === "bus" ? input.arrivalBusRunCode ?? null : null,
+      updated_at: now,
+    })
+    .eq("id", input.rowId);
+  if (error) throw new Error(error.message);
 }
 
 export async function listSupportRosterForEventTrip(input: {
@@ -418,29 +867,7 @@ export async function listSupportRosterForEventTrip(input: {
         roll.filter((r) => r.status === "absent").map((r) => r.staffId ?? r.carerId ?? ""),
       );
       filtered = filtered.filter((b) => !absent.has(b.staffId ?? b.carerId ?? ""));
-      filtered = filtered.filter((b) => {
-        const floor = roll.find(
-          (r) =>
-            (b.staffId && r.staffId === b.staffId) || (b.carerId && r.carerId === b.carerId),
-        );
-        const personRun = effectiveReturnBusRun(
-          floor?.returnTransport === "bus" ? floor.returnBusRunCode : null,
-          b.returnBusRunCode,
-        );
-        return matchesEventBusRun(personRun, input.busRunCode);
-      });
-    } else {
-      filtered = filtered.filter((b) =>
-        matchesEventBusRun(b.returnBusRunCode, input.busRunCode),
-      );
     }
-  } else {
-    filtered = filtered.filter((b) =>
-      matchesEventBusRun(
-        input.direction === "outbound" ? b.outboundBusRunCode : b.returnBusRunCode,
-        input.busRunCode,
-      ),
-    );
   }
 
   return filtered.map((b) => {
@@ -455,6 +882,7 @@ export async function listSupportRosterForEventTrip(input: {
       carerId: b.carerId,
       name: b.displayName,
       address: override || profile?.address || null,
+      pickupOrder: b.pickupOrder ?? 0,
     });
   });
 }
@@ -501,9 +929,6 @@ export async function listLegacyCarerRosterForEventTrip(input: {
         ? (row.outbound_transport_mode ?? "bus")
         : (row.return_transport_mode ?? "bus");
     if (mode !== "bus") continue;
-    const run =
-      input.direction === "outbound" ? row.outbound_bus_run_code : row.return_bus_run_code;
-    if (!matchesEventBusRun(run, input.busRunCode)) continue;
     const profile = names.carer.get(row.carer_id);
     out.push(
       supportRosterPerson({

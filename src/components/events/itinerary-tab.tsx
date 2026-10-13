@@ -7,16 +7,19 @@
  * Per §12.1: each adjacent stop pair = one hop = one transport_trip.
  * The UI shows them as an ordered chain: Stop 0 → Stop 1 → Stop 2 → …
  */
-import { useMemo, useState } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   AlertTriangle,
   BedDouble,
+  Clock,
   GripVertical,
   Loader2,
   MapPin,
   Plus,
+  RefreshCw,
+  ShieldCheck,
   Trash2,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -40,7 +43,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
-import { cn, formatDate, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { cn, formatDateWithWeekday, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { listVenues } from "@/lib/api/venues";
 import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 import {
@@ -48,12 +51,20 @@ import {
   deleteEventVenueStop,
   inferEventKind,
   isAccommodationVenueType,
+  listEventDaySessions,
   listEventVenueStops,
   reorderEventVenueStops,
+  resetEventDaySessions,
+  seedEventDaySessions,
   upsertEventVenueStop,
+  type EventDaySession,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
+import { invalidateEventDayCaches } from "@/lib/query/invalidation";
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import type { EventManifest } from "@/lib/data-store";
+import { ItineraryDayPlan } from "./itinerary-day-plan";
 import {
   CAUTION_BADGE_CLASS,
   CAUTION_CALLOUT_BODY_CLASS,
@@ -68,6 +79,7 @@ interface Props {
 }
 
 const stopsKey = (eventId: string) => ["event-venue-stops", eventId] as const;
+const daySessionsKey = (eventId: string) => ["event-day-sessions", eventId] as const;
 
 /** All calendar dates between start and end inclusive (local calendar days). */
 function dateRange(start: string, end: string): string[] {
@@ -84,7 +96,7 @@ function dateRange(start: string, end: string): string[] {
 }
 
 function fmtDate(iso: string): string {
-  return formatDate(iso);
+  return formatDateWithWeekday(iso);
 }
 
 export function ItineraryTab({ event }: Props) {
@@ -106,7 +118,69 @@ export function ItineraryTab({ event }: Props) {
     staleTime: 60_000,
   });
 
+  const { data: sessions = [], isLoading: sessionsLoading } = useQuery({
+    queryKey: daySessionsKey(event.id),
+    queryFn: () => listEventDaySessions(event.id),
+    staleTime: 30_000,
+  });
+
+  const { data: staff = [] } = useStaffRegistry();
+  const managers = useMemo(
+    () =>
+      staff
+        .filter((s) => s.active && isManagerOrAssistantAccess(s.personnelType))
+        .map((s) => ({ id: s.id, fullName: s.fullName })),
+    [staff],
+  );
+
   const invalidate = () => qc.invalidateQueries({ queryKey: stopsKey(event.id) });
+  const invalidateDays = () => {
+    void qc.invalidateQueries({ queryKey: daySessionsKey(event.id) });
+    invalidateEventDayCaches(qc, { eventId: event.id });
+  };
+
+  const seedMut = useMutation({
+    mutationFn: () =>
+      seedEventDaySessions(event.id, event.startDate, event.endDate ?? event.startDate),
+    onSuccess: (seeded) => {
+      qc.setQueryData(daySessionsKey(event.id), seeded);
+      invalidateEventDayCaches(qc, { eventId: event.id });
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const resetMut = useMutation({
+    mutationFn: () => {
+      const toDelete = sessions.filter((s) => s.phase === "planning").map((s) => s.id);
+      return resetEventDaySessions(event.id, toDelete);
+    },
+    onSuccess: (seeded) => {
+      qc.setQueryData(daySessionsKey(event.id), seeded);
+      invalidateEventDayCaches(qc, { eventId: event.id });
+      toast.success(
+        `Trip days reset — ${seeded.length} day${seeded.length !== 1 ? "s" : ""} from event dates.`,
+      );
+    },
+    onError: (e: Error) => toast.error(`Reset failed: ${e.message}`),
+  });
+
+  const [confirmReset, setConfirmReset] = useState(false);
+  const autoSeedFor = useRef<string | null>(null);
+  useEffect(() => {
+    autoSeedFor.current = null;
+  }, [event.id]);
+  useEffect(() => {
+    if (sessionsLoading || sessions.length > 0 || seedMut.isPending) return;
+    if (autoSeedFor.current === event.id) return;
+    autoSeedFor.current = event.id;
+    seedMut.mutate();
+  }, [event.id, sessionsLoading, sessions.length, seedMut.isPending]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const sessionByDate = useMemo(() => {
+    const m = new Map<string, EventDaySession>();
+    sessions.forEach((s) => m.set(s.session_date.slice(0, 10), s));
+    return m;
+  }, [sessions]);
 
   const stopsByDay = useMemo(() => {
     const m = new Map<string, EventVenueStop[]>();
@@ -145,7 +219,11 @@ export function ItineraryTab({ event }: Props) {
     () => new Set(hotelGate.failingDates),
     [hotelGate.failingDates],
   );
+  const multiDay = eventKind === "multi_day_tour" || days.length > 1;
+  const firstDate = days[0] ?? null;
   const finalDate = days.length > 0 ? days[days.length - 1]! : null;
+  const hasMeeting = firstDate != null && (stopsByDay.get(firstDate)?.length ?? 0) > 0;
+  const hasDeparture = finalDate != null && (stopsByDay.get(finalDate)?.length ?? 0) > 0;
 
   if (isLoading) {
     return (
@@ -159,8 +237,12 @@ export function ItineraryTab({ event }: Props) {
     <div className="space-y-6">
       <div className="space-y-2">
         <p className="text-sm text-muted-foreground">
-          Each adjacent stop pair becomes one bus hop when the day goes active.
-          First stop = origin; last stop = end of day.
+          Each date names the <strong>trip leader</strong>
+          {multiDay ? " and the morning and evening roll times" : ""}.
+          Places sit under that. The first stop is the <strong>meeting point</strong> — people
+          arrive there by bus (Manifest) or self. The group then moves through the stops
+          together. The last stop is the <strong>departure point</strong> — they leave from
+          there by bus (Manifest) or self for home. One venue can be both.
           {eventKind === "multi_day_tour" && (
             <>
               {" "}
@@ -170,6 +252,62 @@ export function ItineraryTab({ event }: Props) {
             </>
           )}
         </p>
+        {(!hasMeeting || !hasDeparture) && (
+          <div className={cn("flex items-start gap-2 px-3 py-2.5 text-sm", CAUTION_CALLOUT_CLASS)}>
+            <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
+            <div>
+              <p className="font-semibold">Meeting point and departure point are required</p>
+              <p className={cn("mt-0.5 text-xs leading-relaxed", CAUTION_CALLOUT_BODY_CLASS)}>
+                {!hasMeeting && !hasDeparture
+                  ? "Add the meeting point, where people arrive, and the departure point, where they leave for home. Confirm stays blocked until both are on the itinerary."
+                  : !hasMeeting
+                    ? "Add a meeting point on the first day — where people arrive by bus or self. Confirm stays blocked until it is on the itinerary."
+                    : "Add a departure point on the last day — where people leave by bus or self for home. Confirm stays blocked until it is on the itinerary."}
+              </p>
+            </div>
+          </div>
+        )}
+        {sessions.length > 0 && !confirmReset && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="text-muted-foreground hover:text-destructive"
+            onClick={() => setConfirmReset(true)}
+            disabled={resetMut.isPending}
+          >
+            <RefreshCw className="mr-1.5 h-3.5 w-3.5" />
+            Reset trip days
+          </Button>
+        )}
+        {confirmReset && (
+          <div className="flex flex-wrap items-center gap-1.5 rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2">
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-destructive" />
+            <span className="text-xs text-destructive">
+              Remove {sessions.filter((s) => s.phase === "planning").length} planning day(s) and
+              reseed leaders from the event dates? Stops stay.
+            </span>
+            <Button
+              size="sm"
+              variant="destructive"
+              className="h-7 px-2 text-[11px]"
+              disabled={resetMut.isPending}
+              onClick={() => {
+                setConfirmReset(false);
+                resetMut.mutate();
+              }}
+            >
+              {resetMut.isPending ? <Loader2 className="h-3 w-3 animate-spin" /> : "Yes, reset"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              className="h-7 px-2 text-[11px]"
+              onClick={() => setConfirmReset(false)}
+            >
+              Cancel
+            </Button>
+          </div>
+        )}
         {!hotelGate.ok && (
           <div className={cn("flex items-start gap-2 px-3 py-2.5 text-sm", CAUTION_CALLOUT_CLASS)}>
             <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
@@ -195,6 +333,12 @@ export function ItineraryTab({ event }: Props) {
             eventKind === "multi_day_tour" && finalDate != null && date !== finalDate
           }
           overnightMissing={failingSet.has(date)}
+          isFirstDay={date === firstDate}
+          isLastDay={date === finalDate}
+          session={sessionByDate.get(date) ?? null}
+          managers={managers}
+          multiDay={multiDay}
+          onPlanSaved={invalidateDays}
         />
       ))}
     </div>
@@ -212,6 +356,14 @@ interface DayItineraryProps {
   /** Multi-day non-final night — last stop must be hotel. */
   requiresOvernightHotel: boolean;
   overnightMissing: boolean;
+  /** First calendar day — its first stop is the trip meeting point. */
+  isFirstDay: boolean;
+  /** Last calendar day — its last stop is the trip departure point. */
+  isLastDay: boolean;
+  session: EventDaySession | null;
+  managers: Array<{ id: string; fullName: string }>;
+  multiDay: boolean;
+  onPlanSaved: () => void;
 }
 
 function DayItinerary({
@@ -222,6 +374,12 @@ function DayItinerary({
   onInvalidate,
   requiresOvernightHotel,
   overnightMissing,
+  isFirstDay,
+  isLastDay,
+  session,
+  managers,
+  multiDay,
+  onPlanSaved,
 }: DayItineraryProps) {
   const sorted = useMemo(
     () => [...stops].sort((a, b) => a.stop_order - b.stop_order),
@@ -239,7 +397,22 @@ function DayItinerary({
   const [deleteTarget, setDeleteTarget] = useState<EventVenueStop | null>(null);
   const [deleting, setDeleting] = useState(false);
   const [reordering, setReordering] = useState(false);
+  const [leaderEditOpen, setLeaderEditOpen] = useState(false);
+  const [pendingLeaderId, setPendingLeaderId] = useState<string | null>(null);
   const gate = useVenueGate();
+
+  useEffect(() => {
+    if (session?.manager_staff_id) setPendingLeaderId(null);
+  }, [session?.manager_staff_id]);
+
+  const leaderId = session?.manager_staff_id ?? pendingLeaderId;
+  const leaderName = leaderId
+    ? (session?.manager_staff_id === leaderId ? session.manager_name : null) ??
+      managers.find((m) => m.id === leaderId)?.fullName ??
+      "Trip leader"
+    : null;
+  const eveningLabel = (session?.curfew_time ?? "").slice(0, 5);
+  const morningLabel = (session?.morning_roll_time ?? "").slice(0, 5);
 
   const handleAdd = async () => {
     if (addKind === "venue") {
@@ -357,12 +530,56 @@ function DayItinerary({
               {overnightMissing ? "Needs overnight hotel" : "Overnight OK"}
             </Badge>
           )}
+          {leaderName ? (
+            <button
+              type="button"
+              onClick={() => setLeaderEditOpen(true)}
+              className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary hover:bg-primary/25"
+            >
+              <ShieldCheck className="h-3 w-3" />
+              {leaderName}
+            </button>
+          ) : (
+            <span className="text-[11px] font-medium text-yellow-600">No trip leader</span>
+          )}
+          {multiDay && leaderName && eveningLabel && (
+            <button
+              type="button"
+              onClick={() => setLeaderEditOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <Clock className="h-3 w-3" />
+              Evening {eveningLabel}
+            </button>
+          )}
+          {multiDay && leaderName && morningLabel && (
+            <button
+              type="button"
+              onClick={() => setLeaderEditOpen(true)}
+              className="inline-flex items-center gap-1 text-[11px] text-muted-foreground hover:text-foreground"
+            >
+              <Clock className="h-3 w-3" />
+              Morning {morningLabel}
+            </button>
+          )}
         </div>
         <Button size="sm" variant="outline" onClick={() => setAddOpen((p) => !p)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
           Add stop / meal
         </Button>
       </div>
+
+      <ItineraryDayPlan
+        event={event}
+        session={session}
+        managers={managers}
+        multiDay={multiDay}
+        isFirstDay={isFirstDay}
+        editOpen={leaderEditOpen}
+        onEditOpenChange={setLeaderEditOpen}
+        onLeaderPicked={setPendingLeaderId}
+        onSaved={onPlanSaved}
+      />
 
       {overnightMissing && (
         <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
@@ -491,7 +708,13 @@ function DayItinerary({
       {sorted.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-muted/30 py-6 text-center text-sm text-muted-foreground">
           <MapPin className="mx-auto mb-1.5 h-4 w-4 opacity-40" />
-          No stops yet — add the departure point first.
+          {isFirstDay && isLastDay
+            ? "No stops yet. Add the meeting point — people arrive there by bus or self, and can leave from the same place for home."
+            : isFirstDay
+              ? "No meeting point yet. Add where people arrive by bus or self."
+              : isLastDay
+                ? "No departure point yet. Add where people leave by bus or self for home."
+                : "No stops yet for this day."}
         </div>
       ) : (
         <div className="px-2 py-2">
@@ -513,6 +736,8 @@ function DayItinerary({
                   const bind = bindRow(id);
                   const nextStop = idx < ids.length - 1 ? stopById.get(ids[idx + 1]!) : null;
                   const isLast = idx === ids.length - 1;
+                  const isMeeting = isFirstDay && idx === 0;
+                  const isDeparture = isLastDay && isLast;
                   const showOvernight =
                     requiresOvernightHotel && isLast && isAccommodationVenueType(stop.venue_type);
 
@@ -546,6 +771,15 @@ function DayItinerary({
                           {stop.venue_type && (
                             <span className="shrink-0 text-[10px] capitalize text-muted-foreground">
                               {stop.venue_type}
+                            </span>
+                          )}
+                          {(isMeeting || isDeparture) && (
+                            <span className="inline-flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
+                              {isMeeting && isDeparture
+                                ? "Meeting point · Departure point"
+                                : isMeeting
+                                  ? "Meeting point"
+                                  : "Departure point"}
                             </span>
                           )}
                           {showOvernight && (

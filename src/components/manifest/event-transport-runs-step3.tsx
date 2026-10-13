@@ -248,7 +248,7 @@ export function EventTransportRunsStep3({
   return (
     <div className="space-y-4">
       <div className="grid gap-2">
-        <Label>Today&apos;s transport</Label>
+        <Label>Today&apos;s Transport Legs</Label>
         <div className="space-y-2">
           {runs.map((run) => {
             const isHop = run.kind === "venue_hop";

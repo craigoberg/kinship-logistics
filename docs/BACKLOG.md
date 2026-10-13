@@ -69,7 +69,7 @@ Cross-cutting setup — not feature-complete until provider accounts, credential
 | BL-054 | **Close Run PIN** (manifest reconciliation) | **Implemented 2026-07-07.** `CloseRunCard` replaces odometer-only finalize: run summary, cancelled-pickup ack, open-RED gate, operator PIN (`PinEntryDialog`), ledger `TRANSPORT_RUN_CLOSED`, then `completeTrip`. API: `src/lib/api/transport-run-close.ts`. | **done** |
 | BL-055 | **Touch-friendly km / odometer entry** | **Implemented 2026-07-07.** `NumericEntryPad` + `NumericEntryDialog` + `NumericEntryTrigger` (sibling to PinPad, not an extension). Manifest: starting odometer, logged leg km (0.5 km ▲/▼), ending odometer. Admin surfaces deferred — reuse same components later. | **done** |
 | BL-056 | **Manifest navigation map — Phase 0 + 0.5** | **Implemented 2026-07-07.** `ManifestRouteMap` placeholder + Google Maps deep link (`manifest-route.ts`). Shown when `leg.status === en_route` (after Depart Stop); upcoming stops hidden during navigation; compact leg header; footer hint. Same UX for Day Centre runs + event outings. Live embed + coordinator optimisation → **BL-015** phases 1–2. | **done** |
-| BL-096 | **Manifest odometer suggest + Fleet current KM** | **Done 2026-07-23.** Per-vehicle start prefill (`current_odometer_km`); legs stay distance; Close Run suggests start+Σ logged; soft-warn thresholds `manifest.odo_*` (no Hub issue); Fleet column + Correct odometer + ledger `TRANSPORT_ODOMETER_CORRECTED`. SQL: `docs/sql/2026-07-23_manifest_odometer_suggest.sql`. | **done** |
+| BL-096 | **Manifest odometer suggest + Fleet current KM** | **Done 2026-07-23.** Per-vehicle start prefill (`current_odometer_km`); Fleet column + Correct odometer + ledger `TRANSPORT_ODOMETER_CORRECTED`. SQL: `docs/sql/2026-07-23_manifest_odometer_suggest.sql`. **Amended 2026-10-12:** one start reading and one end reading for the whole trip. Stops do not record kilometres. Close Run no longer suggests start+Σ. Travelled km = end − start. | **done** |
 
 ---
 
@@ -235,6 +235,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 
 | Date | Change |
 |------|--------|
+| 2026-10-12 | Manifest odometer is the dash reading at the start of the trip and again at Close Run. Stops no longer ask for kilometres. Travelled km = end − start. |
 | 2026-10-07 | BL-133 issue card. Day Centre and Manifest share `IssueRegisterCard`. Manifest still filters that list to the vehicle. |
 | 2026-10-06 | Non-client roll is attendance only. Staff, volunteers, and carers keep defer and check-in/out. Late or early does not raise yellow or red. |
 | 2026-10-06 | BL-133 pass 2. Day Centre client and support rows share `floorRollStatus` and `FloorRollOverdueBadges`. Support Check-Out departure amber/red follows the operational clock. Hub issue and SMS for a late support departure are still outstanding. |

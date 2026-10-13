@@ -172,17 +172,16 @@ export async function lookupParticipantName(
   if (!id) return null;
   const { data, error } = await supabase
     .from("participants")
-    .select("first_name, last_name, full_name")
+    .select("first_name, last_name")
     .eq("id", id)
     .maybeSingle();
   if (error || !data) return null;
   const r = data as {
     first_name?: string | null;
     last_name?: string | null;
-    full_name?: string | null;
   };
   const combined = `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim();
-  return combined || (r.full_name ?? "").trim() || null;
+  return combined || null;
 }
 
 function preview(value: unknown): string {

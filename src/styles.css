@@ -270,3 +270,13 @@ html.yada-public {
     letter-spacing: -0.01em;
   }
 }
+
+/* Scroll regions inside a window must be allowed to shrink. Otherwise a
+   larger text size grows the header until the bottom of the list is clipped
+   and the page scroll is locked behind the dialog. */
+[role="dialog"] .overflow-y-auto,
+[role="dialog"] .overflow-auto,
+[role="alertdialog"] .overflow-y-auto,
+[role="alertdialog"] .overflow-auto {
+  min-height: 0;
+}

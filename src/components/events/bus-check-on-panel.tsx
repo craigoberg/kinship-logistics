@@ -336,7 +336,16 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const name = row.participant_name ?? (row.carer_id ? "Carer" : "Unknown");
+  const name =
+    row.participant_name ??
+    (row.staff_id ? "Staff" : row.carer_id ? "Carer" : "Unknown");
+  const personLabel = row.participant_id
+    ? "Participant"
+    : row.staff_id
+      ? "Non-participant"
+      : row.carer_id
+        ? "Non-participant"
+        : null;
   const isOnBus = row.status === "on_bus";
   const isNt = row.status === "not_travelling";
 
@@ -346,9 +355,9 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <span className="text-base font-semibold">{name}</span>
-            {row.carer_id && !row.participant_id && (
+            {personLabel && (
               <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                Carer
+                {personLabel}
               </span>
             )}
             {row.notes && (

@@ -4491,7 +4491,14 @@ export async function getEventFinanceTotals(eventId: string): Promise<EventFinan
     listEventPaymentLedgerForEvent(eventId),
     listEventLedger(eventId),
   ]);
-  return summarizeEventFinance(paymentLedger, expenseLedger);
+  let supportPaid: Array<{ amount: number }> = [];
+  try {
+    const { listEventSupportPayments } = await import("@/lib/api/event-support");
+    supportPaid = await listEventSupportPayments(eventId);
+  } catch {
+    supportPaid = [];
+  }
+  return summarizeEventFinance([...paymentLedger, ...supportPaid], expenseLedger);
 }
 
 
@@ -5549,9 +5556,6 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     resolvedBookingRows = resolvedBookingRows.filter(
       (r) => (r.outbound_transport_mode ?? "bus") === "bus",
     );
-    resolvedBookingRows = resolvedBookingRows.filter((r) =>
-      matchesEventBusRun(r.outbound_bus_run_code, tripBusRunCode),
-    );
   } else if (input.tripDirection === "return") {
     resolvedBookingRows = resolvedBookingRows.filter(
       (r) => (r.return_transport_mode ?? "bus") === "bus",
@@ -5568,13 +5572,6 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         eligible.ids.has(r.participant_id),
       );
     }
-    // Floor run when handed over; fall back to roster if floor bus has no run.
-    const floorRunByPid = eligible?.runs ?? null;
-    resolvedBookingRows = resolvedBookingRows.filter((r) => {
-      const floorRun = floorRunByPid?.get(r.participant_id);
-      const personRun = effectiveReturnBusRun(floorRun, r.return_bus_run_code);
-      return matchesEventBusRun(personRun, tripBusRunCode);
-    });
   }
 
   resolvedBookingRows.sort((a, b) => {
@@ -5618,6 +5615,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
             : street.length > 0
               ? street
               : null,
+      pickupOrder: Number((r as StartTripBookingRow).pickup_order ?? 0),
     });
   });
 
@@ -5643,6 +5641,15 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       }),
     ]);
     roster.push(...support, ...legacyCarers);
+    const pickupRank = (order: number | null | undefined) => {
+      const n = order ?? 0;
+      return n > 0 ? n : Number.MAX_SAFE_INTEGER;
+    };
+    roster.sort((a, b) => {
+      const d = pickupRank(a.pickupOrder) - pickupRank(b.pickupOrder);
+      if (d !== 0) return d;
+      return a.name.localeCompare(b.name);
+    });
   } catch (err) {
     console.warn("[startTrip:support]", err);
   }

@@ -871,13 +871,14 @@ export function useReorderEventRosterPickupOrder() {
   return useMutation({
     mutationFn: ({
       eventId,
-      orderedBookingIds,
+      ordered,
     }: {
       eventId: string;
-      orderedBookingIds: string[];
-    }) => reorderEventRosterPickupOrder(eventId, orderedBookingIds),
+      ordered: Array<{ kind: "participant" | "support"; id: string }>;
+    }) => reorderEventTravelOrder(eventId, ordered),
     onSuccess: (_data, { eventId }) => {
       void qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+      void qc.invalidateQueries({ queryKey: ["event-support-bookings", eventId] });
     },
     onError: (err: Error) => showRedToast("Could not save pickup order", err),
   });
@@ -1302,7 +1303,7 @@ import {
   type LegPatch,
 } from "@/lib/data-store";
 import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
-import { reorderEventRosterPickupOrder } from "@/lib/api/event-outing";
+import { reorderEventTravelOrder } from "@/lib/api/event-outing";
 import {
   busRunRouteQueryKey,
   listBusRunRouteRoster,

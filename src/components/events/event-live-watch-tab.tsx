@@ -141,7 +141,7 @@ export function EventLiveWatchTab({ event }: Props) {
         </div>
       ) : !session ? (
         <div className="rounded-lg border border-dashed bg-muted/30 py-8 text-center text-sm text-muted-foreground">
-          No trip days yet. Add Trip Days before the office can watch this event.
+          No trip days yet. Open Itinerary so each date can be watched.
         </div>
       ) : (
         <div className="space-y-5">

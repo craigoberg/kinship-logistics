@@ -308,6 +308,101 @@ export async function planVenueBusMovement(
 }
 
 /**
+ * Floor Open: the group is ready to head to this stop. Stamps opened_at and
+ * leaves phase pending so travel (walk / bus / on site) is asked next.
+ * Does not start the activity or meal roll — that happens on arrival.
+ * Opening one stop clears a previous "ready" stamp on other pending stops.
+ */
+export async function declareProgrammeStopOpen(opts: {
+  stopId: string;
+  eventId: string;
+  sessionDate: string;
+  venueName: string | null;
+  eventDaySessionId: string;
+}): Promise<void> {
+  await assertMorningRollCompleteBeforeProgramme({
+    eventId: opts.eventId,
+    sessionId: opts.eventDaySessionId,
+    sessionDate: opts.sessionDate,
+  });
+
+  const { data: row, error: readErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, opened_at")
+    .eq("id", opts.stopId)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  if (!row) throw new Error("Stop not found.");
+  const phase = (row as { phase?: string | null }).phase ?? "pending";
+  if (phase !== "pending") {
+    throw new Error("This stop is already underway or finished.");
+  }
+  if ((row as { opened_at?: string | null }).opened_at) return;
+
+  const { data: activeElsewhere, error: activeErr } = await supabase
+    .from("event_venue_stops")
+    .select("id, label_override")
+    .eq("event_id", opts.eventId)
+    .eq("session_date", opts.sessionDate)
+    .eq("phase", "active")
+    .neq("id", opts.stopId)
+    .limit(1);
+  if (activeErr) throw activeErr;
+  const busy = (activeElsewhere ?? [])[0] as
+    | { label_override?: string | null }
+    | undefined;
+  if (busy) {
+    throw new Error(
+      `Finish ${busy.label_override?.trim() || "the current activity"} before opening the next one.`,
+    );
+  }
+
+  const { error: clearErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      opened_at: null,
+      opened_by_id: null,
+      movement_method: null,
+    })
+    .eq("event_id", opts.eventId)
+    .eq("session_date", opts.sessionDate)
+    .eq("phase", "pending")
+    .neq("id", opts.stopId)
+    .not("opened_at", "is", null);
+  if (clearErr) throw clearErr;
+
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const { error } = await supabase
+    .from("event_venue_stops")
+    .update({
+      opened_at: now,
+      opened_by_id: staffId || null,
+    })
+    .eq("id", opts.stopId)
+    .eq("phase", "pending");
+  if (error) throw error;
+
+  void writeToLedger({
+    staff_id: staffId,
+    category: "TRIP",
+    severity: "INFO",
+    action_type: "ACTIVITY_OPEN",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      description: `Opened ${opts.venueName ?? "stop"} — ready to travel`,
+      summary: `Opened ${opts.venueName ?? "stop"} — ready to travel`,
+      venue_stop_id: opts.stopId,
+      event_id: opts.eventId,
+      session_date: opts.sessionDate,
+      declare_ready: true,
+      location: opts.venueName ?? "trip",
+    }),
+  });
+}
+
+/**
  * Undo planned leave method before confirm. Manifest/trip only exists after
  * bus Release — clearing `movement_method` re-opens the picker.
  */
@@ -430,17 +525,43 @@ export async function openVenueStop(
   const staffId = await resolveStaffIdWithFallback();
   const now = operationalNowIso();
 
-  // 1. Mark stop active
+  const { data: existingOpen } = await supabase
+    .from("event_venue_stops")
+    .select("opened_at, opened_by_id")
+    .eq("id", stop.id)
+    .maybeSingle();
+  const already = existingOpen as {
+    opened_at?: string | null;
+    opened_by_id?: string | null;
+  } | null;
+
+  // 1. Mark stop active. Keep the earlier "ready to go" stamp if Open already ran.
   const { error: phaseErr } = await supabase
     .from("event_venue_stops")
     .update({
       phase: "active",
       movement_method: stop.movementMethod,
-      opened_at: now,
-      opened_by_id: staffId || null,
+      opened_at: already?.opened_at ?? now,
+      opened_by_id: already?.opened_by_id ?? staffId ?? null,
     })
     .eq("id", stop.id);
   if (phaseErr) throw phaseErr;
+
+  const { data: kindRow, error: kindErr } = await supabase
+    .from("event_venue_stops")
+    .select("activity_kind")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (kindErr) throw kindErr;
+  const activityKind =
+    (kindRow as { activity_kind?: string | null } | null)?.activity_kind ??
+    "venue";
+  // Meals and medication rounds keep their own rolls. An activity check-in
+  // list on those stops blocks the next hop after the meal is already done.
+  if (activityKind === "meal" || activityKind === "medication_round") {
+    void writeActivityOpenedLedger(stop, staffId);
+    return;
+  }
 
   // 2. Walk/on-site: seed checked-in as expected + left-trip Absent as placeholders
   const { data: floor, error: attErr } = await supabase
@@ -480,6 +601,19 @@ export async function openVenueStop(
   }
 
   // 4. Ledger entry
+  void writeActivityOpenedLedger(stop, staffId);
+}
+
+async function writeActivityOpenedLedger(
+  stop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+    movementMethod: MovementMethod;
+  },
+  staffId: string,
+) {
   void writeToLedger({
     staff_id: staffId,
     category: "TRIP",
@@ -519,7 +653,25 @@ export async function countOutstandingActivityExpected(
   return count ?? 0;
 }
 
-async function assertActivityRollClearToLeave(venueStopId: string): Promise<void> {
+/**
+ * Activity check-in blocks leave only while a venue activity is still open.
+ * A finished stop, a meal, or a medication round uses its own completion check.
+ */
+export async function assertActivityRollClearToLeave(venueStopId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("phase, activity_kind")
+    .eq("id", venueStopId)
+    .maybeSingle();
+  if (error) throw error;
+  const row = data as {
+    phase?: string | null;
+    activity_kind?: string | null;
+  } | null;
+  const kind = row?.activity_kind ?? "venue";
+  const phase = row?.phase ?? "pending";
+  if (kind === "meal" || kind === "medication_round" || phase !== "active") return;
+
   const outstanding = await countOutstandingActivityExpected(venueStopId);
   if (outstanding <= 0) return;
   throw new Error(

@@ -699,6 +699,16 @@ function composeTransportSummary(
       : null;
 
   if (a === "TRANSPORT_RUN_CLOSED") {
+    const startOdo =
+      typeof meta.start_odometer_km === "number" && Number.isFinite(meta.start_odometer_km)
+        ? meta.start_odometer_km
+        : null;
+    const endOdo =
+      typeof meta.end_odometer_km === "number" && Number.isFinite(meta.end_odometer_km)
+        ? meta.end_odometer_km
+        : null;
+    const odoText =
+      startOdo != null && endOdo != null ? `odo ${startOdo} → ${endOdo}` : null;
     const who =
       passengers.length > 0
         ? isAfternoonRun(meta, lookups)
@@ -710,7 +720,7 @@ function composeTransportSummary(
     const extra = [
       cancelled.length ? `not travelling: ${listNames(cancelled, 6)}` : null,
       noShows.length ? `no-show: ${listNames(noShows, 6)}` : null,
-      kmText,
+      odoText && kmText ? `${odoText}, ${kmText}` : odoText ?? kmText,
     ].filter(Boolean);
     return joinParts([
       `Closed ${run || "transport run"}`,
@@ -1760,7 +1770,9 @@ async function listMealOverlay(
   const titleTable =
     table === "site_day_meal_service_rolls" ? "site_day_activities" : "event_venue_stops";
   const titleCols =
-    table === "site_day_meal_service_rolls" ? "id, title, meal_slot" : "id, venue_name, meal_slot";
+    table === "site_day_meal_service_rolls"
+      ? "id, title, meal_slot"
+      : "id, label_override, meal_slot";
   const [people, staff, titles] = await Promise.all([
     fetchRowsById("participants", "id, first_name, last_name", participantIds),
     fetchRowsById("staff_registry", "id, full_name", staffIds),
@@ -1782,8 +1794,8 @@ async function listMealOverlay(
   for (const t of titles) {
     const id = String(t.id ?? "");
     const title =
+      (typeof t.label_override === "string" && t.label_override.trim()) ||
       (typeof t.title === "string" && t.title.trim()) ||
-      (typeof t.venue_name === "string" && t.venue_name.trim()) ||
       (typeof t.meal_slot === "string" && t.meal_slot.replace(/_/g, " ")) ||
       "meal";
     if (id) titleMap.set(id, title);

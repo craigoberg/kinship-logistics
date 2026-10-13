@@ -233,7 +233,7 @@ export function CareProfileModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex max-h-[85vh] w-[min(96vw,72rem)] max-w-6xl flex-col overflow-x-auto border-border bg-card">
+        <DialogContent className="flex max-h-[calc(100svh-1.5rem)] w-[min(96vw,72rem)] max-w-6xl flex-col overflow-hidden border-border bg-card">
           <DialogHeader className="shrink-0">
             <div className="min-w-0">
               <DialogTitle className="flex flex-wrap items-center gap-2">
@@ -295,8 +295,8 @@ export function CareProfileModal({
             </TabsList>
 
             {/* TAB 1 — Care Profile */}
-            <TabsContent value="profile" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4 space-y-3">
+            <TabsContent value="profile" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-4 space-y-3">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-4">
                   <Field label="First name" className="sm:col-span-2">
                     <Input value={firstName} onChange={(e) => { setFirstName(e.target.value); setDirty(true); }} className="h-9" />
@@ -428,7 +428,7 @@ export function CareProfileModal({
               </DialogFooter>
             </TabsContent>
 
-            <TabsContent value="support" className="flex flex-col overflow-hidden">
+            <TabsContent value="support" className="flex min-h-0 flex-1 flex-col overflow-hidden">
               <SupportPlanTab
                 participant={participant}
                 online={online}
@@ -439,8 +439,8 @@ export function CareProfileModal({
             </TabsContent>
 
             {/* TAB — Contact Information */}
-            <TabsContent value="contact" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4 space-y-4">
+            <TabsContent value="contact" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-4 space-y-4">
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                   <Field label="Phone number">
                     <Input
@@ -481,8 +481,8 @@ export function CareProfileModal({
 
 
             {/* TAB 2 — History */}
-            <TabsContent value="history" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+            <TabsContent value="history" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-4">
                 <HistoryTab
                   participantId={participant.id}
                   query={historyQuery}
@@ -495,8 +495,8 @@ export function CareProfileModal({
             </TabsContent>
 
             {/* TAB 4 — Schedules & Attendance */}
-            <TabsContent value="attendance" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+            <TabsContent value="attendance" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-4">
                 <AttendanceTab
                   participantId={participant.id}
                   participantName={participant.fullName}
@@ -508,8 +508,8 @@ export function CareProfileModal({
             </TabsContent>
 
             {/* TAB 5 — Finance & Ledger */}
-            <TabsContent value="finance" className="flex flex-col overflow-hidden">
-              <div className="flex-1 overflow-y-auto pr-1 pt-4">
+            <TabsContent value="finance" className="flex min-h-0 flex-1 flex-col overflow-hidden">
+              <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain pr-1 pt-4">
                 <FinanceTab
                   participantId={participant.id}
                   participantName={participant.fullName}

@@ -208,7 +208,10 @@ export function useComplianceHubVisibilityDays(): number {
   return useSystemParameter<number>("compliance_hub_visibility_days", 60);
 }
 
-/** Manifest Close Run soft-warn: |end − (start+Σ)| ≥ km (BL-096). */
+/**
+ * Stored threshold from when Close Run compared the ending reading to
+ * start + summed leg km. Close Run no longer reads this.
+ */
 export function useOdoCloseSuggestWarnKm(): number {
   return useSystemParameter<number>("manifest.odo_close_suggest_warn_km", 5);
 }

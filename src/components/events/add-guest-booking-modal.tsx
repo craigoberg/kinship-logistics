@@ -282,8 +282,8 @@ export function AddGuestBookingModal({
         guestOpsNote: opsNote,
         outboundTransportMode: outbound,
         returnTransportMode: ret,
-        outboundBusRunCode: outRun,
-        returnBusRunCode: retRun,
+        outboundBusRunCode: outbound === "bus" ? outRun ?? busRunOpts[0]?.code ?? null : null,
+        returnBusRunCode: ret === "bus" ? retRun ?? busRunOpts[0]?.code ?? null : null,
         tripPickupAddressOverride: effectivePickup,
         transportMedBagRequired: outbound === "bus" ? medBag : "no",
         ticketPrice: event.ticketPrice,
@@ -625,7 +625,7 @@ export function AddGuestBookingModal({
           </div>
 
           <div className="space-y-2">
-            <ReqLabel>Outbound transport</ReqLabel>
+            <ReqLabel>To meeting point</ReqLabel>
             <div className="grid grid-cols-2 gap-2">
               <MobileOptionButton
                 label="Bus"
@@ -641,19 +641,6 @@ export function AddGuestBookingModal({
                 }}
               />
             </div>
-            {outbound === "bus" && busRunOpts.length > 0 && (
-              <div className="grid grid-cols-2 gap-2">
-                {busRunOpts.map((opt) => (
-                  <MobileOptionButton
-                    key={opt.code}
-                    label={opt.shortLabel}
-                    hint={opt.displayName}
-                    selected={outRun === opt.code}
-                    onClick={() => setOutRun(opt.code)}
-                  />
-                ))}
-              </div>
-            )}
             {outbound === "bus" && (
               <div
                 className={cn(
@@ -679,7 +666,7 @@ export function AddGuestBookingModal({
           </div>
 
           <div className="space-y-2">
-            <ReqLabel>Return transport</ReqLabel>
+            <ReqLabel>Departure to home</ReqLabel>
             <div className="grid grid-cols-2 gap-2">
               <MobileOptionButton
                 label="Bus"
@@ -692,19 +679,6 @@ export function AddGuestBookingModal({
                 onClick={() => setRet("self")}
               />
             </div>
-            {ret === "bus" && busRunOpts.length > 0 && (
-              <div className="grid grid-cols-2 gap-2">
-                {busRunOpts.map((opt) => (
-                  <MobileOptionButton
-                    key={opt.code}
-                    label={opt.shortLabel}
-                    hint={opt.displayName}
-                    selected={retRun === opt.code}
-                    onClick={() => setRetRun(opt.code)}
-                  />
-                ))}
-              </div>
-            )}
           </div>
 
           {needsBus && (

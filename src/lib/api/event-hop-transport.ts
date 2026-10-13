@@ -30,13 +30,7 @@ import {
   resolveOvernightWakeBase,
   sessionRequiresMorningRoll,
 } from "@/lib/api/event-deliver-status";
-import {
-  eventBusRunOptions,
-  eventBusRunShortLabel,
-  matchesEventBusRun,
-  transportRunKeysForDirection,
-} from "@/lib/event-bus-runs";
-import { listLookupParameters, LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { matchesEventBusRun } from "@/lib/event-bus-runs";
 import { operationalNowIso } from "@/lib/operational-clock";
 
 export type EventTransportRunKind = "outbound" | "venue_hop" | "return";
@@ -81,6 +75,20 @@ function stopLabel(stop: EventVenueStop | undefined): string {
 
 function stopAddress(stop: EventVenueStop | undefined): string | null {
   return stop?.venue_street_address?.trim() || null;
+}
+
+/** First venue on the first trip day — where bus and self meet. */
+function tripMeetingPoint(stops: EventVenueStop[]): EventVenueStop | undefined {
+  const venue = stops.filter((s) => isVenueTransportStop(s));
+  const first = venue[0];
+  if (!first) return undefined;
+  const firstDate = venue.reduce(
+    (min, s) => (s.session_date < min ? s.session_date : min),
+    first.session_date,
+  );
+  return venue
+    .filter((s) => s.session_date === firstDate)
+    .sort((a, b) => a.stop_order - b.stop_order)[0];
 }
 
 async function fetchTripsForSession(sessionId: string, eventId: string, sessionDate: string) {
@@ -151,12 +159,22 @@ export function pickTripForRun(
   })[0];
 }
 
+/** One trip bus per direction. Prefer a live trip over a leftover draft. */
+function pickTripAny(
+  trips: Record<string, unknown>[],
+): Record<string, unknown> | undefined {
+  return pickTripForRun(
+    trips.map((t) => ({ ...t, bus_run_code: null })),
+    null,
+  );
+}
+
 export async function listEventTransportRuns(opts: {
   eventId: string;
   sessionId: string;
   sessionDate: string;
 }): Promise<EventTransportRunCard[]> {
-  const [stopsRaw, tripsRaw, sessionRow, attendance, bookingsRes, busLookups] =
+  const [stopsRaw, tripsRaw, sessionRow, attendance, bookingsRes] =
     await Promise.all([
       listEventVenueStops(opts.eventId),
       fetchTripsForSession(opts.sessionId, opts.eventId, opts.sessionDate),
@@ -176,7 +194,6 @@ export async function listEventTransportRuns(opts: {
         )
         .eq("event_id", opts.eventId)
         .neq("booking_status", "Cancelled"),
-      listLookupParameters(LOOKUP_CATEGORIES.busRun),
     ]);
 
   if (sessionRow.error) throw sessionRow.error;
@@ -215,28 +232,10 @@ export async function listEventTransportRuns(opts: {
     )
     .map((r) => r.return_bus_run_code);
 
-  const outboundRunKeys = transportRunKeysForDirection(outboundRosterCodes);
-  const returnRunKeys = transportRunKeysForDirection([
-    ...returnRosterCodes,
-    ...returnFloorCodes,
-  ]);
-
-  const runOpts = eventBusRunOptions(busLookups);
-  const shortFor = (code: string | null) =>
-    code ? eventBusRunShortLabel(code, runOpts) : null;
-
-  const findTripForRun = (
-    trips: Record<string, unknown>[],
-    runCode: string | null,
-  ): Record<string, unknown> | undefined => pickTripForRun(trips, runCode);
-
-  const handoverStartedForRun = (runCode: string | null) =>
-    attRows.some(
-      (r) =>
-        r.status === "checked_out" &&
-        (r.return_transport ?? "").toLowerCase() === "bus" &&
-        matchesEventBusRun(r.return_bus_run_code, runCode),
-    );
+  const hasOutboundBus = outboundRosterCodes.length > 0;
+  const hasReturnBus = returnRosterCodes.length > 0 || returnFloorCodes.length > 0;
+  const outboundRunKeys: Array<string | null> = hasOutboundBus ? [null] : [];
+  const returnRunKeys: Array<string | null> = hasReturnBus ? [null] : [];
 
   const allHandoverDone =
     attRows.length > 0 &&
@@ -258,15 +257,22 @@ export async function listEventTransportRuns(opts: {
   const hopTrips = tripsRaw.filter(isHopTrip);
   const outboundTrips = tripsRaw.filter(isOutboundTrip);
   const returnTrips = tripsRaw.filter(isReturnTrip);
+  const meeting = tripMeetingPoint(stopsRaw);
+  const meetingName = meeting ? stopLabel(meeting) : null;
+  const meetingAddress = stopAddress(meeting);
+  const outboundLabel = meetingName
+    ? `Trip — To ${meetingName} (Meeting Point)`
+    : "Trip — to meeting point";
 
   // ── Outbound (Transport IN) — one card per bus run (BL-069) ───────────────
   for (const runCode of outboundRunKeys) {
-    const outboundTrip = findTripForRun(outboundTrips, runCode);
-    const rx = shortFor(runCode);
+    const outboundTrip = pickTripAny(outboundTrips);
     let outboundStatus: EventTransportRunStatus = "waiting";
-    let outboundDetail = rx
-      ? `${rx} morning pickup · bus stays at venue`
-      : "Morning pickup · bus stays at venue";
+    let outboundDetail = meetingAddress
+      ? `Pickup at home · ${meetingAddress}`
+      : meetingName
+        ? `Pickup at home · bus to ${meetingName}`
+        : "Pickup at home · bus to the meeting point";
     if (outboundTrip) {
       const st = tripStatus(outboundTrip);
       if (st === "completed") outboundStatus = "completed";
@@ -278,23 +284,21 @@ export async function listEventTransportRuns(opts: {
     } else {
       outboundStatus = "ready";
       if (locationOpen && pendingArrival > 0) {
-        outboundDetail = rx
-          ? `${rx} pickup · ${pendingArrival} still expected at venue`
-          : `Morning pickup · ${pendingArrival} still expected at venue`;
+        outboundDetail = meetingName
+          ? `To ${meetingName} · ${pendingArrival} still expected`
+          : `To the meeting point · ${pendingArrival} still expected`;
       }
     }
 
     cards.push({
       key: runCode ? `outbound:${runCode}` : "outbound",
       kind: "outbound",
-      label: rx
-        ? `Transport IN (${rx}) — Depot → venue`
-        : "Transport IN — Depot → venue",
+      label: outboundLabel,
       detail: outboundDetail,
       status: outboundStatus,
       tripId: (outboundTrip?.id as string | undefined) ?? null,
-      busRunCode: runCode,
-      busRunShortLabel: rx,
+      busRunCode: null,
+      busRunShortLabel: null,
     });
   }
 
@@ -343,10 +347,14 @@ export async function listEventTransportRuns(opts: {
       overnightWake?.hotelOmitted && i === 0
         ? "Overnight wake → first activity · board where the group is"
         : "In-day bus hop · boarding at origin";
+    const fromPhase = (from.phase ?? "pending") as string;
+    // A walk / on-site hop never creates a bus trip. The place they left
+    // being completed is enough — do not wait for a bus hop that was not taken.
     const priorHopDone =
       i === 0
         ? outboundStatusAgg === "completed" || (locationOpen && allCheckedIn)
-        : hopTrips.some(
+        : fromPhase === "completed" ||
+          hopTrips.some(
             (t) => Number(t.hop_index) === i - 1 && tripStatus(t) === "completed",
           );
     const busPlanned = movementRaw === "bus";
@@ -394,6 +402,41 @@ export async function listEventTransportRuns(opts: {
     });
   }
 
+  // Out-of-order opens (Dinner from wherever the group is) create a hop trip
+  // that is not the next planned venue pair. Surface it so Release stays put.
+  const listedTo = new Set(
+    cards
+      .filter((c) => c.kind === "venue_hop")
+      .map((c) => c.toStopId)
+      .filter((id): id is string => !!id),
+  );
+  for (const trip of hopTrips) {
+    const toId = (trip.venue_stop_to_id as string | null) ?? null;
+    const fromId = (trip.venue_stop_from_id as string | null) ?? null;
+    if (!toId || listedTo.has(toId)) continue;
+    const to = stopsRaw.find((s) => s.id === toId);
+    const from = fromId ? stopsRaw.find((s) => s.id === fromId) : undefined;
+    if (to && to.session_date !== opts.sessionDate) continue;
+    const st = tripStatus(trip);
+    const hopStatus: EventTransportRunStatus =
+      st === "completed" ? "completed" : st === "active" ? "active" : "released";
+    const hopIndex = Number(trip.hop_index);
+    cards.push({
+      key: `hop-extra-${toId}`,
+      kind: "venue_hop",
+      hopIndex: Number.isFinite(hopIndex) ? hopIndex : undefined,
+      label: `${stopLabel(from)} → ${stopLabel(to)}`,
+      detail: "Travel from where the group is now",
+      status: hopStatus,
+      tripId: (trip.id as string | undefined) ?? null,
+      fromStopId: fromId ?? undefined,
+      toStopId: toId,
+      originLabel: stopLabel(from),
+      originAddress: stopAddress(from),
+    });
+    listedTo.add(toId);
+  }
+
   // ── Return home — one card per bus run (BL-069) ───────────────────────────
   const allHopsDone =
     cards.filter((c) => c.kind === "venue_hop").length === 0 ||
@@ -406,52 +449,43 @@ export async function listEventTransportRuns(opts: {
   const lastStopAddress = stopAddress(lastStop);
 
   for (const runCode of returnRunKeys) {
-    const returnTrip = findTripForRun(returnTrips, runCode);
-    const rx = shortFor(runCode);
-    const busHandoverStarted = handoverStartedForRun(runCode);
+    const returnTrip = pickTripAny(returnTrips);
+    const busHandoverStarted = attRows.some(
+      (r) =>
+        r.status === "checked_out" &&
+        (r.return_transport ?? "").toLowerCase() === "bus",
+    );
 
     let returnStatus: EventTransportRunStatus = "waiting";
-    let returnDetail = rx
-      ? `Complete Check-Out — hand to ${rx} before starting HOME`
-      : "Complete Check-Out (hand to bus) before starting the home run";
+    let returnDetail = "Complete Check-Out — hand to the trip bus before the ride home";
     if (returnTrip) {
       const st = tripStatus(returnTrip);
       if (st === "completed") returnStatus = "completed";
       else if (st === "active") returnStatus = "active";
       else returnStatus = "released";
-      returnDetail = rx
-        ? `${rx} · bus passengers only · start from last stop`
-        : "Bus passengers only · start from last stop";
+      returnDetail = "Bus passengers only · start from the departure point";
     } else if (phase === "closed_orderly" || phase === "closed_incident") {
       returnStatus = "ready";
-      returnDetail = rx
-        ? `From ${lastStopLabel} → depot · ${rx}`
-        : `From ${lastStopLabel} → depot · bus passengers only`;
+      returnDetail = `From ${lastStopLabel} · home`;
     } else if (allHopsDone && locationOpen && (busHandoverStarted || allHandoverDone)) {
       returnStatus = "ready";
-      returnDetail = rx
-        ? `From ${lastStopLabel} → depot · ${rx}`
-        : `From ${lastStopLabel} → depot · bus passengers only`;
+      returnDetail = `From ${lastStopLabel} · home`;
     } else if (allHopsDone && locationOpen) {
       returnStatus = "waiting";
-      returnDetail = rx
-        ? `Finish Check-Out first — hand passengers to ${rx}`
-        : "Finish Check-Out first — hand bus passengers to return transport";
+      returnDetail = "Finish Check-Out first — hand passengers to the trip bus";
     }
 
     cards.push({
       key: runCode ? `return:${runCode}` : "return",
       kind: "return",
-      label: rx
-        ? `Transport HOME (${rx}) — ${lastStopLabel} → depot`
-        : `Transport HOME — ${lastStopLabel} → depot`,
+      label: "Trip — departure point to home",
       detail: returnDetail,
       status: returnStatus,
       tripId: (returnTrip?.id as string | undefined) ?? null,
       originLabel: lastStopLabel,
       originAddress: lastStopAddress,
-      busRunCode: runCode,
-      busRunShortLabel: rx,
+      busRunCode: null,
+      busRunShortLabel: null,
     });
   }
 
@@ -551,7 +585,7 @@ export async function seedBusManifestForHop(opts: {
       const key = s.staffId ? `s:${s.staffId}` : s.carerId ? `c:${s.carerId}` : null;
       if (!key) continue;
       const status = attStatus.get(key);
-      if (status === "absent" || status === "checked_out") continue;
+      if (status !== "checked_in") continue;
       pushRow({
         event_day_session_id: opts.eventDaySessionId,
         transport_trip_id: opts.tripId,
@@ -625,15 +659,10 @@ export async function prepareEventHopManifest(opts: {
     );
   }
 
-  const { countOutstandingActivityExpected } = await import(
+  const { assertActivityRollClearToLeave } = await import(
     "@/lib/api/event-activity-roll"
   );
-  const outstandingFrom = await countOutstandingActivityExpected(opts.fromStopId);
-  if (outstandingFrom > 0) {
-    throw new Error(
-      `${outstandingFrom} person${outstandingFrom === 1 ? "" : "s"} still outstanding on the activity check-in. Confirm or mark Not at activity before releasing to the bus.`,
-    );
-  }
+  await assertActivityRollClearToLeave(opts.fromStopId);
 
   const tripId = await getOrCreateEventHopTrip({
     eventId: opts.eventId,
@@ -983,12 +1012,19 @@ export async function finalizeEventVenueHop(trip: TransportTrip): Promise<void> 
       .eq("id", trip.venueStopFromId);
   }
   if (trip.venueStopToId) {
+    const { data: existingOpen } = await supabase
+      .from("event_venue_stops")
+      .select("opened_at")
+      .eq("id", trip.venueStopToId)
+      .maybeSingle();
+    const openedAt =
+      (existingOpen as { opened_at?: string | null } | null)?.opened_at ?? now;
     await supabase
       .from("event_venue_stops")
       .update({
         phase: "active",
         movement_method: "bus",
-        opened_at: now,
+        opened_at: openedAt,
       })
       .eq("id", trip.venueStopToId);
   }

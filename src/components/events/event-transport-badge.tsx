@@ -21,14 +21,19 @@ interface Props {
 export function EventTransportBadge({ mode, prefix, runLabel, className }: Props) {
   const normalized = normalizeEventTransportMode(mode);
   const base = eventTransportLabel(mode);
+  const phrase = runLabel?.trim() ?? "";
+  const keepCase = normalized === "bus" && phrase.includes(" ");
   const label =
-    normalized === "bus" && runLabel && runLabel.trim() && runLabel.trim().toUpperCase() !== "BUS"
-      ? runLabel.trim().toUpperCase()
+    normalized === "bus" && phrase && phrase.toUpperCase() !== "BUS"
+      ? keepCase
+        ? phrase
+        : phrase.toUpperCase()
       : base;
   return (
     <span
       className={cn(
-        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide",
+        "inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold tracking-wide",
+        keepCase ? "normal-case" : "uppercase",
         EVENT_TRANSPORT_BADGE_CLASS[normalized],
         className,
       )}
@@ -49,6 +54,25 @@ interface PairProps {
   className?: string;
 }
 
+/** Roster trip legs: blue Out line, then blue Ret line. Self uses the same chips. */
+function TripLegBadge({
+  mode,
+  prefix,
+  runLabel,
+}: {
+  mode: string;
+  prefix: "Out" | "Ret";
+  runLabel?: string | null;
+}) {
+  const phrase = runLabel?.trim();
+  const label = phrase && phrase.toUpperCase() !== "BUS" ? phrase : eventTransportLabel(mode);
+  return (
+    <span className="inline-flex items-center rounded bg-blue-600 px-1.5 py-0.5 text-[10px] font-semibold tracking-wide text-white">
+      {prefix}: {label}
+    </span>
+  );
+}
+
 /** Out + Ret pair for roster rows; shows struck-through plan when floor ops differed. */
 export function EventTransportPair({
   outbound,
@@ -63,23 +87,19 @@ export function EventTransportPair({
   const retChanged = plannedReturn != null && returnMode !== plannedReturn;
 
   return (
-    <div className={cn("flex flex-wrap items-center gap-1.5", className)}>
-      <div className="flex flex-col gap-0.5">
-        <EventTransportBadge mode={outbound} prefix="Out" runLabel={outboundRunLabel} />
-        {outChanged && (
-          <span className="text-[9px] text-muted-foreground line-through">
-            Planned {eventTransportLabel(plannedOutbound!)}
-          </span>
-        )}
-      </div>
-      <div className="flex flex-col gap-0.5">
-        <EventTransportBadge mode={returnMode} prefix="Ret" runLabel={returnRunLabel} />
-        {retChanged && (
-          <span className="text-[9px] text-muted-foreground line-through">
-            Planned {eventTransportLabel(plannedReturn!)}
-          </span>
-        )}
-      </div>
+    <div className={cn("flex flex-col items-start gap-1", className)}>
+      <TripLegBadge mode={outbound} prefix="Out" runLabel={outboundRunLabel} />
+      {outChanged && (
+        <span className="text-[9px] text-muted-foreground line-through">
+          Planned {eventTransportLabel(plannedOutbound!)}
+        </span>
+      )}
+      <TripLegBadge mode={returnMode} prefix="Ret" runLabel={returnRunLabel} />
+      {retChanged && (
+        <span className="text-[9px] text-muted-foreground line-through">
+          Planned {eventTransportLabel(plannedReturn!)}
+        </span>
+      )}
     </div>
   );
 }

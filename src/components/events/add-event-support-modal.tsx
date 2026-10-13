@@ -42,10 +42,11 @@ import { cn } from "@/lib/utils";
 interface Props {
   open: boolean;
   eventId: string;
+  ticketPrice: number;
   onClose: () => void;
 }
 
-export function AddEventSupportModal({ open, eventId, onClose }: Props) {
+export function AddEventSupportModal({ open, eventId, ticketPrice, onClose }: Props) {
   const qc = useQueryClient();
   const { user, isReady } = useAuthReady();
   const signedIn = isReady && !!user;
@@ -135,9 +136,6 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
 
   const missing: string[] = [];
   if (!personId) missing.push("Person");
-  if (outMode === "bus" && busOpts.length > 1 && !outRun) missing.push("IN run");
-  if (retMode === "bus" && busOpts.length > 1 && !retRun) missing.push("HOME run");
-
   const save = useMutation({
     mutationFn: () =>
       addEventSupportBooking({
@@ -165,7 +163,9 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
         <DialogHeader>
           <DialogTitle>Add support person</DialogTitle>
           <DialogDescription>
-            Own pickup and drop-off methods — same as a client on this trip.
+            They count toward trip capacity. Cost starts at the full event price ($
+            {ticketPrice.toFixed(2)}). Change it on the roster if they pay only some of it.
+            Meeting point is how they reach the first stop (bus or self).
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-4">
@@ -194,38 +194,18 @@ export function AddEventSupportModal({ open, eventId, onClose }: Props) {
             ))}
           </div>
           <div>
-            <Label className="mb-2 block">Inbound</Label>
+            <Label className="mb-2 block">To meeting point</Label>
             <div className="grid grid-cols-2 gap-2">
               <MobileOptionButton label="Bus" selected={outMode === "bus"} onClick={() => setOutMode("bus")} />
               <MobileOptionButton label="Self" selected={outMode === "self"} onClick={() => setOutMode("self")} />
             </div>
-            {outMode === "bus" &&
-              busOpts.map((r) => (
-                <MobileFieldButton
-                  key={r.code}
-                  title={r.shortLabel}
-                  subtitle={r.displayName}
-                  active={(outRun || busOpts[0]?.code) === r.code}
-                  onClick={() => setOutRun(r.code)}
-                />
-              ))}
           </div>
           <div>
-            <Label className="mb-2 block">Home</Label>
+            <Label className="mb-2 block">Departure to home</Label>
             <div className="grid grid-cols-2 gap-2">
               <MobileOptionButton label="Bus" selected={retMode === "bus"} onClick={() => setRetMode("bus")} />
               <MobileOptionButton label="Self" selected={retMode === "self"} onClick={() => setRetMode("self")} />
             </div>
-            {retMode === "bus" &&
-              busOpts.map((r) => (
-                <MobileFieldButton
-                  key={r.code}
-                  title={r.shortLabel}
-                  subtitle={r.displayName}
-                  active={(retRun || busOpts[0]?.code) === r.code}
-                  onClick={() => setRetRun(r.code)}
-                />
-              ))}
           </div>
           {personId ? (
             <div className="space-y-2">

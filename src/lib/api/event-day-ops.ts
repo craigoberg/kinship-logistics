@@ -27,6 +27,7 @@ import {
   type LeftTripDisposition,
 } from "@/lib/trip-absent";
 import { compareBySurname } from "@/lib/ui/sort-participants";
+import { isDuplicateKeyError } from "@/lib/api/supabase-errors";
 
 /** Hub attribution for automated roll sweeps (reported_by is text after migration). */
 export const SYSTEM_ISSUE_REPORTER = "System";
@@ -612,12 +613,34 @@ async function ensureLeftTripPlaceholdersOnAccountabilityRoll(
   }));
 
   // Insert missing only — do not overwrite accounted/expected rows.
-  const { error: upsErr } = await supabase.from(table).upsert(rows, {
-    onConflict: "event_day_session_id,participant_id",
-    ignoreDuplicates: true,
-  });
-  if (upsErr) {
-    console.warn("[ensureLeftTripPlaceholdersOnAccountabilityRoll] upsert failed:", upsErr.message);
+  // Partial unique indexes cannot be used as PostgREST ON CONFLICT targets.
+  const pidsForInsert = rows.map((r) => r.participant_id);
+  const { data: already, error: alreadyErr } = await supabase
+    .from(table)
+    .select("participant_id")
+    .eq("event_day_session_id", sessionId)
+    .in("participant_id", pidsForInsert);
+  if (alreadyErr) {
+    console.warn(
+      "[ensureLeftTripPlaceholdersOnAccountabilityRoll] lookup failed:",
+      alreadyErr.message,
+    );
+  } else {
+    const have = new Set(
+      (already ?? [])
+        .map((r) => (r as { participant_id?: string | null }).participant_id)
+        .filter((id): id is string => !!id),
+    );
+    const missing = rows.filter((r) => !have.has(r.participant_id));
+    if (missing.length) {
+      const { error: insErr } = await supabase.from(table).insert(missing);
+      if (insErr && !isDuplicateKeyError(insErr)) {
+        console.warn(
+          "[ensureLeftTripPlaceholdersOnAccountabilityRoll] insert failed:",
+          insErr.message,
+        );
+      }
+    }
   }
 
   // If they already have expected rows, promote to absent with floor notes.
@@ -702,34 +725,19 @@ export async function listAccountabilityRoll(
     (a) => a.participant_id as string,
   );
 
-  let supportCheckedIn: Array<{
-    key: string;
-    staffId: string | null;
-    carerId: string | null;
-    name: string;
-  }> = [];
-  try {
-    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
-    const support = await listEventSupportAttendance(sessionId);
-    supportCheckedIn = support
-      .filter((s) => s.status === "checked_in")
-      .map((s) => ({
-        key: accPersonKey({ staff_id: s.staffId, carer_id: s.carerId }),
-        staffId: s.staffId,
-        carerId: s.carerId,
-        name: s.displayName,
-      }));
-  } catch {
-    /* BL-125 table not migrated yet */
-  }
+  const checkedInSet = new Set(checkedInIds);
 
-  const checkedInSet = new Set([...checkedInIds, ...supportCheckedIn.map((s) => s.key)]);
-  const supportByKey = new Map(supportCheckedIn.map((s) => [s.key, s]));
-
-  // Checked-in first (still with group — can mark Safe), then left-trip placeholders.
-  const orderedIds: string[] = [...checkedInIds, ...supportCheckedIn.map((s) => s.key)];
-  for (const pid of logMap.keys()) {
-    if (!checkedInSet.has(pid)) orderedIds.push(pid);
+  // Morning and evening rolls are participants only. Non-participants use their own roll.
+  const orderedIds: string[] = [...checkedInIds];
+  for (const [pid, row] of logMap) {
+    if (checkedInSet.has(pid)) continue;
+    const r = row as {
+      participant_id?: string | null;
+      staff_id?: string | null;
+      carer_id?: string | null;
+    };
+    if (!r.participant_id && (r.staff_id || r.carer_id)) continue;
+    orderedIds.push(pid);
   }
   if (orderedIds.length === 0) return [];
 
@@ -737,19 +745,15 @@ export async function listAccountabilityRoll(
   return orderedIds.map((pid) => {
     const existing = logMap.get(pid);
     if (existing) {
-      const mapped = mapAccRow(existing as Record<string, unknown>);
-      const support = supportByKey.get(pid);
-      if (support && !mapped.participant_name) mapped.participant_name = support.name;
-      return mapped;
+      return mapAccRow(existing as Record<string, unknown>);
     }
-    const support = supportByKey.get(pid);
     // Virtual row — not yet in the log table. Name resolved in panel via nameMap.
     return {
       id: `virtual:${pid}`,
       event_day_session_id: sessionId,
       participant_id: pid,
-      staff_id: support?.staffId ?? null,
-      carer_id: support?.carerId ?? null,
+      staff_id: null,
+      carer_id: null,
       expected_accounted_at: virtualExpectedAt,
       accounted_at: null,
       accounted_by: null,
@@ -761,7 +765,7 @@ export async function listAccountabilityRoll(
       notes: null,
       created_at: stamp,
       updated_at: stamp,
-      participant_name: support?.name ?? null,
+      participant_name: null,
       isVirtual: true,
     };
   });
@@ -822,35 +826,34 @@ export async function seedAccountabilityRoll(
   }));
   if (!rows.length) return 0;
 
-  const { data: inserted, error: insErr } = await supabase
+  // Partial unique indexes (participant_id IS NOT NULL) cannot be the target of
+  // PostgREST ON CONFLICT — that returns 42P10. Insert only people not already listed.
+  const ids = rows.map((r) => r.participant_id);
+  const { data: existing, error: existErr } = await supabase
     .from(table)
-    .upsert(rows, { onConflict: "event_day_session_id,participant_id", ignoreDuplicates: true })
-    .select("id");
-  if (insErr) throw insErr;
+    .select("participant_id")
+    .eq("event_day_session_id", opts.sessionId)
+    .in("participant_id", ids);
+  if (existErr) throw existErr;
+  const have = new Set(
+    (existing ?? [])
+      .map((r) => (r as { participant_id?: string | null }).participant_id)
+      .filter((id): id is string => !!id),
+  );
+  const missing = rows.filter((r) => !have.has(r.participant_id));
+  if (!missing.length) return 0;
 
-  let supportInserted = 0;
-  try {
-    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
-    const support = (await listEventSupportAttendance(opts.sessionId)).filter(
-      (s) => s.status === "checked_in",
-    );
-    const supportRows = support.map((s) => ({
-      event_day_session_id: opts.sessionId,
-      participant_id: null,
-      staff_id: s.staffId,
-      carer_id: s.carerId,
-      expected_accounted_at: expectedIso,
-      status: "expected" as AccountabilityStatus,
-    }));
-    if (supportRows.length) {
-      const { data: sIns, error: sErr } = await supabase.from(table).insert(supportRows).select("id");
-      if (!sErr) supportInserted = sIns?.length ?? 0;
-    }
-  } catch {
-    /* support columns / table not migrated yet */
+  const { error: insErr } = await supabase.from(table).insert(missing);
+  if (!insErr) return missing.length;
+  if (!isDuplicateKeyError(insErr)) throw insErr;
+
+  let inserted = 0;
+  for (const row of missing) {
+    const { error: oneErr } = await supabase.from(table).insert(row);
+    if (oneErr && !isDuplicateKeyError(oneErr)) throw oneErr;
+    if (!oneErr) inserted += 1;
   }
-
-  return (inserted?.length ?? 0) + supportInserted;
+  return inserted;
 }
 
 /** Ensure a virtual row is persisted before updating it; returns the real DB id. */
@@ -872,16 +875,34 @@ async function materializeVirtualRow(
   } else {
     payload.participant_id = row.participant_id;
   }
-  const onConflict = row.staff_id
-    ? "event_day_session_id,staff_id"
-    : row.carer_id
-      ? "event_day_session_id,carer_id"
-      : "event_day_session_id,participant_id";
+  const personCol = row.staff_id ? "staff_id" : row.carer_id ? "carer_id" : "participant_id";
+  const personId = row.staff_id || row.carer_id || row.participant_id;
+  const { data: existing, error: existErr } = await supabase
+    .from(table)
+    .select("id")
+    .eq("event_day_session_id", row.event_day_session_id)
+    .eq(personCol, personId)
+    .maybeSingle();
+  if (existErr) throw existErr;
+  if (existing && (existing as { id?: string }).id) {
+    return (existing as { id: string }).id;
+  }
+
   const { data, error } = await supabase
     .from(table)
-    .upsert(payload, { onConflict })
+    .insert(payload)
     .select("id")
     .single();
+  if (error && isDuplicateKeyError(error)) {
+    const { data: again, error: againErr } = await supabase
+      .from(table)
+      .select("id")
+      .eq("event_day_session_id", row.event_day_session_id)
+      .eq(personCol, personId)
+      .maybeSingle();
+    if (againErr) throw againErr;
+    if (again && (again as { id?: string }).id) return (again as { id: string }).id;
+  }
   if (error) throw error;
   return (data as { id: string }).id;
 }

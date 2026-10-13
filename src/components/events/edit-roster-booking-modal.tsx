@@ -33,7 +33,6 @@ import {
 import type { EventRosterBooking } from "@/lib/data-store";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { updateBookingTransportModes, updateBookingTransportMed, type TransportMedBagRequired } from "@/lib/api/event-outing";
-import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import {
   StopAddressChoices,
   choiceFromOverrideText,
@@ -276,7 +275,7 @@ export function EditRosterBookingModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-border bg-card">
+      <DialogContent className="flex max-h-[calc(100svh-1.5rem)] w-full max-w-md flex-col overflow-hidden border-border bg-card">
         <DialogHeader className="shrink-0">
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
@@ -284,7 +283,7 @@ export function EditRosterBookingModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+        <div className="-mx-6 min-h-0 flex-1 overflow-y-auto overscroll-contain px-6">
           <div className="space-y-3 pt-1">
           {!financeWritable && (
             <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
@@ -469,7 +468,7 @@ export function EditRosterBookingModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Outbound</Label>
+                  <Label className="text-xs font-semibold">To meeting point</Label>
                   <Select
                     value={outboundMode}
                     onValueChange={(v) => {
@@ -488,10 +487,10 @@ export function EditRosterBookingModal({
                       <SelectItem value="self">Self-transport</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-muted-foreground">Self = first-day inbound only.</p>
+                  <p className="text-[10px] text-muted-foreground">Bus picks them up at home.</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Return</Label>
+                  <Label className="text-xs font-semibold">Departure to home</Label>
                   <Select
                     value={returnMode}
                     onValueChange={(v) => {
@@ -510,47 +509,9 @@ export function EditRosterBookingModal({
                       <SelectItem value="self">Self-transport</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-muted-foreground">Self = last-day outbound only.</p>
+                  <p className="text-[10px] text-muted-foreground">Bus takes them home from the departure point.</p>
                 </div>
               </div>
-              {outboundMode === "bus" && busRunOpts.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Outbound bus run</Label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {busRunOpts.map((opt) => (
-                      <MobileFieldButton
-                        key={`out-${opt.code}`}
-                        title={opt.shortLabel}
-                        subtitle={opt.displayName}
-                        active={(outboundBusRunCode ?? defaultRunCode) === opt.code}
-                        onClick={() => {
-                          setOutboundBusRunCode(opt.code);
-                          setDirty(true);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {returnMode === "bus" && busRunOpts.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Return bus run</Label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {busRunOpts.map((opt) => (
-                      <MobileFieldButton
-                        key={`ret-${opt.code}`}
-                        title={opt.shortLabel}
-                        subtitle={opt.displayName}
-                        active={(returnBusRunCode ?? defaultRunCode) === opt.code}
-                        onClick={() => {
-                          setReturnBusRunCode(opt.code);
-                          setDirty(true);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 

@@ -482,7 +482,12 @@ function buildInboundGroup(
   const extras: EventWatchPerson[] = [];
   for (const b of bookings) {
     if ((b.outbound_transport_mode ?? "bus") !== "bus") continue;
-    if (!matchesEventBusRun(b.outbound_bus_run_code, card.busRunCode)) continue;
+    if (
+      card.busRunCode &&
+      !matchesEventBusRun(b.outbound_bus_run_code, card.busRunCode)
+    ) {
+      continue;
+    }
     extras.push({
       participantId: b.participant_id,
       name: displayName(b.participant_id, names),
@@ -608,12 +613,14 @@ export async function fetchEventWatchSnapshot(opts: {
   const inboundCards = transportRuns.filter((c) => c.kind === "outbound");
   const outboundTrips = sessionTrips.filter(isWatchOutboundTrip);
   const inbound: EventWatchTransportGroup[] = inboundCards.map((card) => {
-    const matching = outboundTrips.filter((t) =>
-      matchesEventBusRun(
-        String(t.bus_run_code ?? "").trim() || null,
-        card.busRunCode,
-      ),
-    );
+    const matching = card.busRunCode
+      ? outboundTrips.filter((t) =>
+          matchesEventBusRun(
+            String(t.bus_run_code ?? "").trim() || null,
+            card.busRunCode,
+          ),
+        )
+      : outboundTrips;
     const preferred = pickTripForRun(matching, card.busRunCode ?? null);
     const tripIdsForRun = [
       ...new Set(
@@ -687,7 +694,11 @@ export async function fetchEventWatchSnapshot(opts: {
     .map((card) => {
       const fallback = bookings
         .filter((b) => (b.return_transport_mode ?? "bus") === "bus")
-        .filter((b) => matchesEventBusRun(b.return_bus_run_code, card.busRunCode))
+        .filter(
+          (b) =>
+            !card.busRunCode ||
+            matchesEventBusRun(b.return_bus_run_code, card.busRunCode),
+        )
         .map((b) => ({
           participantId: b.participant_id,
           name: displayName(b.participant_id, names),
@@ -699,7 +710,8 @@ export async function fetchEventWatchSnapshot(opts: {
           (a) =>
             a.status === "checked_out" &&
             a.returnTransport === "bus" &&
-            matchesEventBusRun(a.returnBusRunCode, card.busRunCode),
+            (!card.busRunCode ||
+              matchesEventBusRun(a.returnBusRunCode, card.busRunCode)),
         )
         .map((a) => ({
           participantId: a.participantId,

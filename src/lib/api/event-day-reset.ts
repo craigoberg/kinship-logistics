@@ -117,36 +117,39 @@ async function restoreOvernightStartOfDay(opts: {
     opts.eventId,
     opts.sessionDate,
   );
+  let attendanceCount = seeded;
   if (seeded <= 0) {
     const { count, error: cntErr } = await supabase
       .from("event_attendance_log")
       .select("id", { count: "exact", head: true })
       .eq("event_day_session_id", opts.sessionId);
     if (cntErr) throw new Error(`attendance count: ${cntErr.message}`);
-    if ((count ?? 0) === 0) {
-      throw new Error("Overnight reset: no attendance rows to check in (roster empty?).");
-    }
+    attendanceCount = count ?? 0;
   }
 
-  const continuity = await applyOvernightDayStartContinuity({
+  // Cancelled bookings are not seeded. Finish the rewind anyway so the
+  // confirm window can close. Leave the day unopened until someone is confirmed.
+  if (attendanceCount === 0) {
+    return updateSessionResetPatch(opts.sessionId, {
+      phase: "planning",
+      opened_by_id: null,
+      open_declared_at: null,
+      open_leader_notes: "test reset: no confirmed roster",
+      closed_by_id: null,
+      close_declared_at: null,
+      close_leader_notes: null,
+      expected_arrival_by: null,
+      updated_at: nowIso,
+    });
+  }
+
+  await applyOvernightDayStartContinuity({
     sessionId: opts.sessionId,
     eventId: opts.eventId,
     sessionDate: opts.sessionDate,
     actorStaffId: opts.managerStaffId || opts.actorStaffId,
     source: "test_reset",
   });
-  if (!continuity.applied && continuity.checkedInCount === 0) {
-    const { count } = await supabase
-      .from("event_attendance_log")
-      .select("id", { count: "exact", head: true })
-      .eq("event_day_session_id", opts.sessionId)
-      .eq("status", "checked_in");
-    if ((count ?? 0) === 0) {
-      throw new Error(
-        "Overnight reset: check-in wrote 0 rows. Morning Roll will stay empty.",
-      );
-    }
-  }
 
   const opener = opts.managerStaffId || opts.actorStaffId || null;
   return updateSessionResetPatch(opts.sessionId, {

@@ -1,7 +1,8 @@
 /**
  * BottomSheet — mobile-first slide-up panel.
  * Uses the existing Radix Sheet (side=bottom) with driver-friendly sizing.
- * On a phone this fills most of the viewport; on desktop it stays max-h-[60vh].
+ * Fills the visible screen and scrolls to the last row. `svh` stays inside the
+ * window when text is enlarged; `dvh` can sit taller than what is on screen.
  */
 import type { ReactNode } from "react";
 import {
@@ -41,7 +42,7 @@ export function BottomSheet({
         hideTicket={hideTicket}
         className={cn(
           // Sizing: tall on mobile, capped on desktop
-          "max-h-[92dvh] overflow-y-auto rounded-t-2xl",
+          "max-h-[calc(100svh-0.75rem)] overflow-y-auto rounded-t-2xl",
           // Safe area below home bar
           "pb-[max(env(safe-area-inset-bottom),16px)]",
           className,

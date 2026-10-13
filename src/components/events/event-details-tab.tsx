@@ -206,7 +206,7 @@ export function EventDetailsTab({ event, onSaved, onClose }: Props) {
         toast.warning("Event dates saved", {
           description:
             (err as Error).message ||
-            "Trip days may need a refresh on the Trip Days tab.",
+            "Trip days may need a refresh on the Itinerary.",
         });
       }
     } else {

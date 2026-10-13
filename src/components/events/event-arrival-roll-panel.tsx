@@ -37,8 +37,8 @@ import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import {
-  buildBusSelfPickerOptions,
   selectionFromEventMode,
+  type FloorMethodPickerOption,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
 import {
@@ -66,7 +66,7 @@ import { EventTransportBadge } from "@/components/events/event-transport-badge";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
-import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
+import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
@@ -616,15 +616,34 @@ function RollCard({
   const [arrivalOverride, setArrivalOverride] =
     useState<FloorTransportSelection | null>(null);
   const arrivalSel = arrivalOverride ?? plannedSelection;
-  const arrivalPickerOptions = useMemo(
-    () =>
-      buildBusSelfPickerOptions(busRunOpts, "event", {
-        busTitlePrefix: "Arrived on",
-        selfTitle: "Self / Meeting at venue",
-        selfSubtitle: "Family or independent — not on the bus",
-      }),
-    [busRunOpts],
+  const pickerBusCode =
+    (isIn && actualIsBus ? row.arrivalBusRunCode : null) ??
+    (arrivalSel.kind === "bus" ? arrivalSel.busRunCode : null) ??
+    plannedOutbound?.busRunCode ??
+    null;
+  const arrivalPickerOptions = useMemo<FloorMethodPickerOption[]>(
+    () => [
+      {
+        id: "bus",
+        kind: "bus",
+        busRunCode: pickerBusCode,
+        title: "Arrived on Bus",
+        subtitle: "On the trip bus",
+        label: "Bus",
+      },
+      {
+        id: "self",
+        kind: "self",
+        busRunCode: null,
+        title: "Self / Meeting at venue",
+        subtitle: "Family or independent — not on the bus",
+        label: "Self",
+      },
+    ],
+    [pickerBusCode],
   );
+  const arrivalLabel = arrivalSel.kind === "self" ? "Self" : "Bus";
+  const plannedLabel = plannedIsBus ? "Bus" : "Self";
 
   // Walk-in state
   const [walkInNote, setWalkInNote] = useState("");
@@ -692,19 +711,13 @@ function RollCard({
               "min-h-11 touch-manipulation active:scale-[0.99]",
               "hover:bg-black/5 disabled:opacity-60",
             )}
-            aria-label={`Check in ${name} via ${arrivalSel.label}`}
+            aria-label={`Check in ${name} via ${arrivalLabel}`}
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{name}</span>
               {isWalkOn && <WalkOnBadge />}
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                Planned{" "}
-                {plannedIsBus
-                  ? eventBusRunShortLabel(
-                      plannedOutbound?.busRunCode ?? null,
-                      busRunOpts,
-                    ) || "Bus"
-                  : "Self"}
+                Planned {plannedLabel}
               </Badge>
               {absentDayLabel && (
                 <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
@@ -713,14 +726,14 @@ function RollCard({
               )}
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              Tap to check in via {arrivalSel.label}
+              Tap to check in via {arrivalLabel}
             </p>
           </button>
           {clinicalChips.length > 0 && (
             <ClinicalFlagChips chips={clinicalChips} personName={name} />
           )}
           <EmbeddedMethodButton
-            label={arrivalSel.label}
+            label={arrivalLabel}
             disabled={busy}
             onClick={() => setMethodPickerOpen(true)}
           />
@@ -797,24 +810,12 @@ function RollCard({
             <div className="flex shrink-0 items-center gap-1">
               {/* Read-only method badge when chip is not shown (avoids R1 chip + R1 badge double) */}
               {!isAbsent && (isIn || isOut) && !(editable && isIn && !isOut) && (
-                <MethodBadge
-                  method={row.arrivalMethod}
-                  busShortLabel={
-                    row.arrivalMethod === "bus"
-                      ? eventBusRunShortLabel(row.arrivalBusRunCode, busRunOpts)
-                      : null
-                  }
-                />
+                <MethodBadge method={row.arrivalMethod} />
               )}
 
               {editable && isIn && !isOut && (
                 <EmbeddedMethodButton
-                  label={
-                    actualIsBus
-                      ? eventBusRunShortLabel(row.arrivalBusRunCode, busRunOpts) ||
-                        "Bus"
-                      : "Self"
-                  }
+                  label={actualIsBus ? "Bus" : "Self"}
                   disabled={busy}
                   onClick={() => setMethodPickerOpen(true)}
                   aria-label="Change arrival method"
@@ -968,13 +969,9 @@ function RollCard({
         }
         options={arrivalPickerOptions}
         selected={
-          isIn
-            ? selectionFromEventMode(
-                actualIsSelf ? "self" : "bus",
-                row.arrivalBusRunCode,
-                busRunOpts,
-              )
-            : arrivalSel
+          (isIn ? actualIsSelf : arrivalSel.kind === "self")
+            ? { kind: "self", busRunCode: null, label: "Self" }
+            : { kind: "bus", busRunCode: pickerBusCode, label: "Bus" }
         }
         pending={busy}
         onSelect={applyArrivalSelection}

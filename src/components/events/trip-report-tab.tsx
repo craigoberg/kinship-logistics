@@ -266,22 +266,23 @@ export function TripReportDocument({ report }: { report: TripReport }) {
       )}
 
       {/* ── Roster ── */}
-      <Section icon={<Users className="h-4 w-4" />} title={`Roster (${report.rosterSummary.total})`}>
+      <Section icon={<Users className="h-4 w-4" />} title={`Attendees (${report.rosterSummary.attendees})`}>
         <div className="mb-3 flex flex-wrap gap-3 text-sm">
-          <span className="font-medium">{report.rosterSummary.confirmed} confirmed</span>
+          <span className="font-medium">{report.rosterSummary.confirmed} participants</span>
+          <span className="font-medium">{report.rosterSummary.nonParticipants} non-participants</span>
           <span className="text-muted-foreground">{report.rosterSummary.cancelled} cancelled</span>
         </div>
         <RosterTable roster={report.roster} />
         {(report.support ?? []).length > 0 && (
           <div className="mt-4">
-            <h4 className="mb-2 text-sm font-semibold">Support people</h4>
+            <h4 className="mb-2 text-sm font-semibold">Non-participants</h4>
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
                   <tr className="border-b">
                     <th className="pb-1 pr-4">Name</th>
                     <th className="pb-1 pr-4">Role</th>
-                    <th className="pb-1 pr-4">Inbound</th>
+                    <th className="pb-1 pr-4">Meeting point</th>
                     <th className="pb-1">Home</th>
                   </tr>
                 </thead>
@@ -290,8 +291,10 @@ export function TripReportDocument({ report }: { report: TripReport }) {
                     <tr key={`${s.displayName}-${s.roleLabel}`} className="border-b last:border-0">
                       <td className="py-1.5 pr-4 font-medium">{s.displayName}</td>
                       <td className="py-1.5 pr-4">{s.roleLabel}</td>
-                      <td className="py-1.5 pr-4">{s.outboundTransportMode}</td>
-                      <td className="py-1.5">{s.returnTransportMode}</td>
+                      <td className="py-1.5 pr-4">
+                        {s.outboundTransportMode === "bus" ? "Bus" : "Self"}
+                      </td>
+                      <td className="py-1.5">{s.returnTransportMode === "bus" ? "Bus" : "Self"}</td>
                     </tr>
                   ))}
                 </tbody>

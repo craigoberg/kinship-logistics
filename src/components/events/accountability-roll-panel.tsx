@@ -257,7 +257,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       toast.error(
         "Set the " +
           (mode === "curfew" ? "evening roll call time" : "morning roll call time") +
-          " in Trip Days → Config first.",
+          " on the Itinerary for this day first.",
       );
       return;
     }
@@ -415,7 +415,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       {!rollTimeClock && (
         <p className="rounded border border-dashed py-3 text-center text-sm text-muted-foreground">
           No {mode === "curfew" ? "evening roll call" : "morning roll call"} time set on this trip day.
-          Set it in Trip Days → expand the row → Config.
+          Set it on the Itinerary for this day.
         </p>
       )}
 

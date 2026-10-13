@@ -518,7 +518,7 @@ Every new driver session follows the same three-step gate before the active mani
 | **2 — Clearance** | Daily operational clearance | Walkaround / checklist sign-off |
 | **3 — Run start** | `EventPickAndStart` (`src/routes/manifest.tsx`) | Choose run type + starting point only — **not** stop management |
 
-**Odometer (BL-096):** Step 1 prefills start km from that vehicle’s `transport_assets.current_odometer_km` (last Close Run / Admin correct). Soft-warn if far from last known (`manifest.odo_start_vs_last_warn_km`) — driver may accept (e.g. petrol). Legs store **distance** only, typed from the odometer — Depart / Arrive do not capture device GPS or a GPS kilometre figure. Open in Google Maps still uses the leg’s start and end addresses. Close Run suggests **start + Σ logged km** with soft-warn (`manifest.odo_close_suggest_warn_km`). No Hub issue for odo mismatch — Admin corrects on Fleet with justification (`TRANSPORT_ODOMETER_CORRECTED`). Trip stores `asset_id` so close updates the fleet estimate.
+**Odometer (amended 2026-10-12):** The driver records the dash reading twice for the whole trip — at Step 1 (start) and at Close Run (end). Stops do not ask for kilometres. The number entered is the odometer reading, not kilometres travelled. Kilometres for the trip are end − start. Step 1 prefills the start reading from that vehicle’s `transport_assets.current_odometer_km` (last Close Run / Admin correct). Soft-warn if far from last known (`manifest.odo_start_vs_last_warn_km`) — driver may accept (e.g. petrol). Depart / Arrive do not capture device GPS or a GPS kilometre figure. Open in Google Maps still uses the leg’s start and end addresses. Close Run does not suggest an ending reading. No Hub issue for an odometer mismatch — Admin corrects on Fleet with justification (`TRANSPORT_ODOMETER_CORRECTED`). Trip stores `asset_id` so close updates the fleet estimate.
 
 Step 3 must **not** display a passenger roster, pickup-order list, or scrollable stop preview. Stops are discovered and managed **inside** the active manifest after the run opens. Showing a pre-start stop list is a structural violation of this workflow.
 
@@ -1135,7 +1135,7 @@ First production slice for **Movies-style single-day**: Phases 1–3 + **Phase 8
 | Attendance sweep + SMS | `src/lib/api/client-attendance.ts` | Template for event-floor + curfew sweep |
 | Event day ops | `src/lib/api/event-day-ops.ts` | Split: bus manifest vs attendance log |
 | Venue admin | `src/routes/admin.tsx` → Venues tab | Built |
-| Event coordinator | `src/components/events/day-sessions-tab.tsx` | Rename Trip day; add open/close + arrival roll |
+| Event coordinator | `src/components/events/itinerary-day-plan.tsx` | Leader and roll times on each Itinerary date; floor open/close stays in Event Deliver |
 
 ### 12.13 Event Deliver — Mobile-First Field Workflow (Locked — effective 2026-07-13)
 

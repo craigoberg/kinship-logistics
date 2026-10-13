@@ -3,7 +3,6 @@ import { useQueryClient } from "@tanstack/react-query";
 import { Link } from "@tanstack/react-router";
 import {
   AlertTriangle,
-  CalendarDays,
   ChevronDown,
   ChevronUp,
   Compass,
@@ -43,7 +42,6 @@ import { RosterTab } from "./roster-tab";
 import { EventFinanceTab } from "./event-finance-tab";
 import { EventDetailsTab } from "./event-details-tab";
 import { ItineraryTab } from "./itinerary-tab";
-import { DaySessionsTab } from "./day-sessions-tab";
 import { EventStatusPanel } from "./event-status-panel";
 import { TripReportTab } from "./trip-report-tab";
 import { EventLiveWatchTab } from "./event-live-watch-tab";
@@ -147,15 +145,16 @@ export function ManageEventModal({
   }, [open]);
 
   useEffect(() => {
-    if (open && initialTab) setTab(initialTab);
+    if (open && initialTab) setTab(initialTab === "days" ? "itinerary" : initialTab);
   }, [open, initialTab, eventSnapshot?.id]);
 
   const TABS: Array<{ key: TabKey; label: string; icon: React.ComponentType<{ className?: string }> }> = useMemo(() => [
     { key: "details", label: "Details & Config", icon: Settings2 },
-    { key: "roster", label: "Roster", icon: Users },
     ...(isOuting ? [
       { key: "itinerary" as TabKey, label: "Itinerary", icon: Map },
-      { key: "days" as TabKey, label: "Trip Days", icon: CalendarDays },
+    ] : []),
+    { key: "roster", label: "Roster", icon: Users },
+    ...(isOuting ? [
       { key: "live" as TabKey, label: "Live", icon: Eye },
     ] : []),
     { key: "finance", label: "Finance & P&L", icon: Wallet },
@@ -364,10 +363,8 @@ export function ManageEventModal({
     <>
       {tab === "roster" ? (
         <RosterTab event={event} eventKind={scopeKind} />
-      ) : tab === "itinerary" ? (
+      ) : tab === "itinerary" || tab === "days" ? (
         <ItineraryTab event={event} />
-      ) : tab === "days" ? (
-        <DaySessionsTab event={event} />
       ) : tab === "live" ? (
         <EventLiveWatchTab event={event} />
       ) : tab === "report" ? (
@@ -413,7 +410,7 @@ export function ManageEventModal({
         <Sheet open={open} onOpenChange={onOpenChange}>
           <SheetContent
             side="bottom"
-            className="flex h-[100dvh] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card p-0 pb-[env(safe-area-inset-bottom)]"
+            className="flex h-[100svh] max-h-[100svh] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card p-0 pb-[env(safe-area-inset-bottom)]"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{event.title}</SheetTitle>
@@ -427,7 +424,7 @@ export function ManageEventModal({
             </div>
 
             {/* Scrollable tab content */}
-            <div className="flex-1 overflow-y-auto px-4 py-4">
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-4">
               {tabContent}
             </div>
 
@@ -449,13 +446,13 @@ export function ManageEventModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-h-[95dvh] w-full max-w-5xl overflow-hidden border-border bg-card p-0 sm:max-h-[90vh]">
-          {desktopHeader}
-          <div className="max-h-[55dvh] overflow-y-auto px-6 py-5 sm:max-h-[65vh]">
+        <DialogContent className="flex h-[min(90dvh,calc(100svh-1.5rem))] max-h-[calc(100svh-1.5rem)] w-[min(94vw,96rem)] max-w-[min(94vw,96rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0">
+          <div className="shrink-0">{desktopHeader}</div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
             {tabContent}
           </div>
           {tab !== "details" && (
-            <DialogFooter className="border-t border-border px-6 py-3">
+            <DialogFooter className="shrink-0 border-t border-border px-6 py-3">
               {closeButton}
             </DialogFooter>
           )}

@@ -32,8 +32,8 @@ export const eventsCreateConfirmOpenTopic: HelpTopic = {
       body: "Event Manage → Create New Event. Fill Event title, Event type, dates, optional Primary venue and ticket price. Optional Clone roster from prior event. Save Event — status starts as Planning. Afterwards, click the event row to open it. There is no Manage button. Run stays a separate button on Confirmed and Open events.",
     },
     {
-      heading: "Details, Roster, Itinerary, Trip Days",
-      body: "Complete Details & Config as needed. Roster: book participants; for bus passengers set Transport med bag (must not stay not_set). Itinerary: add venue stops per day. Trip Days: assign Trip leader on each date and Save.",
+      heading: "Details, Itinerary, Roster",
+      body: "Complete Details & Config as needed. Itinerary: on each date assign the trip leader (and morning and evening roll times on a multi-day tour), then add the venue stops and Save day. Roster: book who is coming; for bus passengers set Transport med bag (must not stay not_set).",
     },
     {
       heading: "Overnight hotel rule",

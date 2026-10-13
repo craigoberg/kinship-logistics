@@ -5,7 +5,7 @@ export const manifestActiveRunTopic: HelpTopic = {
   kind: "howto",
   title: "Manifest — Active run and Close Run",
   summary:
-    "Depart and arrive stops, confirm passengers, handle cancel/no-show, log distance, then Close Run with PIN.",
+    "Depart and arrive stops, confirm passengers, handle cancel/no-show, then Close Run with the ending odometer and PIN.",
   keywords: [
     "manifest",
     "depart",
@@ -36,12 +36,12 @@ export const manifestActiveRunTopic: HelpTopic = {
       body: "If a passenger is not travelling, use the cancel / not-travelling flow (bottom sheet). Acknowledge cancelled pickups before Close Run when the summary asks.",
     },
     {
-      heading: "Log leg distance",
-      body: "After a leg, enter the kilometres from the odometer on the numeric pad (half-km steps). Totals feed the Close Run odometer suggestion. There is no GPS estimate.",
+      heading: "Odometer",
+      body: "Record the odometer twice for the whole trip: the reading when the run starts, and the reading when you Close Run. Do not enter a reading at each stop. The number is the dash reading, not the kilometres travelled. Kilometres for the trip are the difference between those two readings.",
     },
     {
       heading: "Close Run",
-      body: "When all legs are done, open Close Run: review the summary, clear open-RED / cancelled-pickup gates, enter ending odometer, sign with operator PIN. Close Run stays blocked if Manifest offline queue still has pending writes — reconnect and flush first.",
+      body: "When all legs are done, open Close Run: review the summary, clear open-RED / cancelled-pickup gates, enter the ending odometer reading from the dash, sign with operator PIN. Close Run stays blocked if Manifest offline queue still has pending writes — reconnect and flush first.",
     },
   ],
 };

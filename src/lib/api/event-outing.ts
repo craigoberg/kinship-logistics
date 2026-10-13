@@ -1289,6 +1289,30 @@ export const TRANSPORT_MED_BAG_MIGRATION = "docs/sql/2026-07-07_event_roster_tra
 
 export const PICKUP_ORDER_MIGRATION = "docs/sql/2026-07-07_event_roster_pickup_order.sql";
 
+/** One drag order for everyone on the trip bus (participants and support). */
+export async function reorderEventTravelOrder(
+  eventId: string,
+  ordered: Array<{ kind: "participant" | "support"; id: string }>,
+): Promise<void> {
+  const results = await Promise.all(
+    ordered.map((row, idx) =>
+      supabase
+        .from(row.kind === "participant" ? "event_roster_bookings" : "event_support_bookings")
+        .update({ pickup_order: (idx + 1) * 10 })
+        .eq("id", row.id)
+        .eq("event_id", eventId),
+    ),
+  );
+  const colErr = results.find((r) => isUndefinedColumnError(r.error));
+  if (colErr?.error) {
+    throw new Error(
+      `Pickup order column is not on the database yet. Run ${PICKUP_ORDER_MIGRATION} in Supabase SQL editor, then retry.`,
+    );
+  }
+  const otherErr = results.find((r) => r.error);
+  if (otherErr?.error) throw otherErr.error;
+}
+
 /** Coordinator drag-order on roster — seeds manifest outbound pickup sequence. */
 export async function reorderEventRosterPickupOrder(
   eventId: string,

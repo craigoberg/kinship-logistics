@@ -32,8 +32,8 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
-import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -55,23 +55,15 @@ import {
   usePatchTripLeg,
   useCancelTrip,
   useManifestPickerEvents,
-  useAssetCurrentOdometer,
   useLookupParameters,
   useReorderTripPickupLegs,
+  useStaffRegistry,
 } from "@/hooks/use-supabase-data";
-import { useOdoStartVsLastWarnKm } from "@/hooks/use-system-parameters";
-import { absDiffExceeds } from "@/lib/manifest-odometer";
-import {
-  CAUTION_CALLOUT_BODY_CLASS,
-  CAUTION_CALLOUT_CLASS,
-  CAUTION_CALLOUT_ICON_CLASS,
-} from "@/lib/ui/caution-callout";
 import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
 import { useFleetDutyGap } from "@/hooks/use-fleet-duty-gap";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
-import { requiredFieldOutline } from "@/lib/ui/required-field";
-import { cn, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
+import { cn, eventSpansDate, formatDate, formatDateWithWeekday, formatTime } from "@/lib/utils";
 import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
 import { useChromeVisibility, useHideChromeOnScrollRef } from "@/hooks/chrome-visibility";
 import { todaysSydneyDayCode } from "@/lib/operational-time";
@@ -102,6 +94,9 @@ import {
   pruneIneligibleReturnTripPassengers,
   applyDriverPickupOrder,
 } from "@/lib/data-store";
+import { classifyWorkforceKind, supportPersonKindLabel } from "@/lib/support-person";
+import { StartingKmConfirm } from "@/components/manifest/starting-km-confirm";
+import { VehicleKnownIssues } from "@/components/manifest/vehicle-known-issues";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 import { CloseRunCard } from "@/components/manifest/close-run-card";
 import { ManifestOfflineBanner } from "@/components/manifest/manifest-offline-banner";
@@ -300,9 +295,6 @@ function staffName(staffId: string): string {
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
   const bindChromeScroll = useHideChromeOnScrollRef<HTMLDivElement>();
   const today = useOperationalTodayIso();
-  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
-  const driverName = staffName(driverStaffId);
-  const startVsLastWarnKm = useOdoStartVsLastWarnKm();
 
   // Global escalation/handshake locks removed — RED issues no longer take
   // over the wizard; the verbal-consultation dialog inside
@@ -334,21 +326,6 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
     }
     return false;
   });
-  const [startOdoWarnAck, setStartOdoWarnAck] = useState(false);
-  /** False until driver edits the pad — keep syncing to latest vehicle estimate. */
-  const [odoDirty, setOdoDirty] = useState(false);
-
-  const { data: assetCurrentOdo = null } = useAssetCurrentOdometer(assetId || null);
-
-  // Prefill / re-sync starting odo to this vehicle's current estimate (BL-096).
-  // Re-applies when current KM updates after a Close Run (e.g. 1000 → 1005)
-  // unless the driver has manually edited the field.
-  useEffect(() => {
-    if (!assetId || assetCurrentOdo == null || odoDirty) return;
-    const next = String(Math.round(assetCurrentOdo));
-    setOdo((prev) => (prev === next ? prev : next));
-    setStartOdoWarnAck(false);
-  }, [assetId, assetCurrentOdo, odoDirty]);
 
   useEffect(() => {
     localStorage.setItem("yada_init_step", step);
@@ -367,19 +344,17 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const selectedAsset = useMemo(() => activeAssets.find((a) => a.id === assetId) ?? null, [activeAssets, assetId]);
 
   const odoNum = odo === "" ? NaN : Number(odo);
-  const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
-  const startDiffersFromLast =
-    assetCurrentOdo != null &&
-    odoReasonable &&
-    absDiffExceeds(odoNum, assetCurrentOdo, startVsLastWarnKm);
-  const startBelowLast =
-    assetCurrentOdo != null && odoReasonable && odoNum < assetCurrentOdo;
 
   const proceedToClearance = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAsset || !odoReasonable) return;
-    if ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck) return;
+    if (!selectedAsset) return;
     setStep("clearance");
+  };
+
+  const acceptClearance = (km: number) => {
+    setOdo(String(km));
+    setClearanceOk(true);
+    setStep("event");
   };
 
   // Multi-device handshake short-circuit branches removed.
@@ -393,7 +368,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Step 1 of 3 — pick today's vehicle and record the starting odometer.
+            Step 1 of 3 — pick today's vehicle. The starting kilometres are confirmed at clearance.
           </p>
           <form onSubmit={proceedToClearance} className="mt-5 space-y-5">
             <div className="grid gap-2">
@@ -414,109 +389,18 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                       icon={<Bus className="h-5 w-5" />}
                       tone={assetId === a.id ? "success" : "neutral"}
                       active={assetId === a.id}
-                      onClick={() => {
-                        setAssetId(a.id);
-                        setOdoDirty(false);
-                        setStartOdoWarnAck(false);
-                        const est =
-                          a.currentOdometerKm != null
-                            ? Math.round(a.currentOdometerKm)
-                            : null;
-                        if (est != null) setOdo(String(est));
-                      }}
+                      onClick={() => setAssetId(a.id)}
                       className="min-h-[4.5rem] py-4"
                     />
                   ))}
                 </div>
               )}
             </div>
-            <div className="grid gap-2">
-              <NumericEntryTrigger
-                id="odo"
-                label="Starting odometer"
-                value={odo}
-                onChange={(v) => {
-                  setOdo(v);
-                  setOdoDirty(true);
-                  setStartOdoWarnAck(false);
-                }}
-                placeholder="Tap to enter starting km"
-                title="Starting odometer"
-                description={
-                  assetCurrentOdo != null
-                    ? `Last known for this vehicle: ${Math.round(assetCurrentOdo)} km. Adjust if the bus was driven (e.g. petrol).`
-                    : "Enter the odometer reading where the bus is parked."
-                }
-                step={1}
-                allowDecimal={false}
-                min={1}
-                unit="km"
-              />
-              {assetCurrentOdo != null && (
-                <p className="text-[11px] text-muted-foreground">
-                  Vehicle current (est.):{" "}
-                  <span className="tabular-nums font-medium">
-                    {Math.round(assetCurrentOdo)} km
-                  </span>
-                  {!odoDirty && odoNum === Math.round(assetCurrentOdo) && " · pre-filled"}
-                </p>
-              )}
-              {(startDiffersFromLast || startBelowLast) && assetCurrentOdo != null && (
-                <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-                    <p className={CAUTION_CALLOUT_BODY_CLASS}>
-                      {startBelowLast
-                        ? `Start (${odoNum} km) is below the last known reading (${Math.round(assetCurrentOdo)} km). Check for a fat-finger — Admin can correct later on Fleet.`
-                        : `Start differs from last known by ${Math.abs(odoNum - assetCurrentOdo)} km (warn at ${startVsLastWarnKm} km). OK if the bus was driven (e.g. petrol).`}
-                    </p>
-                  </div>
-                  <div className="grid gap-2">
-                    <FieldActionButton
-                      variant="primary"
-                      size="sm"
-                      onClick={() => {
-                        setOdo(String(Math.round(assetCurrentOdo)));
-                        setOdoDirty(false);
-                        setStartOdoWarnAck(false);
-                      }}
-                    >
-                      Use {Math.round(assetCurrentOdo)} km (suggested)
-                    </FieldActionButton>
-                    <FieldActionButton
-                      variant={startOdoWarnAck ? "success" : "caution"}
-                      size="sm"
-                      onClick={() => setStartOdoWarnAck(true)}
-                    >
-                      {startOdoWarnAck
-                        ? "Accepted — continue below"
-                        : "Accept this starting reading"}
-                    </FieldActionButton>
-                  </div>
-                </div>
-              )}
-            </div>
             <FieldActionButton
               type="submit"
-              variant={
-                assetId &&
-                odoReasonable &&
-                !((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-                  ? "caution"
-                  : "secondary"
-              }
-              pulse={
-                !!(
-                  assetId &&
-                  odoReasonable &&
-                  !((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-                )
-              }
-              disabled={
-                !assetId ||
-                !odoReasonable ||
-                ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-              }
+              variant={assetId ? "caution" : "secondary"}
+              pulse={!!assetId}
+              disabled={!assetId}
             >
               Continue to Vehicle Clearance →
             </FieldActionButton>
@@ -527,12 +411,8 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
       {step === "clearance" && selectedAsset && (
         <ClearanceGate
           asset={selectedAsset}
-          startOdometer={odoNum}
           dateStr={today}
-          onCleared={() => {
-            setClearanceOk(true);
-            setStep("event");
-          }}
+          onCleared={acceptClearance}
           onBack={() => setStep("vehicle")}
         />
       )}
@@ -548,19 +428,18 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
 
 interface ClearanceGateProps {
   asset: TransportAsset;
-  startOdometer: number;
   dateStr: string;
-  onCleared: () => void;
+  onCleared: (startKm: number) => void;
   onBack: () => void;
 }
 
 function ClearanceGate({
   asset,
-  startOdometer,
   dateStr,
   onCleared,
   onBack,
 }: ClearanceGateProps) {
+  const [logIssue, setLogIssue] = useState(false);
   const existingQ = useQuery<AssetDailyClearance | null>({
     queryKey: ["asset-clearance", asset.id, dateStr],
     queryFn: () => getClearanceForAssetOnDate(asset.id, dateStr),
@@ -605,12 +484,19 @@ function ClearanceGate({
   }
 
   const existing = existingQ.data ?? null;
+  const alreadyCleared =
+    !!existing && (existing.status === "passed" || existing.status === "authorized_override");
 
-  if (
-    existing &&
-    (existing.status === "passed" || existing.status === "authorized_override")
-  ) {
-    return <FastPassBanner asset={asset} clearance={existing} onConfirm={onCleared} onBack={onBack} />;
+  if (alreadyCleared && existing && !logIssue) {
+    return (
+      <FastPassBanner
+        asset={asset}
+        clearance={existing}
+        onConfirm={onCleared}
+        onLogIssue={() => setLogIssue(true)}
+        onBack={onBack}
+      />
+    );
   }
 
   if (existing && existing.status === "failed") {
@@ -638,25 +524,25 @@ function ClearanceGate({
   return (
     <IssueAccumulatorGate
       asset={asset}
-      startOdometer={startOdometer}
       dateStr={dateStr}
+      alreadyCleared={alreadyCleared}
       onPassed={onCleared}
-      onBack={onBack}
+      onBack={alreadyCleared ? () => setLogIssue(false) : onBack}
     />
   );
 }
 
 function IssueAccumulatorGate({
   asset,
-  startOdometer,
   dateStr,
+  alreadyCleared,
   onPassed,
   onBack,
 }: {
   asset: TransportAsset;
-  startOdometer: number;
   dateStr: string;
-  onPassed: () => void;
+  alreadyCleared: boolean;
+  onPassed: (startKm: number) => void;
   onBack: () => void;
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
@@ -665,10 +551,10 @@ function IssueAccumulatorGate({
   return (
     <IssueAccumulatorPanel
       asset={asset}
-      startOdometer={startOdometer}
       dateStr={dateStr}
       checkpoints={[]}
       driverName={driverName}
+      alreadyCleared={alreadyCleared}
       onCleared={onPassed}
       onBack={onBack}
     />
@@ -680,13 +566,16 @@ function FastPassBanner({
   asset,
   clearance,
   onConfirm,
+  onLogIssue,
   onBack,
 }: {
   asset: TransportAsset;
   clearance: AssetDailyClearance;
-  onConfirm: () => void;
+  onConfirm: (startKm: number) => void;
+  onLogIssue: () => void;
   onBack: () => void;
 }) {
+  const [startKm, setStartKm] = useState<number | null>(null);
   const parsed = clearance.createdAt ? new Date(clearance.createdAt) : null;
   const time =
     parsed && !isNaN(parsed.getTime())
@@ -704,14 +593,32 @@ function FastPassBanner({
         <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared for service at{" "}
         <span className="font-mono font-semibold">{time}</span> by <span className="font-semibold">{driver}</span>.
       </p>
-      <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
-        Please inspect for obvious new damage before departing.
+      <div className="mt-4">
+        <VehicleKnownIssues asset={asset} />
+      </div>
+      <FieldActionButton className="mt-3" variant="primary" onClick={onLogIssue}>
+        Log a New Issue
+      </FieldActionButton>
+      <p className="mt-4 text-sm font-medium text-amber-700 dark:text-amber-300">
+        Please inspect for obvious new damage before departing and log any new issues.
       </p>
+      <div className="mt-5">
+        <StartingKmConfirm assetId={asset.id} onReading={setStartKm} />
+      </div>
+      {startKm == null && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Still needed: confirm the starting kilometres
+        </div>
+      )}
       <FieldActionButton
-        className="mt-5"
-        variant="caution"
-        pulse
-        onClick={onConfirm}
+        className="mt-4"
+        variant={startKm != null ? "caution" : "secondary"}
+        pulse={startKm != null}
+        disabled={startKm == null}
+        onClick={() => {
+          if (startKm == null) return;
+          onConfirm(startKm);
+        }}
       >
         Confirm &amp; Roll
       </FieldActionButton>
@@ -1481,8 +1388,8 @@ function EventPickAndStart({
                     {e.title} ·{" "}
                     {todaySessionEventIds.has(e.id) ||
                     eventSpansDate(e.startDate, e.endDate, today)
-                      ? formatDate(today)
-                      : formatDate(e.startDate)}
+                      ? formatDateWithWeekday(today)
+                      : formatDateWithWeekday(e.startDate)}
                     {e.status === "Planning" ? " (Planning — confirm first)" : ""}
                     {e.status === "Closed" ? " (Closed — return transport pending)" : ""}
                   </SelectItem>
@@ -1763,6 +1670,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   });
 
   const isVenueHop = trip.tripKind === "event_venue_hop";
+  /** Pickups to the meeting point, and the run home, are stops. Place-to-place hops are legs. */
+  const movementWord = isVenueHop ? "Leg" : "Stop";
   const hopBoardingReady = useHopBoardingGate(isVenueHop ? trip.id : "");
   const showWalkOn =
     !!trip.eventId && !isVenueHop && activeLeg != null && activeLeg.status !== "en_route";
@@ -1862,7 +1771,6 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   };
   // Empty legs (failed hop seed) must not look "complete".
   const allLegsComplete = legs.length > 0 && activeLeg == null;
-  const totalKm = legs.reduce((sum, l) => sum + (l.loggedDistanceKm ?? 0), 0);
   const { requestCancel, dialog: pickupCancelDialog, isCancelling } = usePickupCancelDialog(
     trip.id,
     { eventId: trip.eventId ?? null },
@@ -2027,6 +1935,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           }
           tripId={trip.id}
           eventId={trip.eventId}
+          movementWord={movementWord}
         />
         {trip.eventId && (
           <WalkOnCompanionsLine
@@ -2049,6 +1958,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       key={leg.id}
       leg={displayLeg ?? leg}
       stopNumber={stopNumber}
+      movementWord={movementWord}
       drag={drag}
       onCancelPickup={requestCancel}
       cancelDisabled={isCancelling || reorderPickups.isPending}
@@ -2073,12 +1983,12 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
               {formatDate(trip.tripDate)}
               {preDepartureOpen
                 ? " · Pre-departure"
-                : ` · Leg ${Math.min(completedCount + 1, legs.length)} of ${legs.length}`}
+                : ` · ${movementWord} ${Math.min(completedCount + 1, legs.length)} of ${legs.length}`}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
-            <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">Start ODO</div>
+            <div className="font-mono text-lg font-bold tabular-nums">{trip.startOdometerKm}</div>
           </div>
         </div>
       </header>
@@ -2111,7 +2021,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         )}
 
         {!preDepartureOpen && completedLegs.map((l) => (
-          <LegRow key={l.id} leg={l} locked />
+          <LegRow key={l.id} leg={l} locked movementWord={movementWord} />
         ))}
 
         {!preDepartureOpen && activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
@@ -2191,7 +2101,9 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
         {legs.length === 0 && (
           <Card className="border-2 border-amber-500/50 bg-amber-500/10 p-4 text-center">
-            <div className="mt-1 text-lg font-bold">No legs on this run</div>
+            <div className="mt-1 text-lg font-bold">
+              {isVenueHop ? "No legs on this run" : "No stops on this run"}
+            </div>
             <div className="text-sm text-muted-foreground">
               {isVenueHop
                 ? "Hop leg failed to create — go back to Step 3 and tap Start Hop again (it will heal)."
@@ -2203,7 +2115,9 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         {!preDepartureOpen && allLegsComplete && (
           <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
             <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
-            <div className="mt-2 text-lg font-bold">All legs completed</div>
+            <div className="mt-2 text-lg font-bold">
+              {isVenueHop ? "All legs completed" : "All stops completed"}
+            </div>
             <div className="text-sm text-muted-foreground">Finalize the shift below.</div>
           </Card>
         )}
@@ -2214,6 +2128,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
             <LegRow
               key={l.id}
               leg={l}
+              movementWord={movementWord}
               onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined}
               onChangeAddress={
                 isPassengerPickupLeg(l) && l.status === "pending"
@@ -2283,7 +2198,13 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
         ) : activeIsEnRoute ? (
           <div className="text-center text-xs text-muted-foreground">
-            Tap Arrive at Stop when you reach the destination.
+            {isVenueHop
+              ? "Tap Arrive when you reach the next place."
+              : "Tap Arrive at Stop when you reach the destination."}
+          </div>
+        ) : isVenueHop ? (
+          <div className="text-center text-xs text-muted-foreground">
+            Depart when everyone who is travelling is aboard.
           </div>
         ) : (
           <div className="text-center text-xs text-muted-foreground">
@@ -2335,12 +2256,32 @@ function ChangeStopAddressButton({
   );
 }
 
+function PassengerKindBadge({ leg }: { leg: TripLeg }) {
+  const { data: staff = [] } = useStaffRegistry();
+  let label: string | null = null;
+  if (leg.toParticipantId) label = "Participant";
+  else if (leg.toCarerId) label = "Carer";
+  else if (leg.toStaffId) {
+    const row = staff.find((s) => s.id === leg.toStaffId);
+    label = row
+      ? supportPersonKindLabel(classifyWorkforceKind(row.personnelType, row.role))
+      : "Staff";
+  }
+  if (!label) return null;
+  return (
+    <Badge variant="outline" className="ml-1.5 shrink-0 align-middle text-[10px] uppercase">
+      {label}
+    </Badge>
+  );
+}
+
 function LegRow({
   leg,
   onCancelPickup,
   onChangeAddress,
   cancelDisabled,
   stopNumber,
+  movementWord,
   drag,
   locked,
 }: {
@@ -2349,12 +2290,14 @@ function LegRow({
   onChangeAddress?: () => void;
   cancelDisabled?: boolean;
   stopNumber?: number;
+  /** Stop on a pickup or home run. Leg on a place-to-place hop. */
+  movementWord: "Stop" | "Leg";
   drag?: PickupDragBind;
   locked?: boolean;
 }) {
   const done = leg.status === "completed";
   const showCancel = !done && !locked && onCancelPickup && canCancelPickupLeg(leg);
-  const label = stopNumber != null ? `Stop ${stopNumber}` : `Leg ${leg.legIndex}`;
+  const label = `${movementWord} ${stopNumber ?? leg.legIndex}`;
 
   return (
     <Card
@@ -2388,7 +2331,10 @@ function LegRow({
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
         {isPassengerPickupLeg(leg) && !done ? (
           <>
-            <div className="truncate font-medium">{leg.toLabel}</div>
+            <div className="flex min-w-0 items-center gap-1.5 font-medium">
+              <span className="truncate">{leg.toLabel}</span>
+              <PassengerKindBadge leg={leg} />
+            </div>
             <div className="truncate text-[11px] text-muted-foreground">
               after {leg.fromLabel}
             </div>
@@ -2411,9 +2357,8 @@ function LegRow({
         )}
       </div>
       {done ? (
-        <div className="flex shrink-0 items-center gap-1 text-xs font-semibold text-green-600">
+        <div className="flex shrink-0 items-center text-green-600">
           <CheckCircle2 className="h-4 w-4" />
-          {leg.loggedDistanceKm != null ? `${leg.loggedDistanceKm.toFixed(1)} km` : "—"}
         </div>
       ) : (
         <div className="flex shrink-0 flex-col items-end gap-1.5">
@@ -2594,6 +2539,7 @@ function ActiveLegCard({
   boardingRequired,
   tripId,
   eventId,
+  movementWord,
 }: {
   leg: TripLeg;
   trip: TransportTrip;
@@ -2608,6 +2554,7 @@ function ActiveLegCard({
   boardingRequired?: boolean;
   tripId: string;
   eventId?: string | null;
+  movementWord: "Stop" | "Leg";
 }) {
   const patch = usePatchTripLeg();
   const [busy, setBusy] = useState(false);
@@ -2670,7 +2617,7 @@ function ActiveLegCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
-              <Navigation className="h-3.5 w-3.5 shrink-0" /> Active leg {leg.legIndex}
+              <Navigation className="h-3.5 w-3.5 shrink-0" /> Active {movementWord.toLowerCase()} {leg.legIndex}
             </div>
             {(onWalkOn || onCancelPickup || onChangeAddress) && leg.status !== "en_route" && (
               <div className="flex shrink-0 items-center gap-1.5">
@@ -2711,7 +2658,10 @@ function ActiveLegCard({
                   </div>
                 )}
                 <div className="text-xs text-slate-400">↓</div>
-                <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
+                <div className="flex min-w-0 items-center gap-1.5 text-lg font-bold leading-tight">
+                  <span className="truncate">{leg.toLabel}</span>
+                  <PassengerKindBadge leg={leg} />
+                </div>
                 {leg.targetAddress && (
                   <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
@@ -2734,13 +2684,14 @@ function ActiveLegCard({
                 disabled={busy}
                 onClick={() => void markStop("end")}
               >
-                Arrive at Stop
+                {movementWord === "Leg" ? "Arrive" : "Arrive at Stop"}
               </FieldActionButton>
             ) : leg.status === "arrived" ? (
               <ArrivedChecklist
                 leg={leg}
                 isReturnRun={isReturnRun}
                 isVenueHopGroup={leg.legKind === "venue_to_venue"}
+                movementWord={movementWord}
                 tripId={tripId}
                 eventId={eventId}
               />
@@ -2755,7 +2706,7 @@ function ActiveLegCard({
                 disabled={busy}
                 onClick={() => void markStop("start")}
               >
-                Depart Stop
+                {movementWord === "Leg" ? "Depart" : "Depart Stop"}
               </FieldActionButton>
             )}
           </div>
@@ -2773,12 +2724,14 @@ function ArrivedChecklist({
   isVenueHopGroup = false,
   tripId,
   eventId,
+  movementWord,
 }: {
   leg: TripLeg;
   isReturnRun?: boolean;
   isVenueHopGroup?: boolean;
   tripId: string;
   eventId?: string | null;
+  movementWord: "Stop" | "Leg";
 }) {
   const queryClient = useQueryClient();
   const patch = usePatchTripLeg();
@@ -2794,7 +2747,6 @@ function ArrivedChecklist({
       }
     }
     return {
-      loggedKm: leg.loggedDistanceKm != null ? String(leg.loggedDistanceKm) : "",
       present: leg.passengerPresent ?? true,
       medStatus: leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
       extraMed: leg.unexpectedMedicationLogged ?? false,
@@ -2807,7 +2759,7 @@ function ArrivedChecklist({
     localStorage.setItem(storageKey, JSON.stringify(formState));
   }, [formState, storageKey]);
 
-  const { loggedKm, present, medStatus, extraMed, extraNotes, unsafeDropVerbalCleared } = formState;
+  const { present, medStatus, extraMed, extraNotes, unsafeDropVerbalCleared } = formState;
   const [noShowArmed, setNoShowArmed] = useState(() => !(formState.present ?? true));
   const [unsafeDropArmed, setUnsafeDropArmed] = useState(() => !(formState.present ?? true));
   const [showNoShow, setShowNoShow] = useState(false);
@@ -2830,11 +2782,7 @@ function ArrivedChecklist({
   /** Unsafe drop on return run requires RED verbal auth before leg can complete. */
   const unsafeDropBlocked = isReturnRun && !present && !unsafeDropVerbalCleared;
 
-  const loggedKmNum = Number(loggedKm);
-  const loggedKmMissing = !loggedKm || Number.isNaN(loggedKmNum);
-
   const blocked =
-    loggedKmMissing ||
     (showMedChecks && !expectedMedSatisfied) ||
     (showExtraMed && extraMed && extraNotes.trim().length < 3) ||
     unsafeDropBlocked;
@@ -2864,7 +2812,6 @@ function ArrivedChecklist({
         tripId,
         patch: {
           status: "completed",
-          loggedDistanceKm: Number(loggedKm),
           passengerPresent: isVenueHopGroup ? true : present,
           medicationHandoverStatus: leg.medicationExpected
             ? medStatus
@@ -2921,7 +2868,7 @@ function ArrivedChecklist({
         });
       }
       localStorage.removeItem(storageKey);
-      toast.success(`Leg ${leg.legIndex} logged`, {
+      toast.success(`${movementWord} ${leg.legIndex} logged`, {
         description: `${leg.fromLabel} → ${leg.toLabel}`,
       });
     } catch {
@@ -2931,33 +2878,14 @@ function ArrivedChecklist({
 
   const confirmLabel = unsafeDropBlocked
     ? "🔴 Complete verbal consultation first"
-    : "Confirm & Log Leg Completion";
+    : `Confirm & log this ${movementWord.toLowerCase()}`;
 
   return (
     <div className="space-y-4 rounded-lg bg-slate-800/60 p-3 text-white">
-      <NumericEntryTrigger
-        id="kmlog"
-        label="Logged leg km"
-        value={loggedKm}
-        onChange={(v) => updateField("loggedKm", v)}
-        placeholder="Tap to enter leg distance"
-        title="Logged leg kilometres"
-        description="From the odometer, in 0.5 km steps. Close Run adds these up."
-        step={0.5}
-        allowDecimal
-        min={0}
-        unit="km"
-        variant="dark"
-        className={requiredFieldOutline(loggedKmMissing)}
-      />
-      {loggedKmMissing && (
-        <p className="text-sm font-medium text-destructive">Enter the kilometres for this leg.</p>
-      )}
-
       {/* ── Passenger confirmation — context-sensitive ──────────────────── */}
       {isVenueHopGroup ? (
         <p className="text-sm text-slate-300">
-          Group arrival at <strong>{leg.toLabel}</strong> — confirm distance and complete this hop.
+          Group arrival at <strong>{leg.toLabel}</strong> — complete this hop.
         </p>
       ) : isReturnRun ? (
         /* Return run: confirm safe handover at front door */
@@ -3055,7 +2983,7 @@ function ArrivedChecklist({
               }
             }}
             ledgerCategory="TRIP"
-            subjectLabel={`${participantName} · Leg ${leg.legIndex} drop-off`}
+            subjectLabel={`${participantName} · ${movementWord} ${leg.legIndex} drop-off`}
             sourceId={leg.id}
             actionType="RED_VERBAL_CONSULTATION"
             titleOverride="RED Verbal Consultation — Unsafe Drop"

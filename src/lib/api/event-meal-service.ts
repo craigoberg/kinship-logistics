@@ -142,11 +142,11 @@ export async function setMealServiceStatus(
   const personName = await lookupParticipantName(row.participant_id);
   const { data: stop } = await supabase
     .from("event_venue_stops")
-    .select("venue_name, meal_slot")
+    .select("label_override, meal_slot")
     .eq("id", row.venue_stop_id)
     .maybeSingle();
   const meal =
-    (stop as { venue_name?: string } | null)?.venue_name?.trim() ||
+    (stop as { label_override?: string } | null)?.label_override?.trim() ||
     ((stop as { meal_slot?: string } | null)?.meal_slot ?? "meal").replace(/_/g, " ");
   const who = personName ?? "client";
   const note = (row.notes ?? "").trim();
@@ -227,16 +227,35 @@ export async function openMealVenueStop(args: {
     .eq("id", args.stopId);
   if (prepErr) throw prepErr;
 
-  await openVenueStop(
-    {
-      id: args.stopId,
-      eventId: args.eventId,
-      sessionDate: args.sessionDate,
-      venueName: null,
-      movementMethod: "on_site",
-    },
-    args.eventDaySessionId,
-  );
+  const { data: phaseRow, error: phaseReadErr } = await supabase
+    .from("event_venue_stops")
+    .select("phase, movement_method")
+    .eq("id", args.stopId)
+    .maybeSingle();
+  if (phaseReadErr) throw phaseReadErr;
+  const alreadyActive =
+    ((phaseRow as { phase?: string | null } | null)?.phase ?? "pending") ===
+    "active";
+  if (!alreadyActive) {
+    const existingMove = (phaseRow as { movement_method?: string | null } | null)
+      ?.movement_method;
+    const movementMethod =
+      existingMove === "walk" ||
+      existingMove === "other" ||
+      existingMove === "on_site"
+        ? existingMove
+        : "on_site";
+    await openVenueStop(
+      {
+        id: args.stopId,
+        eventId: args.eventId,
+        sessionDate: args.sessionDate,
+        venueName: null,
+        movementMethod,
+      },
+      args.eventDaySessionId,
+    );
+  }
 
   await seedMealServiceRoll(
     args.stopId,

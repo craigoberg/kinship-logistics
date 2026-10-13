@@ -42,12 +42,15 @@ export type TransportRosterPerson = {
   staffId: string | null;
   carerId: string | null;
   personKind: RoutePersonKind;
+  /** Shared roster drag order. Bus people on one trip sort by this. */
+  pickupOrder?: number;
 };
 
 export function clientRosterPerson(input: {
   participantId: string;
   name: string;
   address: string | null;
+  pickupOrder?: number;
 }): TransportRosterPerson {
   return {
     id: input.participantId,
@@ -57,6 +60,7 @@ export function clientRosterPerson(input: {
     staffId: null,
     carerId: null,
     personKind: "participant",
+    pickupOrder: input.pickupOrder,
   };
 }
 
@@ -66,6 +70,7 @@ export function supportRosterPerson(input: {
   carerId?: string | null;
   name: string;
   address: string | null;
+  pickupOrder?: number;
 }): TransportRosterPerson {
   const id =
     input.kind === "carer"
@@ -79,6 +84,7 @@ export function supportRosterPerson(input: {
     staffId: input.kind === "carer" ? null : input.staffId ?? null,
     carerId: input.kind === "carer" ? input.carerId ?? null : null,
     personKind: input.kind,
+    pickupOrder: input.pickupOrder,
   };
 }
 

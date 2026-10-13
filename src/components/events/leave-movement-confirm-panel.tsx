@@ -80,7 +80,9 @@ export function LeaveMovementConfirmPanel({
     enabled: method === "bus",
   });
 
-  const hopCard = runs.find((r) => r.kind === "venue_hop" && r.hopIndex === hopIndex);
+  const hopCard =
+    runs.find((r) => r.kind === "venue_hop" && r.toStopId === toStopId) ??
+    runs.find((r) => r.kind === "venue_hop" && r.hopIndex === hopIndex);
   const tripId = hopCard?.tripId;
 
   const { data: manifest = [] } = useQuery({
@@ -143,7 +145,7 @@ export function LeaveMovementConfirmPanel({
         eventId,
         eventDaySessionId: sessionId,
         sessionDate,
-        hopIndex,
+        hopIndex: hopCard?.hopIndex ?? hopIndex,
         fromStopId,
         toStopId,
       }),
