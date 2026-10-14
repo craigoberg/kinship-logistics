@@ -1,6 +1,6 @@
 /**
  * DEV/TEST tools bar — fake Sydney date/time + Simulate offline (BL-082).
- * Single amber row. SIM Time: anyone on DEV, Craig only on TEST.
+ * Single amber row. SIM Time: anyone on your PC, Craig only on the office site.
  * Simulate offline stays on the row only when Craig is signed in.
  */
 import { useSyncExternalStore, useState, useMemo } from "react";

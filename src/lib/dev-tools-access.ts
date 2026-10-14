@@ -2,9 +2,9 @@
  * DEV/TEST tools (simulate offline, Reset Start of Day, Show diag) are
  * presented only when Craig is the signed-in person. Production builds never
  * show them (`IS_TEST_BUILD`). Manifest Cancel / Reset Trip is separate: every
- * signed-in driver sees it, on Test and on production.
+ * signed-in driver sees it, on your PC and on the office site.
  *
- * SIM Time is separate: anyone on a DEV build, Craig only on TEST.
+ * SIM Time is separate: anyone on your PC (DEV), Craig only on the office site.
  */
 import { useEffect, useState } from "react";
 import { ACTIVE_PROFILE_EVENT } from "@/lib/active-profile-event";
@@ -23,7 +23,7 @@ export function canUseDevTools(): boolean {
   return profile.fullName.trim().toLowerCase() === "craig oberg";
 }
 
-/** DEV: any operator. TEST: Craig only. Production: never. */
+/** Your PC: any operator. Office site: Craig only. */
 export function canUseSimTime(): boolean {
   if (!IS_TEST_BUILD) return false;
   if (typeof window === "undefined") return false;
