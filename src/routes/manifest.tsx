@@ -32,7 +32,8 @@ import {
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -95,7 +96,6 @@ import {
   applyDriverPickupOrder,
   applyTerminalChainLabels,
 } from "@/lib/data-store";
-import { classifyWorkforceKind, supportPersonKindLabel } from "@/lib/support-person";
 import { StartingKmConfirm } from "@/components/manifest/starting-km-confirm";
 import { VehicleKnownIssues } from "@/components/manifest/vehicle-known-issues";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
@@ -1717,6 +1717,9 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         name: l.toLabel,
         address: l.targetAddress,
         legId: l.id,
+        participantId: l.toParticipantId,
+        staffId: l.toStaffId,
+        carerId: l.toCarerId,
       }));
   }, [isReturnRun, legs]);
 
@@ -2285,21 +2288,16 @@ function ChangeStopAddressButton({
 
 function PassengerKindBadge({ leg }: { leg: TripLeg }) {
   const { data: staff = [] } = useStaffRegistry();
-  let label: string | null = null;
-  if (leg.toParticipantId) label = "Participant";
-  else if (leg.toCarerId) label = "Carer";
-  else if (leg.toStaffId) {
-    const row = staff.find((s) => s.id === leg.toStaffId);
-    label = row
-      ? supportPersonKindLabel(classifyWorkforceKind(row.personnelType, row.role))
-      : "Staff";
-  }
-  if (!label) return null;
-  return (
-    <Badge variant="outline" className="ml-1.5 shrink-0 align-middle text-[10px] uppercase">
-      {label}
-    </Badge>
-  );
+  const row = leg.toStaffId ? staff.find((s) => s.id === leg.toStaffId) : undefined;
+  const kind = manifestPersonKind({
+    participantId: leg.toParticipantId,
+    carerId: leg.toCarerId,
+    staffId: leg.toStaffId,
+    personnelType: row?.personnelType,
+    role: row?.role,
+  });
+  if (!kind) return null;
+  return <PersonKindBadge kind={kind} className="ml-1.5 align-middle" />;
 }
 
 function LegRow({
@@ -2416,6 +2414,9 @@ interface ReturnPassenger {
   name: string;
   address: string | null;
   legId: string;
+  participantId: string | null;
+  staffId: string | null;
+  carerId: string | null;
 }
 
 /**
@@ -2434,6 +2435,7 @@ function ReturnBoardingRoll({
   onAllBoarded: () => void;
   onChangeAddress?: (legId: string) => void;
 }) {
+  const { data: staff = [] } = useStaffRegistry();
   const boardingKey = `return_boarding_${tripId}`;
 
   const [boarded, setBoarded] = useState<Set<string>>(() => {
@@ -2497,6 +2499,14 @@ function ReturnBoardingRoll({
       <div className="mt-3 space-y-2">
         {passengers.map((p) => {
           const on = boarded.has(p.id);
+          const staffRow = p.staffId ? staff.find((s) => s.id === p.staffId) : undefined;
+          const kind = manifestPersonKind({
+            participantId: p.participantId,
+            staffId: p.staffId,
+            carerId: p.carerId,
+            personnelType: staffRow?.personnelType,
+            role: staffRow?.role,
+          });
           return (
             <div
               key={p.id}
@@ -2513,7 +2523,10 @@ function ReturnBoardingRoll({
                 className="flex min-w-0 flex-1 touch-manipulation select-none items-center justify-between gap-2 py-1 text-left"
               >
                 <span className="min-w-0">
-                  <span className="block truncate text-base font-semibold">{p.name}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-base font-semibold">{p.name}</span>
+                    {kind ? <PersonKindBadge kind={kind} /> : null}
+                  </span>
                   {p.address && (
                     <span className="mt-0.5 block truncate text-[11px] text-slate-300">{p.address}</span>
                   )}

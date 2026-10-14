@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { RotateCcw, UserX, Users } from "lucide-react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { ClientTime } from "@/components/ui/client-time";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
@@ -30,7 +31,6 @@ import {
   type EventSupportAttendanceRow,
 } from "@/lib/api/event-support";
 import { eventDeliverStatusKey } from "@/lib/api/event-deliver-status";
-import { supportPersonKindLabel } from "@/lib/support-person";
 import type { FloorMethodPickerOption, FloorTransportSelection } from "@/lib/ui/floor-transport-method";
 import {
   DutyOnDutyConfirmSheet,
@@ -301,8 +301,6 @@ function SupportFloorRow({
     () => BUS_SELF_OPTIONS(selection.kind === "bus" ? selection.busRunCode : storedCode, arriving),
     [arriving, selection.busRunCode, selection.kind, storedCode],
   );
-  const kind = supportPersonKindLabel(row.personKind);
-
   function applyMethod(next: FloorTransportSelection) {
     setOverride(next);
     if (!arriving || !isIn) return;
@@ -357,9 +355,7 @@ function SupportFloorRow({
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{row.displayName}</span>
-              <Badge variant="outline" className="text-[10px] uppercase">
-                {kind}
-              </Badge>
+              <PersonKindBadge kind={row.personKind} />
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Planned {methodLabel(plannedBus ? "bus" : "self")}
               </Badge>
@@ -393,15 +389,10 @@ function SupportFloorRow({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{row.displayName}</span>
-              <Badge
-                variant="outline"
-                className={cn(
-                  "text-[10px] uppercase",
-                  arriving && isIn && "border-success-foreground/40 text-success-foreground",
-                )}
-              >
-                {kind}
-              </Badge>
+              <PersonKindBadge
+                kind={row.personKind}
+                surface={arriving && isIn ? "light" : "theme"}
+              />
               {isAbsent && (
                 <Badge variant="destructive" className="text-[10px]">
                   Absent

@@ -31,6 +31,7 @@ import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { RunLiveStatusBadge } from "@/components/attendance/run-live-status-badge";
 import { AddSupportToRunDialog } from "@/components/participants/add-support-to-run-dialog";
 import { cn } from "@/lib/utils";
+import { PersonKindText } from "@/components/people/person-kind-badge";
 import { StopAddressSheet } from "@/components/address/stop-address-picker";
 import {
   personKeyToOwner,
@@ -288,7 +289,12 @@ export function RunRoutePanel() {
                       <div className="min-w-0 flex-1">
                         <div className="font-medium">
                           {stop.name}
-                          {stop.roleLabel ? (
+                          {stop.personKind ? (
+                            <PersonKindText
+                              kind={stop.personKind}
+                              className="ml-2 text-xs font-normal"
+                            />
+                          ) : stop.roleLabel ? (
                             <span className="ml-2 text-xs font-normal text-muted-foreground">
                               {stop.roleLabel}
                             </span>

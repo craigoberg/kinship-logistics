@@ -45,12 +45,12 @@ import {
 import { EVENT_SUPPORT_KEY } from "@/lib/api/event-support";
 import {
   knownPersonComesAsGuest,
-  knownPersonHatLine,
   knownPersonStatusNote,
   listKnownPeople,
   matchKnownPeople,
   type KnownPerson,
 } from "@/lib/api/known-people";
+import { KnownPersonKindLine } from "@/components/people/person-kind-badge";
 
 export function WalkOnCompanionsLine({
   eventId,
@@ -125,7 +125,7 @@ export function WalkOnStopIconButton({
   );
 }
 
-/** Event Deliver Check-In — quiet footer under the roll, not a floor CTA. */
+/** Event Deliver Check-In — sits on the count line, right side. Not a floor commit. */
 export function WalkOnFloorButton({
   label,
   className,
@@ -136,18 +136,18 @@ export function WalkOnFloorButton({
   onClick: () => void;
 }) {
   return (
-    <div className="flex justify-center pt-1">
-      <Button
-        type="button"
-        size="sm"
-        variant="outline"
-        onClick={onClick}
-        className={cn("h-8 gap-1.5 text-xs text-muted-foreground", className)}
-      >
-        <UserRoundPlus className="h-3.5 w-3.5" />
-        {label}
-      </Button>
-    </div>
+    <Button
+      type="button"
+      variant="outline"
+      onClick={onClick}
+      className={cn(
+        "h-10 shrink-0 gap-1.5 border-amber-500/70 bg-amber-500/15 font-semibold text-amber-950 hover:bg-amber-500/25 dark:border-amber-400/70 dark:bg-amber-500/20 dark:text-amber-50",
+        className,
+      )}
+    >
+      <UserRoundPlus className="h-4 w-4" />
+      {label}
+    </Button>
   );
 }
 
@@ -508,7 +508,11 @@ export function WalkOnPersonModal({
                       onClick={() => useKnownPerson(person)}
                     >
                       <span className="font-medium">{person.name}</span>
-                      <span className="text-xs text-muted-foreground">{knownPersonHatLine(person)}</span>
+                      <KnownPersonKindLine
+                        hats={person.hats}
+                        guest={person.participantKind === "guest"}
+                        detail={person.detail}
+                      />
                       {note ? (
                         <span className="text-xs font-medium text-amber-800">{note}</span>
                       ) : null}

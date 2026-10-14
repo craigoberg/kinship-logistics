@@ -12,6 +12,7 @@ import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
+import { listVenueTypes, venueTypeLabel } from "@/lib/api/venue-types";
 import { parseIsoDateLocal, toIsoDateString, formatDate } from "@/lib/utils";
 import {
   DEFAULT_EVENING_ROLL_CALL,
@@ -110,9 +111,11 @@ export interface EventVenueStop {
   movement_method?: string | null;
   opened_at?: string | null;
   closed_at?: string | null;
-  /** Joined from venues table (not always present). */
+  /** Joined from venues table (not always present). The code, used for overnight. */
   venue_name?: string | null;
   venue_type?: string | null;
+  /** Type name copied onto this line when it was added. A later rename does not change it. */
+  venue_type_label?: string | null;
   venue_street_address?: string | null;
 }
 
@@ -147,6 +150,7 @@ export async function listEventVenueStops(eventId: string): Promise<EventVenueSt
     ...r,
     venue_name: (r as { venues?: { name?: string } | null }).venues?.name ?? null,
     venue_type: (r as { venues?: { venue_type?: string } | null }).venues?.venue_type ?? null,
+    venue_type_label: (r as { venue_type_label?: string | null }).venue_type_label ?? null,
     venue_street_address:
       (r as { venues?: { street_address?: string | null } | null }).venues?.street_address ?? null,
   })) as EventVenueStop[];
@@ -446,6 +450,7 @@ export async function upsertEventVenueStop(
     throw new Error("Meal slot is required (Breakfast / Lunch / …).");
   }
 
+  const typeLabel = await labelForVenueAtInsert(input.venue_id);
   const payload: Record<string, unknown> = {
     event_id: input.event_id,
     session_date: input.session_date,
@@ -465,6 +470,7 @@ export async function upsertEventVenueStop(
     movement_method:
       kind === "meal" || kind === "medication_round" ? "on_site" : null,
   };
+  if (!input.id && typeLabel) payload.venue_type_label = typeLabel;
 
   if (input.id) {
     const { data, error } = await supabase
@@ -486,7 +492,20 @@ export async function upsertEventVenueStop(
     return stop;
   }
 
-  const created = await insertEventVenueStop(payload, input.stop_order);
+  let created: EventVenueStop;
+  try {
+    created = await insertEventVenueStop(payload, input.stop_order);
+  } catch (err) {
+    if (
+      payload.venue_type_label &&
+      isSchemaMismatchError(err as { code?: string; message?: string })
+    ) {
+      delete payload.venue_type_label;
+      created = await insertEventVenueStop(payload, input.stop_order);
+    } else {
+      throw err;
+    }
+  }
   void recordOfficeChangeBestEffort({
     action: "created",
     entity: "itinerary",
@@ -496,6 +515,22 @@ export async function upsertEventVenueStop(
     summary: `Added itinerary stop on ${input.session_date}`,
   });
   return created;
+}
+
+/** Current type name, copied onto a new itinerary line. Existing lines are left alone. */
+async function labelForVenueAtInsert(
+  venueId: string | null | undefined,
+): Promise<string | null> {
+  if (!venueId) return null;
+  const { data, error } = await supabase
+    .from("venues")
+    .select("venue_type")
+    .eq("id", venueId)
+    .maybeSingle();
+  if (error || !data) return null;
+  const catalog = await listVenueTypes();
+  const label = venueTypeLabel(catalog.types, (data as { venue_type?: string }).venue_type);
+  return label || null;
 }
 
 export async function deleteEventVenueStop(id: string): Promise<void> {

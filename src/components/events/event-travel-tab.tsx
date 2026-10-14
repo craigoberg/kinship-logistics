@@ -6,8 +6,9 @@ import { useCallback, useMemo, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Bus, GripVertical, Pencil, Pill } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import type { PersonKindChip } from "@/lib/ui/person-kind-chip";
 import {
   useCarersRegistry,
   useEventBookings,
@@ -28,7 +29,6 @@ import {
   setEventSupportTravel,
   type EventSupportBooking,
 } from "@/lib/api/event-support";
-import { supportPersonKindLabel } from "@/lib/support-person";
 import {
   TRANSPORT_MED_BAG_LABELS,
   updateBookingTransportModes,
@@ -334,7 +334,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
 
   const personRow = (
     name: string,
-    role: string,
+    kind: PersonKindChip,
     subtitle: string | null,
     outbound: "bus" | "self",
     ret: "bus" | "self",
@@ -373,9 +373,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       <div className="min-w-[11rem] flex-1 pt-1">
         <div className="flex flex-wrap items-center gap-1.5">
           <span className="truncate text-sm font-medium">{name}</span>
-          <Badge variant="outline" className="text-[10px] uppercase">
-            {role}
-          </Badge>
+          <PersonKindBadge kind={kind} />
           {extra}
         </div>
         {subtitle ? <p className="truncate text-xs text-muted-foreground">{subtitle}</p> : null}
@@ -421,7 +419,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     const home = legAddress(b.tripReturnAddressOverride, meeting || profile);
     return personRow(
       b.participantName,
-      b.isGuestBooking ? "Guest" : "Participant",
+      b.isGuestBooking ? "guest" : "participant",
       null,
       outbound,
       ret,
@@ -478,7 +476,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
   ) =>
     personRow(
       s.displayName,
-      supportPersonKindLabel(s.personKind),
+      s.personKind,
       null,
       s.outboundTransportMode,
       s.returnTransportMode,
@@ -537,7 +535,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     };
     return personRow(
       c.name,
-      "Carer",
+      "carer",
       `Carer for ${c.booking.participantName}`,
       c.outbound,
       c.ret,

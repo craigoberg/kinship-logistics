@@ -24,6 +24,9 @@ import {
 import { isAppOnline } from "@/lib/simulated-offline";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { supabase } from "@/integrations/supabase/client";
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
 
 const manifestKey = (tripId: string) => ["event-bus-manifest", tripId] as const;
 
@@ -174,6 +177,15 @@ function HopBoardingRow({
   onToggle: () => void;
   onNotTravelling: () => void;
 }) {
+  const { data: staff = [] } = useStaffRegistry();
+  const staffRow = row.staff_id ? staff.find((s) => s.id === row.staff_id) : undefined;
+  const kind = manifestPersonKind({
+    participantId: row.participant_id,
+    carerId: row.carer_id,
+    staffId: row.staff_id,
+    personnelType: staffRow?.personnelType,
+    role: staffRow?.role,
+  });
   const name =
     row.participant_name ??
     (row.carer_id ? "Carer" : row.staff_id ? "Staff" : "Passenger");
@@ -196,9 +208,7 @@ function HopBoardingRow({
       >
         <span className="font-semibold">
           {name}
-          <span className="ml-2 text-[10px] font-bold uppercase text-muted-foreground">
-            {row.participant_id ? "Participant" : "Non-participant"}
-          </span>
+          {kind ? <PersonKindBadge kind={kind} className="ml-2 align-middle" /> : null}
         </span>
         <span
           className={cn(

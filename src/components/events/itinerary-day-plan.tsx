@@ -58,6 +58,8 @@ interface Props {
   isFirstDay: boolean;
   editOpen: boolean;
   onEditOpenChange: (open: boolean) => void;
+  /** Stops and issue tools. Leader edit stays mounted either way. */
+  showDetails: boolean;
   /** Leader just chosen, before the day list refreshes. */
   onLeaderPicked: (staffId: string) => void;
   onSaved: () => void;
@@ -71,6 +73,7 @@ export function ItineraryDayPlan({
   isFirstDay,
   editOpen,
   onEditOpenChange,
+  showDetails,
   onLeaderPicked,
   onSaved,
 }: Props) {
@@ -150,6 +153,7 @@ export function ItineraryDayPlan({
   });
 
   if (!session) {
+    if (!showDetails) return null;
     return (
       <p className="border-b px-4 py-3 text-xs text-muted-foreground">
         Preparing this day so a trip leader can be assigned.
@@ -163,8 +167,8 @@ export function ItineraryDayPlan({
   const showPicker = !savedLeaderId;
 
   return (
-    <div className="border-b bg-muted/10">
-      {(floorLive || floorClosed || showPicker) && (
+    <div className={showDetails ? "border-b bg-muted/10" : undefined}>
+      {showDetails && (floorLive || floorClosed || showPicker) && (
         <div className="space-y-3 px-4 py-3">
           {(floorLive || floorClosed) && (
             <p className="text-xs text-muted-foreground">
@@ -235,6 +239,7 @@ export function ItineraryDayPlan({
         </div>
       )}
 
+      {showDetails && (
       <div className={cn("space-y-3 px-4", showPicker || floorLive || floorClosed ? "pb-3" : "py-3")}>
         <Button
           size="sm"
@@ -247,6 +252,7 @@ export function ItineraryDayPlan({
         </Button>
         <EventIssuesCard eventId={event.id} eventDaySessionId={session.id} />
       </div>
+      )}
 
       <LeaderEditDialog
         open={editOpen}

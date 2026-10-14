@@ -2,8 +2,8 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { AlertTriangle, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { Input } from "@/components/ui/input";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import {
@@ -280,20 +280,10 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           <td key="participant" className="px-4 py-2">
             <div className="flex flex-nowrap items-center gap-1.5 font-medium">
               <span className="whitespace-nowrap">{b.participantName}</span>
-              <Badge
-                variant="outline"
-                className="shrink-0 align-middle text-[10px] uppercase"
-              >
-                Participant
-              </Badge>
-              {b.isGuestBooking && (
-                <Badge
-                  variant="outline"
-                  className="ml-1.5 align-middle text-[10px] uppercase"
-                >
-                  Guest
-                </Badge>
-              )}
+              <PersonKindBadge
+                kind={b.isGuestBooking ? "guest" : "participant"}
+                className="align-middle"
+              />
               {b.isWalkOn && (
                 <WalkOnBadge className="ml-1.5 align-middle" />
               )}
@@ -447,9 +437,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                       <div className="flex flex-wrap items-center gap-1.5">
                         <HeartHandshake className="h-3.5 w-3.5 text-info" />
                         <span className="font-medium">{name}</span>
-                        <Badge variant="outline" className="text-[10px] uppercase">
-                          Carer
-                        </Badge>
+                        <PersonKindBadge kind="carer" />
                       </div>
                       <p className="text-xs text-muted-foreground">Carer for {b.participantName}</p>
                     </div>
@@ -546,9 +534,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           <td className="px-4 py-2">
             <div className="flex flex-nowrap items-center gap-1.5 font-medium">
               <span className="whitespace-nowrap">{s.displayName}</span>
-              <Badge variant="outline" className="shrink-0 align-middle text-[10px] uppercase">
-                {supportPersonKindLabel(s.personKind)}
-              </Badge>
+              <PersonKindBadge kind={s.personKind} className="align-middle" />
             </div>
             {s.notes ? (
               <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">“{s.notes}”</div>

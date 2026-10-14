@@ -17,6 +17,8 @@ import {
   ChevronDown,
   ChevronUp,
   Clock,
+  BedDouble,
+  Flag,
   Footprints,
   Loader2,
   MapPin,
@@ -43,6 +45,7 @@ import {
 import { cn, formatTime } from "@/lib/utils";
 import { sortByParticipantSurname } from "@/lib/ui/sort-participants";
 import {
+  isAccommodationVenueType,
   isMealStop,
   isMedicationStop,
   isVenueTransportStop,
@@ -94,10 +97,19 @@ import {
 import type { MealOpenPayload } from "@/lib/meal-open";
 import {
   getEventAttendanceRow,
+  listEventAttendanceRoll,
   listFloorAbsentNotes,
   markEventAttendanceAbsent,
   reinstateLeftTripEverywhere,
 } from "@/lib/api/event-attendance";
+import {
+  EVENT_SUPPORT_ROLL_KEY,
+  listEventSupportAttendance,
+} from "@/lib/api/event-support";
+import {
+  PERSON_KIND_CHIP_CLASS,
+  type PersonKindChip,
+} from "@/lib/ui/person-kind-chip";
 import {
   formatActivitySkipDisplay,
   formatActivitySkipShortLabel,
@@ -113,6 +125,7 @@ import {
 } from "@/lib/api/event-deliver-status";
 import { listEventDayIssues } from "@/lib/api/site-issues";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
+import { stopVenueTypeName } from "@/lib/api/venue-types";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -125,6 +138,77 @@ interface Props {
 
 const stopsKey = (eventId: string) => ["event-venue-stops", eventId] as const;
 const participantsKey = () => ["participants"] as const;
+
+function OvernightChip({ className }: { className?: string }) {
+  return (
+    <Badge className={cn("gap-0.5 bg-indigo-600 text-[10px] text-white", className)}>
+      <BedDouble className="h-3 w-3" />
+      Overnight
+    </Badge>
+  );
+}
+
+function ActivityChip() {
+  return (
+    <Badge className="gap-0.5 bg-cyan-700 text-[10px] text-white">
+      <Flag className="h-3 w-3" />
+      Activity
+    </Badge>
+  );
+}
+
+function MeetingPointChip({ name }: { name?: string }) {
+  return (
+    <Badge className="max-w-full gap-1 bg-sky-700 text-[10px] text-white">
+      <MapPin className="h-3 w-3 shrink-0" />
+      <span className="truncate">{name ? `Meeting point · ${name}` : "Meeting point"}</span>
+    </Badge>
+  );
+}
+
+function PartyCountChip({ kind, count }: { kind: PersonKindChip; count: number }) {
+  const word =
+    kind === "participant"
+      ? count === 1
+        ? "Participant"
+        : "Participants"
+      : kind === "carer"
+        ? count === 1
+          ? "Carer"
+          : "Carers"
+        : kind === "volunteer"
+          ? count === 1
+            ? "Volunteer"
+            : "Volunteers"
+          : "Staff";
+  return (
+    <Badge
+      variant="outline"
+      className={cn("gap-1 text-[10px] font-semibold", PERSON_KIND_CHIP_CLASS[kind])}
+    >
+      <span className="tabular-nums">{count}</span>
+      {word}
+    </Badge>
+  );
+}
+
+function ProgrammePartyBar({
+  meetingPoint,
+  counts,
+}: {
+  meetingPoint: string;
+  counts: { participants: number; carers: number; volunteers: number; staff: number };
+}) {
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <MeetingPointChip name={meetingPoint} />
+      <PartyCountChip kind="participant" count={counts.participants} />
+      <PartyCountChip kind="carer" count={counts.carers} />
+      <PartyCountChip kind="volunteer" count={counts.volunteers} />
+      <PartyCountChip kind="staff" count={counts.staff} />
+    </div>
+  );
+}
 
 // ─── Main component ───────────────────────────────────────────────────────────
 
@@ -164,6 +248,26 @@ export function ActivityLoopTab({
     [participants],
   );
 
+  const { data: attendanceRoll = [] } = useQuery({
+    queryKey: ["event-attendance-log", eventDaySessionId],
+    queryFn: () => listEventAttendanceRoll(eventDaySessionId),
+    staleTime: 20_000,
+  });
+  const { data: supportRoll = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_ROLL_KEY(eventDaySessionId),
+    queryFn: () => listEventSupportAttendance(eventDaySessionId),
+    staleTime: 20_000,
+  });
+  const partyCounts = useMemo(() => {
+    const onSite = supportRoll.filter((r) => r.status === "checked_in");
+    return {
+      participants: attendanceRoll.filter((r) => r.status === "checked_in").length,
+      carers: onSite.filter((r) => r.personKind === "carer").length,
+      volunteers: onSite.filter((r) => r.personKind === "volunteer").length,
+      staff: onSite.filter((r) => r.personKind === "staff").length,
+    };
+  }, [attendanceRoll, supportRoll]);
+
   const { data: groupStatus } = useQuery({
     queryKey: eventDeliverStatusKey(eventDaySessionId),
     queryFn: () =>
@@ -192,6 +296,15 @@ export function ActivityLoopTab({
     () => buildProgrammeHops(todayStops, overnightWake),
     [todayStops, overnightWake],
   );
+
+  const meetingPointName = useMemo(() => {
+    const place =
+      hotelOmitted && wakeOriginStop
+        ? wakeOriginStop
+        : (todayStops.find((s) => isVenueTransportStop(s)) ?? todayStops[0] ?? null);
+    if (!place) return overnightWake.label || "Meeting point";
+    return place.label_override?.trim() || place.venue_name?.trim() || "Meeting point";
+  }, [hotelOmitted, wakeOriginStop, todayStops, overnightWake.label]);
 
   /** Where the group is: the open activity, else the latest one they finished. */
   const hereStop = useMemo(() => {
@@ -257,6 +370,7 @@ export function ActivityLoopTab({
             activities. Use the Morning Roll tab.
           </div>
         )}
+        <ProgrammePartyBar meetingPoint={meetingPointName} counts={partyCounts} />
         <StopCard
           key={todayStops[0]!.id}
           stop={todayStops[0]!}
@@ -300,6 +414,8 @@ export function ActivityLoopTab({
           activities or releasing the bus. Use the Morning Roll tab.
         </div>
       )}
+
+      <ProgrammePartyBar meetingPoint={meetingPointName} counts={partyCounts} />
 
       {/* Hotel omitted from today's itinerary — still the boarding / leave origin */}
       {hotelOmitted && wakeOriginStop && (
@@ -478,9 +594,7 @@ function WakeLeaveCard({
           </div>
           <div className="min-w-0 flex-1">
             <span className="truncate font-semibold text-sm">{wakeLabel}</span>
-            <Badge className="ml-2 bg-slate-600 text-white text-[10px]">
-              Overnight / wake
-            </Badge>
+            <OvernightChip className="ml-2" />
           </div>
         </div>
       </div>
@@ -504,9 +618,7 @@ function WakeLeaveCard({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <span className="truncate font-semibold text-sm">{wakeLabel}</span>
-            <Badge className="bg-slate-600 text-white text-[10px]">
-              Overnight / wake
-            </Badge>
+            <OvernightChip />
           </div>
           <p className="text-[11px] text-muted-foreground">{hereLine}</p>
         </div>
@@ -572,6 +684,8 @@ function StopCard({
   const meal = isMealStop(stop);
   const med = isMedicationStop(stop);
   const venue = !meal && !med;
+  const overnight = venue && isAccommodationVenueType(stop.venue_type);
+  const activity = venue && !overnight;
 
   const presenceQ = useQuery({
     queryKey: ["trip-med-presence", eventDaySessionId],
@@ -975,6 +1089,9 @@ function StopCard({
                   Meds
                 </Badge>
               )}
+              {isOrigin && <MeetingPointChip />}
+              {overnight && <OvernightChip />}
+              {activity && <ActivityChip />}
               {flashRed && (
                 <Badge className="bg-red-600 text-[10px] uppercase text-white">
                   Overdue
@@ -1010,9 +1127,9 @@ function StopCard({
                 Arrived — open to run this activity
               </p>
             ) : (
-              stop.venue_type &&
+              stopVenueTypeName(stop) &&
               venue && (
-                <p className="text-[11px] text-muted-foreground">{stop.venue_type}</p>
+                <p className="text-[11px] text-muted-foreground">{stopVenueTypeName(stop)}</p>
               )
             )}
             {declaredOpen && phase === "pending" && stop.opened_at && (

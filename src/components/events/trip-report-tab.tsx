@@ -35,6 +35,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindText } from "@/components/people/person-kind-badge";
+import { personKindFromLabel } from "@/lib/ui/person-kind-chip";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
@@ -290,7 +292,13 @@ export function TripReportDocument({ report }: { report: TripReport }) {
                   {report.support.map((s) => (
                     <tr key={`${s.displayName}-${s.roleLabel}`} className="border-b last:border-0">
                       <td className="py-1.5 pr-4 font-medium">{s.displayName}</td>
-                      <td className="py-1.5 pr-4">{s.roleLabel}</td>
+                      <td className="py-1.5 pr-4">
+                        {personKindFromLabel(s.roleLabel) ? (
+                          <PersonKindText kind={personKindFromLabel(s.roleLabel)!} />
+                        ) : (
+                          s.roleLabel
+                        )}
+                      </td>
                       <td className="py-1.5 pr-4">
                         {s.outboundTransportMode === "bus" ? "Bus" : "Self"}
                       </td>

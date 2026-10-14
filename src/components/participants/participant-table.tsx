@@ -4,6 +4,7 @@ import { Link } from "@tanstack/react-router";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { Button } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
 import { officeClickRowClass } from "@/lib/ui/office-click-row";
@@ -144,9 +145,7 @@ export function ParticipantTable({
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="truncate font-semibold">{p.fullName}</span>
                     {p.participantKind === "guest" && (
-                      <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
-                        Guest
-                      </Badge>
+                      <PersonKindBadge kind="guest" />
                     )}
                     <GuestContext guest={guestContext?.get(p.id) ?? null} />
                     {p.participantKind === "guest" && p.archivedAt && (
@@ -222,9 +221,7 @@ export function ParticipantTable({
                     <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate">{p.fullName}</span>
                       {p.participantKind === "guest" && (
-                        <Badge variant="outline" className="shrink-0 text-[10px] uppercase">
-                          Guest
-                        </Badge>
+                        <PersonKindBadge kind="guest" />
                       )}
                       <GuestContext guest={guestContext?.get(p.id) ?? null} />
                       {p.participantKind === "guest" && p.archivedAt && (

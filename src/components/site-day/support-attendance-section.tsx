@@ -56,7 +56,7 @@ import {
   type ArrivalMethod,
   type DepartureVector,
 } from "@/lib/api/client-attendance";
-import { supportPersonKindLabel } from "@/lib/support-person";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import type { AttendanceRollMode } from "./attendance-roll-panel";
 import { AdjustExpectedTimeModal } from "./adjust-expected-time-modal";
 import { FloorRollOverdueBadges } from "./floor-roll-overdue-badges";
@@ -329,6 +329,8 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
               ? /\[FLOOR ABSENT:([A-Z_]+)\]\s*([^—(]+)/.exec(row.notes)
               : null;
             const absentLabel = absentMatch?.[2]?.trim() ?? "Absent today";
+            const kindSurface =
+              hiVisDone || isYellow || isAbsent || (isOut && !departureDone) ? "light" : "theme";
             const subTextCls = hiVisDone
               ? "text-success-foreground/90"
               : isYellow || isAbsent || (isOut && !departureDone)
@@ -426,6 +428,7 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                       >
                         {row.displayName}
                       </span>
+                      <PersonKindBadge kind={row.personKind} surface={kindSurface} />
                       {!isIn && !isOut && !isAbsent && (
                         <Badge
                           variant="outline"
@@ -473,10 +476,9 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                       )}
                     </div>
                     <div className={cn("mt-0.5 text-xs", subTextCls)}>
-                      {supportPersonKindLabel(row.personKind)}
                       {row.expectedArrivalAt && (
                         <>
-                          {" · Expected "}
+                          {"Expected "}
                           <ClientTime
                             iso={row.expectedArrivalAt}
                             options={{ hour: "2-digit", minute: "2-digit" }}
@@ -485,7 +487,7 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                       )}
                       {row.expectedDepartureAt && (
                         <>
-                          {" → "}
+                          {row.expectedArrivalAt ? " → " : "Leave "}
                           <ClientTime
                             iso={row.expectedDepartureAt}
                             options={{ hour: "2-digit", minute: "2-digit" }}
@@ -610,9 +612,7 @@ export function SupportAttendanceSection({ sessionId, mode = "all" }: Props) {
                 <span className="font-medium line-through decoration-slate-500/60">
                   {row.displayName}
                 </span>
-                <span className="ml-2 text-xs text-slate-700">
-                  {supportPersonKindLabel(row.personKind)}
-                </span>
+                <PersonKindBadge kind={row.personKind} surface="light" className="ml-2" />
                 {row.checkedOutAt && (
                   <span className="ml-2 text-xs text-slate-700">
                     Out{" "}

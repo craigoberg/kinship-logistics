@@ -10,10 +10,11 @@
 import { supabase } from "@/integrations/supabase/client";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { resolveStaffIdWithFallback, verifyCoordinatorPin } from "@/lib/data-store";
-import { formatDate } from "@/lib/utils";
+import { formatDate, isoDateOnly, todayLocalIso } from "@/lib/utils";
 import { writeToLedgerOrThrow, writeToLedger } from "@/lib/api/ledger";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
+import { syncVenueTypeRequirements } from "@/lib/api/venue-requirements";
 
 // ============================================================================
 // Types
@@ -40,6 +41,8 @@ export interface Venue {
   created_by_staff_id: string | null;
   created_at: string;
   updated_at: string;
+  /** A baseline signed before this time must be signed again. */
+  baseline_voided_at?: string | null;
 }
 
 export interface VenueTemplateField {
@@ -50,6 +53,11 @@ export interface VenueTemplateField {
   options_json: string[] | null;
   is_mandatory: boolean;
   is_system_core: boolean;
+  requirement_code?: string | null;
+  is_current?: boolean | null;
+  /** This venue: true = met, false = not here, null = not answered yet. */
+  assessment_met?: boolean | null;
+  assessment_reason?: string | null;
   sort_order: number;
   created_at: string;
   updated_at: string;
@@ -135,6 +143,7 @@ export async function upsertVenue(input: UpsertVenueInput): Promise<Venue> {
   };
 
   if (input.id) {
+    const previous = await getVenue(input.id);
     const { data, error } = await supabase
       .from("venues")
       .update(payload)
@@ -142,6 +151,11 @@ export async function upsertVenue(input: UpsertVenueInput): Promise<Venue> {
       .select("*")
       .single();
     if (error) throw error;
+    if (previous.venue_type !== payload.venue_type) {
+      await syncVenueTypeRequirements((data as Venue).id, payload.venue_type, {
+        voidBaseline: true,
+      }).catch(() => null);
+    }
     await writeToLedger({
       staff_id: actor,
       category: "CENTRE",
@@ -161,10 +175,15 @@ export async function upsertVenue(input: UpsertVenueInput): Promise<Venue> {
     .single();
   if (error) throw error;
 
-  // Seed mandatory core safety template fields (§12.2.2).
-  await supabase.rpc("seed_venue_mandatory_safety_fields", {
-    p_venue_id: (data as Venue).id,
-  });
+  const synced = await syncVenueTypeRequirements(
+    (data as Venue).id,
+    payload.venue_type,
+  ).catch(() => false);
+  if (!synced) {
+    await supabase.rpc("seed_venue_mandatory_safety_fields", {
+      p_venue_id: (data as Venue).id,
+    });
+  }
 
   // Auto-create annual compliance asset (best-effort).
   await ensureVenueComplianceAsset(data as Venue).catch(() => null);
@@ -192,6 +211,14 @@ export async function archiveVenue(id: string): Promise<void> {
     .eq("id", id);
   if (error) throw error;
 
+  await supabase
+    .from("compliance_assets")
+    .update({ status: "archived" })
+    .eq("subject_table", "venues")
+    .eq("subject_id", id)
+    .eq("type", "venue_annual_review")
+    .eq("status", "active");
+
   await writeToLedger({
     staff_id: actor,
     category: "CENTRE",
@@ -200,6 +227,55 @@ export async function archiveVenue(id: string): Promise<void> {
     gps_lat: null,
     gps_lng: null,
     metadata: { venue_id: id },
+  });
+}
+
+/** Bring an archived venue back. If the annual review date has passed, the old baseline does not count. */
+export async function restoreVenue(id: string): Promise<void> {
+  const allowed = await canManageSystemParameters();
+  if (!allowed) throw new Error("Only Managers can restore venues.");
+
+  const actor = await resolveStaffIdWithFallback();
+  const today = todayLocalIso();
+  const { data: asset } = await supabase
+    .from("compliance_assets")
+    .select("id, expiry_date")
+    .eq("subject_table", "venues")
+    .eq("subject_id", id)
+    .eq("type", "venue_annual_review")
+    .order("expiry_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  const expiry = isoDateOnly((asset as { expiry_date?: string | null } | null)?.expiry_date);
+  const pastDue = !expiry || expiry < today;
+
+  const { error } = await supabase
+    .from("venues")
+    .update({
+      status: "active",
+      ...(pastDue ? { baseline_voided_at: operationalNowIso() } : {}),
+    })
+    .eq("id", id);
+  if (error) throw error;
+
+  if (asset && (asset as { id: string }).id) {
+    await supabase
+      .from("compliance_assets")
+      .update({
+        status: "active",
+        ...(pastDue ? { expiry_date: today, next_action_at: null } : {}),
+      })
+      .eq("id", (asset as { id: string }).id);
+  }
+
+  await writeToLedger({
+    staff_id: actor,
+    category: "CENTRE",
+    severity: "INFO",
+    action_type: "VENUE_RESTORED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: { venue_id: id, baseline_reset: pastDue },
   });
 }
 
@@ -247,6 +323,47 @@ export async function addVenueTemplateField(
     .single();
   if (error) throw error;
   return data as VenueTemplateField;
+}
+
+/** Yes or No for this venue, plus why a required check is not met. */
+export async function saveVenueFieldAssessment(
+  fieldId: string,
+  met: boolean,
+  reason: string | null,
+): Promise<void> {
+  const allowed = await canManageSystemParameters();
+  if (!allowed) throw new Error("Only Managers can record venue checks.");
+  const nextReason = met ? null : reason?.trim() || null;
+  const { data: before, error: readErr } = await supabase
+    .from("venue_template_fields")
+    .select("venue_id, assessment_met, assessment_reason")
+    .eq("id", fieldId)
+    .single();
+  if (readErr) throw new Error(readErr.message);
+  const row = before as {
+    venue_id: string;
+    assessment_met: boolean | null;
+    assessment_reason: string | null;
+  };
+  if (row.assessment_met === met && (row.assessment_reason ?? null) === nextReason) return;
+
+  const { error } = await supabase
+    .from("venue_template_fields")
+    .update({
+      assessment_met: met,
+      assessment_reason: nextReason,
+    })
+    .eq("id", fieldId);
+  if (error) {
+    if (String(error.message).toLowerCase().includes("assessment_met")) {
+      throw new Error("Run docs/sql/2026-10-14_venue_type_requirements.sql again, then hard refresh.");
+    }
+    throw new Error(error.message);
+  }
+  await supabase
+    .from("venues")
+    .update({ baseline_voided_at: operationalNowIso() })
+    .eq("id", row.venue_id);
 }
 
 export async function updateVenueTemplateField(
@@ -326,6 +443,8 @@ export async function cloneVenue(sourceVenueId: string, newName: string): Promis
       .insert(fieldRows);
     if (fErr) throw fErr;
   }
+
+  await syncVenueTypeRequirements((newVenue as Venue).id, source.venue_type).catch(() => null);
 
   // Auto-create annual compliance asset for the clone (best-effort).
   await ensureVenueComplianceAsset(newVenue as Venue).catch(() => null);
@@ -539,7 +658,8 @@ export interface VenueUsability {
  *      defer window (next_action_at > today, max 1 month from expiry).
  */
 export async function getVenueUsability(venueId: string): Promise<VenueUsability> {
-  const [signoff, complianceRows] = await Promise.all([
+  const [venueRow, signoff, complianceRows] = await Promise.all([
+    supabase.from("venues").select("status, baseline_voided_at").eq("id", venueId).maybeSingle(),
     getLatestBaselineSignoff(venueId),
     supabase
       .from("compliance_assets")
@@ -552,12 +672,26 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
       .limit(1),
   ]);
 
-  if (!signoff) {
+  const venueMeta = venueRow.data as { status?: string; baseline_voided_at?: string | null } | null;
+  if (venueMeta?.status === "archived") {
     return {
       canUse: false,
       reason: "no_baseline",
-      message:
-        "This venue has no completed safety baseline sign-off. Go to Admin → Venues to complete the sign-off before using this venue for an outing.",
+      message: "This venue is archived. Restore it and sign a baseline before using it on a trip.",
+      latestSignoff: signoff,
+    };
+  }
+
+  const voidedAt = venueMeta?.baseline_voided_at ?? null;
+  const baselineStale = !!signoff && !!voidedAt && signoff.signed_off_at < voidedAt;
+
+  if (!signoff || baselineStale) {
+    return {
+      canUse: false,
+      reason: "no_baseline",
+      message: baselineStale
+        ? "This venue's type or requirements changed, or it came back after the review date. Sign a new baseline before using it on a trip."
+        : "This venue has no completed safety baseline sign-off. Go to Admin → Venues to complete the sign-off before using this venue for an outing.",
       latestSignoff: null,
     };
   }
@@ -573,10 +707,8 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
     return { canUse: true, reason: "ok", message: "", latestSignoff: signoff };
   }
 
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-  const expiry = new Date(asset.expiry_date);
-  expiry.setHours(0, 0, 0, 0);
+  const today = todayLocalIso();
+  const expiry = isoDateOnly(asset.expiry_date);
 
   if (expiry >= today) {
     return { canUse: true, reason: "ok", message: "", latestSignoff: signoff };
@@ -584,8 +716,7 @@ export async function getVenueUsability(venueId: string): Promise<VenueUsability
 
   // Compliance is overdue — check for active deferral.
   if (asset.next_action_at) {
-    const deferUntil = new Date(asset.next_action_at);
-    deferUntil.setHours(0, 0, 0, 0);
+    const deferUntil = isoDateOnly(asset.next_action_at);
     if (deferUntil >= today) {
       return {
         canUse: true,

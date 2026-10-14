@@ -19,6 +19,7 @@ import { TransportCodeBadge } from "@/components/transport/schedule-transport-pi
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
 import { officeClickRowClass } from "@/lib/ui/office-click-row";
+import { PersonKindText } from "@/components/people/person-kind-badge";
 import {
   groupRunPlanningPeople,
   listRunPlanningRows,
@@ -184,7 +185,9 @@ export function RunPlanningPeopleTable({
                 >
                   <td className="px-3 py-2">
                     <div className="font-medium">{p.name}</div>
-                    <div className="text-xs text-muted-foreground">{p.roleLabel}</div>
+                    <div className="text-xs">
+                      <PersonKindText kind={p.personKind} className="text-xs" />
+                    </div>
                   </td>
                   {boardDays.map((d) => {
                     const cell = p.cells[d.code];

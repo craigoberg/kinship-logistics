@@ -14,6 +14,7 @@ import {
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import { PersonKindText } from "@/components/people/person-kind-badge";
 import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
 import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
@@ -163,7 +164,12 @@ function FloorLeaderHandoverDialog({
                 <MobileFieldButton
                   key={row.staffId}
                   title={row.displayName}
-                  subtitle={row.personKind === "volunteer" ? "Volunteer" : "Staff"}
+                  subtitle={
+                    <PersonKindText
+                      kind={row.personKind === "volunteer" ? "volunteer" : "staff"}
+                      className="text-xs font-normal"
+                    />
+                  }
                   tone="success"
                   active={selectedId === row.staffId}
                   onClick={() => setSelectedId(row.staffId)}

@@ -50,10 +50,10 @@ import {
   addKnownPersonToEvent,
   listKnownPeople,
   matchKnownPeople,
-  knownPersonHatLine,
   knownPersonStatusNote,
 } from "@/lib/api/known-people";
 import { EVENT_SUPPORT_KEY } from "@/lib/api/event-support";
+import { KnownPersonKindLine } from "@/components/people/person-kind-badge";
 
 interface Props {
   open: boolean;
@@ -436,7 +436,11 @@ export function AddGuestBookingModal({
                     <div key={person.key} className="flex items-center justify-between gap-2">
                       <div className="text-sm">
                         <div className="font-medium">{person.name}</div>
-                        <div className="text-xs text-muted-foreground">{knownPersonHatLine(person)}</div>
+                        <KnownPersonKindLine
+                          hats={person.hats}
+                          guest={person.participantKind === "guest"}
+                          detail={person.detail}
+                        />
                         {knownPersonStatusNote(person) ? (
                           <div className="text-xs font-medium text-amber-800">
                             {knownPersonStatusNote(person)}

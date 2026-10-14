@@ -27,6 +27,8 @@ import {
   listWalkOnBookings,
   walkOnParticipantIds,
 } from "@/lib/api/event-walk-on";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import type { PersonKindChip } from "@/lib/ui/person-kind-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
@@ -406,19 +408,25 @@ export function EventArrivalRollPanel({
         {isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
-      <div className="flex flex-wrap gap-3 text-xs font-medium">
-        <span>
-          {checkedIn}/{total} checked in
-        </span>
-        {pending > 0 && (
-          <span className="text-amber-600">{pending} still expected</span>
-        )}
-        {absent > 0 && (
-          <span className="text-destructive">{absent} absent</span>
-        )}
-        {checkedOut > 0 && (
-          <span className="text-muted-foreground">{checkedOut} handed to transport</span>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-3 text-xs font-medium">
+          <span>
+            {checkedIn}/{total} checked in
+          </span>
+          {pending > 0 && (
+            <span className="text-amber-600">{pending} still expected</span>
+          )}
+          {absent > 0 && (
+            <span className="text-destructive">{absent} absent</span>
+          )}
+          {checkedOut > 0 && (
+            <span className="text-muted-foreground">{checkedOut} handed to transport</span>
+          )}
+        </div>
+        <WalkOnFloorButton
+          label="Someone extra arrived"
+          onClick={() => setWalkOnOpen(true)}
+        />
       </div>
 
       {/* ── Arrival gate banner ── */}
@@ -475,6 +483,11 @@ export function EventArrivalRollPanel({
                   plannedOutboundByParticipant.get(row.participantId) ?? null
                 }
                 isWalkOn={walkOnIds.has(row.participantId)}
+                personKind={
+                  participants.find((p) => p.id === row.participantId)?.participantKind === "guest"
+                    ? "guest"
+                    : "participant"
+                }
                 clinicalChips={clinicalFlagsFromParticipant(
                   participants.find((p) => p.id === row.participantId) ?? {},
                 )}
@@ -519,10 +532,6 @@ export function EventArrivalRollPanel({
 
       <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
 
-      <WalkOnFloorButton
-        label="Someone extra arrived"
-        onClick={() => setWalkOnOpen(true)}
-      />
       <WalkOnPersonModal
         open={walkOnOpen}
         onOpenChange={setWalkOnOpen}
@@ -550,6 +559,7 @@ function RollCard({
   busRunOpts,
   plannedOutbound,
   isWalkOn = false,
+  personKind = "participant",
   clinicalChips = [],
   onUndoCheckIn,
   onCheckout,
@@ -570,6 +580,7 @@ function RollCard({
   busRunOpts: ReturnType<typeof eventBusRunOptions>;
   plannedOutbound: { mode: "bus" | "self"; busRunCode: string | null } | null;
   isWalkOn?: boolean;
+  personKind?: PersonKindChip;
   clinicalChips?: import("@/lib/clinical-flags").ClinicalFlagChip[];
   onUndoCheckIn: () => void;
   onCheckout: (t: ReturnTransport, busRunCode?: string | null) => void;
@@ -686,6 +697,8 @@ function RollCard({
     );
   }
 
+  const kindSurface = isIn || arrivalUrgency === "warning" ? "light" : "theme";
+
   return (
     <li
       className={cn(
@@ -715,6 +728,7 @@ function RollCard({
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{name}</span>
+              <PersonKindBadge kind={personKind} surface={kindSurface} />
               {isWalkOn && <WalkOnBadge />}
               <Badge variant="outline" className="text-[10px] text-muted-foreground">
                 Planned {plannedLabel}
@@ -757,6 +771,7 @@ function RollCard({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1">
                 <span className="font-medium text-sm leading-tight">{name}</span>
+                <PersonKindBadge kind={personKind} surface={kindSurface} />
                 {isWalkOn && <WalkOnBadge />}
                 {absentDayLabel && (
                   <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">

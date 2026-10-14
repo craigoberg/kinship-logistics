@@ -2,10 +2,10 @@
  * Venues Management workspace — GUARDRAILS §12.2
  *
  * Tabs:
- *   Registry  — list all venues; create / edit / archive / clone
- *   [selected venue] — template fields + baseline sign-off history
+ *   Venues — list; expand a row for template, baseline, and compliance
+ *   Venue types — names offered on the venue form
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -13,8 +13,8 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Copy,
+  ChevronDown,
   ChevronRight,
-  FolderOpen,
   Loader2,
   Pencil,
   Plus,
@@ -52,6 +52,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -83,6 +84,7 @@ import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import {
   addVenueTemplateField,
   archiveVenue,
+  restoreVenue,
   batchLatestBaselineSignoffs,
   cloneVenue,
   deleteVenueTemplateField,
@@ -92,6 +94,7 @@ import {
   listVenues,
   submitBaselineSignoff,
   updateVenueTemplateField,
+  saveVenueFieldAssessment,
   upsertVenue,
   type AnswerType,
   type BaselineSignoffAnswer,
@@ -102,18 +105,9 @@ import {
   type VenueUseReason,
 } from "@/lib/api/venues";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
-
-const VENUE_TYPE_LABELS: Record<string, string> = {
-  general: "General",
-  park: "Park / outdoor",
-  hotel: "Hotel / accommodation",
-  cinema: "Cinema / theatre",
-  museum: "Museum / gallery",
-  sports: "Sports / recreation",
-  restaurant: "Restaurant / café",
-  shopping: "Shopping centre",
-  club: "Club / social venue",
-};
+import { BUILTIN_VENUE_TYPES, venueTypeLabel } from "@/lib/api/venue-types";
+import { ensureDueVenueBaselineIssues, syncVenueTypeRequirements } from "@/lib/api/venue-requirements";
+import { useVenueTypes, VenueTypesPanel } from "@/components/admin/venue-types-panel";
 
 // ─── Query keys ────────────────────────────────────────────────────────────
 
@@ -185,7 +179,7 @@ export function VenuesWorkspace() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"active" | "all">("active");
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Venue | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Create / edit
   const [editing, setEditing] = useState<Venue | "new" | null>(null);
@@ -199,6 +193,13 @@ export function VenuesWorkspace() {
     queryFn: () => listVenues(),
     staleTime: 60_000,
   });
+  const typesQ = useVenueTypes();
+  const typeName = (code: string) => venueTypeLabel(typesQ.data?.types, code);
+
+  useEffect(() => {
+    if (venues.length === 0) return;
+    void ensureDueVenueBaselineIssues(venues);
+  }, [venues]);
 
   const activeVenueIds = useMemo(
     () => venues.filter((v) => v.status === "active").map((v) => v.id),
@@ -220,10 +221,11 @@ export function VenuesWorkspace() {
     return rows.filter(
       (v) =>
         v.name.toLowerCase().includes(q) ||
+        typeName(v.venue_type).toLowerCase().includes(q) ||
         (v.venue_type ?? "").toLowerCase().includes(q) ||
         (v.street_address ?? "").toLowerCase().includes(q),
     );
-  }, [venues, statusFilter, search]);
+  }, [venues, statusFilter, search, typesQ.data?.types]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: VENUES_KEY });
@@ -236,21 +238,34 @@ export function VenuesWorkspace() {
       toast.success("Venue archived.");
       invalidate();
       setArchiveTarget(null);
-      if (selected?.id === archiveTarget?.id) setSelected(null);
+      if (expandedId === archiveTarget?.id) setExpandedId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const restoreMut = useMutation({
+    mutationFn: (id: string) => restoreVenue(id),
+    onSuccess: () => {
+      toast.success("Venue restored. If the review date has passed, sign a new baseline.");
+      invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div>
-        <p className="text-sm text-muted-foreground">
-          Managed destination registry for out-of-centre outings (§12.2). Venue safety
-          templates and baseline sign-offs are stored here — not per-event.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Managed destination registry for out-of-centre outings (§12.2). Venue safety
+        templates and baseline sign-offs are stored here — not per-event.
+      </p>
 
+      <Tabs defaultValue="venues" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="venues">Venues</TabsTrigger>
+          <TabsTrigger value="types">Venue types</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="venues" className="space-y-4">
       {/* Toolbar — match Vendors */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[200px] flex-1">
@@ -307,9 +322,9 @@ export function VenuesWorkspace() {
               </TableRow>
             ) : (
               visible.map((v) => (
+                <Fragment key={v.id}>
                 <TableRow
-                  key={v.id}
-                  className={cn(officeClickRowClass, selected?.id === v.id && "bg-muted/50")}
+                  className={cn(officeClickRowClass, expandedId === v.id && "bg-muted/50")}
                   onClick={() => setEditing(v)}
                 >
                   <TableCell>
@@ -321,7 +336,7 @@ export function VenuesWorkspace() {
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {VENUE_TYPE_LABELS[v.venue_type] ?? v.venue_type}
+                    {typeName(v.venue_type)}
                   </TableCell>
                   <TableCell>{riskBadge(v.risk_tier)}</TableCell>
                   <TableCell>
@@ -339,10 +354,14 @@ export function VenuesWorkspace() {
                       <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                         <IconActionButton
                           className="h-8 w-8"
-                          onClick={() => setSelected(v)}
-                          tooltip="Open template & baseline"
+                          onClick={() => setExpandedId((id) => (id === v.id ? null : v.id))}
+                          tooltip={expandedId === v.id ? "Hide baseline" : "Show baseline"}
                         >
-                          <FolderOpen className="h-4 w-4" />
+                          {expandedId === v.id ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
                         </IconActionButton>
                         <IconActionButton
                           className="h-8 w-8"
@@ -351,7 +370,7 @@ export function VenuesWorkspace() {
                         >
                           <Copy className="h-4 w-4" />
                         </IconActionButton>
-                        {v.status === "active" && (
+                        {v.status === "active" ? (
                           <IconActionButton
                             className="h-8 w-8"
                             onClick={() => setArchiveTarget(v)}
@@ -359,41 +378,40 @@ export function VenuesWorkspace() {
                           >
                             <Archive className="h-4 w-4" />
                           </IconActionButton>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={restoreMut.isPending}
+                            onClick={() => restoreMut.mutate(v.id)}
+                          >
+                            Restore
+                          </Button>
                         )}
                       </div>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
                     </div>
                   </TableCell>
                 </TableRow>
+                {expandedId === v.id && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="bg-card p-0">
+                      <VenueDetailPanel
+                        venue={v}
+                        embedded
+                        onClose={() => setExpandedId(null)}
+                        onEdit={() => setEditing(v)}
+                        onInvalidate={invalidate}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+                </Fragment>
               ))
             )}
           </TableBody>
         </Table>
       </div>
-
-      {/* Venue detail side-panel */}
-      {selected && (
-        <VenueDetailPanel
-          venue={selected}
-          onClose={() => setSelected(null)}
-          onEdit={() => setEditing(selected)}
-          onInvalidate={invalidate}
-        />
-      )}
-
-      {/* Create / Edit sheet */}
-      {editing !== null && (
-        <VenueFormSheet
-          open
-          venue={editing === "new" ? null : editing}
-          onOpenChange={(open) => !open && setEditing(null)}
-          onSaved={(v) => {
-            invalidate();
-            setEditing(null);
-            setSelected(v);
-          }}
-        />
-      )}
 
       {/* Clone dialog */}
       {cloneSource && (
@@ -404,7 +422,7 @@ export function VenuesWorkspace() {
           onCloned={(v) => {
             invalidate();
             setCloneSource(null);
-            setSelected(v);
+            setExpandedId(v.id);
           }}
         />
       )}
@@ -438,6 +456,30 @@ export function VenuesWorkspace() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </TabsContent>
+
+        <TabsContent value="types">
+          <VenueTypesPanel
+            venues={venues}
+            catalog={typesQ.data}
+            loading={typesQ.isLoading}
+            onEditVenue={(v) => setEditing(v)}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {editing !== null && (
+        <VenueFormSheet
+          open
+          venue={editing === "new" ? null : editing}
+          onOpenChange={(open) => !open && setEditing(null)}
+          onSaved={(v) => {
+            invalidate();
+            setEditing(null);
+            setExpandedId(v.id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -446,13 +488,16 @@ export function VenuesWorkspace() {
 
 interface DetailProps {
   venue: Venue;
+  /** Inside the venue row. The row already shows the name. */
+  embedded?: boolean;
   onClose: () => void;
   onEdit: () => void;
   onInvalidate: () => void;
 }
 
-function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps) {
+function VenueDetailPanel({ venue, embedded = false, onClose, onEdit, onInvalidate }: DetailProps) {
   const qc = useQueryClient();
+  const typesQ = useVenueTypes();
   const [panelTab, setPanelTab] = useState<"template" | "signoffs" | "compliance">("template");
   const [signoffOpen, setSignoffOpen] = useState(false);
 
@@ -469,17 +514,31 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
   });
 
   const latestSignoff = signoffs[0] ?? null;
+  const currentFields = fields.filter((f) => f.is_current !== false).filter((f, i, all) => {
+    if (!f.requirement_code) return true;
+    return all.findIndex((other) => other.requirement_code === f.requirement_code) === i;
+  });
+
+  useEffect(() => {
+    let cancel = false;
+    void syncVenueTypeRequirements(venue.id, venue.venue_type).then((ok) => {
+      if (!cancel && ok) void qc.invalidateQueries({ queryKey: venueFieldsKey(venue.id) });
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [venue.id, venue.venue_type, qc]);
 
   return (
-    <div className="mt-2 rounded-lg border bg-card">
-      {/* Panel header */}
+    <div className={embedded ? "border-t bg-card" : "mt-2 rounded-lg border bg-card"}>
+      {!embedded && (
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
         <div className="space-y-0.5">
           <h3 className="font-semibold text-sm">{venue.name}</h3>
           <div className="flex flex-wrap items-center gap-1.5">
             {statusBadge(venue.status)}
             {riskBadge(venue.risk_tier)}
-            <span className="text-xs text-muted-foreground capitalize">{venue.venue_type}</span>
+            <span className="text-xs text-muted-foreground">{venueTypeLabel(typesQ.data?.types, venue.venue_type)}</span>
             {venue.max_safe_group_size && (
               <span className="text-xs text-muted-foreground">
                 Max group: {venue.max_safe_group_size}
@@ -500,6 +559,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
           </Button>
         </div>
       </div>
+      )}
 
       {/* Baseline status */}
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5 bg-muted/30">
@@ -548,7 +608,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
       {panelTab === "template" && (
         <TemplateFieldsEditor
           venue={venue}
-          fields={fields}
+          fields={currentFields}
           isLoading={fieldsLoading}
           onInvalidate={onInvalidate}
         />
@@ -571,7 +631,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
         <BaselineSignoffDialog
           open
           venue={venue}
-          fields={fields}
+          fields={currentFields}
           onOpenChange={(open) => !open && setSignoffOpen(false)}
           onSigned={() => {
             void qc.invalidateQueries({ queryKey: venueSignoffsKey(venue.id) });
@@ -581,6 +641,39 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
           }}
         />
       )}
+    </div>
+  );
+}
+
+function VenueAssessmentNote({
+  field,
+  onSaved,
+}: {
+  field: VenueTemplateField;
+  onSaved: () => void;
+}) {
+  const [text, setText] = useState(field.assessment_reason ?? "");
+  useEffect(() => {
+    setText(field.assessment_reason ?? "");
+  }, [field.id, field.assessment_reason]);
+
+  return (
+    <div className="mt-2 max-w-md">
+      <CharacterCountedInput
+        label={field.is_mandatory ? "Why this is still all right" : "Note (optional)"}
+        value={text}
+        onValueChange={setText}
+        onBlur={() => {
+          if (text.trim() === (field.assessment_reason ?? "").trim()) return;
+          void saveVenueFieldAssessment(field.id, false, text)
+            .then(onSaved)
+            .catch((err: Error) => toast.error(err.message));
+        }}
+        minChars={field.is_mandatory ? 8 : 0}
+        maxChars={200}
+        required={!!field.is_mandatory}
+        placeholder="Who this affects, and why the visit can still go ahead"
+      />
     </div>
   );
 }
@@ -651,8 +744,8 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          These fields appear in every baseline sign-off and per-event reconfirmation for this
-          venue. System core fields (§12.2.2) cannot be removed.
+          Mark each check for this venue. No, on a required check, needs a reason why the visit
+          can still go ahead. Then sign the baseline.
         </p>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -665,22 +758,50 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
       ) : (
         <div className="divide-y rounded-lg border text-sm">
           {fields.map((f) => (
-            <div key={f.id} className="flex items-start gap-3 px-3 py-2.5">
-              <div className="flex-1 min-w-0">
+            <div key={f.id} className="flex flex-wrap items-start gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
                 <span className="font-medium">{f.prompt}</span>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="text-[10px] capitalize">
-                    {f.answer_type.replace("_", " ")}
-                  </Badge>
                   {f.is_mandatory && (
                     <Badge variant="outline" className="text-[10px]">Required</Badge>
                   )}
-                  {f.is_system_core && (
-                    <Badge variant="secondary" className="text-[10px]">Core</Badge>
+                  {f.requirement_code && (
+                    <Badge variant="secondary" className="text-[10px]">From type</Badge>
                   )}
                 </div>
+                {f.assessment_met === false && (f.requirement_code || f.answer_type === "yes_no") && (
+                  <VenueAssessmentNote field={f} onSaved={invalidate} />
+                )}
               </div>
-              {!f.is_system_core && (
+              {(f.requirement_code || f.answer_type === "yes_no") && (
+              <div className="flex items-center gap-1">
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={f.assessment_met === true ? "default" : "outline"}
+                  onClick={() => {
+                    void saveVenueFieldAssessment(f.id, true, null)
+                      .then(() => invalidate())
+                      .catch((err: Error) => toast.error(err.message));
+                  }}
+                >
+                  Yes
+                </Button>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant={f.assessment_met === false ? "default" : "outline"}
+                  onClick={() => {
+                    void saveVenueFieldAssessment(f.id, false, f.assessment_reason ?? "")
+                      .then(() => invalidate())
+                      .catch((err: Error) => toast.error(err.message));
+                  }}
+                >
+                  No
+                </Button>
+              </div>
+              )}
+              {!f.is_system_core && !f.requirement_code && (
                 <IconActionButton
                   className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                   tooltip="Remove template field"
@@ -826,6 +947,7 @@ interface VenueFormSheetProps {
 
 function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetProps) {
   const isEdit = !!venue;
+  const typesQ = useVenueTypes();
 
   const [name, setName] = useState("");
   const [venueType, setVenueType] = useState("general");
@@ -858,6 +980,18 @@ function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetPr
       setRiskTier("medium");
     }
   }, [open, venue]);
+
+  const catalogTypes = typesQ.data?.types ?? BUILTIN_VENUE_TYPES;
+  const typeOptions = catalogTypes.filter(
+    (t) => t.status === "active" || t.code === venueType,
+  );
+
+  useEffect(() => {
+    if (!open || isEdit) return;
+    const active = catalogTypes.filter((t) => t.status === "active");
+    if (active.some((t) => t.code === venueType)) return;
+    if (active[0]) setVenueType(active[0].code);
+  }, [open, isEdit, catalogTypes, venueType]);
 
   const mut = useMutation({
     mutationFn: () =>
@@ -916,19 +1050,9 @@ function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetPr
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[
-                  ["general", "General"],
-                  ["park", "Park / outdoor"],
-                  ["hotel", "Hotel / accommodation"],
-                  ["cinema", "Cinema / theatre"],
-                  ["museum", "Museum / gallery"],
-                  ["sports", "Sports / recreation"],
-                  ["restaurant", "Restaurant / café"],
-                  ["shopping", "Shopping centre"],
-                  ["club", "Club / social venue"],
-                ].map(([v, l]) => (
-                  <SelectItem key={v} value={v}>{l}</SelectItem>
-                ))}
+                {typeOptions.map((t) => (
+                    <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
@@ -1153,10 +1277,12 @@ function BaselineSignoffDialog({
   }, [open]);
 
   const mandatoryFields = fields.filter((f) => f.is_mandatory);
-  const allMandatoryAnswered = mandatoryFields.every((f) => {
-    const a = answers[f.id] ?? "";
-    return a.trim().length > 0;
-  });
+  const allMandatoryAnswered = mandatoryFields.every((f) =>
+    requirementAnswerOk(f, rowAnswer(f, answers[f.id] ?? "")),
+  );
+  const missingOnTemplate = fields.filter(
+    (f) => f.is_mandatory && usesRowAnswer(f) && !requirementAnswerOk(f, rowAnswer(f, "")),
+  );
   const evidenceOk = evidence.trim().length >= MIN_EVIDENCE;
   const pinOk = managerPinVerified;
   const canSubmit = allMandatoryAnswered && evidenceOk && pinOk && !busy;
@@ -1167,8 +1293,8 @@ function BaselineSignoffDialog({
     setPinError(null);
     try {
       const answerRows: BaselineSignoffAnswer[] = fields
-        .filter((f) => answers[f.id])
-        .map((f) => ({ field_id: f.id, answer_text: answers[f.id] }));
+        .map((f) => ({ field_id: f.id, answer_text: rowAnswer(f, answers[f.id] ?? "") }))
+        .filter((row) => row.answer_text.trim().length > 0);
 
       await submitBaselineSignoff({
         venue_id: venue.id,
@@ -1201,7 +1327,7 @@ function BaselineSignoffDialog({
         <DialogHeader>
           <DialogTitle>Venue safety baseline sign-off</DialogTitle>
           <DialogDescription>
-            Complete all mandatory checklist fields, then sign with your Manager PIN. This
+            Yes and No are already on the safety template. Sign with your Manager PIN. This
             record is immutable once saved.
           </DialogDescription>
         </DialogHeader>
@@ -1213,7 +1339,25 @@ function BaselineSignoffDialog({
             </p>
           ) : (
             <>
-              {fields.map((f) => (
+              {missingOnTemplate.length > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  Still to answer on the template: {missingOnTemplate.map((f) => f.prompt).join(", ")}
+                </div>
+              )}
+              <ul className="space-y-1 text-sm">
+                {fields.filter(usesRowAnswer).map((f) => (
+                  <li key={f.id}>
+                    <span className="font-medium">{f.prompt}</span>
+                    {" — "}
+                    {f.assessment_met === true
+                      ? "Yes"
+                      : f.assessment_met === false
+                        ? `No. ${f.assessment_reason ?? ""}`
+                        : "Not answered"}
+                  </li>
+                ))}
+              </ul>
+              {fields.filter((f) => !usesRowAnswer(f)).map((f) => (
                 <AnswerField
                   key={f.id}
                   field={f}
@@ -1293,6 +1437,67 @@ function BaselineSignoffDialog({
 
 // ─── Answer field renderer ───────────────────────────────────────────────────
 
+function usesRowAnswer(field: VenueTemplateField): boolean {
+  return !!field.requirement_code || field.answer_type === "yes_no";
+}
+
+function rowAnswer(field: VenueTemplateField, typed: string): string {
+  if (!usesRowAnswer(field)) return typed;
+  if (field.assessment_met === true) return "Present";
+  if (field.assessment_met === false) return `Not present: ${field.assessment_reason ?? ""}`;
+  return "";
+}
+
+function requirementAnswerOk(field: VenueTemplateField, value: string): boolean {
+  if (usesRowAnswer(field)) {
+    if (field.assessment_met === true) return true;
+    if (field.assessment_met === false) {
+      if (!field.is_mandatory) return true;
+      return (field.assessment_reason ?? "").trim().length >= 8;
+    }
+    return !field.is_mandatory;
+  }
+  return value.trim().length > 0;
+}
+
+function RequirementAnswer({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const notHere = value.startsWith("Not present:");
+  const reason = notHere ? value.slice("Not present:".length).trimStart() : "";
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <MobileOptionButton
+          label="Present"
+          selected={value === "Present"}
+          onClick={() => onChange("Present")}
+        />
+        <MobileOptionButton
+          label="Not here"
+          selected={notHere}
+          onClick={() => onChange(reason ? `Not present: ${reason}` : "Not present: ")}
+        />
+      </div>
+      {notHere && (
+        <CharacterCountedInput
+          label="Why it is not here"
+          value={reason}
+          onValueChange={(next) => onChange(`Not present: ${next}`)}
+          minChars={8}
+          maxChars={200}
+          required
+          placeholder="Who this affects, and why the visit can still go ahead"
+        />
+      )}
+    </div>
+  );
+}
+
 function AnswerField({
   field,
   value,
@@ -1311,7 +1516,9 @@ function AnswerField({
         {field.is_mandatory && <span className="ml-1 text-destructive">*</span>}
       </Label>
 
-      {field.answer_type === "yes_no" ? (
+      {field.requirement_code ? (
+        <RequirementAnswer value={value} onChange={onChange} />
+      ) : field.answer_type === "yes_no" ? (
         <div className="grid grid-cols-2 gap-2">
           {(["Yes", "No"] as const).map((opt) => (
             <MobileOptionButton

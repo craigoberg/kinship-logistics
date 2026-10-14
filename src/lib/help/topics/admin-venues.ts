@@ -29,7 +29,7 @@ export const adminVenuesTopic: HelpTopic = {
   steps: [
     {
       heading: "Open Admin → Venues",
-      body: "Admin Configuration → Venues lists the destination registry. Search before creating a duplicate. Click a row to edit the venue. The folder button opens the template and baseline. Clone and Archive stay their own buttons.",
+      body: "Admin Configuration → Venues has two tabs. Venues is the destination registry. Venue types is the list behind the Venue type dropdown (Park, Hotel, and any names you add). Search before creating a duplicate. Click a row to edit the venue. The chevron on the row expands the template and baseline under that venue. Clone and Archive stay their own buttons.",
     },
     {
       heading: "Add venue → Create venue",
@@ -37,7 +37,7 @@ export const adminVenuesTopic: HelpTopic = {
     },
     {
       heading: "Template, sign-offs, compliance",
-      body: "Use the folder button for template, sign-offs, and compliance. A new venue has template structure only until someone signs a baseline. Clicking the row opens the venue edit, not that folder.",
+      body: "Use the chevron on the venue row for template, sign-offs, and compliance. It opens under that row. Each check has Yes or No for this venue. No, on a required check, needs a reason. Venue types is where a new type such as Cruise gets its checks: expand the type, search the list, and tick them. Edit on a check can archive it when you say why. A new venue copies that list. Changing the list, or the venue type, needs a new baseline. Clicking the row opens the venue edit.",
     },
     {
       heading: "Sign baseline",

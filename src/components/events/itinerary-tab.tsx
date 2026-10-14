@@ -13,6 +13,8 @@ import { toast } from "sonner";
 import {
   AlertTriangle,
   BedDouble,
+  ChevronDown,
+  ChevronRight,
   Clock,
   GripVertical,
   Loader2,
@@ -46,6 +48,8 @@ import {
 import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
 import { cn, formatDateWithWeekday, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { listVenues } from "@/lib/api/venues";
+import { stopVenueTypeName, venueTypeLabel } from "@/lib/api/venue-types";
+import { useVenueTypes } from "@/components/admin/venue-types-panel";
 import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 import {
   assessItineraryDayAnchors,
@@ -416,7 +420,9 @@ function DayItinerary({
   const [reordering, setReordering] = useState(false);
   const [leaderEditOpen, setLeaderEditOpen] = useState(false);
   const [pendingLeaderId, setPendingLeaderId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState(false);
   const gate = useVenueGate();
+  const typesQ = useVenueTypes();
 
   useEffect(() => {
     if (session?.manager_staff_id) setPendingLeaderId(null);
@@ -549,15 +555,30 @@ function DayItinerary({
         dayShapeBad && "border-amber-500/60 ring-1 ring-amber-400/40 dark:border-amber-400/50",
       )}
     >
-      {/* Day header */}
-      <div className="flex items-center justify-between border-b bg-muted/30 px-4 py-2.5">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-sm">{fmtDate(date)}</span>
-          {hopCount > 0 && (
+      {/* Day header — date, hops, and lights stay visible when collapsed */}
+      <div
+        className={cn(
+          "flex items-center justify-between gap-2 bg-muted/30 px-3 py-2.5",
+          expanded && "border-b",
+        )}
+      >
+        <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            className="inline-flex min-h-9 flex-wrap items-center gap-2 rounded-md text-left hover:bg-muted/60"
+            aria-expanded={expanded}
+            aria-label={expanded ? `Collapse ${fmtDate(date)}` : `Expand ${fmtDate(date)}`}
+            onClick={() => setExpanded((open) => !open)}
+          >
+            {expanded ? (
+              <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+            )}
+            <span className="font-semibold text-sm">{fmtDate(date)}</span>
             <Badge variant="outline" className="text-[10px]">
               {hopCount} hop{hopCount === 1 ? "" : "s"}
             </Badge>
-          )}
           {requiresOvernightHotel && (
             <Badge
               variant="outline"
@@ -592,7 +613,11 @@ function DayItinerary({
               {departOk ? "Departure place" : "Needs a departure place"}
             </Badge>
           )}
-          {leaderName ? (
+          {!leaderName && (
+            <span className="text-[11px] font-medium text-yellow-600">No trip leader</span>
+          )}
+          </button>
+          {leaderName && (
             <button
               type="button"
               onClick={() => setLeaderEditOpen(true)}
@@ -601,8 +626,6 @@ function DayItinerary({
               <ShieldCheck className="h-3 w-3" />
               {leaderName}
             </button>
-          ) : (
-            <span className="text-[11px] font-medium text-yellow-600">No trip leader</span>
           )}
           {multiDay && leaderName && eveningLabel && (
             <button
@@ -625,10 +648,12 @@ function DayItinerary({
             </button>
           )}
         </div>
-        <Button size="sm" variant="outline" onClick={() => setAddOpen((p) => !p)}>
-          <Plus className="mr-1 h-3.5 w-3.5" />
-          Add stop / meal
-        </Button>
+        {expanded && (
+          <Button size="sm" variant="outline" className="shrink-0" onClick={() => setAddOpen((p) => !p)}>
+            <Plus className="mr-1 h-3.5 w-3.5" />
+            Add stop / meal
+          </Button>
+        )}
       </div>
 
       <ItineraryDayPlan
@@ -639,11 +664,12 @@ function DayItinerary({
         isFirstDay={isFirstDay}
         editOpen={leaderEditOpen}
         onEditOpenChange={setLeaderEditOpen}
+        showDetails={expanded}
         onLeaderPicked={setPendingLeaderId}
         onSaved={onPlanSaved}
       />
 
-      {!meetOk && (
+      {expanded && !meetOk && (
         <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
           <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
           <span>
@@ -653,7 +679,7 @@ function DayItinerary({
         </div>
       )}
 
-      {overnightMissing && (
+      {expanded && overnightMissing && (
         <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
           <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
           <span>
@@ -663,7 +689,7 @@ function DayItinerary({
         </div>
       )}
 
-      {isLastDay && !departOk && (
+      {expanded && isLastDay && !departOk && (
         <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
           <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
           <span>
@@ -674,7 +700,7 @@ function DayItinerary({
       )}
 
       {/* Add stop / meal inline form */}
-      {addOpen && (
+      {expanded && addOpen && (
         <div className="border-b bg-muted/10 px-4 py-3 space-y-2">
           <div className="grid grid-cols-2 gap-2">
             <Button
@@ -759,7 +785,7 @@ function DayItinerary({
                   <SelectContent>
                     {venues.map((v) => (
                       <SelectItem key={v.id} value={v.id}>
-                        {v.name}{v.venue_type ? ` · ${v.venue_type}` : ""}
+                        {v.name}{v.venue_type ? ` · ${venueTypeLabel(typesQ.data?.types, v.venue_type)}` : ""}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -787,7 +813,7 @@ function DayItinerary({
       )}
 
       {/* Stop list */}
-      {sorted.length === 0 ? (
+      {expanded && (sorted.length === 0 ? (
         <div className="space-y-1 px-2 py-2">
           {multiDay && (
             <ItineraryRollRow label={startRollLabel} detail={startRollDetail} />
@@ -865,9 +891,9 @@ function DayItinerary({
                           <span className="truncate text-sm font-medium">
                             {stop.label_override ?? stop.venue_name ?? "Unknown venue"}
                           </span>
-                          {stop.venue_type && (
-                            <span className="shrink-0 text-[10px] capitalize text-muted-foreground">
-                              {stop.venue_type}
+                          {stopVenueTypeName(stop, typesQ.data?.types) && (
+                            <span className="shrink-0 text-[10px] text-muted-foreground">
+                              {stopVenueTypeName(stop, typesQ.data?.types)}
                             </span>
                           )}
                           {(isMeeting || isDeparture) && (
@@ -916,7 +942,7 @@ function DayItinerary({
             )}
           </PointerSortableList>
         </div>
-      )}
+      ))}
 
       {/* Compliance block dialog */}
       <AlertDialog

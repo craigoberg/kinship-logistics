@@ -35,6 +35,8 @@ import {
   cn,
 } from "@/lib/utils";
 import { RYGE_SEVERITY_CHIPS } from "@/lib/ui/ryge-severity-chips";
+import { PersonKindText } from "@/components/people/person-kind-badge";
+import { personKindFromLabel } from "@/lib/ui/person-kind-chip";
 import type { SiteIssue } from "@/lib/api/site-issues";
 import { useAuthReady } from "@/hooks/use-auth-ready";
 import { getActiveUserProfile } from "@/lib/data-store";
@@ -337,7 +339,13 @@ function ReportBody({
                 <div>
                   <span className="font-medium">{s.displayName}</span>
                   <span className="ml-2 text-xs text-muted-foreground">
-                    {s.roleLabel} · {s.arrivalHow}
+                    {personKindFromLabel(s.roleLabel) ? (
+                      <PersonKindText kind={personKindFromLabel(s.roleLabel)!} className="text-xs" />
+                    ) : (
+                      s.roleLabel
+                    )}
+                    {" · "}
+                    {s.arrivalHow}
                   </span>
                 </div>
                 <div className="text-xs text-muted-foreground">

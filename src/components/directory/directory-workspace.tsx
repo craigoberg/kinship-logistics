@@ -31,6 +31,8 @@ import {
   useParticipants,
 } from "@/hooks/use-supabase-data";
 import { isActiveUserManager } from "@/lib/data-store";
+import { classifyWorkforceKind } from "@/lib/support-person";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import type { Carer, StaffMember, StaffCertification } from "@/lib/data-store";
 import { StaffFormSheet } from "./staff-form-sheet";
@@ -267,7 +269,12 @@ export function DirectoryWorkspace() {
                         )}
                         onClick={openStaff}
                       >
-                        <TableCell className="font-medium">{s.fullName}</TableCell>
+                        <TableCell className="font-medium">
+                          <span className="inline-flex flex-wrap items-center gap-1.5">
+                            {s.fullName}
+                            <PersonKindBadge kind={classifyWorkforceKind(s.personnelType, s.role)} />
+                          </span>
+                        </TableCell>
                         <TableCell>
                           <div className="text-sm">{s.role ?? "—"}</div>
                           {s.personnelType && (

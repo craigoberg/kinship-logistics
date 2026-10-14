@@ -43,7 +43,7 @@ import {
   updateEventSupportBooking,
   type EventSupportBooking,
 } from "@/lib/api/event-support";
-import { supportPersonKindLabel } from "@/lib/support-person";
+import { PersonKindText } from "@/components/people/person-kind-badge";
 import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { cn, parseIsoDateLocal, todayLocalIso, toIsoDateString } from "@/lib/utils";
 
@@ -175,7 +175,7 @@ export function EditEventSupportModal({
         <DialogHeader className="shrink-0">
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
-            {booking.displayName} · {supportPersonKindLabel(booking.personKind)}. Cost starts at
+            {booking.displayName} · <PersonKindText kind={booking.personKind} />. Cost starts at
             the full event price. No medication fields.
           </DialogDescription>
         </DialogHeader>

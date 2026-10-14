@@ -170,6 +170,7 @@ To maintain a single source of truth and eliminate look-and-feel drift, duplicat
 | Field route CTA             | `src/components/ui/field-action-button.tsx`                   | Floor next-action = `caution` (+ `pulse`). Green `success` = already done. Blue `primary` = chrome / navigate. See UI-STYLE-GUIDE Floor CTA colours. |
 | Hide chrome on scroll       | `src/hooks/chrome-visibility.tsx`                             | Dashboard + Manifest: hide SIM / AppShell / BottomNav / Cancel on scroll down; reveal on scroll up. Do not hide Close Run or Incident/Raise. |
 | Click to open a record      | `src/lib/ui/office-click-row.ts`                              | Office lists, including Admin registries and Run Planning: light grey row, darker on hover, click opens the record or edit dialog. Archive, Remove, Restore, and Clone stay buttons. Field floors keep tap targets. |
+| Person kind chip            | `PersonKindBadge` · `src/lib/ui/person-kind-chip.ts`          | Who is who. Participant and Guest sky, Staff violet, Volunteer teal, Carer rose. Soft outline. Walk-on stays amber. Floor amber, green, blue, and red stay for actions. |
 
 Every future module that requires checklists, visual inspections, or anomaly logging must import and leverage these specific files. Building custom, localized variations of these blocks is a structural violation.
 
@@ -741,7 +742,7 @@ All recurring destinations (clubs, hotels, cinemas, parks, museums) live in a **
 
 | Field class | Examples |
 | :-- | :-- |
-| Identity | Name, venue type, status (`active` / `archived`) |
+| Identity | Name, venue type (Admin → Venues → Venue types; `hotel` remains the overnight stay), status (`active` / `archived`) |
 | Location | Street address, GPS pin, access notes |
 | Operations | Site contact, max safe group size, risk tier |
 | Safety | Linked template + baseline sign-off record |

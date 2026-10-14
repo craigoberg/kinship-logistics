@@ -22,6 +22,9 @@ import {
   UserX,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -336,16 +339,18 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const { data: staff = [] } = useStaffRegistry();
+  const staffRow = row.staff_id ? staff.find((s) => s.id === row.staff_id) : undefined;
   const name =
     row.participant_name ??
     (row.staff_id ? "Staff" : row.carer_id ? "Carer" : "Unknown");
-  const personLabel = row.participant_id
-    ? "Participant"
-    : row.staff_id
-      ? "Non-participant"
-      : row.carer_id
-        ? "Non-participant"
-        : null;
+  const kind = manifestPersonKind({
+    participantId: row.participant_id,
+    carerId: row.carer_id,
+    staffId: row.staff_id,
+    personnelType: staffRow?.personnelType,
+    role: staffRow?.role,
+  });
   const isOnBus = row.status === "on_bus";
   const isNt = row.status === "not_travelling";
 
@@ -355,11 +360,7 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <span className="text-base font-semibold">{name}</span>
-            {personLabel && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                {personLabel}
-              </span>
-            )}
+            {kind ? <PersonKindBadge kind={kind} /> : null}
             {row.notes && (
               <p className="text-xs italic text-muted-foreground truncate">{row.notes}</p>
             )}
