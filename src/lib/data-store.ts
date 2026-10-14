@@ -3434,6 +3434,12 @@ export interface EventRosterBooking {
   tripPickupAddressOverride: string | null;
   /** Bus stop home from the departure point, when it differs from the meeting-point pickup. */
   tripReturnAddressOverride: string | null;
+  /** meeting_point | home | address. Null is the older home-door pickup. */
+  pickupJoin: string | null;
+  /** departure_point | home | same | address. Null is the older home-door drop-off. */
+  alightMode: string | null;
+  carerPickupJoin: string | null;
+  carerAlightMode: string | null;
   /** Carer on this booking — Bus or Self to the meeting point. Null uses the bus-seat flag. */
   carerOutboundTransportMode: "bus" | "self" | null;
   /** Carer on this booking — Bus or Self home from the departure point. */
@@ -3528,6 +3534,10 @@ interface BookingRow {
   carer_return_transport_mode?: string | null;
   carer_trip_pickup_address_override?: string | null;
   carer_trip_return_address_override?: string | null;
+  pickup_join?: string | null;
+  alight_mode?: string | null;
+  carer_pickup_join?: string | null;
+  carer_alight_mode?: string | null;
   carer_pickup_order?: number | null;
   dynamic_medical_notes_snapshot: string | null;
   outbound_transport_mode?: string | null;
@@ -3596,6 +3606,10 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
         : null,
     carerTripPickupAddressOverride: r.carer_trip_pickup_address_override ?? null,
     carerTripReturnAddressOverride: r.carer_trip_return_address_override ?? null,
+    pickupJoin: r.pickup_join ?? null,
+    alightMode: r.alight_mode ?? null,
+    carerPickupJoin: r.carer_pickup_join ?? null,
+    carerAlightMode: r.carer_alight_mode ?? null,
     carerPickupOrder:
       r.carer_pickup_order == null ? null : Number(r.carer_pickup_order),
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
@@ -5632,12 +5646,15 @@ async function fetchItineraryDayStop(
 ): Promise<{ label: string; address: string | null } | null> {
   const { data, error } = await supabase
     .from("event_venue_stops")
-    .select("label_override, stop_order, venues(name, street_address)")
+    .select("label_override, stop_order, activity_kind, venues(name, street_address)")
     .eq("event_id", eventId)
     .eq("session_date", sessionDate)
     .order("stop_order", { ascending: true });
   if (error) throwPg("[startTrip:itineraryStop]", error);
-  const rows = data ?? [];
+  const rows = (data ?? []).filter((row) => {
+    const kind = (row as { activity_kind?: string | null }).activity_kind ?? "venue";
+    return kind !== "passenger_pickup" && kind !== "passenger_dropoff";
+  });
   const picked = (which === "first" ? rows[0] : rows[rows.length - 1]) as
     | {
         label_override?: string | null;
@@ -5880,6 +5897,30 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
       pickupOrder: Number((r as StartTripBookingRow).pickup_order ?? 0),
     });
   });
+
+  if (input.tripDirection === "outbound" || input.tripDirection === "return") {
+    try {
+      const { loadBookingJoinModes, skipDoorDropoff, skipDoorPickup } = await import(
+        "@/lib/api/passenger-stops"
+      );
+      const modes = await loadBookingJoinModes(input.eventId);
+      if (modes) {
+        const keep = roster.filter((person) => {
+          const mode = person.participantId
+            ? modes.byParticipant.get(person.participantId)
+            : undefined;
+          if (!mode) return true;
+          return input.tripDirection === "return"
+            ? !skipDoorDropoff(mode.alightMode)
+            : !skipDoorPickup(mode.pickupJoin);
+        });
+        roster.length = 0;
+        roster.push(...keep);
+      }
+    } catch (err) {
+      console.warn("[startTrip:passengerStops]", err);
+    }
+  }
 
   try {
     const { listSupportRosterForEventTrip, listLegacyCarerRosterForEventTrip } =

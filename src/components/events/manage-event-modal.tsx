@@ -452,7 +452,15 @@ export function ManageEventModal({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="flex h-[min(90dvh,calc(100svh-1.5rem))] max-h-[calc(100svh-1.5rem)] w-[min(94vw,96rem)] max-w-[min(94vw,96rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0">
+        <DialogContent
+          className="flex h-[min(90dvh,calc(100svh-1.5rem))] max-h-[calc(100svh-1.5rem)] w-[min(94vw,96rem)] max-w-[min(94vw,96rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0"
+          onInteractOutside={(event) => {
+            const target = event.target;
+            if (target instanceof Element && target.closest("[data-radix-popper-content-wrapper]")) {
+              event.preventDefault();
+            }
+          }}
+        >
           <div className="shrink-0">{desktopHeader}</div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-6 py-5">
             {tabContent}

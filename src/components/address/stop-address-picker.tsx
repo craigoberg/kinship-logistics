@@ -23,6 +23,9 @@ export function StopAddressChoices({
   allowCustom,
   customText,
   onCustomText,
+  customTitle = "Other address today",
+  customHint = "This run only. It is not added to the person’s places.",
+  customAction = "Use this address today",
   onChoose,
   disabled,
 }: {
@@ -34,6 +37,9 @@ export function StopAddressChoices({
   allowCustom?: boolean;
   customText?: string;
   onCustomText?: (value: string) => void;
+  customTitle?: string;
+  customHint?: string;
+  customAction?: string;
   onChoose: (choice: StopAddressChoice) => void;
   disabled?: boolean;
 }) {
@@ -77,13 +83,13 @@ export function StopAddressChoices({
       {allowCustom && (
         <div className="space-y-2 rounded-xl border border-border p-3">
           <CharacterCountedInput
-            label="Other address today"
+            label={customTitle}
             value={customText ?? ""}
             onValueChange={(v) => onCustomText?.(v)}
             minChars={6}
             maxChars={160}
             required={false}
-            hint="This run only. It is not added to the person’s places."
+            hint={customHint}
           />
           {(customText ?? "").trim().length > 0 && !customOk && (
             <p className="text-sm text-destructive">Missing: Address</p>
@@ -93,7 +99,7 @@ export function StopAddressChoices({
             disabled={disabled || !customOk}
             onClick={() => onChoose({ mode: "custom", text: (customText ?? "").trim() })}
           >
-            Use this address today
+            {customAction}
           </Button>
         </div>
       )}
@@ -111,6 +117,9 @@ export function StopAddressSheet({
   standingAddressId,
   showStanding,
   allowCustom,
+  customTitle,
+  customHint,
+  customAction,
   busy,
   onChoose,
 }: {
@@ -123,6 +132,9 @@ export function StopAddressSheet({
   standingAddressId?: string | null;
   showStanding?: boolean;
   allowCustom?: boolean;
+  customTitle?: string;
+  customHint?: string;
+  customAction?: string;
   busy?: boolean;
   onChoose: (choice: StopAddressChoice) => void;
 }) {
@@ -140,6 +152,9 @@ export function StopAddressSheet({
         standingAddressId={standingAddressId}
         showStanding={showStanding}
         allowCustom={allowCustom}
+        customTitle={customTitle}
+        customHint={customHint}
+        customAction={customAction}
         customText={custom}
         onCustomText={setCustom}
         disabled={busy}

@@ -20,6 +20,7 @@ import {
   type EventManifest,
   type EventRosterBooking,
 } from "@/lib/data-store";
+import { ownerFromLeg, type AddressOwner } from "@/lib/api/person-addresses";
 import { carerLegMode, legAddress, legOverrideToStore } from "@/lib/event-travel-legs";
 import {
   EVENT_SUPPORT_KEY,
@@ -218,6 +219,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
   const invalidate = () => {
     void qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
     void qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(event.id) });
+    void qc.invalidateQueries({ queryKey: ["event-venue-stops", event.id] });
   };
 
   const saveParticipant = useMutation({
@@ -227,6 +229,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       ret: "bus" | "self";
       pickup?: string | null;
       home?: string | null;
+      pickupJoin?: string | null;
+      alightMode?: string | null;
     }) =>
       updateBookingTransportModes({
         booking_id: input.booking.id,
@@ -237,6 +241,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         return_bus_run_code: input.ret === "bus" ? input.booking.returnBusRunCode : null,
         trip_pickup_address_override: input.pickup,
         trip_return_address_override: input.home,
+        pickup_join: input.pickupJoin,
+        alight_mode: input.alightMode,
       }),
     onSuccess: () => invalidate(),
     onError: (err: Error) => toast.error(err.message),
@@ -250,6 +256,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       ret: "bus" | "self";
       pickup?: string | null;
       home?: string | null;
+      pickupJoin?: string | null;
+      alightMode?: string | null;
     }) =>
       setEventSupportTravel({
         id: input.booking.id,
@@ -261,6 +269,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         returnBusRunCode: input.ret === "bus" ? input.booking.returnBusRunCode : null,
         tripPickupAddressOverride: input.pickup,
         tripReturnAddressOverride: input.home,
+        pickupJoin: input.pickupJoin,
+        alightMode: input.alightMode,
       }),
     onSuccess: () => invalidate(),
     onError: (err: Error) => toast.error(err.message),
@@ -275,6 +285,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       ret: "bus" | "self";
       pickup?: string | null;
       home?: string | null;
+      pickupJoin?: string | null;
+      alightMode?: string | null;
     }) =>
       updateCompanionCarerTravel({
         bookingId: input.bookingId,
@@ -283,6 +295,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         ret: input.ret,
         pickupAddress: input.pickup,
         returnAddress: input.home,
+        pickupJoin: input.pickupJoin,
+        alightMode: input.alightMode,
       }),
     onSuccess: () => invalidate(),
     onError: (err: Error) => toast.error(err.message),
@@ -344,6 +358,11 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     onHome: (mode: "bus" | "self") => void,
     onMeetingAddress: (next: string) => void,
     onHomeAddress: (next: string) => void,
+    pickupJoin: string | null,
+    alightMode: string | null,
+    onPickupJoin: (mode: "meeting_point" | "home" | "address") => void,
+    onAlightMode: (mode: "departure_point" | "home" | "same" | "address") => void,
+    addressOwner: AddressOwner | null,
     onEdit: (() => void) | null,
     saving: boolean,
     extra?: ReactNode,
@@ -388,6 +407,11 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         onHome={onHome}
         onMeetingAddress={onMeetingAddress}
         onHomeAddress={onHomeAddress}
+        pickupJoin={pickupJoin}
+        alightMode={alightMode}
+        onPickupJoin={onPickupJoin}
+        onAlightMode={onAlightMode}
+        addressOwner={addressOwner}
       />
       {onEdit && (
         <Button
@@ -415,8 +439,15 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     const outbound = (b.outboundTransportMode as "bus" | "self") ?? "bus";
     const ret = (b.returnTransportMode as "bus" | "self") ?? "bus";
     const profile = profileStop(b.participantRegularPickupAddress, b.participantStreetAddress);
-    const meeting = legAddress(b.tripPickupAddressOverride, profile);
-    const home = legAddress(b.tripReturnAddressOverride, meeting || profile);
+    const doorMeeting = legAddress(b.tripPickupAddressOverride, profile);
+    const meeting =
+      b.pickupJoin === "address" ? (b.tripPickupAddressOverride ?? "") : doorMeeting;
+    const leavesEarly = b.alightMode === "address" || b.alightMode === "same";
+    const home = leavesEarly
+      ? b.alightMode === "same"
+        ? meeting
+        : (b.tripReturnAddressOverride ?? "")
+      : legAddress(b.tripReturnAddressOverride, doorMeeting || profile);
     return personRow(
       b.participantName,
       b.isGuestBooking ? "guest" : "participant",
@@ -433,7 +464,9 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
           booking: b,
           outbound,
           ret,
-          pickup: legOverrideToStore(next, profile),
+          pickup:
+            b.pickupJoin === "address" ? next.trim() || null : legOverrideToStore(next, profile),
+          pickupJoin: b.pickupJoin === "address" ? "address" : undefined,
         });
       },
       (next) => {
@@ -442,9 +475,35 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
           booking: b,
           outbound,
           ret,
-          home: legOverrideToStore(next, meeting || profile),
+          home:
+            b.alightMode === "address" || b.alightMode === "same"
+              ? next.trim() || null
+              : legOverrideToStore(next, doorMeeting || profile),
+          alightMode:
+            b.alightMode === "address" || b.alightMode === "same" ? "address" : undefined,
         });
       },
+      b.pickupJoin,
+      b.alightMode,
+      (mode) => {
+        setSavingId(b.id);
+        saveParticipant.mutate({
+          booking: b,
+          outbound: mode === "address" ? "self" : outbound,
+          ret,
+          pickupJoin: mode,
+        });
+      },
+      (mode) => {
+        setSavingId(b.id);
+        saveParticipant.mutate({
+          booking: b,
+          outbound,
+          ret: mode === "address" || mode === "home" ? "bus" : ret,
+          alightMode: mode,
+        });
+      },
+      b.participantId ? { kind: "participant", id: b.participantId } : null,
       () => setEditBooking(b),
       savingId === b.id,
       isOuting && outbound === "bus" ? (
@@ -473,15 +532,22 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       onGripPointerDown: (e: React.PointerEvent) => void;
       isDragging: boolean;
     },
-  ) =>
-    personRow(
+  ) => {
+    const door = legAddress(s.tripPickupAddressOverride, s.profileAddress);
+    return personRow(
       s.displayName,
       s.personKind,
       null,
       s.outboundTransportMode,
       s.returnTransportMode,
-      legAddress(s.tripPickupAddressOverride, s.profileAddress),
-      legAddress(s.tripReturnAddressOverride, legAddress(s.tripPickupAddressOverride, s.profileAddress)),
+      s.pickupJoin === "address" ? (s.tripPickupAddressOverride ?? "") : door,
+      s.alightMode === "same"
+        ? s.pickupJoin === "address"
+          ? (s.tripPickupAddressOverride ?? "")
+          : door
+        : s.alightMode === "address"
+          ? (s.tripReturnAddressOverride ?? "")
+          : legAddress(s.tripReturnAddressOverride, door || s.profileAddress),
       (mode) => setSupportMode(s, "meet", mode),
       (mode) => setSupportMode(s, "home", mode),
       (next) => {
@@ -490,19 +556,46 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
           booking: s,
           outbound: s.outboundTransportMode,
           ret: s.returnTransportMode,
-          pickup: legOverrideToStore(next, s.profileAddress),
+          pickup:
+            s.pickupJoin === "address" ? next.trim() || null : legOverrideToStore(next, s.profileAddress),
+          pickupJoin: s.pickupJoin === "address" ? "address" : undefined,
         });
       },
       (next) => {
         setSavingId(s.id);
-        const meeting = legAddress(s.tripPickupAddressOverride, s.profileAddress);
         saveSupport.mutate({
           booking: s,
           outbound: s.outboundTransportMode,
           ret: s.returnTransportMode,
-          home: legOverrideToStore(next, meeting || s.profileAddress),
+          home:
+            s.alightMode === "address" || s.alightMode === "same"
+              ? next.trim() || null
+              : legOverrideToStore(next, door || s.profileAddress),
+          alightMode:
+            s.alightMode === "address" || s.alightMode === "same" ? "address" : undefined,
         });
       },
+      s.pickupJoin,
+      s.alightMode,
+      (mode) => {
+        setSavingId(s.id);
+        saveSupport.mutate({
+          booking: s,
+          outbound: mode === "address" ? "self" : s.outboundTransportMode,
+          ret: s.returnTransportMode,
+          pickupJoin: mode,
+        });
+      },
+      (mode) => {
+        setSavingId(s.id);
+        saveSupport.mutate({
+          booking: s,
+          outbound: s.outboundTransportMode,
+          ret: mode === "address" || mode === "home" ? "bus" : s.returnTransportMode,
+          alightMode: mode,
+        });
+      },
+      ownerFromLeg({ staffId: s.staffId, carerId: s.carerId }),
       () => {
         const netPaid = supportPaidById.get(s.id) ?? s.amountPaid;
         setEditSupport({ ...s, amountPaid: netPaid });
@@ -511,6 +604,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       null,
       rowBind,
     );
+  };
 
   const renderCarer = (
     bookingId: string,
@@ -522,7 +616,14 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
   ) => {
     const c = companionByBookingId.get(bookingId);
     if (!c) return null;
-    const save = (patch: { outbound?: "bus" | "self"; ret?: "bus" | "self"; pickup?: string | null; home?: string | null }) => {
+    const save = (patch: {
+      outbound?: "bus" | "self";
+      ret?: "bus" | "self";
+      pickup?: string | null;
+      home?: string | null;
+      pickupJoin?: string | null;
+      alightMode?: string | null;
+    }) => {
       setSavingId(c.booking.id);
       saveCarer.mutate({
         bookingId: c.booking.id,
@@ -531,20 +632,48 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         ret: patch.ret ?? c.ret,
         pickup: patch.pickup,
         home: patch.home,
+        pickupJoin: patch.pickupJoin,
+        alightMode: patch.alightMode,
       });
     };
+    const pickupJoin = c.booking.carerPickupJoin;
+    const alightMode = c.booking.carerAlightMode;
     return personRow(
       c.name,
       "carer",
       `Carer for ${c.booking.participantName}`,
       c.outbound,
       c.ret,
-      c.meeting,
-      c.home,
+      pickupJoin === "address" ? (c.booking.carerTripPickupAddressOverride ?? "") : c.meeting,
+      alightMode === "same"
+        ? c.meeting
+        : alightMode === "address"
+          ? (c.booking.carerTripReturnAddressOverride ?? "")
+          : c.home,
       (mode) => save({ outbound: mode }),
       (mode) => save({ ret: mode }),
-      (next) => save({ pickup: legOverrideToStore(next, c.profile) }),
-      (next) => save({ home: legOverrideToStore(next, c.meeting || c.profile) }),
+      (next) =>
+        save({
+          pickup: pickupJoin === "address" ? next.trim() || null : legOverrideToStore(next, c.profile),
+          pickupJoin: pickupJoin === "address" ? "address" : undefined,
+        }),
+      (next) =>
+        save({
+          home:
+            alightMode === "address" || alightMode === "same"
+              ? next.trim() || null
+              : legOverrideToStore(next, c.meeting || c.profile),
+          alightMode: alightMode === "address" || alightMode === "same" ? "address" : undefined,
+        }),
+      pickupJoin,
+      alightMode,
+      (mode) => save({ pickupJoin: mode, outbound: mode === "address" ? "self" : c.outbound }),
+      (mode) =>
+        save({
+          alightMode: mode,
+          ret: mode === "address" || mode === "home" ? "bus" : c.ret,
+        }),
+      { kind: "carer", id: c.carerId },
       null,
       savingId === c.booking.id,
       null,
@@ -578,10 +707,11 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         <div>
           <h3 className="text-sm font-semibold">Travel</h3>
           <p className="max-w-3xl text-xs text-muted-foreground">
-            This sets only how each confirmed person gets to the meeting point, and how they
-            get home from the departure point. When a leg is Bus, the address under it is that
-            stop — the two addresses can be different. Self hides the address. A carer travelling
-            with someone is their own line.
+            Joins trip is At meeting point or On trip. Leaves trip is At departure point or Before
+            departure. At the meeting point, Bus or Self is how they get there. On trip, they make
+            their own way to the address and the bus collects them there. Before departure, the bus
+            drops them at that address and the itinerary gains a line. From the departure point,
+            Bus or Self is how they get home. A carer, staff member, or volunteer is their own line.
           </p>
         </div>
         <div className="flex items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">

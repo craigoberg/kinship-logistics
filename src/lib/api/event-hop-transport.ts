@@ -4,6 +4,7 @@
  * In-day bus movement between itinerary stops — separate from outbound/return manifests.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
 import {
   getOrCreateEventHopTrip,
@@ -12,10 +13,13 @@ import {
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
 import {
+  isPassengerStop,
   isVenueTransportStop,
   listEventVenueStops,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
+import { listPassengerAssignments, type PassengerAssignment } from "@/lib/api/passenger-stops";
+import { addressKey } from "@/lib/passenger-stops";
 import {
   mapTransportTripFromDb,
   mapTripLegFromDb,
@@ -23,7 +27,6 @@ import {
   type ActiveTripBundle,
   type TransportTrip,
 } from "@/lib/data-store";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
   assertMorningRollCompleteBeforeProgramme,
   buildProgrammeHops,
@@ -86,6 +89,7 @@ function tripMeetingPoint(stops: EventVenueStop[]): EventVenueStop | undefined {
   );
   return stops
     .filter((s) => s.session_date === firstDate)
+    .filter((s) => !isPassengerStop(s))
     .sort((a, b) => a.stop_order - b.stop_order)[0];
 }
 
@@ -501,6 +505,44 @@ function hopManifestPersonKey(row: {
   return null;
 }
 
+/** People collected later, or already dropped off, are not on this boarding roll. */
+async function hopBoardingExclusions(tripId: string, eventId: string): Promise<Set<string>> {
+  const excluded = new Set<string>();
+  const { data: trip, error } = await supabase
+    .from("transport_trips")
+    .select("venue_stop_from_id")
+    .eq("id", tripId)
+    .maybeSingle();
+  if (error || !trip) return excluded;
+  const fromId = (trip as { venue_stop_from_id?: string | null }).venue_stop_from_id;
+  if (!fromId) return excluded;
+  const stops = await listEventVenueStops(eventId);
+  const from = stops.find((stop) => stop.id === fromId);
+  if (!from) return excluded;
+  const day = from.session_date.slice(0, 10);
+  const dayStops = stops.filter((stop) => stop.session_date.slice(0, 10) === day);
+  const assignments = await listPassengerAssignments(eventId);
+  for (const person of assignments) {
+    if (person.pickupAddress) {
+      const stop = dayStops.find(
+        (row) =>
+          row.activity_kind === "passenger_pickup" &&
+          addressKey(row.street_address) === addressKey(person.pickupAddress),
+      );
+      if (stop && stop.stop_order > from.stop_order) excluded.add(person.key);
+    }
+    if (person.dropoffAddress) {
+      const stop = dayStops.find(
+        (row) =>
+          row.activity_kind === "passenger_dropoff" &&
+          addressKey(row.street_address) === addressKey(person.dropoffAddress),
+      );
+      if (stop && stop.stop_order <= from.stop_order) excluded.add(person.key);
+    }
+  }
+  return excluded;
+}
+
 /** Everyone still with the group on this hop — not clients only (§11.10). */
 export async function seedBusManifestForHop(opts: {
   eventId: string;
@@ -518,11 +560,14 @@ export async function seedBusManifestForHop(opts: {
     (r) => (r as { participant_id: string }).participant_id,
   );
 
+  const excluded = await hopBoardingExclusions(opts.tripId, opts.eventId).catch(
+    () => new Set<string>(),
+  );
   const rows: Record<string, unknown>[] = [];
   const seen = new Set<string>();
   const pushRow = (row: Record<string, unknown>) => {
     const key = hopManifestPersonKey(row);
-    if (!key || seen.has(key)) return;
+    if (!key || seen.has(key) || excluded.has(key)) return;
     seen.add(key);
     rows.push(row);
   };
@@ -814,20 +859,141 @@ async function ensureVenueHopLeg(opts: {
     .limit(1);
   if (existingLegs?.length) return;
 
-  const { error: legErr } = await supabase.from("trip_legs").insert({
-    trip_id: opts.tripId,
-    leg_index: 1,
-    leg_kind: "venue_to_venue",
-    from_label: opts.fromLabel,
-    to_label: opts.toLabel,
+  const seeds = await hopLegSeeds(opts);
+  let { error: legErr } = await supabase.from("trip_legs").insert(seeds);
+  if (legErr && isSchemaMismatchError(legErr)) {
+    const stripped = seeds.map((row) => {
+      const copy = { ...row };
+      delete copy.from_staff_id;
+      delete copy.to_staff_id;
+      delete copy.from_carer_id;
+      delete copy.to_carer_id;
+      return copy;
+    });
+    legErr = (await supabase.from("trip_legs").insert(stripped)).error;
+  }
+  if (legErr) throw new Error(`Could not create hop leg: ${legErr.message}`);
+}
+
+function personLegColumns(person: PassengerAssignment | null) {
+  return {
     from_participant_id: null,
-    to_participant_id: null,
+    to_participant_id: person?.participantId ?? null,
+    from_staff_id: null,
+    to_staff_id: person?.staffId ?? null,
+    from_carer_id: null,
+    to_carer_id: person?.carerId ?? null,
+  };
+}
+
+/** Venue-to-venue, with a pickup or drop-off leg for each passenger stop in between. */
+async function hopLegSeeds(opts: {
+  tripId: string;
+  fromLabel: string;
+  toLabel: string;
+  toAddress: string | null;
+}): Promise<Record<string, unknown>[]> {
+  const plain = (index: number, fromLabel: string, toLabel: string, address: string | null) => ({
+    trip_id: opts.tripId,
+    leg_index: index,
+    leg_kind: index === 1 && fromLabel === opts.fromLabel && toLabel === opts.toLabel
+      ? "venue_to_venue"
+      : "client_to_venue",
+    from_label: fromLabel,
+    to_label: toLabel,
+    ...personLegColumns(null),
+    status: "pending",
+    medication_expected: false,
+    medication_handover_status: "not_required",
+    target_address: address,
+  });
+
+  const { data: trip } = await supabase
+    .from("transport_trips")
+    .select("event_id, venue_stop_from_id, venue_stop_to_id")
+    .eq("id", opts.tripId)
+    .maybeSingle();
+  const eventId = (trip as { event_id?: string | null } | null)?.event_id;
+  const fromId = (trip as { venue_stop_from_id?: string | null } | null)?.venue_stop_from_id;
+  const toId = (trip as { venue_stop_to_id?: string | null } | null)?.venue_stop_to_id;
+  if (!eventId || !fromId || !toId) {
+    return [plain(1, opts.fromLabel, opts.toLabel, opts.toAddress)];
+  }
+
+  const stops = await listEventVenueStops(eventId);
+  const from = stops.find((stop) => stop.id === fromId);
+  const to = stops.find((stop) => stop.id === toId);
+  if (!from || !to) return [plain(1, opts.fromLabel, opts.toLabel, opts.toAddress)];
+  const day = from.session_date.slice(0, 10);
+  const between = stops
+    .filter(
+      (stop) =>
+        stop.session_date.slice(0, 10) === day &&
+        isPassengerStop(stop) &&
+        stop.stop_order > from.stop_order &&
+        stop.stop_order < to.stop_order,
+    )
+    .sort((a, b) => a.stop_order - b.stop_order);
+  if (between.length === 0) return [plain(1, opts.fromLabel, opts.toLabel, opts.toAddress)];
+
+  const assignments = await listPassengerAssignments(eventId);
+  const rank = (order: number) => (order > 0 ? order : Number.MAX_SAFE_INTEGER);
+  const seeds: Record<string, unknown>[] = [];
+  const cursor: { label: string; person: PassengerAssignment | null } = {
+    label: opts.fromLabel,
+    person: null,
+  };
+
+  const pushPerson = (person: PassengerAssignment, address: string) => {
+    seeds.push({
+      trip_id: opts.tripId,
+      leg_index: seeds.length + 1,
+      leg_kind: "client_to_client",
+      from_label: cursor.label,
+      to_label: person.name,
+      from_participant_id: cursor.person?.participantId ?? null,
+      to_participant_id: person.participantId,
+      from_staff_id: cursor.person?.staffId ?? null,
+      to_staff_id: person.staffId,
+      from_carer_id: cursor.person?.carerId ?? null,
+      to_carer_id: person.carerId,
+      status: "pending",
+      medication_expected: false,
+      medication_handover_status: "not_required",
+      target_address: address,
+    });
+    cursor.label = person.name;
+    cursor.person = person;
+  };
+
+  for (const stop of between) {
+    const wantPickup = stop.activity_kind === "passenger_pickup";
+    const people = assignments
+      .filter((person) =>
+        addressKey(wantPickup ? person.pickupAddress : person.dropoffAddress) ===
+        addressKey(stop.street_address),
+      )
+      .sort((a, b) => rank(a.pickupOrder) - rank(b.pickupOrder) || a.name.localeCompare(b.name));
+    for (const person of people) pushPerson(person, stop.street_address?.trim() || "");
+  }
+
+  seeds.push({
+    trip_id: opts.tripId,
+    leg_index: seeds.length + 1,
+    leg_kind: cursor.person ? "client_to_venue" : "venue_to_venue",
+    from_label: cursor.label,
+    to_label: opts.toLabel,
+    ...personLegColumns(null),
+    from_participant_id: cursor.person?.participantId ?? null,
+    from_staff_id: cursor.person?.staffId ?? null,
+    from_carer_id: cursor.person?.carerId ?? null,
     status: "pending",
     medication_expected: false,
     medication_handover_status: "not_required",
     target_address: opts.toAddress,
   });
-  if (legErr) throw new Error(`Could not create hop leg: ${legErr.message}`);
+  if (seeds.length === 1) return [plain(1, opts.fromLabel, opts.toLabel, opts.toAddress)];
+  return seeds;
 }
 
 export async function startEventVenueHop(

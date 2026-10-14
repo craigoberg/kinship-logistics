@@ -3,6 +3,7 @@
  * Own IN/HOME methods. Not guest participants.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { loadBookingJoinModes, skipDoorDropoff, skipDoorPickup } from "@/lib/api/passenger-stops";
 import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
 import { formatTravelHow, recordOfficeChangeBestEffort, withAuditActorMeta } from "@/lib/api/office-change-log";
@@ -43,6 +44,10 @@ export interface EventSupportBooking {
   tripPickupAddressOverride: string | null;
   /** Bus stop home from the departure point, when it differs from the meeting-point pickup. */
   tripReturnAddressOverride: string | null;
+  /** Null means the older home-door pickup. */
+  pickupJoin: string | null;
+  /** Null means the older home-door drop-off. */
+  alightMode: string | null;
   /** Home or street on the staff / carer record. */
   profileAddress: string | null;
   /** Null means the full event ticket price. */
@@ -99,6 +104,8 @@ interface BookingDb {
   pickup_order: number | null;
   trip_pickup_address_override: string | null;
   trip_return_address_override?: string | null;
+  pickup_join?: string | null;
+  alight_mode?: string | null;
   custom_price?: number | string | null;
   notes?: string | null;
   amount_paid?: number | string | null;
@@ -173,6 +180,8 @@ function toBooking(r: BookingDb, names: NameMaps): EventSupportBooking {
     pickupOrder: r.pickup_order,
     tripPickupAddressOverride: r.trip_pickup_address_override,
     tripReturnAddressOverride: r.trip_return_address_override ?? null,
+    pickupJoin: r.pickup_join ?? null,
+    alightMode: r.alight_mode ?? null,
     profileAddress:
       r.person_kind === "carer"
         ? names.carer.get(r.carer_id ?? "")?.address ?? null
@@ -370,6 +379,8 @@ export async function setEventSupportTravel(input: {
   /** Omit to leave the stored stop. Null clears it. */
   tripPickupAddressOverride?: string | null;
   tripReturnAddressOverride?: string | null;
+  pickupJoin?: string | null;
+  alightMode?: string | null;
 }): Promise<void> {
   const patch: Record<string, unknown> = {
     outbound_transport_mode: input.outbound,
@@ -383,8 +394,13 @@ export async function setEventSupportTravel(input: {
   if (input.tripReturnAddressOverride !== undefined) {
     patch.trip_return_address_override = input.tripReturnAddressOverride?.trim() || null;
   }
+  if (input.pickupJoin !== undefined) patch.pickup_join = input.pickupJoin;
+  if (input.alightMode !== undefined) patch.alight_mode = input.alightMode;
   const { error } = await supabase.from("event_support_bookings").update(patch).eq("id", input.id);
   if (error) {
+    if (isSchemaMismatchError(error) && (input.pickupJoin !== undefined || input.alightMode !== undefined)) {
+      throw new Error("Run docs/sql/2026-10-15_passenger_stops.sql in the database, then try again.");
+    }
     if (isSchemaMismatchError(error)) {
       throw new Error(
         "Run docs/sql/2026-10-14_travel_leg_addresses.sql in the database, then try again.",
@@ -400,6 +416,16 @@ export async function setEventSupportTravel(input: {
     category: "TRIP",
     summary: `Set ${input.displayName} travel to the meeting point ${input.outbound}, home ${input.ret}`,
   });
+  const { data: owner } = await supabase
+    .from("event_support_bookings")
+    .select("event_id")
+    .eq("id", input.id)
+    .maybeSingle();
+  const eventId = (owner as { event_id?: string } | null)?.event_id;
+  if (eventId) {
+    const { syncPassengerStopsForEvent } = await import("@/lib/api/passenger-stops");
+    await syncPassengerStopsForEvent(eventId);
+  }
 }
 
 export async function removeEventSupportBooking(id: string): Promise<void> {
@@ -1067,6 +1093,11 @@ export async function listSupportRosterForEventTrip(input: {
       ? b.outboundTransportMode === "bus"
       : b.returnTransportMode === "bus",
   );
+  filtered = filtered.filter((b) =>
+    input.direction === "outbound"
+      ? !skipDoorPickup(b.pickupJoin)
+      : !skipDoorDropoff(b.alightMode),
+  );
 
   if (input.direction === "return" && input.sessionDate) {
     const { data: session } = await supabase
@@ -1137,6 +1168,7 @@ export async function listLegacyCarerRosterForEventTrip(input: {
     error = res.error;
   }
   const support = await listEventSupportBookings(input.eventId);
+  const joinModes = await loadBookingJoinModes(input.eventId);
   if (error) return [];
   const already = new Set(
     support.filter((b) => b.carerId).map((b) => b.carerId as string),
@@ -1167,6 +1199,9 @@ export async function listLegacyCarerRosterForEventTrip(input: {
           ? "bus"
           : "self";
     if (mode !== "bus") continue;
+    const join = joinModes?.byCarer.get(row.carer_id);
+    if (input.direction === "outbound" && join && skipDoorPickup(join.pickupJoin)) continue;
+    if (input.direction === "return" && join && skipDoorDropoff(join.alightMode)) continue;
     const profile = names.carer.get(row.carer_id);
     const pickup = (row.carer_trip_pickup_address_override ?? "").trim();
     const home = (row.carer_trip_return_address_override ?? "").trim();

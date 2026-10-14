@@ -22,6 +22,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Lock,
   Trash2,
   UserCheck,
 } from "lucide-react";
@@ -56,6 +57,7 @@ import {
   assessOvernightHotelStops,
   deleteEventVenueStop,
   inferEventKind,
+  isPassengerStop,
   isAccommodationVenueType,
   isVenueTransportStop,
   listEventDaySessions,
@@ -527,9 +529,10 @@ function DayItinerary({
 
   const stopById = useMemo(() => new Map(sorted.map((s) => [s.id, s])), [sorted]);
 
-  const hopCount = Math.max(0, sorted.length - 1);
-  const firstStop = sorted[0];
-  const lastStop = sorted[sorted.length - 1];
+  const places = sorted.filter((stop) => !isPassengerStop(stop));
+  const hopCount = Math.max(0, places.length - 1);
+  const firstStop = places[0];
+  const lastStop = places[places.length - 1];
   const meetOk = !!firstStop && isVenueTransportStop(firstStop);
   const departOk = !isLastDay || (!!lastStop && isVenueTransportStop(lastStop));
   const dayShapeBad = !meetOk || (isLastDay && !departOk) || overnightMissing;
@@ -856,8 +859,9 @@ function DayItinerary({
                   const nextStop = idx < ids.length - 1 ? stopById.get(ids[idx + 1]!) : null;
                   const isLast = idx === ids.length - 1;
                   const isPlace = isVenueTransportStop(stop);
-                  const isMeeting = idx === 0 && isPlace;
-                  const isDeparture = isLastDay && isLast && isPlace;
+                  const passenger = isPassengerStop(stop);
+                  const isMeeting = !!firstStop && stop.id === firstStop.id;
+                  const isDeparture = isLastDay && !!lastStop && stop.id === lastStop.id;
                   const showOvernight =
                     requiresOvernightHotel && isLast && isAccommodationVenueType(stop.venue_type) && isPlace;
 
@@ -896,6 +900,11 @@ function DayItinerary({
                               {stopVenueTypeName(stop, typesQ.data?.types)}
                             </span>
                           )}
+                          {passenger && (
+                            <span className="inline-flex shrink-0 items-center rounded bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold text-info">
+                              {stop.activity_kind === "passenger_dropoff" ? "Drop-off" : "Pickup"}
+                            </span>
+                          )}
                           {(isMeeting || isDeparture) && (
                             <span className="inline-flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
                               {isMeeting && isDeparture
@@ -917,14 +926,26 @@ function DayItinerary({
                             </span>
                           )}
                         </div>
-                        {nextStop && (
+                        {passenger && stop.street_address ? (
+                          <p className="ml-5 truncate text-[10px] text-muted-foreground">
+                            {stop.street_address}
+                          </p>
+                        ) : nextStop ? (
                           <p className="ml-5 text-[10px] text-muted-foreground">
                             ↳ Hop {idx + 1} to{" "}
                             {nextStop.label_override ?? nextStop.venue_name ?? "next stop"}
                           </p>
-                        )}
+                        ) : null}
                       </div>
 
+                      {passenger ? (
+                        <span
+                          className="flex h-10 w-10 shrink-0 items-center justify-center text-muted-foreground"
+                          title="Stays while someone is picked up or dropped off here"
+                        >
+                          <Lock className="h-4 w-4" />
+                        </span>
+                      ) : (
                       <IconActionButton
                         className="h-10 w-10 shrink-0 text-muted-foreground hover:text-destructive"
                         tooltip="Remove stop"
@@ -934,6 +955,7 @@ function DayItinerary({
                       >
                         <Trash2 className="h-4 w-4" />
                       </IconActionButton>
+                      )}
                     </div>
                     </div>
                   );

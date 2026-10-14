@@ -89,6 +89,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     mutationFn: updateCompanionCarerTravel,
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
+      void qc.invalidateQueries({ queryKey: ["event-venue-stops", event.id] });
     },
     onError: (err: Error) => toast.error(err.message),
     onSettled: () => setSavingCarerId(null),
@@ -420,6 +421,8 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   ret?: "bus" | "self";
                   pickup?: string | null;
                   home?: string | null;
+                  pickupJoin?: string | null;
+                  alightMode?: string | null;
                 }) => {
                   setSavingCarerId(b.id);
                   saveCarerTravel.mutate({
@@ -429,6 +432,8 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                     ret: patch.ret ?? ret,
                     pickupAddress: patch.pickup,
                     returnAddress: patch.home,
+                    pickupJoin: patch.pickupJoin,
+                    alightMode: patch.alightMode,
                   });
                 };
                 return (
@@ -445,14 +450,56 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                       outbound={outbound}
                       ret={ret}
                       disabled={savingCarerId === b.id}
-                      meetingAddress={meeting}
-                      homeAddress={home}
+                      meetingAddress={
+                        b.carerPickupJoin === "address"
+                          ? (b.carerTripPickupAddressOverride ?? "")
+                          : meeting
+                      }
+                      homeAddress={
+                        b.carerAlightMode === "same"
+                          ? meeting
+                          : b.carerAlightMode === "address"
+                            ? (b.carerTripReturnAddressOverride ?? "")
+                            : home
+                      }
                       onMeet={(mode) => save({ outbound: mode })}
                       onHome={(mode) => save({ ret: mode })}
-                      onMeetingAddress={(next) => save({ pickup: legOverrideToStore(next, profile) })}
-                      onHomeAddress={(next) =>
-                        save({ home: legOverrideToStore(next, meeting || profile) })
+                      onMeetingAddress={(next) =>
+                        save({
+                          pickup:
+                            b.carerPickupJoin === "address"
+                              ? next.trim() || null
+                              : legOverrideToStore(next, profile),
+                          pickupJoin: b.carerPickupJoin === "address" ? "address" : undefined,
+                        })
                       }
+                      onHomeAddress={(next) =>
+                        save({
+                          home:
+                            b.carerAlightMode === "address" || b.carerAlightMode === "same"
+                              ? next.trim() || null
+                              : legOverrideToStore(next, meeting || profile),
+                          alightMode:
+                            b.carerAlightMode === "address" || b.carerAlightMode === "same"
+                              ? "address"
+                              : undefined,
+                        })
+                      }
+                      pickupJoin={b.carerPickupJoin}
+                      alightMode={b.carerAlightMode}
+                      onPickupJoin={(mode) =>
+                        save({
+                          pickupJoin: mode,
+                          outbound: mode === "address" ? "self" : outbound,
+                        })
+                      }
+                      onAlightMode={(mode) =>
+                        save({
+                          alightMode: mode,
+                          ret: mode === "address" || mode === "home" ? "bus" : ret,
+                        })
+                      }
+                      addressOwner={carerId ? { kind: "carer", id: carerId } : null}
                     />
                   </div>
                 );

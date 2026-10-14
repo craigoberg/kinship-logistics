@@ -903,6 +903,14 @@ Transport accountability only — keyed by `event_day_session_id` + `transport_t
 5. **Group hop:** when the whole group boards and arrives together, **no event-floor re-check-in at destination** (§12.1) — unless incident en route.
 6. Bus manifest does **not** replace event-floor check-in at the **primary venue** when people arrive asynchronously.
 
+#### 12.4.3b Passenger stops (locked 2026-10-15)
+
+Every confirmed person (participant, carer, staff, volunteer) **joins the trip** either **at the meeting point** or **on the trip**, and **leaves** either **at the departure point** or **before** it. At the meeting point, Bus or Self is how they get there. On the trip, they make their own way to the address, and the bus collects them there. That address is one **Pickup** row (shared when several people use it), slotted just after the meeting point until someone drags it. Before the departure point, the bus drops them at the address. That address is one **Drop-off** row, slotted just before the departure point until someone drags it. At the departure point, Bus or Self is how they get home.
+
+These rows are not programme places. They do not become the meeting point or the departure point, and they are not opened as an activity. They stay while anyone is assigned. Putting everyone back on the meeting point or the departure point removes the row.
+
+Someone collected on a later row is not also a door on the way to the meeting point. Someone dropped before the departure point is not also driven home from the departure point. Bus from the departure point is the door drop-off. A blank join or leave on a booking saved before this date still means that door.
+
 #### 12.4.3a Outbound vs. return runs — two separate manifests
 
 For single-day outings and every day of a multi-day tour, **transport is always two separate §11 manifests**:

@@ -74,7 +74,12 @@ export function inferEventKind(input: {
 // event_venue_stops — itinerary
 // ============================================================================
 
-export type EventStopActivityKind = "venue" | "meal" | "medication_round";
+export type EventStopActivityKind =
+  | "venue"
+  | "meal"
+  | "medication_round"
+  | "passenger_pickup"
+  | "passenger_dropoff";
 export type EventMealSlot = "breakfast" | "morning_tea" | "lunch" | "dinner";
 export type EventMealSource =
   | "delivered_by_us"
@@ -117,6 +122,8 @@ export interface EventVenueStop {
   /** Type name copied onto this line when it was added. A later rename does not change it. */
   venue_type_label?: string | null;
   venue_street_address?: string | null;
+  /** Address on a passenger pickup or drop-off. Places use the venue address. */
+  street_address?: string | null;
 }
 
 export function isMealStop(
@@ -129,6 +136,13 @@ export function isMedicationStop(
   stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
 ): boolean {
   return (stop?.activity_kind ?? "venue") === "medication_round";
+}
+
+export function isPassengerStop(
+  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+): boolean {
+  const kind = stop?.activity_kind ?? "venue";
+  return kind === "passenger_pickup" || kind === "passenger_dropoff";
 }
 
 /** Venue stops that participate in bus hops / overnight hotel chain. */
@@ -311,6 +325,9 @@ export function assessItineraryDayAnchors(opts: {
   for (const date of dates) {
     const dayStops = opts.stops
       .filter((s) => s.session_date === date)
+      .filter(
+        (s) => s.activity_kind !== "passenger_pickup" && s.activity_kind !== "passenger_dropoff",
+      )
       .sort((a, b) => a.stop_order - b.stop_order);
     const first = dayStops[0];
     const last = dayStops[dayStops.length - 1];
@@ -536,6 +553,19 @@ async function labelForVenueAtInsert(
 export async function deleteEventVenueStop(id: string): Promise<void> {
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can remove itinerary stops.");
+
+  const { data: existing, error: readErr } = await supabase
+    .from("event_venue_stops")
+    .select("activity_kind")
+    .eq("id", id)
+    .maybeSingle();
+  if (readErr) throw readErr;
+  const kind = (existing as { activity_kind?: string | null } | null)?.activity_kind;
+  if (kind === "passenger_pickup" || kind === "passenger_dropoff") {
+    throw new Error(
+      "This stop stays while someone is picked up or dropped off here. Put them back on the meeting point or the departure point.",
+    );
+  }
 
   const { error } = await supabase
     .from("event_venue_stops")
@@ -1315,6 +1345,10 @@ export interface UpdateBookingTransportModeInput {
   /** Omit to leave the stored stop. Null clears it. */
   trip_pickup_address_override?: string | null;
   trip_return_address_override?: string | null;
+  /** meeting_point | home | address. Omit to leave it. */
+  pickup_join?: string | null;
+  /** departure_point | home | same | address. Omit to leave it. */
+  alight_mode?: string | null;
 }
 
 export async function updateBookingTransportModes(
@@ -1343,12 +1377,20 @@ export async function updateBookingTransportModes(
   if (input.trip_return_address_override !== undefined) {
     patch.trip_return_address_override = input.trip_return_address_override?.trim() || null;
   }
+  const joinTouch = input.pickup_join !== undefined || input.alight_mode !== undefined;
+  if (input.pickup_join !== undefined) patch.pickup_join = input.pickup_join;
+  if (input.alight_mode !== undefined) patch.alight_mode = input.alight_mode;
 
   const { error } = await supabase
     .from("event_roster_bookings")
     .update(patch)
     .eq("id", input.booking_id);
   if (error) {
+    if (isSchemaMismatchError(error) && joinTouch) {
+      throw new Error(
+        "Run docs/sql/2026-10-15_passenger_stops.sql in the database, then try again.",
+      );
+    }
     if (isSchemaMismatchError(error) && addressTouch) {
       throw new Error(
         "Run docs/sql/2026-10-14_travel_leg_addresses.sql in the database, then try again.",
@@ -1384,6 +1426,16 @@ export async function updateBookingTransportModes(
     category: "TRIP",
     summary: `Set booking transport IN ${input.outbound_transport_mode} / OUT ${input.return_transport_mode}`,
   });
+  const { data: owner } = await supabase
+    .from("event_roster_bookings")
+    .select("event_id")
+    .eq("id", input.booking_id)
+    .maybeSingle();
+  const eventId = (owner as { event_id?: string } | null)?.event_id;
+  if (eventId) {
+    const { syncPassengerStopsForEvent } = await import("@/lib/api/passenger-stops");
+    await syncPassengerStopsForEvent(eventId);
+  }
 }
 
 // ============================================================================
@@ -1458,6 +1510,8 @@ export async function updateCompanionCarerTravel(input: {
   ret: "bus" | "self";
   pickupAddress?: string | null;
   returnAddress?: string | null;
+  pickupJoin?: string | null;
+  alightMode?: string | null;
 }): Promise<void> {
   const patch: Record<string, unknown> = {
     carer_outbound_transport_mode: input.outbound,
@@ -1470,11 +1524,16 @@ export async function updateCompanionCarerTravel(input: {
   if (input.returnAddress !== undefined) {
     patch.carer_trip_return_address_override = input.returnAddress?.trim() || null;
   }
+  if (input.pickupJoin !== undefined) patch.carer_pickup_join = input.pickupJoin;
+  if (input.alightMode !== undefined) patch.carer_alight_mode = input.alightMode;
   const { error } = await supabase
     .from("event_roster_bookings")
     .update(patch)
     .eq("id", input.bookingId);
   if (error) {
+    if (isSchemaMismatchError(error) && (input.pickupJoin !== undefined || input.alightMode !== undefined)) {
+      throw new Error("Run docs/sql/2026-10-15_passenger_stops.sql in the database, then try again.");
+    }
     if (isSchemaMismatchError(error)) {
       throw new Error(`Run ${TRAVEL_LEG_ADDRESS_SQL} in the database, then try again.`);
     }
@@ -1488,6 +1547,16 @@ export async function updateCompanionCarerTravel(input: {
     category: "TRIP",
     summary: `Set ${input.displayName} travel to the meeting point ${input.outbound}, home ${input.ret}`,
   });
+  const { data: owner } = await supabase
+    .from("event_roster_bookings")
+    .select("event_id")
+    .eq("id", input.bookingId)
+    .maybeSingle();
+  const eventId = (owner as { event_id?: string } | null)?.event_id;
+  if (eventId) {
+    const { syncPassengerStopsForEvent } = await import("@/lib/api/passenger-stops");
+    await syncPassengerStopsForEvent(eventId);
+  }
 }
 
 /** One drag order for everyone on the trip bus (participants, support, and carers on a booking). */

@@ -344,8 +344,15 @@ export async function assessEventReturnTransport(
     ? await listReturnHomeBusEligibleParticipantIds(lastSession.id)
     : null;
 
+  const { loadBookingJoinModes, skipDoorDropoff } = await import("@/lib/api/passenger-stops");
+  const joinModes = await loadBookingJoinModes(eventId).catch(() => null);
+  const needsHomeDoor = (participantId: string) => {
+    const mode = joinModes?.byParticipant.get(participantId)?.alightMode;
+    return !skipDoorDropoff(mode);
+  };
+
   if (floorEligible) {
-    busReturnPassengerCount = floorEligible.ids.size;
+    busReturnPassengerCount = [...floorEligible.ids].filter(needsHomeDoor).length;
   } else {
     const actualTransport = await fetchEventActualTransport(eventId);
     const { data: bookings, error: bookErr } = await supabase
@@ -357,6 +364,7 @@ export async function assessEventReturnTransport(
 
     for (const b of bookings ?? []) {
       const row = b as { participant_id: string; return_transport_mode: string | null };
+      if (!needsHomeDoor(row.participant_id)) continue;
       const planned = normalizeEventTransportMode(row.return_transport_mode);
       const actual = actualTransport.get(row.participant_id)?.return;
       if ((actual ?? planned) === "bus") busReturnPassengerCount++;
@@ -478,8 +486,11 @@ export async function listBusHomeHandoverGaps(opts: {
     }
   }
 
+  const { loadBookingJoinModes, skipDoorDropoff } = await import("@/lib/api/passenger-stops");
+  const joinModes = await loadBookingJoinModes(opts.eventId).catch(() => null);
   const missingIds = busOut
     .map((r) => r.participant_id)
+    .filter((id) => !skipDoorDropoff(joinModes?.byParticipant.get(id)?.alightMode))
     .filter((id) => !onManifest.has(id));
 
   if (missingIds.length === 0) {

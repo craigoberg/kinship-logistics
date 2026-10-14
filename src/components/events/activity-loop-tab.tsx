@@ -47,6 +47,7 @@ import { sortByParticipantSurname } from "@/lib/ui/sort-participants";
 import {
   isAccommodationVenueType,
   isMealStop,
+  isPassengerStop,
   isMedicationStop,
   isVenueTransportStop,
   listEventVenueStops,
@@ -319,7 +320,7 @@ export function ActivityLoopTab({
       });
     if (completed[0]) return completed[0];
     if (hotelOmitted && wakeOriginStop) return wakeOriginStop;
-    return todayStops[0] ?? null;
+    return todayStops.find((stop) => !isPassengerStop(stop)) ?? null;
   }, [todayStops, hotelOmitted, wakeOriginStop]);
 
   const invalidateStops = () => {
@@ -435,6 +436,7 @@ export function ActivityLoopTab({
       )}
 
       {todayStops.map((stop, idx) => {
+        if (isPassengerStop(stop)) return null;
         const meal = isMealStop(stop);
         const med = isMedicationStop(stop);
         const hopOut = programmeHops.find((h) => h.from.id === stop.id);
