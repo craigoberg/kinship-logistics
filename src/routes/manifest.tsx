@@ -1,6 +1,6 @@
 // Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -1884,10 +1884,30 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   useRealtimeInvalidate({ table: "trip_run_notices", queryKeys: [["trip-run-notices", trip.id]] });
 
   const activeRef = useRef<HTMLDivElement | null>(null);
+  const closeRunRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (preDepartureOpen) return;
     if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
   }, [activeLeg?.id, preDepartureOpen]);
+
+  // The reconcile card is taller than a phone once SIM, incident, and the trip
+  // header are on screen. Land with the PIN button inside the list.
+  useLayoutEffect(() => {
+    if (preDepartureOpen || !allLegsComplete) return;
+    const card = closeRunRef.current;
+    const scroller = card?.closest("[data-manifest-scroll]");
+    if (!card || !(scroller instanceof HTMLElement)) return;
+
+    const revealPin = () => {
+      const overflow =
+        card.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom;
+      if (overflow > 1) scroller.scrollTop += overflow + 8;
+    };
+
+    revealPin();
+    const later = window.setTimeout(revealPin, 300);
+    return () => window.clearTimeout(later);
+  }, [allLegsComplete, preDepartureOpen]);
 
   const prevLegIdsRef = useRef<string[]>(legs.map((l) => l.id));
   useEffect(() => {
@@ -2117,13 +2137,18 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         )}
 
         {!preDepartureOpen && allLegsComplete && (
-          <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
-            <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
-            <div className="mt-2 text-lg font-bold">
-              {isVenueHop ? "All legs completed" : "All stops completed"}
+          <>
+            <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
+              <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
+              <div className="mt-2 text-lg font-bold">
+                {isVenueHop ? "All legs completed" : "All stops completed"}
+              </div>
+              <div className="text-sm text-muted-foreground">Finalize the shift below.</div>
+            </Card>
+            <div ref={closeRunRef}>
+              <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
             </div>
-            <div className="text-sm text-muted-foreground">Finalize the shift below.</div>
-          </Card>
+          </>
         )}
 
         {!preDepartureOpen &&
@@ -2198,9 +2223,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           <div className="text-center text-xs text-muted-foreground">
             Check everyone onto the bus, then All Aboard.
           </div>
-        ) : allLegsComplete ? (
-          <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
-        ) : activeIsEnRoute ? (
+        ) : allLegsComplete ? null : activeIsEnRoute ? (
           <div className="text-center text-xs text-muted-foreground">
             {isVenueHop
               ? "Tap Arrive when you reach the next place."

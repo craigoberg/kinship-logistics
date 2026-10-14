@@ -98,7 +98,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **RED verbal consultation** | Defined | `VerbalConsultationDialog` | RED path | Manager by name; operator PIN only |
 | **Manifest Day Centre title** | **Defined** | Sticky header `Daily Run — {run} · Morning` / `… · Afternoon Return` | Active `/manifest` Day Centre trip | Event trips keep the event title. Run label from Admin `bus_runs`. Confirms which bus the driver started. |
 | **End of Day Went home how** | **Defined** | Bus = Admin run display name (floor `departure_bus_run_code`, else weekly OUT) | Day Centre Report **Went home** | Family / independent stay those labels. Generic **Bus** only when the vector is bus and no run code is on file. |
-| **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Primary action in footer, scroll body free |
+| **Manifest sticky CTA** | Defined | Footer pattern in manifest routes | Confirm depart, close leg | Depart and Arrive stay on the active stop. Close Run reconcile scrolls with the stop list so the PIN button can sit fully on a phone. The footer under that card is only Cancel trip. |
 | **Hide chrome on scroll** | **Defined** | `ChromeVisibilityProvider` + `useHideChromeOnScroll` | Dashboard document scroll | Visible on load. Scroll down hides SIM bar, AppShell header, and BottomNav. Scroll up or back to top reveals. **Do not hide** when the page cannot scroll (~48px overflow). Flip only after ~48px travel; lock ~400ms so collapsing chrome cannot flicker. Does **not** hide Close Run, Incident / Raise FABs, SiteNoGo, or MOTD. **Manifest does not hide chrome** — the list must not spring, and Depart / Arrive must stay under the finger. |
 | **Manifest pre-departure boarding** | **Defined** | Return `ReturnBoardingRoll` / hop `HopBoardingPanel` only | Home run and venue hop before first depart | Header shows **Pre-departure**. Hide all leg cards until All Aboard / hop boarded. Then boarding panel closes and the active leg appears. Do not `scrollIntoView` the first leg while the roll is open. |
 | **Floor CTA colours** | **Defined** | Amber pulse = next commit; green = done; blue = you-are-here; slate = blocked; red = danger | Manifest, Day Centre, Event Deliver | Locked 2026-09-09. See Quick reference — colours. RYGE chips and Raise-ticket FAB are exceptions. |
@@ -576,6 +576,7 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-10-14 | Manifest close run | Close Run scrolls with the stop list. The PIN button is no longer clipped by a fixed footer on a phone. |
 | 2026-10-14 | Manifest map | Arrive and Depart sit above the route picture. Open in Google Maps sits under that button. The picture stays full width and is a short strip. |
 | 2026-10-14 | Manifest scroll | iPhone Chrome must not rubber-band the Manifest list at the top or bottom. Chrome stays on screen so Depart and Arrive do not jump. |
 | 2026-10-14 | Itinerary day lights | Meet place, Overnight OK, and Departure place use the same green/amber badges. First item each day is a place. Last item is a hotel on an overnight night, or a departure place on the final day. Multi-day shows Check-in or Morning roll, and Evening roll before the hotel. |
