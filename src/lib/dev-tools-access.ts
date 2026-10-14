@@ -1,7 +1,8 @@
 /**
- * DEV/TEST tools (simulate offline, Reset Start of Day, Show diag,
- * Cancel / Reset Trip on a test build) are presented only when Craig is the
- * signed-in person. Production builds never show them (`IS_TEST_BUILD`).
+ * DEV/TEST tools (simulate offline, Reset Start of Day, Show diag) are
+ * presented only when Craig is the signed-in person. Production builds never
+ * show them (`IS_TEST_BUILD`). Manifest Cancel / Reset Trip is separate: every
+ * signed-in driver sees it, on Test and on production.
  *
  * SIM Time is separate: anyone on a DEV build, Craig only on TEST.
  */
