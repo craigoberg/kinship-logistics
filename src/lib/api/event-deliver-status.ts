@@ -156,15 +156,17 @@ export interface OvernightWakeBase {
  * (itinerary may omit the hotel on the final day).
  */
 export function resolveOvernightWakeBase(
-  allStops: VenueStopRow[],
+  allStops: EventVenueStop[],
   sessionDate: string,
-  todayStops: VenueStopRow[],
+  todayStops: EventVenueStop[],
 ): OvernightWakeBase {
+  const allRows = allStops as VenueStopRow[];
+  const todayRows = todayStops as VenueStopRow[];
   // Meals / meds are not overnight hotels or hop origins.
-  const todayVenues = todayStops.filter((s) => isVenueTransportStop(s));
+  const todayVenues = todayRows.filter((s) => isVenueTransportStop(s));
   const priorDates = [
     ...new Set(
-      allStops
+      allRows
         .map((s) => s.session_date)
         .filter((d): d is string => !!d && d < sessionDate),
     ),
@@ -181,7 +183,7 @@ export function resolveOvernightWakeBase(
     };
   }
 
-  const priorVenues = allStops
+  const priorVenues = allRows
     .filter((s) => s.session_date === priorDate)
     .filter((s) => isVenueTransportStop(s))
     .sort((a, b) => a.stop_order - b.stop_order);
@@ -207,15 +209,22 @@ export function resolveOvernightWakeBase(
   };
 }
 
+function placesDiffer(a: VenueStopRow, b: VenueStopRow): boolean {
+  if (a.venue_id && b.venue_id) return a.venue_id !== b.venue_id;
+  return stopLabel(a) !== stopLabel(b);
+}
+
 /**
- * Consecutive venue→venue hops only (BL-073 / BL-077).
- * Meal and medication_round stops are on-site at the current venue — never hop destinations.
+ * Consecutive place-to-place hops.
+ * A meeting-point meal at a different place starts the chain.
+ * Later meals and medication rounds stay on-site at the current place.
  */
 export function buildProgrammeHops(
-  todayStops: VenueStopRow[],
+  todayStops: EventVenueStop[],
   overnightWake: OvernightWakeBase | null,
 ): Array<{ from: VenueStopRow; to: VenueStopRow; hopIndex: number }> {
-  const venues = todayStops.filter((s) => isVenueTransportStop(s));
+  const ordered = [...(todayStops as VenueStopRow[])].sort((a, b) => a.stop_order - b.stop_order);
+  const venues = ordered.filter((s) => isVenueTransportStop(s));
   const hops: Array<{ from: VenueStopRow; to: VenueStopRow; hopIndex: number }> = [];
   let hopIndex = 0;
 
@@ -227,6 +236,23 @@ export function buildProgrammeHops(
     hops.push({
       from: overnightWake.priorLastStop,
       to: venues[0],
+      hopIndex: hopIndex++,
+    });
+  }
+
+  const first = ordered[0];
+  const firstVenue = venues[0];
+  if (
+    !overnightWake?.hotelOmitted &&
+    first &&
+    firstVenue &&
+    first.id !== firstVenue.id &&
+    isOnSiteProgrammeStop(first) &&
+    placesDiffer(first, firstVenue)
+  ) {
+    hops.push({
+      from: first,
+      to: firstVenue,
       hopIndex: hopIndex++,
     });
   }
@@ -274,18 +300,20 @@ function onSiteBeforeFirstVenue(
 
 function onSiteStepLabel(stop: VenueStopRow, atVenue: VenueStopRow): string {
   const at = stopLabel(atVenue);
+  const here = stop.id === atVenue.id || stopLabel(stop) === at;
   if (isMealStop(stop)) {
     const slot = stop.meal_slot;
     const mealName =
       stop.label_override?.trim() ||
       (slot ? MEAL_SLOT_LABELS[slot] : null) ||
       "Meal";
-    return `${mealName} at ${at}`;
+    return here ? mealName : `${mealName} at ${at}`;
   }
   if (isMedicationStop(stop)) {
-    return stop.label_override?.trim() || `Medication round at ${at}`;
+    const name = stop.label_override?.trim() || "Medication round";
+    return here ? name : `${name} at ${at}`;
   }
-  return `${stopLabel(stop)} at ${at}`;
+  return here ? stopLabel(stop) : `${stopLabel(stop)} at ${at}`;
 }
 
 function onSiteStepDetail(stop: VenueStopRow, phase: StopPhase): string {
@@ -330,10 +358,14 @@ export function buildProgrammeTimeline(
       });
     }
   } else if (firstVenue) {
-    for (const act of [
-      ...onSiteBeforeFirstVenue(todayStops, firstVenue),
-      ...onSiteActivitiesAtVenue(todayStops, firstVenue, nextAfterFirst),
-    ]) {
+    for (const act of onSiteBeforeFirstVenue(todayStops, firstVenue)) {
+      items.push({
+        kind: "onsite",
+        stop: act,
+        atVenue: placesDiffer(act, firstVenue) ? act : firstVenue,
+      });
+    }
+    for (const act of onSiteActivitiesAtVenue(todayStops, firstVenue, nextAfterFirst)) {
       items.push({ kind: "onsite", stop: act, atVenue: firstVenue });
     }
   } else {
@@ -548,8 +580,8 @@ export async function fetchEventDeliverGroupStatus(opts: {
   const overnightWake = showMorningRoll
     ? resolveOvernightWakeBase(allStops as VenueStopRow[], opts.sessionDate, todayStops)
     : null;
-  /** Arrival / wake label — Day 1 first venue; Day 2+ overnight hotel. */
-  const baseStop = overnightWake?.todayStop ?? todayVenues[0] ?? todayStops[0];
+  /** Day 1 arrival is the meeting point (first stop). Day 2+ wakes at the hotel. */
+  const baseStop = overnightWake?.todayStop ?? todayStops[0] ?? todayVenues[0];
   const baseName = overnightWake?.label ?? stopLabel(baseStop);
   /**
    * Where the group sleeps tonight (last venue today — not a meal/med row).
@@ -613,7 +645,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
       : allCheckedIn
         ? `All checked in at ${baseName}`
         : `Check in at ${baseName}`,
-    detail: totalOnTrip > 0 ? `${checkedInOrOut} / ${totalOnTrip} on the trip` : undefined,
+    detail: totalOnTrip > 0 ? `${checkedInOrOut} of ${totalOnTrip} checked in` : undefined,
     state: "upcoming",
   });
 

@@ -107,6 +107,7 @@ import {
 } from "@/lib/trip-absent";
 import {
   eventDeliverStatusKey,
+  buildProgrammeHops,
   fetchEventDeliverGroupStatus,
   resolveOvernightWakeBase,
 } from "@/lib/api/event-deliver-status";
@@ -187,6 +188,10 @@ export function ActivityLoopTab({
   );
   const hotelOmitted = overnightWake.hotelOmitted;
   const wakeOriginStop = overnightWake.priorLastStop;
+  const programmeHops = useMemo(
+    () => buildProgrammeHops(todayStops, overnightWake),
+    [todayStops, overnightWake],
+  );
 
   /** Where the group is: the open activity, else the latest one they finished. */
   const hereStop = useMemo(() => {
@@ -201,9 +206,7 @@ export function ActivityLoopTab({
       });
     if (completed[0]) return completed[0];
     if (hotelOmitted && wakeOriginStop) return wakeOriginStop;
-    return (
-      todayStops.find((s) => isVenueTransportStop(s)) ?? todayStops[0] ?? null
-    );
+    return todayStops[0] ?? null;
   }, [todayStops, hotelOmitted, wakeOriginStop]);
 
   const invalidateStops = () => {
@@ -318,56 +321,27 @@ export function ActivityLoopTab({
       {todayStops.map((stop, idx) => {
         const meal = isMealStop(stop);
         const med = isMedicationStop(stop);
-        // Origin is first venue stop only — meals/meds never start the hop chain.
+        const hopOut = programmeHops.find((h) => h.from.id === stop.id);
+        const hopIn = programmeHops.find((h) => h.to.id === stop.id);
+        // First bus venue is the origin only when the day does not start at a meeting-point meal.
         const isOrigin =
           !hotelOmitted &&
           !meal &&
           !med &&
+          !hopIn &&
           todayStops.findIndex((s) => isVenueTransportStop(s)) === idx;
-        let prevStop: EventVenueStop | null = null;
-        if (!meal && !med) {
-          if (hotelOmitted && idx === 0) {
-            prevStop = wakeOriginStop;
-          } else {
-            for (let i = idx - 1; i >= 0; i--) {
-              if (isVenueTransportStop(todayStops[i]!)) {
-                prevStop = todayStops[i]!;
-                break;
-              }
-            }
-            if (!prevStop && hotelOmitted) prevStop = wakeOriginStop;
-          }
-        }
-        let nextStop: EventVenueStop | null = null;
-        if (!meal && !med) {
-          for (let i = idx + 1; i < todayStops.length; i++) {
-            if (isVenueTransportStop(todayStops[i]!)) {
-              nextStop = todayStops[i]!;
-              break;
-            }
-          }
-        }
-        const venueHopIdx = todayStops
-          .slice(0, idx + 1)
-          .filter((s) => isVenueTransportStop(s)).length - 1;
-        const inboundHopIndex =
-          meal || med
-            ? null
-            : hotelOmitted
-              ? venueHopIdx
-              : venueHopIdx - 1;
-        const outboundHopIndex =
-          meal || med || !nextStop
-            ? null
-            : hotelOmitted
-              ? venueHopIdx + 1
-              : venueHopIdx;
+        const prevStop =
+          meal || med ? null : ((hopIn?.from as EventVenueStop | undefined) ?? null);
+        const nextStop =
+          meal || med ? null : ((hopOut?.to as EventVenueStop | undefined) ?? null);
+        const inboundHopIndex = meal || med || !hopIn ? null : hopIn.hopIndex;
+        const outboundHopIndex = meal || med || !hopOut ? null : hopOut.hopIndex;
 
         return (
           <StopCard
             key={stop.id}
             stop={stop}
-            stopIndex={hotelOmitted ? idx + 1 : idx}
+            stopIndex={idx}
             isOrigin={isOrigin}
             hereStop={hereStop}
             eventId={eventId}
@@ -696,7 +670,7 @@ function StopCard({
       ? (stop.meal_slot ?? "meal").replace(/_/g, " ")
       : med
         ? "Medication round"
-        : `Stop ${stopIndex}`,
+        : `Stop ${stopIndex + 1}`,
   );
   const hereName = hereStop ? stopDisplayName(hereStop, "here") : null;
   const isHere = !!hereStop && hereStop.id === stop.id;
@@ -967,7 +941,7 @@ function StopCard({
             {phase === "completed" ? (
               <CheckCircle2 className="h-4 w-4" />
             ) : (
-              stopIndex
+              stopIndex + 1
             )}
           </div>
 

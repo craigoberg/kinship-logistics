@@ -7,7 +7,7 @@
  *   - Booking outbound/return transport mode patches (§12.3.2)
  */
 import { supabase } from "@/integrations/supabase/client";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
@@ -192,13 +192,13 @@ export function assessOvernightHotelStops(opts: {
   const failingDates: string[] = [];
 
   for (const date of overnightDates) {
-    // Meal Programme stops do not count as overnight venue (BL-073).
+    // The night ends on the last item. A meal or medication round after the hotel does not count.
     const dayStops = opts.stops
       .filter((s) => s.session_date === date)
-      .filter((s) => (s.activity_kind ?? "venue") === "venue")
       .sort((a, b) => a.stop_order - b.stop_order);
     const last = dayStops[dayStops.length - 1];
-    if (!last || !isAccommodationVenueType(last.venue_type)) {
+    const lastIsPlace = !!last && (last.activity_kind ?? "venue") === "venue";
+    if (!lastIsPlace || !isAccommodationVenueType(last?.venue_type)) {
       failingDates.push(date);
     }
   }
@@ -212,7 +212,7 @@ export function assessOvernightHotelStops(opts: {
     ok: false,
     failingDates,
     blockers: [
-      `Overnight days must end at Hotel / accommodation — fix Itinerary for: ${labels}. (Admin → Venues: set venue type to Hotel / accommodation, then make that stop last on the day.)`,
+      `Overnight days must end on a Hotel / accommodation place — not a meal. Fix Itinerary for: ${labels}. (Admin → Venues: set venue type to Hotel / accommodation, then make that place the last item of the day.)`,
     ],
   };
 }
@@ -278,6 +278,82 @@ export async function assertOvernightDaysEndAtHotel(eventId: string): Promise<vo
   }
 }
 
+export interface ItineraryDayAnchorAssessment {
+  ok: boolean;
+  /** Days whose first item is missing or is not a place. */
+  meetFailingDates: string[];
+  /** Final day whose last item is missing or is not a place. */
+  departFailingDates: string[];
+  blockers: string[];
+}
+
+/**
+ * First item of every day is a place (meeting point).
+ * Last item of the final day is a place (departure). Meals and medication rounds are not places.
+ */
+export function assessItineraryDayAnchors(opts: {
+  sessionDates: string[];
+  stops: Array<{
+    session_date: string;
+    stop_order: number;
+    activity_kind?: string | null;
+  }>;
+}): ItineraryDayAnchorAssessment {
+  const dates = [...opts.sessionDates].sort((a, b) => a.localeCompare(b));
+  const meetFailingDates: string[] = [];
+  const departFailingDates: string[] = [];
+  const lastDate = dates[dates.length - 1];
+
+  for (const date of dates) {
+    const dayStops = opts.stops
+      .filter((s) => s.session_date === date)
+      .sort((a, b) => a.stop_order - b.stop_order);
+    const first = dayStops[0];
+    const last = dayStops[dayStops.length - 1];
+    if (!first || (first.activity_kind ?? "venue") !== "venue") meetFailingDates.push(date);
+    if (date === lastDate && (!last || (last.activity_kind ?? "venue") !== "venue")) {
+      departFailingDates.push(date);
+    }
+  }
+
+  const blockers: string[] = [];
+  if (meetFailingDates.length > 0) {
+    blockers.push(
+      `The first item each day must be a place (where people meet) — not a meal or medication round. Fix: ${meetFailingDates.map((d) => formatDate(d)).join(", ")}.`,
+    );
+  }
+  if (departFailingDates.length > 0) {
+    blockers.push(
+      `The last item on the final day must be a departure place — not a meal or medication round. Fix: ${departFailingDates.map((d) => formatDate(d)).join(", ")}.`,
+    );
+  }
+  return {
+    ok: blockers.length === 0,
+    meetFailingDates,
+    departFailingDates,
+    blockers,
+  };
+}
+
+export async function assessItineraryDayAnchorsForEvent(
+  eventId: string,
+): Promise<ItineraryDayAnchorAssessment> {
+  const sessions = await listEventDaySessions(eventId);
+  const stops = await listEventVenueStops(eventId);
+  const sessionDates =
+    sessions.length > 0
+      ? sessions.map((s) => s.session_date.slice(0, 10))
+      : [...new Set(stops.map((s) => s.session_date))].sort((a, b) => a.localeCompare(b));
+  return assessItineraryDayAnchors({ sessionDates, stops });
+}
+
+export async function assertItineraryDayAnchors(eventId: string): Promise<void> {
+  const result = await assessItineraryDayAnchorsForEvent(eventId);
+  if (!result.ok) {
+    throw new Error(result.blockers[0] ?? "Itinerary is missing a meeting or departure place.");
+  }
+}
+
 export interface ItineraryStopAnchor {
   id: string;
   label: string;
@@ -303,6 +379,43 @@ export async function getLastItineraryStopForDate(
     streetAddress: last.venue_street_address ?? null,
     sessionDate: last.session_date,
   };
+}
+
+/** Highest stored order on that day, plus one. Row count is not a free slot. */
+async function nextFreeStopOrder(eventId: string, sessionDate: string): Promise<number> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("stop_order")
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .order("stop_order", { ascending: false })
+    .limit(1);
+  if (error) throw error;
+  const top = (data?.[0] as { stop_order?: number } | undefined)?.stop_order;
+  return (typeof top === "number" ? top : -1) + 1;
+}
+
+async function insertEventVenueStop(
+  payload: Record<string, unknown>,
+  stopOrder: number,
+): Promise<EventVenueStop> {
+  const eventId = String(payload.event_id ?? "");
+  const sessionDate = String(payload.session_date ?? "");
+  let order = stopOrder;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const { data, error } = await supabase
+      .from("event_venue_stops")
+      .insert({ ...payload, stop_order: order, phase: "pending" })
+      .select("*")
+      .single();
+    if (!error) return data as EventVenueStop;
+    if (attempt === 0 && isDuplicateKeyError(error)) {
+      order = await nextFreeStopOrder(eventId, sessionDate);
+      continue;
+    }
+    throw error;
+  }
+  throw new Error("Could not add the itinerary stop.");
 }
 
 export interface UpsertEventVenueStopInput {
@@ -373,13 +486,7 @@ export async function upsertEventVenueStop(
     return stop;
   }
 
-  const { data, error } = await supabase
-    .from("event_venue_stops")
-    .insert({ ...payload, phase: "pending" })
-    .select("*")
-    .single();
-  if (error) throw error;
-  const created = data as EventVenueStop;
+  const created = await insertEventVenueStop(payload, input.stop_order);
   void recordOfficeChangeBestEffort({
     action: "created",
     entity: "itinerary",
@@ -1170,6 +1277,9 @@ export interface UpdateBookingTransportModeInput {
   /** BL-069 — required when outbound is bus and multi-run is used; null clears. */
   outbound_bus_run_code?: string | null;
   return_bus_run_code?: string | null;
+  /** Omit to leave the stored stop. Null clears it. */
+  trip_pickup_address_override?: string | null;
+  trip_return_address_override?: string | null;
 }
 
 export async function updateBookingTransportModes(
@@ -1189,12 +1299,26 @@ export async function updateBookingTransportModes(
   } else if (input.return_bus_run_code !== undefined) {
     patch.return_bus_run_code = input.return_bus_run_code?.trim() || null;
   }
+  const addressTouch =
+    input.trip_pickup_address_override !== undefined ||
+    input.trip_return_address_override !== undefined;
+  if (input.trip_pickup_address_override !== undefined) {
+    patch.trip_pickup_address_override = input.trip_pickup_address_override?.trim() || null;
+  }
+  if (input.trip_return_address_override !== undefined) {
+    patch.trip_return_address_override = input.trip_return_address_override?.trim() || null;
+  }
 
   const { error } = await supabase
     .from("event_roster_bookings")
     .update(patch)
     .eq("id", input.booking_id);
   if (error) {
+    if (isSchemaMismatchError(error) && addressTouch) {
+      throw new Error(
+        "Run docs/sql/2026-10-14_travel_leg_addresses.sql in the database, then try again.",
+      );
+    }
     if (isSchemaMismatchError(error)) {
       // Pre-BL-069: modes only.
       const { error: retryErr } = await supabase
@@ -1289,22 +1413,72 @@ export const TRANSPORT_MED_BAG_MIGRATION = "docs/sql/2026-07-07_event_roster_tra
 
 export const PICKUP_ORDER_MIGRATION = "docs/sql/2026-07-07_event_roster_pickup_order.sql";
 
-/** One drag order for everyone on the trip bus (participants and support). */
+const TRAVEL_LEG_ADDRESS_SQL = "docs/sql/2026-10-14_travel_leg_addresses.sql";
+
+/** Carer listed on a participant booking — own Bus / Self and own stops. */
+export async function updateCompanionCarerTravel(input: {
+  bookingId: string;
+  displayName: string;
+  outbound: "bus" | "self";
+  ret: "bus" | "self";
+  pickupAddress?: string | null;
+  returnAddress?: string | null;
+}): Promise<void> {
+  const patch: Record<string, unknown> = {
+    carer_outbound_transport_mode: input.outbound,
+    carer_return_transport_mode: input.ret,
+    carer_transport_required: input.outbound === "bus" || input.ret === "bus",
+  };
+  if (input.pickupAddress !== undefined) {
+    patch.carer_trip_pickup_address_override = input.pickupAddress?.trim() || null;
+  }
+  if (input.returnAddress !== undefined) {
+    patch.carer_trip_return_address_override = input.returnAddress?.trim() || null;
+  }
+  const { error } = await supabase
+    .from("event_roster_bookings")
+    .update(patch)
+    .eq("id", input.bookingId);
+  if (error) {
+    if (isSchemaMismatchError(error)) {
+      throw new Error(`Run ${TRAVEL_LEG_ADDRESS_SQL} in the database, then try again.`);
+    }
+    throw error;
+  }
+  void recordOfficeChangeBestEffort({
+    action: "updated",
+    entity: "booking",
+    recordId: input.bookingId,
+    recordName: input.displayName,
+    category: "TRIP",
+    summary: `Set ${input.displayName} travel to the meeting point ${input.outbound}, home ${input.ret}`,
+  });
+}
+
+/** One drag order for everyone on the trip bus (participants, support, and carers on a booking). */
 export async function reorderEventTravelOrder(
   eventId: string,
-  ordered: Array<{ kind: "participant" | "support"; id: string }>,
+  ordered: Array<{ kind: "participant" | "support" | "carer"; id: string }>,
 ): Promise<void> {
   const results = await Promise.all(
     ordered.map((row, idx) =>
       supabase
-        .from(row.kind === "participant" ? "event_roster_bookings" : "event_support_bookings")
-        .update({ pickup_order: (idx + 1) * 10 })
+        .from(row.kind === "support" ? "event_support_bookings" : "event_roster_bookings")
+        .update(
+          row.kind === "carer"
+            ? { carer_pickup_order: (idx + 1) * 10 }
+            : { pickup_order: (idx + 1) * 10 },
+        )
         .eq("id", row.id)
         .eq("event_id", eventId),
     ),
   );
   const colErr = results.find((r) => isUndefinedColumnError(r.error));
   if (colErr?.error) {
+    const missing = colErr.error.message ?? "";
+    if (missing.includes("carer_")) {
+      throw new Error(`Run ${TRAVEL_LEG_ADDRESS_SQL} in the database, then try again.`);
+    }
     throw new Error(
       `Pickup order column is not on the database yet. Run ${PICKUP_ORDER_MIGRATION} in Supabase SQL editor, then retry.`,
     );

@@ -72,7 +72,11 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
     }
   }, [bringsCarer, carerId, carers]);
 
-  const booked = useMemo(() => new Set(existingBookings.map((b) => b.participantId)), [existingBookings]);
+  const booked = useMemo(
+    () => new Set(existingBookings.map((b) => b.participantId)),
+    [existingBookings],
+  );
+  const restoring = useMemo(() => new Set<string>(), []);
   const available = useMemo(
     () =>
       [...participants]
@@ -110,7 +114,11 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
         carerTransportRequired: bringsCarer ? carerTransport : false,
         participantTransportRequired: isOuting ? true : participantTransport,
       });
-      toast.success("Participant added to roster");
+      toast.success(
+        restoring.has(participantId)
+          ? "Back on the trip. Earlier payments and refunds are unchanged."
+          : "Participant added to roster",
+      );
       onOpenChange(false);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
@@ -152,12 +160,19 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
                 {available.map((p) => (
                   <SelectItem key={p.id} value={p.id}>
                     {p.fullName}
+                    {restoring.has(p.id) ? " — was on this trip" : ""}
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
 
+          {restoring.has(participantId) ? (
+            <p className="text-xs text-muted-foreground">
+              This puts their existing booking back. Payments and refunds stay as they are.
+              Record any new payment on the roster.
+            </p>
+          ) : (
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Amount paid (AUD)
@@ -178,6 +193,7 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
               Initial funds are written to the payment ledger for this event.
             </p>
           </div>
+          )}
 
           {/* ----- Transport logistics (legacy non-outing events only) ----- */}
           {!isOuting && (
@@ -280,7 +296,11 @@ export function AddRosterBookingModal({ open, onOpenChange, event, existingBooki
           </Button>
           <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
             <UserPlus className="h-4 w-4" />
-            {mutation.isPending ? "Saving…" : "Add to Roster"}
+            {mutation.isPending
+              ? "Saving…"
+              : restoring.has(participantId)
+                ? "Put back on trip"
+                : "Add to Roster"}
           </Button>
         </DialogFooter>
       </DialogContent>

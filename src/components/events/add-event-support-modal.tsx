@@ -33,6 +33,7 @@ import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import {
   EVENT_SUPPORT_KEY,
   addEventSupportBooking,
+  type EventSupportBooking,
 } from "@/lib/api/event-support";
 import { classifyWorkforceKind, type SupportPersonKind } from "@/lib/support-person";
 import { listSupportSchedulesForPerson } from "@/lib/api/support-attendance";
@@ -43,10 +44,17 @@ interface Props {
   open: boolean;
   eventId: string;
   ticketPrice: number;
+  existingBookings: EventSupportBooking[];
   onClose: () => void;
 }
 
-export function AddEventSupportModal({ open, eventId, ticketPrice, onClose }: Props) {
+export function AddEventSupportModal({
+  open,
+  eventId,
+  ticketPrice,
+  existingBookings,
+  onClose,
+}: Props) {
   const qc = useQueryClient();
   const { user, isReady } = useAuthReady();
   const signedIn = isReady && !!user;
@@ -117,22 +125,38 @@ export function AddEventSupportModal({ open, eventId, ticketPrice, onClose }: Pr
     if (first.pickupAddressOverride) setAddress(first.pickupAddressOverride);
   }, [personId, defaultsQ.data]);
 
+  const onTrip = useMemo(() => {
+    const blocked = new Set<string>();
+    const comingBack = new Set<string>();
+    for (const b of existingBookings) {
+      const id = b.personKind === "carer" ? b.carerId : b.staffId;
+      if (!id) continue;
+      blocked.add(id);
+    }
+    return { blocked, comingBack };
+  }, [existingBookings]);
+
   const people = useMemo(() => {
+    const mapRow = (id: string, name: string, subtitle: string) => ({
+      id,
+      name,
+      subtitle: onTrip.comingBack.has(id)
+        ? "Was on this trip — adding puts the same booking back"
+        : subtitle,
+    });
     if (kind === "carer") {
-      return (carerQ.data ?? []).map((c) => ({
-        id: c.id,
-        name: c.fullName,
-        subtitle: c.streetAddress ?? "",
-      }));
+      return (carerQ.data ?? [])
+        .filter((c) => !onTrip.blocked.has(c.id))
+        .map((c) => mapRow(c.id, c.fullName, c.streetAddress ?? ""));
     }
     return (staffQ.data ?? [])
-      .filter((s) => s.active)
+      .filter((s) => s.active && !onTrip.blocked.has(s.id))
       .filter((s) => {
         const wk = classifyWorkforceKind(s.personnelType, s.role);
         return kind === "volunteer" ? wk === "volunteer" : wk === "staff";
       })
-      .map((s) => ({ id: s.id, name: s.fullName, subtitle: s.streetAddress ?? s.role ?? "" }));
-  }, [kind, staffQ.data, carerQ.data]);
+      .map((s) => mapRow(s.id, s.fullName, s.streetAddress ?? s.role ?? ""));
+  }, [kind, staffQ.data, carerQ.data, onTrip]);
 
   const missing: string[] = [];
   if (!personId) missing.push("Person");
@@ -150,7 +174,11 @@ export function AddEventSupportModal({ open, eventId, ticketPrice, onClose }: Pr
         tripPickupAddressOverride: address,
       }),
     onSuccess: () => {
-      toast.success("Support person added to the trip");
+      toast.success(
+        onTrip.comingBack.has(personId)
+          ? "Back on the trip. Earlier payments and refunds are unchanged."
+          : "Support person added to the trip",
+      );
       void qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(eventId) });
       onClose();
     },
@@ -239,7 +267,7 @@ export function AddEventSupportModal({ open, eventId, ticketPrice, onClose }: Pr
             Close
           </Button>
           <Button disabled={missing.length > 0 || save.isPending} onClick={() => save.mutate()}>
-            Add to trip
+            {onTrip.comingBack.has(personId) ? "Put back on trip" : "Add to trip"}
           </Button>
         </DialogFooter>
       </DialogContent>

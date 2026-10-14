@@ -77,16 +77,14 @@ function stopAddress(stop: EventVenueStop | undefined): string | null {
   return stop?.venue_street_address?.trim() || null;
 }
 
-/** First venue on the first trip day — where bus and self meet. */
+/** First stop of the first day — where bus and self meet, including a meal. */
 function tripMeetingPoint(stops: EventVenueStop[]): EventVenueStop | undefined {
-  const venue = stops.filter((s) => isVenueTransportStop(s));
-  const first = venue[0];
-  if (!first) return undefined;
-  const firstDate = venue.reduce(
+  if (stops.length === 0) return undefined;
+  const firstDate = stops.reduce(
     (min, s) => (s.session_date < min ? s.session_date : min),
-    first.session_date,
+    stops[0]!.session_date,
   );
-  return venue
+  return stops
     .filter((s) => s.session_date === firstDate)
     .sort((a, b) => a.stop_order - b.stop_order)[0];
 }
@@ -241,15 +239,15 @@ export async function listEventTransportRuns(opts: {
     attRows.length > 0 &&
     attRows.every((r) => r.status === "checked_out" || r.status === "absent");
 
-  // Meal / medication Programme activities are not venue hops (BL-073 / BL-077).
+  // Full day list so a meeting-point meal can start the first hop.
   const dayStops = stopsRaw
     .filter((s) => s.session_date === opts.sessionDate)
-    .filter((s) => isVenueTransportStop(s))
     .sort((a, b) => a.stop_order - b.stop_order);
+  const dayVenues = dayStops.filter((s) => isVenueTransportStop(s));
 
   const showMorning = await sessionRequiresMorningRoll(opts.eventId, opts.sessionDate);
   const overnightWake = showMorning
-    ? resolveOvernightWakeBase(stopsRaw, opts.sessionDate, dayStops)
+    ? resolveOvernightWakeBase(stopsRaw, opts.sessionDate, dayVenues)
     : null;
   const programmeHops = buildProgrammeHops(dayStops, overnightWake);
 

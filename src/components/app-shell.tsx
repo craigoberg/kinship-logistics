@@ -20,6 +20,7 @@ import { ChangePinDialog } from "@/components/auth/change-pin-dialog";
 import { useMenuAccess } from "@/hooks/use-menu-access";
 import { accessRoleLabel } from "@/lib/access-roles";
 import { useChromeVisibility, useHideChromeOnScroll } from "@/hooks/chrome-visibility";
+import { usePreventOverscrollBounce } from "@/hooks/prevent-overscroll-bounce";
 
 /** Human-readable label for the active user's role. */
 function roleLabel(role: string | null | undefined, accessRole?: string | null): string {
@@ -97,6 +98,7 @@ export function AppShell({
   const { collapsed: sidebarCollapsed, toggle: toggleSidebar } = useSidebarCollapsed();
   const { chromeHidden } = useChromeVisibility();
   useHideChromeOnScroll(!viewportLock && isDashboard ? "window" : null);
+  usePreventOverscrollBounce(viewportLock);
 
   const handleLogout = () => {
     try {

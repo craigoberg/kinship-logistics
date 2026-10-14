@@ -14,7 +14,7 @@
 import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { ACTIVE_PROFILE_EVENT } from "@/lib/active-profile-event";
-import { canUseDevTools } from "@/lib/dev-tools-access";
+import { canUseSimTime } from "@/lib/dev-tools-access";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   getSydneyIsoDate,
@@ -144,8 +144,8 @@ function readOverride(): OperationalClockOverride | null {
   if (!canOverride()) return null;
   // Hydration: match SSR (no localStorage) until root marks client ready.
   if (!clientReady) return null;
-  // Stored SIM applies only while Craig is signed in on this device.
-  if (!canUseDevTools()) return null;
+  // DEV: any operator. TEST: stored SIM applies only while Craig is signed in.
+  if (!canUseSimTime()) return null;
   if (memoryCache !== undefined) return memoryCache;
   try {
     const stored = parseStoredOverride(localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY));
@@ -207,7 +207,7 @@ export function isOperationalClockOverridden(): boolean {
 }
 
 export function setOperationalClockOverride(next: OperationalClockOverride): void {
-  if (!canOverride() || !canUseDevTools()) return;
+  if (!canOverride() || !canUseSimTime()) return;
   clientReady = true;
   const [hh, mm] = next.time.trim().split(":").map(Number);
   const time = `${String(Math.min(23, Math.max(0, hh ?? 0))).padStart(2, "0")}:${String(Math.min(59, Math.max(0, mm ?? 0))).padStart(2, "0")}`;

@@ -34,6 +34,7 @@ import {
 } from "@/lib/api/event-lifecycle-gates";
 import {
   assessOvernightHotelItinerary,
+  assessItineraryDayAnchorsForEvent,
   inferEventKind,
   isOutingEventKind,
   seedEventDaySessions,
@@ -166,6 +167,7 @@ async function guardPlanningToConfirmed(eventId: string): Promise<StatusGuardRes
   }
 
   const hotel = await assessOvernightHotelItinerary(eventId);
+  const anchors = await assessItineraryDayAnchorsForEvent(eventId);
   const startDay = row.start_date.slice(0, 10);
   const endDay = (row.end_date ?? row.start_date).slice(0, 10);
   const { data: stopRows, error: stopErr } = await supabase
@@ -196,8 +198,15 @@ async function guardPlanningToConfirmed(eventId: string): Promise<StatusGuardRes
       }
     }
   }
-  if (!hotel.ok || pointBlockers.length > 0) {
-    return { ok: false, blockers: [...pointBlockers, ...(hotel.ok ? [] : hotel.blockers)] };
+  if (!hotel.ok || !anchors.ok || pointBlockers.length > 0) {
+    return {
+      ok: false,
+      blockers: [
+        ...pointBlockers,
+        ...(hotel.ok ? [] : hotel.blockers),
+        ...(anchors.ok ? [] : anchors.blockers),
+      ],
+    };
   }
 
   // BL-098 — incomplete guest bookings warn on Confirm (Open location hard-blocks).
@@ -275,6 +284,11 @@ async function guardConfirmedToOpen(eventId: string, startDate: string): Promise
   const hotel = await assessOvernightHotelItinerary(eventId);
   if (!hotel.ok) {
     return { ok: false, blockers: hotel.blockers };
+  }
+
+  const anchors = await assessItineraryDayAnchorsForEvent(eventId);
+  if (!anchors.ok) {
+    return { ok: false, blockers: anchors.blockers };
   }
 
   return { ok: true, blockers: [] };

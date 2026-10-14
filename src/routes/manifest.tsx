@@ -93,6 +93,7 @@ import {
   resolveStaffIdWithFallback,
   pruneIneligibleReturnTripPassengers,
   applyDriverPickupOrder,
+  applyTerminalChainLabels,
 } from "@/lib/data-store";
 import { classifyWorkforceKind, supportPersonKindLabel } from "@/lib/support-person";
 import { StartingKmConfirm } from "@/components/manifest/starting-km-confirm";
@@ -362,7 +363,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   return (
     <div
       ref={bindChromeScroll}
-      className="min-h-0 flex-1 overflow-y-auto overscroll-y-contain [overflow-anchor:none] p-4"
+      className="min-h-0 flex-1 overflow-y-auto overscroll-y-none [overflow-anchor:none] p-4"
     >
       {step === "vehicle" && (
         <Card className="p-5">
@@ -1622,8 +1623,8 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     setDriverPickupOrder([]);
   }, [trip.id]);
   const legs = useMemo(
-    () => applyDriverPickupOrder(serverLegs, driverPickupOrder),
-    [serverLegs, driverPickupOrder],
+    () => applyTerminalChainLabels(trip, applyDriverPickupOrder(serverLegs, driverPickupOrder)),
+    [trip, serverLegs, driverPickupOrder],
   );
   const qc = useQueryClient();
   const reorderPickups = useReorderTripPickupLegs();
@@ -1723,6 +1724,10 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const [boardingConfirmed, setBoardingConfirmed] = useState(
     () => localStorage.getItem(boardingKey) === "true" || returnPassengers.length === 0,
   );
+
+  useEffect(() => {
+    if (isReturnRun && returnPassengers.length === 0) setBoardingConfirmed(true);
+  }, [isReturnRun, returnPassengers.length]);
 
   useEffect(() => {
     if (!isReturnRun || returnPassengers.length === 0) return;
@@ -1930,7 +1935,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           drag={drag}
           isReturnRun={isReturnRun}
           boardingRequired={
-            (isReturnRun && !boardingConfirmed) ||
+            (isReturnRun && !boardingConfirmed && returnPassengers.length > 0) ||
             (isVenueHop && !hopBoardingReady && leg.status !== "en_route" && leg.status !== "arrived")
           }
           tripId={trip.id}
@@ -2000,8 +2005,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
         ref={bindChromeScroll}
         data-manifest-scroll
         className={cn(
-          "min-h-0 flex-1 overflow-y-auto [overflow-anchor:none] px-3 pb-4 pt-3 space-y-2",
-          "overscroll-y-contain",
+          "min-h-0 flex-1 overflow-y-auto overscroll-y-none [overflow-anchor:none] px-3 pb-4 pt-3 space-y-2",
         )}
       >
         {isReturnRun && !boardingConfirmed && returnPassengers.length > 0 && (
@@ -2672,10 +2676,6 @@ function ActiveLegCard({
             </div>
           )}
 
-          {leg.status === "en_route" && (
-            <ManifestRouteMap leg={leg} trip={trip} legs={legs} className="mt-3" />
-          )}
-
           <div className="mt-4">
             {leg.status === "en_route" ? (
               <FieldActionButton
@@ -2710,6 +2710,10 @@ function ActiveLegCard({
               </FieldActionButton>
             )}
           </div>
+
+          {leg.status === "en_route" && (
+            <ManifestRouteMap leg={leg} trip={trip} legs={legs} className="mt-3" />
+          )}
         </div>
       </div>
     </Card>

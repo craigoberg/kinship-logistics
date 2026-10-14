@@ -1,12 +1,13 @@
 /**
  * DEV/TEST tools bar — fake Sydney date/time + Simulate offline (BL-082).
- * Single amber row. Shown only when Craig is signed in on a test build.
+ * Single amber row. SIM Time: anyone on DEV, Craig only on TEST.
+ * Simulate offline stays on the row only when Craig is signed in.
  */
 import { useSyncExternalStore, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock, CloudOff, X } from "lucide-react";
 import { toast } from "sonner";
-import { useCanUseDevTools } from "@/lib/dev-tools-access";
+import { useCanUseDevTools, useCanUseSimTime } from "@/lib/dev-tools-access";
 import { getAppLaneBadge, IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   clearOperationalClockOverride,
@@ -39,12 +40,13 @@ function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
 }
 
 export function DevOperationalClockBar() {
-  const allowed = useCanUseDevTools();
-  if (!IS_TEST_BUILD || !allowed) return null;
-  return <DevOperationalClockBarInner />;
+  const sim = useCanUseSimTime();
+  const devTools = useCanUseDevTools();
+  if (!IS_TEST_BUILD || !sim) return null;
+  return <DevOperationalClockBarInner showOffline={devTools} />;
 }
 
-function DevOperationalClockBarInner() {
+function DevOperationalClockBarInner({ showOffline }: { showOffline: boolean }) {
   const qc = useQueryClient();
   // Override is null until markOperationalClockClientReady() (root) — matches SSR.
   const snapshot = useSyncExternalStore(
@@ -159,6 +161,7 @@ function DevOperationalClockBarInner() {
             </button>
           ) : null}
 
+          {showOffline ? (
           <label
             className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
             onClick={(e) => e.stopPropagation()}
@@ -171,6 +174,7 @@ function DevOperationalClockBarInner() {
               aria-label="Simulate network offline for field testing"
             />
           </label>
+          ) : null}
         </div>
       </div>
 

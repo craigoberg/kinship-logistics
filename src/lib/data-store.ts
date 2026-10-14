@@ -21,6 +21,7 @@ import {
   sydneyWallClockToUtcDate,
   todaysSydneyDayCode,
 } from "@/lib/operational-time";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso, eventSpansDate } from "@/lib/utils";
 import { writeToLedger } from "@/lib/api/ledger";
 import {
@@ -3431,6 +3432,15 @@ export interface EventRosterBooking {
   /** One-off pickup address override for THIS event only. Wins over the
    * participant's regular_pickup_address when the manifest is seeded. */
   tripPickupAddressOverride: string | null;
+  /** Bus stop home from the departure point, when it differs from the meeting-point pickup. */
+  tripReturnAddressOverride: string | null;
+  /** Carer on this booking — Bus or Self to the meeting point. Null uses the bus-seat flag. */
+  carerOutboundTransportMode: "bus" | "self" | null;
+  /** Carer on this booking — Bus or Self home from the departure point. */
+  carerReturnTransportMode: "bus" | "self" | null;
+  carerTripPickupAddressOverride: string | null;
+  carerTripReturnAddressOverride: string | null;
+  carerPickupOrder: number | null;
   /** Frozen snapshot of critical medical alerts taken at the moment this
    * participant was added to the roster (or last refreshed by a coordinator). */
   dynamicMedicalNotesSnapshot: string | null;
@@ -3488,6 +3498,11 @@ export interface EventRosterBooking {
   walkOnIssueId: string | null;
   /** BL-122 — carer attached on the night to a planned host booking. */
   carerIsWalkOn: boolean;
+  /**
+   * Settled cancellation taken off the Event Manage list.
+   * The booking row and its payments stay. Null means still listed.
+   */
+  removedFromRosterAt: string | null;
   // ─────────────────────────────────────────────────────────────────────────
   createdAt: string;
   updatedAt: string;
@@ -3508,6 +3523,12 @@ interface BookingRow {
   carer_transport_required: boolean | null;
   participant_transport_required: boolean | null;
   trip_pickup_address_override: string | null;
+  trip_return_address_override?: string | null;
+  carer_outbound_transport_mode?: string | null;
+  carer_return_transport_mode?: string | null;
+  carer_trip_pickup_address_override?: string | null;
+  carer_trip_return_address_override?: string | null;
+  carer_pickup_order?: number | null;
   dynamic_medical_notes_snapshot: string | null;
   outbound_transport_mode?: string | null;
   return_transport_mode?: string | null;
@@ -3532,6 +3553,7 @@ interface BookingRow {
   total_amount_billed: number | string | null;
   billing_status: string | null;
   finance_verified_at: string | null;
+  removed_from_roster_at?: string | null;
   created_at: string;
   updated_at: string;
   participants?:
@@ -3563,6 +3585,19 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     carerTransportRequired: r.carer_transport_required ?? false,
     participantTransportRequired: r.participant_transport_required ?? false,
     tripPickupAddressOverride: r.trip_pickup_address_override ?? null,
+    tripReturnAddressOverride: r.trip_return_address_override ?? null,
+    carerOutboundTransportMode:
+      r.carer_outbound_transport_mode === "bus" || r.carer_outbound_transport_mode === "self"
+        ? r.carer_outbound_transport_mode
+        : null,
+    carerReturnTransportMode:
+      r.carer_return_transport_mode === "bus" || r.carer_return_transport_mode === "self"
+        ? r.carer_return_transport_mode
+        : null,
+    carerTripPickupAddressOverride: r.carer_trip_pickup_address_override ?? null,
+    carerTripReturnAddressOverride: r.carer_trip_return_address_override ?? null,
+    carerPickupOrder:
+      r.carer_pickup_order == null ? null : Number(r.carer_pickup_order),
     dynamicMedicalNotesSnapshot: r.dynamic_medical_notes_snapshot ?? null,
     participantRegularPickupAddress: r.participants?.regular_pickup_address ?? null,
     participantStreetAddress: r.participants?.street_address ?? null,
@@ -3594,9 +3629,15 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     walkOnBoardedLegId: r.walk_on_boarded_leg_id ?? null,
     walkOnIssueId: r.walk_on_issue_id ?? null,
     carerIsWalkOn: r.carer_is_walk_on === true,
+    removedFromRosterAt: r.removed_from_roster_at ?? null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
+}
+
+/** Paid and owing are clear when the event ledger nets to zero. */
+export function rosterMoneySettled(net: number): boolean {
+  return Math.abs(Number(net) || 0) < 0.005;
 }
 
 
@@ -3710,9 +3751,205 @@ export interface NewEventBooking {
   carerIsWalkOn?: boolean;
 }
 
+interface ExistingRosterBooking {
+  id: string;
+  booking_status: string;
+  custom_price: number | string | null;
+  removed_from_roster_at: string | null;
+}
+
+async function findExistingEventBooking(
+  eventId: string,
+  participantId: string,
+): Promise<ExistingRosterBooking | null> {
+  const full = await supabase
+    .from("event_roster_bookings")
+    .select("id, booking_status, custom_price, removed_from_roster_at")
+    .eq("event_id", eventId)
+    .eq("participant_id", participantId)
+    .limit(5);
+  if (full.error && isSchemaMismatchError(full.error)) {
+    const legacy = await supabase
+      .from("event_roster_bookings")
+      .select("id, booking_status, custom_price")
+      .eq("event_id", eventId)
+      .eq("participant_id", participantId)
+      .limit(5);
+    if (legacy.error) throw legacy.error;
+    return ((legacy.data ?? []) as ExistingRosterBooking[])[0] ?? null;
+  }
+  if (full.error) throw full.error;
+  const rows = (full.data ?? []) as ExistingRosterBooking[];
+  if (rows.length === 0) return null;
+  const active = rows.find(
+    (r) => r.booking_status !== "Cancelled" && !r.removed_from_roster_at,
+  );
+  return active ?? rows.find((r) => r.removed_from_roster_at) ?? rows[0] ?? null;
+}
+
+/** Put a cancelled booking back on the trip. Payments and refunds stay on this row. */
+async function reactivateEventBooking(
+  existing: ExistingRosterBooking,
+  input: NewEventBooking,
+): Promise<EventRosterBooking> {
+  const custom = existing.custom_price == null ? null : Number(existing.custom_price);
+  const nextCustom = custom === 0 ? null : custom;
+  const patch: Record<string, unknown> = {
+    booking_status: "Confirmed",
+    removed_from_roster_at: null,
+    custom_price: nextCustom,
+    pickup_order: 0,
+  };
+  if (input.outboundTransportMode) {
+    patch.outbound_transport_mode = input.outboundTransportMode;
+    patch.return_transport_mode = input.returnTransportMode ?? "bus";
+    patch.participant_transport_required =
+      input.participantTransportRequired ??
+      (input.outboundTransportMode === "bus" || input.returnTransportMode === "bus");
+    if (input.outboundBusRunCode !== undefined) {
+      patch.outbound_bus_run_code =
+        input.outboundTransportMode === "self" ? null : input.outboundBusRunCode?.trim() || null;
+    }
+    if (input.returnBusRunCode !== undefined) {
+      patch.return_bus_run_code =
+        input.returnTransportMode === "self" ? null : input.returnBusRunCode?.trim() || null;
+    }
+  }
+  if (input.tripPickupAddressOverride !== undefined) {
+    const v = (input.tripPickupAddressOverride ?? "").trim();
+    patch.trip_pickup_address_override = v.length > 0 ? v : null;
+  }
+  if (input.isGuestBooking) {
+    patch.is_guest_booking = true;
+    patch.host_participant_id = input.hostParticipantId?.trim() || null;
+    patch.guest_ops_note = input.guestOpsNote?.trim() || null;
+    patch.funding_claim_type = input.fundingClaimType?.trim() || "Private";
+  }
+  if (input.isWalkOn) {
+    patch.is_walk_on = true;
+    patch.walk_on_source = input.walkOnSource ?? null;
+    patch.walk_on_boarded_leg_id = input.walkOnBoardedLegId ?? null;
+    patch.walk_on_issue_id = input.walkOnIssueId ?? null;
+    if (input.notes) patch.notes = input.notes;
+  }
+  if (input.transportMedBagRequired) {
+    patch.transport_med_bag_required = input.transportMedBagRequired;
+    patch.transport_med_notes = input.transportMedNotes?.trim() || null;
+  }
+
+  let { data, error } = await supabase
+    .from("event_roster_bookings")
+    .update(patch)
+    .eq("id", existing.id)
+    .select(BOOKING_PARTICIPANT_SELECT)
+    .single();
+  if (error && isSchemaMismatchError(error)) {
+    const legacy = { ...patch };
+    delete legacy.removed_from_roster_at;
+    delete legacy.is_guest_booking;
+    delete legacy.host_participant_id;
+    delete legacy.guest_ops_note;
+    delete legacy.is_walk_on;
+    delete legacy.walk_on_source;
+    delete legacy.walk_on_boarded_leg_id;
+    delete legacy.walk_on_issue_id;
+    delete legacy.outbound_bus_run_code;
+    delete legacy.return_bus_run_code;
+    delete legacy.transport_med_bag_required;
+    delete legacy.transport_med_notes;
+    const retry = await supabase
+      .from("event_roster_bookings")
+      .update(legacy)
+      .eq("id", existing.id)
+      .select(BOOKING_PARTICIPANT_SELECT)
+      .single();
+    data = retry.data;
+    error = retry.error;
+  }
+  if (error) throw error;
+
+  await recomputeBookingPaidFromEventLedger({
+    bookingId: existing.id,
+    participantId: input.participantId,
+    eventId: input.eventId,
+    ticketBaseline: nextCustom ?? input.ticketPrice,
+  });
+
+  const booking = rowToBooking(data as BookingRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "booking",
+    recordId: booking.id,
+    recordName: booking.participantName || "booking",
+    category: "TRIP",
+    summary: `Put ${booking.participantName || "them"} back on ${input.eventTitle ?? "the trip"}. Earlier payments and refunds kept.`,
+  });
+  return booking;
+}
+
+export async function removeCancelledRosterBooking(bookingId: string): Promise<void> {
+  const { data, error } = await supabase
+    .from("event_roster_bookings")
+    .select(
+      "id, event_id, participant_id, booking_status, participants!event_roster_bookings_participant_id_fkey(first_name, last_name)",
+    )
+    .eq("id", bookingId)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("Booking not found.");
+  const row = data as {
+    id: string;
+    event_id: string;
+    participant_id: string;
+    booking_status: string;
+    participants?: { first_name?: string; last_name?: string } | null;
+  };
+  if (row.booking_status !== "Cancelled") {
+    throw new Error("Cancel the booking before removing them from the list.");
+  }
+  const name =
+    `${row.participants?.first_name ?? ""} ${row.participants?.last_name ?? ""}`.trim() ||
+    "This person";
+  const entries = await listEventPaymentLedger(row.participant_id, row.event_id);
+  const net = Number(entries.reduce((sum, entry) => sum + entry.amount, 0).toFixed(2));
+  if (!rosterMoneySettled(net)) {
+    throw new Error(
+      "Paid and owing must be zero before they can leave the list. Refund what was paid first.",
+    );
+  }
+  const { error: updErr } = await supabase
+    .from("event_roster_bookings")
+    .update({ removed_from_roster_at: operationalNowIso() })
+    .eq("id", bookingId);
+  if (updErr) {
+    if (isSchemaMismatchError(updErr)) {
+      throw new Error(
+        "Run docs/sql/2026-10-14_roster_remove_from_list.sql in the database, then try again.",
+      );
+    }
+    throw updErr;
+  }
+  logOfficeChange({
+    action: "updated",
+    entity: "booking",
+    recordId: bookingId,
+    recordName: name,
+    category: "TRIP",
+    summary: `Removed ${name} from the trip roster. Booking, payments, and refunds kept.`,
+  });
+}
+
 export async function insertEventBooking(
   input: NewEventBooking,
 ): Promise<EventRosterBooking> {
+  const existing = await findExistingEventBooking(input.eventId, input.participantId);
+  if (existing?.removed_from_roster_at || existing?.booking_status === "Cancelled") {
+    return reactivateEventBooking(existing, input);
+  }
+  if (existing) {
+    throw new Error("This person is already on the roster.");
+  }
+
   const amount = input.amountPaid ?? 0;
   const trimmedNotes = (input.notes ?? "").trim();
   const bringsCarer = !!input.bringsCarer;
@@ -5384,10 +5621,14 @@ export async function setAssetCurrentOdometerKm(
   }
 }
 
-/** Last itinerary stop for a trip day — return-run departure anchor (§12.4.3a). */
-async function fetchLastItineraryStopForReturn(
+/**
+ * First stop of the day is the meeting point (Transport IN ends there).
+ * Last stop is the departure point (Transport HOME leaves from there).
+ */
+async function fetchItineraryDayStop(
   eventId: string,
   sessionDate: string,
+  which: "first" | "last",
 ): Promise<{ label: string; address: string | null } | null> {
   const { data, error } = await supabase
     .from("event_venue_stops")
@@ -5395,20 +5636,29 @@ async function fetchLastItineraryStopForReturn(
     .eq("event_id", eventId)
     .eq("session_date", sessionDate)
     .order("stop_order", { ascending: true });
-  if (error) throwPg("[startTrip:lastItineraryStop]", error);
+  if (error) throwPg("[startTrip:itineraryStop]", error);
   const rows = data ?? [];
-  const last = rows[rows.length - 1] as
+  const picked = (which === "first" ? rows[0] : rows[rows.length - 1]) as
     | {
         label_override?: string | null;
         venues?: { name?: string; street_address?: string | null } | null;
       }
     | undefined;
-  if (!last) return null;
-  const v = last.venues;
+  if (!picked) return null;
+  const v = picked.venues;
+  const fallback = which === "first" ? "Meeting point" : "Last stop";
   return {
-    label: (last.label_override ?? "").trim() || v?.name?.trim() || "Last stop",
+    label: (picked.label_override ?? "").trim() || v?.name?.trim() || fallback,
     address: v?.street_address?.trim() || null,
   };
+}
+
+/** Last itinerary stop for a trip day — return-run departure anchor (§12.4.3a). */
+async function fetchLastItineraryStopForReturn(
+  eventId: string,
+  sessionDate: string,
+): Promise<{ label: string; address: string | null } | null> {
+  return fetchItineraryDayStop(eventId, sessionDate, "last");
 }
 
 export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle> {
@@ -5581,6 +5831,21 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     return (a.created_at ?? "").localeCompare(b.created_at ?? "");
   });
 
+  const returnAddressByParticipant = new Map<string, string>();
+  if (input.tripDirection === "return") {
+    const { data: returnRows, error: returnErr } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, trip_return_address_override")
+      .eq("event_id", input.eventId);
+    if (!returnErr) {
+      for (const raw of returnRows ?? []) {
+        const row = raw as { participant_id: string; trip_return_address_override?: string | null };
+        const addr = (row.trip_return_address_override ?? "").trim();
+        if (addr) returnAddressByParticipant.set(row.participant_id, addr);
+      }
+    }
+  }
+
   const roster: TransportRosterPerson[] = (resolvedBookingRows ?? []).map((r) => {
     const row = r as unknown as {
       participant_id: string;
@@ -5604,17 +5869,14 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
     const override = (row.trip_pickup_address_override ?? "").trim();
     const regular = (p?.regular_pickup_address ?? "").trim();
     const street = (p?.street_address ?? "").trim();
+    const meeting =
+      override.length > 0 ? override : regular.length > 0 ? regular : street.length > 0 ? street : "";
+    const home = returnAddressByParticipant.get(row.participant_id) || meeting;
     return clientRosterPerson({
       participantId: row.participant_id,
       name: `${p?.first_name ?? ""} ${p?.last_name ?? ""}`.trim() || "(participant)",
       address:
-        override.length > 0
-          ? override
-          : regular.length > 0
-            ? regular
-            : street.length > 0
-              ? street
-              : null,
+        (input.tripDirection === "return" ? home : meeting).trim() || null,
       pickupOrder: Number((r as StartTripBookingRow).pickup_order ?? 0),
     });
   });
@@ -5819,6 +6081,17 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
   if (tripErr) throwPg("[startTrip:insert]", tripErr);
   const trip = rowToTrip(tripRow as TripRow);
 
+  // Outbound ends at that day's meeting point (first itinerary stop), not the
+  // event's primary venue — that place is often the hotel, later in the day.
+  let meetingAddress: string | null = null;
+  if (!isReturn) {
+    const meeting = await fetchItineraryDayStop(input.eventId, sessionDateForTrip, "first");
+    if (meeting) {
+      venueLabel = meeting.label;
+      meetingAddress = meeting.address;
+    }
+  }
+
   // 6. Build leg chain.
   //
   //   Outbound (§12): [origin] → pax1 → … → paxN → venue.  Bus stays; no return leg.
@@ -5883,7 +6156,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         to_label: venueLabel,
         ...tripLegPersonColumns(null, null),
         medication_expected: false,
-        target_address: null,
+        target_address: meetingAddress,
       });
     } else {
       for (let i = 0; i < roster.length; i++) {
@@ -5905,7 +6178,7 @@ export async function startTrip(input: StartTripInput): Promise<ActiveTripBundle
         to_label: venueLabel,
         ...tripLegPersonColumns(last, null),
         medication_expected: false,
-        target_address: null,
+        target_address: meetingAddress,
       });
     }
     // Return leg appended only for legacy (full-loop) runs; outbound bus stays at venue.
@@ -6684,6 +6957,73 @@ function lockedPassengerPickupLegs(legs: TripLeg[]): TripLeg[] {
     .sort((a, b) => a.legIndex - b.legIndex);
 }
 
+/** Return-to-depot / into-centre leg is tied to a person, including staff and carers. */
+function legAnchorsReturn(leg: TripLeg): boolean {
+  return leg.fromParticipantId != null || leg.fromStaffId != null || leg.fromCarerId != null;
+}
+
+function isChainTerminalLeg(leg: TripLeg): boolean {
+  return leg.legKind === "client_to_venue" || (leg.legKind === "venue_to_depot" && legAnchorsReturn(leg));
+}
+
+type ChainPerson = {
+  toLabel: string;
+  toParticipantId: string | null;
+  toStaffId: string | null;
+  toCarerId: string | null;
+};
+
+function chainPersonFromLeg(leg: TripLeg): ChainPerson {
+  return {
+    toLabel: leg.toLabel,
+    toParticipantId: leg.toParticipantId,
+    toStaffId: leg.toStaffId,
+    toCarerId: leg.toCarerId,
+  };
+}
+
+function terminalFromPerson(person: ChainPerson | null, originLabel: string) {
+  if (!person) {
+    return {
+      fromLabel: originLabel,
+      fromParticipantId: null as string | null,
+      fromStaffId: null as string | null,
+      fromCarerId: null as string | null,
+    };
+  }
+  return {
+    fromLabel: person.toLabel,
+    fromParticipantId: person.toParticipantId,
+    fromStaffId: person.toStaffId,
+    fromCarerId: person.toCarerId,
+  };
+}
+
+/**
+ * Depot and Day Centre legs follow the last real stop.
+ * A volunteer or carer must move that label too — checking only
+ * from_participant_id left their name on the depot line after a drag.
+ */
+export function applyTerminalChainLabels(trip: TransportTrip, legs: TripLeg[]): TripLeg[] {
+  const pickups = legs
+    .filter((l) => isPassengerPickupLeg(l) && !isCancelledPickupLeg(l))
+    .sort((a, b) => a.legIndex - b.legIndex);
+  const tail = pickups.length > 0 ? chainPersonFromLeg(pickups[pickups.length - 1]!) : null;
+  const from = terminalFromPerson(tail, tripStartLabelForPickups(trip, legs));
+  return legs.map((leg) => {
+    if (!isChainTerminalLeg(leg)) return leg;
+    if (
+      leg.fromLabel === from.fromLabel &&
+      leg.fromParticipantId === from.fromParticipantId &&
+      leg.fromStaffId === from.fromStaffId &&
+      leg.fromCarerId === from.fromCarerId
+    ) {
+      return leg;
+    }
+    return { ...leg, ...from };
+  });
+}
+
 /** Trip anchor label for the first pickup when the bus has not left yet. */
 function tripStartLabelForPickups(trip: TransportTrip, legs: TripLeg[]): string {
   const pickups = legs
@@ -6856,43 +7196,31 @@ export async function rebuildTripPickupChain(tripId: string): Promise<TripLeg[]>
   const locked = lockedPassengerPickupLegs(legs);
   const lastPending = pendingPickups[pendingPickups.length - 1] ?? null;
   const lastPendingEp = lastPending ? endpoints.get(lastPending.id) : null;
-  const chainEnd = lastPendingEp
+  const chainEnd: ChainPerson | null = lastPendingEp
     ? {
         toLabel: lastPendingEp.toLabel,
         toParticipantId: lastPendingEp.toParticipantId,
+        toStaffId: lastPendingEp.toStaffId,
+        toCarerId: lastPendingEp.toCarerId,
       }
     : locked.length > 0
-      ? {
-          toLabel: locked[locked.length - 1]!.toLabel,
-          toParticipantId: locked[locked.length - 1]!.toParticipantId,
-        }
-      : {
-          toLabel: tripStartLabelForPickups(trip, legs),
-          toParticipantId: null as string | null,
-        };
+      ? chainPersonFromLeg(locked[locked.length - 1]!)
+      : null;
+  const from = terminalFromPerson(chainEnd, tripStartLabelForPickups(trip, legs));
 
   for (const leg of legs) {
-    if (leg.legKind === "client_to_venue") {
-      const { error } = await supabase
-        .from("trip_legs")
-        .update({
-          from_label: chainEnd.toLabel,
-          from_participant_id: chainEnd.toParticipantId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", leg.id);
-      if (error) throwPg("[rebuildTripPickupChain:terminal]", error);
-    } else if (leg.legKind === "venue_to_depot" && leg.fromParticipantId) {
-      const { error } = await supabase
-        .from("trip_legs")
-        .update({
-          from_label: chainEnd.toLabel,
-          from_participant_id: chainEnd.toParticipantId,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", leg.id);
-      if (error) throwPg("[rebuildTripPickupChain:return]", error);
-    }
+    if (!isChainTerminalLeg(leg)) continue;
+    const { error } = await supabase
+      .from("trip_legs")
+      .update({
+        from_label: from.fromLabel,
+        from_participant_id: from.fromParticipantId,
+        from_staff_id: from.fromStaffId,
+        from_carer_id: from.fromCarerId,
+        updated_at: new Date().toISOString(),
+      })
+      .eq("id", leg.id);
+    if (error) throwPg("[rebuildTripPickupChain:terminal]", error);
   }
 
   const { data: out, error: outErr } = await supabase
@@ -6965,37 +7293,14 @@ export async function reorderTripPickupLegs(
     lockedPickups[lockedPickups.length - 1] ??
     null;
   const originLabel = tripStartLabelForPickups(trip, legs);
-  const updatedOtherLegs = otherLegs.map((leg) => {
-    if (leg.legKind === "client_to_venue") {
-      if (lastChain) {
-        return {
-          ...leg,
-          fromLabel: lastChain.toLabel,
-          fromParticipantId: lastChain.toParticipantId,
-        };
-      }
-      return {
-        ...leg,
-        fromLabel: originLabel,
-        fromParticipantId: null,
-      };
-    }
-    if (leg.legKind === "venue_to_depot" && leg.fromParticipantId) {
-      if (lastChain) {
-        return {
-          ...leg,
-          fromLabel: lastChain.toLabel,
-          fromParticipantId: lastChain.toParticipantId,
-        };
-      }
-      return {
-        ...leg,
-        fromLabel: originLabel,
-        fromParticipantId: null,
-      };
-    }
-    return leg;
-  });
+  const terminalFrom = terminalFromPerson(
+    lastChain ? chainPersonFromLeg(lastChain) : null,
+    originLabel,
+  );
+  const terminalIds = new Set(otherLegs.filter(isChainTerminalLeg).map((leg) => leg.id));
+  const updatedOtherLegs = otherLegs.map((leg) =>
+    terminalIds.has(leg.id) ? { ...leg, ...terminalFrom } : leg,
+  );
 
   const finalLegs = [...orderedPickups, ...updatedOtherLegs];
 
@@ -7027,12 +7332,11 @@ export async function reorderTripPickupLegs(
       patch.to_staff_id = leg.toStaffId;
       patch.from_carer_id = leg.fromCarerId;
       patch.to_carer_id = leg.toCarerId;
-    } else if (
-      leg.legKind === "client_to_venue" ||
-      (leg.legKind === "venue_to_depot" && leg.fromParticipantId != null)
-    ) {
+    } else if (terminalIds.has(leg.id)) {
       patch.from_label = leg.fromLabel;
       patch.from_participant_id = leg.fromParticipantId;
+      patch.from_staff_id = leg.fromStaffId;
+      patch.from_carer_id = leg.fromCarerId;
     }
     const { error } = await supabase.from("trip_legs").update(patch).eq("id", leg.id);
     if (error) throwPg("[reorderTripPickupLegs:final]", error);
@@ -7509,6 +7813,9 @@ export async function pruneIneligibleReturnTripPassengers(
     const floorRun = eligible.runs.get(l.toParticipantId);
     // checked_in (no floor run yet) — keep; floor omit means still with the group.
     if (floorRun === undefined) return false;
+    // One trip bus (event home run has no run code). Check-out still stamps the
+    // sole Admin bus code (R1). That person is on this bus, not a different run.
+    if (!tripRun) return false;
     const personRun = effectiveReturnBusRun(
       floorRun,
       rosterRuns.get(l.toParticipantId),

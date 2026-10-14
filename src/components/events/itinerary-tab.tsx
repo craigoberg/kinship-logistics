@@ -21,6 +21,7 @@ import {
   RefreshCw,
   ShieldCheck,
   Trash2,
+  UserCheck,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -47,10 +48,12 @@ import { cn, formatDateWithWeekday, parseIsoDateLocal, toIsoDateString } from "@
 import { listVenues } from "@/lib/api/venues";
 import { useVenueGate } from "@/lib/hooks/use-venue-gate";
 import {
+  assessItineraryDayAnchors,
   assessOvernightHotelStops,
   deleteEventVenueStop,
   inferEventKind,
   isAccommodationVenueType,
+  isVenueTransportStop,
   listEventDaySessions,
   listEventVenueStops,
   reorderEventVenueStops,
@@ -215,6 +218,10 @@ export function ItineraryTab({ event }: Props) {
     [eventKind, days, stops],
   );
 
+  const anchorGate = useMemo(
+    () => assessItineraryDayAnchors({ sessionDates: days, stops }),
+    [days, stops],
+  );
   const failingSet = useMemo(
     () => new Set(hotelGate.failingDates),
     [hotelGate.failingDates],
@@ -222,8 +229,8 @@ export function ItineraryTab({ event }: Props) {
   const multiDay = eventKind === "multi_day_tour" || days.length > 1;
   const firstDate = days[0] ?? null;
   const finalDate = days.length > 0 ? days[days.length - 1]! : null;
-  const hasMeeting = firstDate != null && (stopsByDay.get(firstDate)?.length ?? 0) > 0;
-  const hasDeparture = finalDate != null && (stopsByDay.get(finalDate)?.length ?? 0) > 0;
+  const hasMeeting = anchorGate.meetFailingDates.length === 0;
+  const hasDeparture = anchorGate.departFailingDates.length === 0;
 
   if (isLoading) {
     return (
@@ -239,16 +246,15 @@ export function ItineraryTab({ event }: Props) {
         <p className="text-sm text-muted-foreground">
           Each date names the <strong>trip leader</strong>
           {multiDay ? " and the morning and evening roll times" : ""}.
-          Places sit under that. The first stop is the <strong>meeting point</strong> — people
-          arrive there by bus (Manifest) or self. The group then moves through the stops
-          together. The last stop is the <strong>departure point</strong> — they leave from
-          there by bus (Manifest) or self for home. One venue can be both.
+          Places sit under that. The first item each day is a <strong>place</strong> — the
+          meeting point, where people arrive and where a multi-day roll call happens. A meal cannot
+          be first. The last item is a <strong>hotel</strong> on an overnight night, or a{" "}
+          <strong>departure place</strong> on the final day. Dinner cannot end the day.
           {eventKind === "multi_day_tour" && (
             <>
               {" "}
-              Non-final nights <strong>must</strong> end at a venue typed{" "}
-              <strong>Hotel / accommodation</strong> (Confirm / Open are blocked until fixed).
-              Final day is exempt.
+              Confirm / Open stay blocked until each day starts at a place and each overnight night
+              ends at a Hotel / accommodation place.
             </>
           )}
         </p>
@@ -256,13 +262,9 @@ export function ItineraryTab({ event }: Props) {
           <div className={cn("flex items-start gap-2 px-3 py-2.5 text-sm", CAUTION_CALLOUT_CLASS)}>
             <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
             <div>
-              <p className="font-semibold">Meeting point and departure point are required</p>
+              <p className="font-semibold">Each day needs a meeting place, and the last day a departure place</p>
               <p className={cn("mt-0.5 text-xs leading-relaxed", CAUTION_CALLOUT_BODY_CLASS)}>
-                {!hasMeeting && !hasDeparture
-                  ? "Add the meeting point, where people arrive, and the departure point, where they leave for home. Confirm stays blocked until both are on the itinerary."
-                  : !hasMeeting
-                    ? "Add a meeting point on the first day — where people arrive by bus or self. Confirm stays blocked until it is on the itinerary."
-                    : "Add a departure point on the last day — where people leave by bus or self for home. Confirm stays blocked until it is on the itinerary."}
+                {anchorGate.blockers.join(" ")}
               </p>
             </div>
           </div>
@@ -347,6 +349,21 @@ export function ItineraryTab({ event }: Props) {
 
 // ─── One-day itinerary block ─────────────────────────────────────────────────
 
+function ItineraryRollRow({ label, detail }: { label: string; detail: string }) {
+  return (
+    <div className="flex min-h-11 items-center gap-2 rounded-lg bg-muted/40 px-2 py-2">
+      <span className="h-5 w-5 shrink-0" aria-hidden />
+      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-violet-500/15 text-violet-800 dark:text-violet-100">
+        <UserCheck className="h-3.5 w-3.5" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <p className="text-sm font-medium">{label}</p>
+        <p className="text-[10px] text-muted-foreground">{detail}</p>
+      </div>
+    </div>
+  );
+}
+
 interface DayItineraryProps {
   event: EventManifest;
   date: string;
@@ -422,13 +439,17 @@ function DayItinerary({
     }
     setAdding(true);
     try {
+      // Orders are not always 0..n-1. A deleted stop leaves a gap, so the
+      // row count can already be in use (day 2 is 1–4, and 4 is the med round).
+      const nextOrder =
+        sorted.reduce((max, stop) => Math.max(max, stop.stop_order), -1) + 1;
       if (addKind === "meal") {
         const slotLabel = addMealSlot.replace(/_/g, " ");
         await upsertEventVenueStop({
           event_id: event.id,
           session_date: date,
           venue_id: addVenueId || null,
-          stop_order: sorted.length,
+          stop_order: nextOrder,
           label_override:
             addLabel.trim() ||
             slotLabel.charAt(0).toUpperCase() + slotLabel.slice(1),
@@ -452,7 +473,7 @@ function DayItinerary({
           event_id: event.id,
           session_date: date,
           venue_id: addVenueId,
-          stop_order: sorted.length,
+          stop_order: nextOrder,
           label_override: addLabel.trim() || null,
           activity_kind: "venue",
         });
@@ -501,12 +522,31 @@ function DayItinerary({
   const stopById = useMemo(() => new Map(sorted.map((s) => [s.id, s])), [sorted]);
 
   const hopCount = Math.max(0, sorted.length - 1);
+  const firstStop = sorted[0];
+  const lastStop = sorted[sorted.length - 1];
+  const meetOk = !!firstStop && isVenueTransportStop(firstStop);
+  const departOk = !isLastDay || (!!lastStop && isVenueTransportStop(lastStop));
+  const dayShapeBad = !meetOk || (isLastDay && !departOk) || overnightMissing;
+  const meetName = meetOk
+    ? (firstStop?.label_override ?? firstStop?.venue_name ?? "the meeting place")
+    : null;
+  const hotelLast =
+    !!lastStop &&
+    isVenueTransportStop(lastStop) &&
+    isAccommodationVenueType(lastStop.venue_type);
+  const startRollLabel = isFirstDay ? "Check-in" : "Morning roll";
+  const startRollDetail = meetName
+    ? `At ${meetName}`
+    : "At the meeting place — the first item must be a place";
+  const eveningRollDetail = hotelLast
+    ? `Before ${lastStop?.label_override ?? lastStop?.venue_name ?? "the hotel"}`
+    : "Before the hotel — the night must end at a hotel";
 
   return (
     <div
       className={cn(
         "rounded-lg border",
-        overnightMissing && "border-amber-500/60 ring-1 ring-amber-400/40 dark:border-amber-400/50",
+        dayShapeBad && "border-amber-500/60 ring-1 ring-amber-400/40 dark:border-amber-400/50",
       )}
     >
       {/* Day header */}
@@ -528,6 +568,28 @@ function DayItinerary({
             >
               <BedDouble className="h-3 w-3" />
               {overnightMissing ? "Needs overnight hotel" : "Overnight OK"}
+            </Badge>
+          )}
+          <Badge
+            variant="outline"
+            className={cn(
+              "gap-1 text-[10px]",
+              meetOk ? CAUTION_OK_BADGE_CLASS : CAUTION_BADGE_CLASS,
+            )}
+          >
+            <MapPin className="h-3 w-3" />
+            {meetOk ? "Meet place" : "Needs a meeting place"}
+          </Badge>
+          {isLastDay && (
+            <Badge
+              variant="outline"
+              className={cn(
+                "gap-1 text-[10px]",
+                departOk ? CAUTION_OK_BADGE_CLASS : CAUTION_BADGE_CLASS,
+              )}
+            >
+              <MapPin className="h-3 w-3" />
+              {departOk ? "Departure place" : "Needs a departure place"}
             </Badge>
           )}
           {leaderName ? (
@@ -581,12 +643,32 @@ function DayItinerary({
         onSaved={onPlanSaved}
       />
 
+      {!meetOk && (
+        <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
+          <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
+          <span>
+            The first item must be a <strong>place</strong> — where people meet
+            {multiDay ? " and roll call happens" : ""}. A meal or medication round cannot be first.
+          </span>
+        </div>
+      )}
+
       {overnightMissing && (
         <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
           <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
           <span>
-            Last stop must be a <strong>Hotel / accommodation</strong> venue. Add one or drag it to
-            the end of this day.
+            The last item must be a <strong>Hotel / accommodation</strong> place. A meal cannot end
+            the night. Add one or drag it to the end of this day.
+          </span>
+        </div>
+      )}
+
+      {isLastDay && !departOk && (
+        <div className={cn("flex items-start gap-1.5 px-4 py-2 text-xs", CAUTION_STRIP_CLASS)}>
+          <AlertTriangle className={cn("mt-0.5 h-3.5 w-3.5", CAUTION_CALLOUT_ICON_CLASS)} />
+          <span>
+            The last item must be a <strong>departure place</strong>. Dinner or a medication round
+            cannot end the day.
           </span>
         </div>
       )}
@@ -706,18 +788,29 @@ function DayItinerary({
 
       {/* Stop list */}
       {sorted.length === 0 ? (
-        <div className="rounded-lg border border-dashed bg-muted/30 py-6 text-center text-sm text-muted-foreground">
-          <MapPin className="mx-auto mb-1.5 h-4 w-4 opacity-40" />
-          {isFirstDay && isLastDay
-            ? "No stops yet. Add the meeting point — people arrive there by bus or self, and can leave from the same place for home."
-            : isFirstDay
-              ? "No meeting point yet. Add where people arrive by bus or self."
-              : isLastDay
-                ? "No departure point yet. Add where people leave by bus or self for home."
-                : "No stops yet for this day."}
+        <div className="space-y-1 px-2 py-2">
+          {multiDay && (
+            <ItineraryRollRow label={startRollLabel} detail={startRollDetail} />
+          )}
+          {requiresOvernightHotel && (
+            <ItineraryRollRow label="Evening roll" detail={eveningRollDetail} />
+          )}
+          <div className="rounded-lg border border-dashed bg-muted/30 py-6 text-center text-sm text-muted-foreground">
+            <MapPin className="mx-auto mb-1.5 h-4 w-4 opacity-40" />
+            {isFirstDay && isLastDay
+              ? "No stops yet. Add the meeting place — people arrive there by bus or self, and can leave from the same place for home."
+              : isFirstDay
+                ? "No meeting place yet. Add a place where people arrive by bus or self."
+                : isLastDay
+                  ? "No departure place yet. Add a place where people leave by bus or self for home."
+                  : "No stops yet for this day. Start with a place."}
+          </div>
         </div>
       ) : (
-        <div className="px-2 py-2">
+        <div className="space-y-1 px-2 py-2">
+          {multiDay && (
+            <ItineraryRollRow label={startRollLabel} detail={startRollDetail} />
+          )}
           {sorted.length >= 2 && (
             <p className="mb-2 px-2 text-xs text-muted-foreground">
               Press and drag any row to reorder — works on iPhone and iPad.
@@ -736,14 +829,18 @@ function DayItinerary({
                   const bind = bindRow(id);
                   const nextStop = idx < ids.length - 1 ? stopById.get(ids[idx + 1]!) : null;
                   const isLast = idx === ids.length - 1;
-                  const isMeeting = isFirstDay && idx === 0;
-                  const isDeparture = isLastDay && isLast;
+                  const isPlace = isVenueTransportStop(stop);
+                  const isMeeting = idx === 0 && isPlace;
+                  const isDeparture = isLastDay && isLast && isPlace;
                   const showOvernight =
-                    requiresOvernightHotel && isLast && isAccommodationVenueType(stop.venue_type);
+                    requiresOvernightHotel && isLast && isAccommodationVenueType(stop.venue_type) && isPlace;
 
                   return (
+                    <div key={id} className="space-y-1">
+                      {requiresOvernightHotel && isLast && (
+                        <ItineraryRollRow label="Evening roll" detail={eveningRollDetail} />
+                      )}
                     <div
-                      key={id}
                       ref={bind.rowRef}
                       className={cn(
                         "flex min-h-11 items-center gap-2 rounded-lg px-2 py-2 touch-manipulation select-none",
@@ -759,7 +856,7 @@ function DayItinerary({
                       />
 
                       <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[11px] font-bold text-primary">
-                        {idx}
+                        {idx + 1}
                       </div>
 
                       <div className="min-w-0 flex-1">
@@ -811,6 +908,7 @@ function DayItinerary({
                       >
                         <Trash2 className="h-4 w-4" />
                       </IconActionButton>
+                    </div>
                     </div>
                   );
                 })}

@@ -16,6 +16,7 @@ import {
 } from "@/lib/api/event-lifecycle-gates";
 import {
   assertOvernightDaysEndAtHotel,
+  assertItineraryDayAnchors,
   type EventDaySession,
 } from "@/lib/api/event-outing";
 import { operationalNowIso } from "@/lib/operational-clock";
@@ -88,6 +89,7 @@ export async function openEventLocation(input: {
 
   // BL-T3 / BL-072 — overnight itinerary must end at hotel (final day exempt).
   await assertOvernightDaysEndAtHotel(session.event_id);
+  await assertItineraryDayAnchors(session.event_id);
 
   // BL-098 — guest bookings must be complete before floor open.
   const { listIncompleteGuestBookings, formatGuestIncompleteMessage } =

@@ -33,8 +33,29 @@ export function ManifestRouteMap({ leg, trip, legs, className }: Props) {
       )}
       aria-label="Route preview map"
     >
-      {/* Placeholder map canvas */}
-      <div className="relative min-h-[40vh] max-h-[50vh] bg-gradient-to-b from-slate-800 to-slate-900 md:min-h-[280px] md:max-h-[360px]">
+      <div className="space-y-2 p-3">
+        {mapsUrl ? (
+          <Button
+            type="button"
+            variant="outline"
+            className="h-12 w-full touch-manipulation border-slate-600 bg-slate-800 text-sm font-semibold text-white hover:bg-slate-700 hover:text-white"
+            asChild
+          >
+            <a href={mapsUrl} target="_blank" rel="noopener noreferrer">
+              <ExternalLink className="mr-2 h-4 w-4" />
+              Open in Google Maps
+            </a>
+          </Button>
+        ) : (
+          <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
+            <MapPin className="h-3.5 w-3.5 shrink-0" />
+            No street address on file — use passenger labels or enter destination manually in Maps.
+          </div>
+        )}
+      </div>
+
+      {/* Placeholder map canvas — short strip, full width of the card */}
+      <div className="relative h-32 bg-gradient-to-b from-slate-800 to-slate-900">
         <div
           className="absolute inset-0 opacity-30"
           style={{
@@ -70,38 +91,13 @@ export function ManifestRouteMap({ leg, trip, legs, className }: Props) {
         <div className="absolute bottom-3 left-3 right-3 space-y-1 rounded-lg bg-slate-900/90 px-3 py-2 text-xs backdrop-blur-sm">
           <div className="flex items-start gap-2">
             <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-green-500" />
-            <span className="line-clamp-2 text-slate-200">{fromDisplay}</span>
+            <span className="truncate text-slate-200">{fromDisplay}</span>
           </div>
           <div className="flex items-start gap-2">
             <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-500" />
-            <span className="line-clamp-2 font-medium text-white">{toDisplay}</span>
+            <span className="truncate font-medium text-white">{toDisplay}</span>
           </div>
         </div>
-      </div>
-
-      <div className="space-y-2 border-t border-slate-700 p-3">
-        <p className="text-center text-[11px] leading-relaxed text-slate-400">
-          Simulated route — live Google Maps navigation is planned (BL-015). Tap below to open
-          directions in Google Maps.
-        </p>
-        {mapsUrl ? (
-          <Button
-            type="button"
-            variant="outline"
-            className="h-12 w-full touch-manipulation border-slate-600 bg-slate-800 text-sm font-semibold text-white hover:bg-slate-700 hover:text-white"
-            asChild
-          >
-            <a href={mapsUrl} target="_blank" rel="noopener noreferrer">
-              <ExternalLink className="mr-2 h-4 w-4" />
-              Open in Google Maps
-            </a>
-          </Button>
-        ) : (
-          <div className="flex items-center gap-2 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs text-amber-200">
-            <MapPin className="h-3.5 w-3.5 shrink-0" />
-            No street address on file — use passenger labels or enter destination manually in Maps.
-          </div>
-        )}
       </div>
     </div>
   );

@@ -527,6 +527,10 @@ async function mintSession(row: PersonRow): Promise<{
   let email = (row.email ?? "").trim().toLowerCase();
   if (!email.includes("@")) email = internalEmail(row);
   let authUserId = (row.auth_user_id ?? "").trim() || null;
+  if (authUserId) {
+    const { data: linked, error: linkedErr } = await db.auth.admin.getUserById(authUserId);
+    if (linkedErr || !linked.user) authUserId = null;
+  }
   if (authUserId && (await authUserTaken(authUserId, row))) authUserId = null;
   if (!authUserId) {
     let existing = await findAuthUserIdByEmail(email);
@@ -560,7 +564,15 @@ async function mintSession(row: PersonRow): Promise<{
       password,
       email_confirm: true,
     });
-    if (error) throw new PinAuthError("Could not open a session. Try again.");
+    if (error) {
+      console.error("mintSession updateUser failed", error.message);
+      throw new PinAuthError("Could not open a session. Try again.");
+    }
+  }
+  const { data: authRow, error: authReadErr } = await db.auth.admin.getUserById(authUserId);
+  if (authReadErr || !authRow.user?.email) {
+    console.error("mintSession read user failed", authReadErr?.message);
+    throw new PinAuthError("Could not open a session. Try again.");
   }
   if (row.auth_user_id !== authUserId) {
     const table = row.kind === "carer" ? "carers_registry" : "staff_registry";
@@ -568,8 +580,12 @@ async function mintSession(row: PersonRow): Promise<{
     if (error) throw new PinAuthError("Could not link this person to a sign-in. Try again.");
   }
   const anon = createPublishableServerClient();
-  const { data: signed, error: signErr } = await anon.auth.signInWithPassword({ email, password });
+  const { data: signed, error: signErr } = await anon.auth.signInWithPassword({
+    email: authRow.user.email,
+    password,
+  });
   if (signErr || !signed.session) {
+    console.error("mintSession sign-in failed", signErr?.message);
     throw new PinAuthError("Could not open a session. Try again.");
   }
   return {

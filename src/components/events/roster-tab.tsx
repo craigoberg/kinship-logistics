@@ -1,6 +1,7 @@
-﻿import { Fragment, useCallback, useMemo, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { AlertTriangle, Bus, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pill, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
+﻿import { Fragment, useMemo, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { toast } from "sonner";
+import { AlertTriangle, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -9,7 +10,7 @@ import {
   useEventBookings,
   useEventPaymentLedgerForEvent,
   useCarersRegistry,
-  useReorderEventRosterPickupOrder,
+  useUpdateEventBooking,
 } from "@/hooks/use-supabase-data";
 import type { EventManifest, EventRosterBooking } from "@/lib/data-store";
 import {
@@ -24,25 +25,23 @@ import {
   EVENT_SUPPORT_PAYMENTS_KEY,
   listEventSupportBookings,
   listEventSupportPayments,
+  setEventSupportBookingStatus,
   supportBookingCost,
   type EventSupportBooking,
 } from "@/lib/api/event-support";
 import { EditEventSupportModal } from "./edit-event-support-modal";
 import { RecordSupportMoneyModal } from "./record-support-money-modal";
 import { supportPersonKindLabel } from "@/lib/support-person";
+import { carerLegMode, legAddress, legOverrideToStore } from "@/lib/event-travel-legs";
+import { updateCompanionCarerTravel } from "@/lib/api/event-outing";
+import { TravelLegControls } from "./travel-leg-controls";
 import { WalkOnBadge } from "./walk-on-person-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
-import {
-  eventActualTransportKey,
-  fetchEventActualTransport,
-} from "@/lib/api/event-transport";
-import { TRANSPORT_MED_BAG_LABELS } from "@/lib/api/event-outing";
-import { EventTransportPair } from "./event-transport-badge";
-import { PointerSortableList } from "@/components/manifest/manage-pickups-panel";
+import { PointerLaneList } from "./pointer-lane-list";
 import { cn, formatDate } from "@/lib/utils";
 
 interface Props {
@@ -70,6 +69,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const [refundSupport, setRefundSupport] = useState<EventSupportBooking | null>(null);
   const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const qc = useQueryClient();
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
   const { data: supportBookings = [] } = useQuery({
     queryKey: EVENT_SUPPORT_KEY(event.id),
@@ -81,16 +81,20 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     queryFn: () => listEventSupportPayments(event.id),
     staleTime: 15_000,
   });
-  const reorderPickup = useReorderEventRosterPickupOrder();
+  const listedBookings = bookings;
+  const listedSupport = supportBookings;
+  const updateBooking = useUpdateEventBooking();
+  const [savingCarerId, setSavingCarerId] = useState<string | null>(null);
+  const saveCarerTravel = useMutation({
+    mutationFn: updateCompanionCarerTravel,
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
+    },
+    onError: (err: Error) => toast.error(err.message),
+    onSettled: () => setSavingCarerId(null),
+  });
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
   const { data: carersAll = [] } = useCarersRegistry();
-
-  const { data: actualTransport = new Map() } = useQuery({
-    queryKey: eventActualTransportKey(event.id),
-    queryFn: () => fetchEventActualTransport(event.id),
-    enabled: isOuting,
-    staleTime: 30_000,
-  });
 
   const carersById = useMemo(() => {
     const m = new Map<string, (typeof carersAll)[number]>();
@@ -98,51 +102,17 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     return m;
   }, [carersAll]);
 
-  const runLabelFor = useCallback(
-    (mode: string | null | undefined, leg: "meet" | "home") => {
-      if ((mode ?? "bus") !== "bus") return null;
-      return leg === "meet" ? "To meeting point" : "Departure to home";
-    },
-    [],
-  );
-
-  const activeBookings = useMemo(
-    () => bookings.filter((b) => b.bookingStatus !== "Cancelled"),
-    [bookings],
-  );
-  const activeSupport = useMemo(
-    () => supportBookings.filter((s) => s.bookingStatus !== "Cancelled"),
-    [supportBookings],
-  );
-  const supportCarerIds = new Set(
-    activeSupport.map((s) => s.carerId).filter((id): id is string => !!id),
-  );
-  const supportStaffIds = new Set(
-    activeSupport.map((s) => s.staffId).filter((id): id is string => !!id),
-  );
-  const extraCompanions = activeBookings.filter((b) => {
-    if (!b.bringsCarer) return false;
-    if (b.carerId && (supportStaffIds.has(b.carerId) || supportCarerIds.has(b.carerId))) {
-      return false;
-    }
-    if (b.companionCarerId && supportCarerIds.has(b.companionCarerId)) return false;
-    return true;
-  });
-  const extraCarerSeats = extraCompanions.filter((b) => b.carerTransportRequired).length;
-  const participantCount = activeBookings.length;
-  const nonParticipantCount = activeSupport.length + extraCompanions.length;
-  const attendeeCount = participantCount + nonParticipantCount;
-  const cancelledCount = bookings.length - activeBookings.length;
-  const participantBusSeats = activeBookings.filter(
-    (b) =>
-      b.participantTransportRequired ||
-      b.outboundTransportMode === "bus" ||
-      b.returnTransportMode === "bus",
-  ).length;
-  const supportBusSeats = activeSupport.filter(
-    (s) => s.outboundTransportMode === "bus" || s.returnTransportMode === "bus",
-  ).length;
-  const busSeats = participantBusSeats + extraCarerSeats + supportBusSeats;
+  const waitlistedCount =
+    listedBookings.filter((b) => b.bookingStatus === "Waitlisted").length +
+    listedSupport.filter((s) => s.bookingStatus === "Waitlisted").length;
+  const confirmedCount =
+    listedBookings.filter((b) => b.bookingStatus !== "Cancelled" && b.bookingStatus !== "Waitlisted")
+      .length +
+    listedSupport.filter((s) => s.bookingStatus !== "Cancelled" && s.bookingStatus !== "Waitlisted")
+      .length;
+  const cancelledCount =
+    listedBookings.filter((b) => b.bookingStatus === "Cancelled").length +
+    listedSupport.filter((s) => s.bookingStatus === "Cancelled").length;
 
   const ledgerTotalsByParticipant = useMemo(() => {
     return paymentLedger.reduce((totals, entry) => {
@@ -174,11 +144,13 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
-    if (!n) return bookings;
-    return bookings.filter((b) =>
+    if (!n) return listedBookings;
+    return listedBookings.filter((b) =>
       [
         b.participantName,
         b.bookingStatus,
+        (b.carerId && carersById.get(b.carerId)?.fullName) || "",
+        (b.companionCarerId && carersById.get(b.companionCarerId)?.fullName) || "",
         manifestPickupForBooking(b) ?? "",
         (ledgerTotalsByParticipant.get(b.participantId) ?? 0).toFixed(2),
       ]
@@ -186,89 +158,64 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         .toLowerCase()
         .includes(n),
     );
-  }, [bookings, ledgerTotalsByParticipant, query]);
+  }, [carersById, ledgerTotalsByParticipant, listedBookings, query]);
 
-  const dragEnabled = !query.trim();
-  const ridesBus = (outbound?: string | null, ret?: string | null) =>
-    (outbound ?? "bus") === "bus" || (ret ?? "bus") === "bus";
-  const orderRank = (order: number | null | undefined) => {
-    const n = order ?? 0;
-    return n > 0 ? n : Number.MAX_SAFE_INTEGER;
-  };
-  const cancelledBookings = useMemo(
-    () => bookings.filter((b) => b.bookingStatus === "Cancelled"),
-    [bookings],
-  );
-  const cancelledSupport = useMemo(
-    () => supportBookings.filter((s) => s.bookingStatus === "Cancelled"),
-    [supportBookings],
-  );
   const filteredSupport = useMemo(() => {
     const n = query.trim().toLowerCase();
-    if (!n) return supportBookings;
-    return supportBookings.filter((s) =>
+    if (!n) return listedSupport;
+    return listedSupport.filter((s) =>
       [s.displayName, s.bookingStatus, s.notes ?? "", supportPersonKindLabel(s.personKind)]
         .join(" ")
         .toLowerCase()
         .includes(n),
     );
-  }, [query, supportBookings]);
-  const { busIds, selfBookingIds, selfSupportIds } = useMemo(() => {
-    const sourceBookings = (query.trim() ? filtered : bookings).filter(
-      (b) => b.bookingStatus !== "Cancelled",
-    );
-    const sourceSupport = (query.trim() ? filteredSupport : supportBookings).filter(
-      (s) => s.bookingStatus !== "Cancelled",
-    );
-    const busPeople = [
-      ...sourceBookings
-        .filter((b) => ridesBus(b.outboundTransportMode, b.returnTransportMode))
-        .map((b) => ({
-          key: `p:${b.id}`,
-          order: orderRank(b.pickupOrder),
-          name: b.participantName,
-        })),
-      ...sourceSupport
-        .filter((s) => ridesBus(s.outboundTransportMode, s.returnTransportMode))
-        .map((s) => ({
-          key: `s:${s.id}`,
-          order: orderRank(s.pickupOrder),
-          name: s.displayName,
-        })),
-    ].sort((a, b) => a.order - b.order || a.name.localeCompare(b.name));
-    return {
-      busIds: busPeople.map((p) => p.key),
-      selfBookingIds: sourceBookings
-        .filter((b) => !ridesBus(b.outboundTransportMode, b.returnTransportMode))
-        .sort((a, b) => a.participantName.localeCompare(b.participantName))
-        .map((b) => b.id),
-      selfSupportIds: sourceSupport
-        .filter((s) => !ridesBus(s.outboundTransportMode, s.returnTransportMode))
-        .sort((a, b) => a.displayName.localeCompare(b.displayName))
-        .map((s) => s.id),
-    };
-  }, [bookings, filtered, filteredSupport, query, supportBookings]);
+  }, [query, listedSupport]);
   const bookingById = useMemo(
-    () => new Map(bookings.map((b) => [b.id, b])),
-    [bookings],
+    () => new Map(listedBookings.map((b) => [b.id, b])),
+    [listedBookings],
   );
   const supportById = useMemo(
-    () => new Map(supportBookings.map((s) => [s.id, s])),
-    [supportBookings],
+    () => new Map(listedSupport.map((s) => [s.id, s])),
+    [listedSupport],
   );
-
-  const handlePickupReorder = useCallback(
-    (orderedIds: string[]) => {
-      reorderPickup.mutate({
-        eventId: event.id,
-        ordered: orderedIds.map((key) => ({
-          kind: key.startsWith("s:") ? ("support" as const) : ("participant" as const),
-          id: key.slice(2),
-        })),
+  const setRosterStatus = useMutation({
+    mutationFn: async (input: { key: string; status: string }) => {
+      if (input.key.startsWith("s:")) {
+        const person = supportById.get(input.key.slice(2));
+        if (!person || person.bookingStatus === input.status) return;
+        await setEventSupportBookingStatus(person.id, input.status, person.displayName);
+        return;
+      }
+      const person = bookingById.get(input.key.slice(2));
+      if (!person || person.bookingStatus === input.status) return;
+      await updateBooking.mutateAsync({
+        bookingId: person.id,
+        bookingStatus: input.status,
+        notes: person.notes,
       });
     },
-    [event.id, reorderPickup],
-  );
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
+      void qc.invalidateQueries({ queryKey: EVENT_SUPPORT_KEY(event.id) });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
+  const dragEnabled = !query.trim() && !setRosterStatus.isPending;
+  const statusLanes = useMemo(() => {
+    const laneOf = (status: string) =>
+      status === "Cancelled" ? "Cancelled" : status === "Waitlisted" ? "Waitlisted" : "Confirmed";
+    const buckets: Record<"Confirmed" | "Waitlisted" | "Cancelled", string[]> = {
+      Confirmed: [],
+      Waitlisted: [],
+      Cancelled: [],
+    };
+    for (const b of filtered) buckets[laneOf(b.bookingStatus)].push(`p:${b.id}`);
+    for (const s of filteredSupport) buckets[laneOf(s.bookingStatus)].push(`s:${s.id}`);
+    return (["Confirmed", "Waitlisted", "Cancelled"] as const).map((id) => ({
+      id,
+      itemIds: buckets[id],
+    }));
+  }, [filtered, filteredSupport]);
 
   type RowBind = {
     rowRef: (el: HTMLElement | null) => void;
@@ -287,8 +234,6 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
     const owes = financeWritable && b.bookingStatus !== "Cancelled" && trueBalance > 0;
     const canRefund = financeWritable && netLedgerSum > 0;
     const isOpen = expanded.has(b.id);
-    const pickupAddress = manifestPickupForBooking(b);
-
     return (
       <Fragment key={b.id}>
         <tr
@@ -305,12 +250,12 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   type="button"
                   className={cn(
                     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-                    reorderPickup.isPending
+                    setRosterStatus.isPending
                       ? "cursor-not-allowed opacity-50"
-                      : "cursor-grab touch-manipulation active:cursor-grabbing",
+                      : "cursor-grab touch-none active:cursor-grabbing",
                   )}
-                  aria-label="Drag to reorder pickup"
-                  disabled={reorderPickup.isPending}
+                  aria-label="Drag to another list"
+                  disabled={setRosterStatus.isPending}
                   onPointerDown={rowBind.onGripPointerDown}
                 >
                   <GripVertical className="h-4 w-4" />
@@ -366,127 +311,25 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                 </Tooltip>
               )}
             </div>
-            {pickupAddress ? (
-              <div className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">{pickupAddress}</div>
-            ) : (
-              <div className="mt-0.5 text-xs italic text-warning">No pickup address on file</div>
-            )}
-            {b.bringsCarer && (
-              <div className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-info">
-                <HeartHandshake className="h-3 w-3" />
-                +1 Carer: {(b.carerId && carersById.get(b.carerId)?.fullName) || "Unassigned"}
-                {b.carerTransportRequired && (
-                  <span className="ml-1 inline-flex items-center gap-0.5 rounded bg-info/10 px-1.5 py-0.5 text-[10px] uppercase tracking-wide">
-                    <Bus className="h-3 w-3" />
-                    <span>seat</span>
-                  </span>
-                )}
-              </div>
-            )}
             {b.notes && (
               <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">
                 “{b.notes}”
               </div>
             )}
-            {/* Mobile-only: booking status + transport badges stacked below name */}
-            <div className="mt-1.5 flex flex-wrap items-center gap-1 sm:hidden">
-              <span className="text-xs text-muted-foreground">{b.bookingStatus}</span>
-              {isOuting && (
-                <EventTransportPair
-                  outbound={actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode}
-                  return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
-                  plannedOutbound={b.outboundTransportMode}
-                  plannedReturn={b.returnTransportMode}
-                  outboundRunLabel={runLabelFor(
-                    actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode,
-                    "meet",
-                  )}
-                  returnRunLabel={runLabelFor(
-                    actualTransport.get(b.participantId)?.return ?? b.returnTransportMode,
-                    "home",
-                  )}
-                />
-              )}
-              {isOuting &&
-                (b.outboundTransportMode ?? "bus") === "bus" &&
-                b.bookingStatus !== "Cancelled" && (
-                  <span
-                    className={
-                      "inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
-                      (b.transportMedBagRequired === "yes"
-                        ? "bg-info/15 text-info"
-                        : b.transportMedBagRequired === "no"
-                          ? "bg-muted text-muted-foreground"
-                          : "bg-warning/15 text-warning")
-                    }
-                  >
-                    <Pill className="h-3 w-3" />
-                    {TRANSPORT_MED_BAG_LABELS[b.transportMedBagRequired]}
-                  </span>
-                )}
-            </div>
           </td>,
-          <td key="status" className="hidden px-4 py-2 align-top sm:table-cell">
-            <div className="text-muted-foreground">{b.bookingStatus}</div>
-            {isOuting && (
-              <EventTransportPair
-                className="mt-1"
-                outbound={
-                  actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode
-                }
-                return={actualTransport.get(b.participantId)?.return ?? b.returnTransportMode}
-                plannedOutbound={b.outboundTransportMode}
-                plannedReturn={b.returnTransportMode}
-                outboundRunLabel={runLabelFor(
-                  actualTransport.get(b.participantId)?.outbound ?? b.outboundTransportMode,
-                  "meet",
-                )}
-                returnRunLabel={runLabelFor(
-                  actualTransport.get(b.participantId)?.return ?? b.returnTransportMode,
-                  "home",
-                )}
-              />
-            )}
-            {isOuting &&
-              (b.outboundTransportMode ?? "bus") === "bus" &&
-              b.bookingStatus !== "Cancelled" && (
-                <Tooltip>
-                  <TooltipTrigger asChild>
-                    <span
-                      className={
-                        "mt-1 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide " +
-                        (b.transportMedBagRequired === "yes"
-                          ? "bg-info/15 text-info"
-                          : b.transportMedBagRequired === "no"
-                            ? "bg-muted text-muted-foreground"
-                            : "bg-warning/15 text-warning")
-                      }
-                    >
-                      <Pill className="h-3 w-3" />
-                      {TRANSPORT_MED_BAG_LABELS[b.transportMedBagRequired]}
-                    </span>
-                  </TooltipTrigger>
-                  <TooltipContent className="max-w-xs">
-                    {b.transportMedBagRequired === "yes" && b.transportMedNotes
-                      ? b.transportMedNotes
-                      : "Coordinator transport med bag decision for bus pickup."}
-                  </TooltipContent>
-                </Tooltip>
-              )}
-          </td>,
-          <td key="cost" className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+          <td key="cost" className="px-4 py-2 text-right font-semibold tabular-nums">
             ${fmtMoney(baselineCost)}
             {b.customPrice != null && b.customPrice !== event.ticketPrice && (
               <span className="ml-1 text-[10px] uppercase tracking-wide text-info">custom</span>
             )}
           </td>,
-          <td key="paid" className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+          <td key="paid" className="px-4 py-2 text-right font-semibold tabular-nums">
             ${fmtMoney(netLedgerSum)}
           </td>,
           <td
             key="balance"
             className={cn(
-              "hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell",
+              "px-4 py-2 text-right font-semibold tabular-nums",
               b.bookingStatus === "Cancelled"
                 ? "text-muted-foreground"
                 : trueBalance <= 0
@@ -496,7 +339,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           >
             ${fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
           </td>,
-          <td key="paid-badge" className="hidden px-4 py-2 text-right sm:table-cell">
+          <td key="paid-badge" className="px-4 py-2 text-right">
             <PaidBadge
               baselineCost={baselineCost}
               netLedgerSum={netLedgerSum}
@@ -568,11 +411,71 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
               </Tooltip>
             </div>
           </td>,
-        ]}</tr>
+          ]}</tr>
+        {b.bringsCarer && !(b.carerId && supportBookings.some((s) => s.personKind === "carer" && s.carerId === b.carerId)) && (
+          <tr className="border-t border-border/50 bg-muted/15">
+            <td />
+            <td colSpan={6} className="px-4 py-2">
+              {(() => {
+                const carerId = b.carerId || b.companionCarerId;
+                const carer = carerId ? carersById.get(carerId) : undefined;
+                const outbound = carerLegMode(b.carerOutboundTransportMode, b.carerTransportRequired);
+                const ret = carerLegMode(b.carerReturnTransportMode, b.carerTransportRequired);
+                const profile = (carer?.streetAddress ?? "").trim();
+                const meeting = legAddress(b.carerTripPickupAddressOverride, profile);
+                const home = legAddress(b.carerTripReturnAddressOverride, meeting || profile);
+                const name = carer?.fullName || "Carer";
+                const save = (patch: {
+                  outbound?: "bus" | "self";
+                  ret?: "bus" | "self";
+                  pickup?: string | null;
+                  home?: string | null;
+                }) => {
+                  setSavingCarerId(b.id);
+                  saveCarerTravel.mutate({
+                    bookingId: b.id,
+                    displayName: name,
+                    outbound: patch.outbound ?? outbound,
+                    ret: patch.ret ?? ret,
+                    pickupAddress: patch.pickup,
+                    returnAddress: patch.home,
+                  });
+                };
+                return (
+                  <div className="flex flex-wrap items-start gap-3">
+                    <div className="min-w-[12rem] pt-1">
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        <HeartHandshake className="h-3.5 w-3.5 text-info" />
+                        <span className="font-medium">{name}</span>
+                        <Badge variant="outline" className="text-[10px] uppercase">
+                          Carer
+                        </Badge>
+                      </div>
+                      <p className="text-xs text-muted-foreground">Carer for {b.participantName}</p>
+                    </div>
+                    <TravelLegControls
+                      outbound={outbound}
+                      ret={ret}
+                      disabled={savingCarerId === b.id}
+                      meetingAddress={meeting}
+                      homeAddress={home}
+                      onMeet={(mode) => save({ outbound: mode })}
+                      onHome={(mode) => save({ ret: mode })}
+                      onMeetingAddress={(next) => save({ pickup: legOverrideToStore(next, profile) })}
+                      onHomeAddress={(next) =>
+                        save({ home: legOverrideToStore(next, meeting || profile) })
+                      }
+                    />
+                  </div>
+                );
+              })()}
+            </td>
+          </tr>
+        )}
         {isOpen && (
           <tr className="border-t border-border/40 bg-muted/10">{[
             <td key="spacer" aria-hidden />,
-            <td key="history" colSpan={7} className="p-0">
+            <td key="history" colSpan={6} className="p-0">
               <BookingPaymentHistory
                 participantId={b.participantId}
                 eventId={event.id}
@@ -617,12 +520,12 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   type="button"
                   className={cn(
                     "flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-muted-foreground",
-                    reorderPickup.isPending
+                    setRosterStatus.isPending
                       ? "cursor-not-allowed opacity-50"
-                      : "cursor-grab touch-manipulation active:cursor-grabbing",
+                      : "cursor-grab touch-none active:cursor-grabbing",
                   )}
-                  aria-label="Drag to reorder pickup"
-                  disabled={reorderPickup.isPending}
+                  aria-label="Drag to another list"
+                  disabled={setRosterStatus.isPending}
                   onPointerDown={rowBind.onGripPointerDown}
                 >
                   <GripVertical className="h-4 w-4" />
@@ -647,45 +550,22 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                 {supportPersonKindLabel(s.personKind)}
               </Badge>
             </div>
-            {s.tripPickupAddressOverride ? (
-              <div className="mt-0.5 whitespace-nowrap text-xs text-muted-foreground">{s.tripPickupAddressOverride}</div>
-            ) : s.outboundTransportMode === "bus" || s.returnTransportMode === "bus" ? (
-              <div className="mt-0.5 text-xs italic text-warning">No pickup address on file</div>
-            ) : null}
-            <div className="mt-1.5 sm:hidden">
-              <EventTransportPair
-                outbound={s.outboundTransportMode}
-                return={s.returnTransportMode}
-                outboundRunLabel={runLabelFor(s.outboundTransportMode, "meet")}
-                returnRunLabel={runLabelFor(s.returnTransportMode, "home")}
-              />
-            </div>
             {s.notes ? (
               <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">“{s.notes}”</div>
             ) : null}
           </td>
-          <td className="hidden px-4 py-2 align-top sm:table-cell">
-            <div className="text-muted-foreground">{s.bookingStatus}</div>
-            <EventTransportPair
-              className="mt-1"
-              outbound={s.outboundTransportMode}
-              return={s.returnTransportMode}
-              outboundRunLabel={runLabelFor(s.outboundTransportMode, "meet")}
-              returnRunLabel={runLabelFor(s.returnTransportMode, "home")}
-            />
-          </td>
-          <td className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+          <td className="px-4 py-2 text-right font-semibold tabular-nums">
             ${fmtMoney(baselineCost)}
             {s.customPrice != null && s.customPrice !== event.ticketPrice && (
               <span className="ml-1 text-[10px] uppercase tracking-wide text-info">custom</span>
             )}
           </td>
-          <td className="hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell">
+          <td className="px-4 py-2 text-right font-semibold tabular-nums">
             ${fmtMoney(netPaid)}
           </td>
           <td
             className={cn(
-              "hidden px-4 py-2 text-right font-semibold tabular-nums sm:table-cell",
+              "px-4 py-2 text-right font-semibold tabular-nums",
               s.bookingStatus === "Cancelled"
                 ? "text-muted-foreground"
                 : trueBalance <= 0
@@ -695,7 +575,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           >
             ${fmtMoney(s.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
           </td>
-          <td className="hidden px-4 py-2 text-right sm:table-cell">
+          <td className="px-4 py-2 text-right">
             <PaidBadge
               baselineCost={baselineCost}
               netLedgerSum={netPaid}
@@ -757,7 +637,7 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         {isOpen && (
           <tr className="border-t border-border/40 bg-muted/10">
             <td aria-hidden />
-            <td colSpan={7} className="px-4 py-3">
+            <td colSpan={6} className="px-4 py-3">
               {history.length === 0 ? (
                 <p className="text-sm text-muted-foreground">No payments yet.</p>
               ) : (
@@ -817,20 +697,10 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           <p className="text-xs text-muted-foreground">
             {isLoading
               ? "Loading…"
-              : `${attendeeCount} on the trip${
-                  cancelledCount > 0 ? ` · ${cancelledCount} cancelled` : ""
-                }`}
+              : `Confirmed ${confirmedCount} · Waitlisted ${waitlistedCount} · Cancelled ${cancelledCount}`}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
-          <div className="flex items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
-            <Users className="h-3.5 w-3.5 text-info" />
-            Attendees: <span className="tabular-nums text-info">{attendeeCount}</span>
-          </div>
-          <div className="flex items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide text-foreground">
-            <Bus className="h-3.5 w-3.5 text-info" />
-            Bus seats: <span className="tabular-nums text-info">{busSeats}</span>
-          </div>
           <Button
             type="button"
             variant="secondary"
@@ -866,12 +736,11 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           className="h-9 pl-9"
         />
       </div>
-      {dragEnabled && busIds.length > 1 && (
-        <p className="text-xs text-muted-foreground">
-          Drag people on the bus to set the manifest pickup order. Self-transport stays at the
-          bottom. The driver can still reorder on the manifest.
-        </p>
-      )}
+      <p className="text-xs text-muted-foreground">
+        Drag a person between Confirmed, Waitlisted, and Cancelled. That sets their booking.
+        Money stays on the row. A carer travelling with someone is listed under them, with their
+        own Bus or Self. Everyone else’s travel is on the Travel tab.
+      </p>
 
       {error && (
         <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive-foreground">
@@ -887,104 +756,81 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
           {query ? `No bookings match "${query}".` : "No participants on this roster yet."}
         </div>
       ) : (
-        <div className="overflow-x-auto rounded-lg border border-border">
-          <TooltipProvider delayDuration={200}>
-            <table className="w-full text-sm">
-              <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-                <tr>
-                  <th className="w-14 px-2 py-2"></th>
-                  <th className="px-4 py-2 font-medium">Person</th>
-                  {/* Financial columns hidden on small screens — visible from sm */}
-                  <th className="hidden px-4 py-2 font-medium sm:table-cell">Booking status</th>
-                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Booking cost</th>
-                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Total paid</th>
-                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Net balance</th>
-                  <th className="hidden px-4 py-2 text-right font-medium sm:table-cell">Status</th>
-                  <th className="px-4 py-2 text-right font-medium">Actions</th>
-                </tr>
-              </thead>
-              <tbody>
-                {busIds.length > 0 && (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="border-t border-border bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      On the bus
-                    </td>
-                  </tr>
-                )}
-                {dragEnabled ? (
-                  <PointerSortableList
-                    itemIds={busIds}
-                    onReorder={handlePickupReorder}
-                    disabled={reorderPickup.isPending}
+        <TooltipProvider delayDuration={200}>
+          <PointerLaneList
+            lanes={statusLanes}
+            disabled={!dragEnabled}
+            onMove={(key, status) => setRosterStatus.mutate({ key, status })}
+          >
+            {({ lanes, bindLane, bindRow }) => (
+              <div className="space-y-4">
+                {lanes.map((lane) => (
+                  <section
+                    key={lane.id}
+                    ref={bindLane(lane.id)}
+                    className="min-h-16 overflow-x-auto rounded-lg border border-border"
                   >
-                    {({ ids, bindRow }) =>
-                      ids.map((key) => {
-                        const bind = bindRow(key);
-                        if (key.startsWith("s:")) {
-                          const s = supportById.get(key.slice(2));
-                          return s ? renderSupportRow(s, bind, true) : null;
-                        }
-                        const b = bookingById.get(key.slice(2));
-                        return b ? renderBookingRow(b, bind, true) : null;
-                      })
-                    }
-                  </PointerSortableList>
-                ) : (
-                  busIds.map((key) => {
-                    if (key.startsWith("s:")) {
-                      const s = supportById.get(key.slice(2));
-                      return s ? renderSupportRow(s) : null;
-                    }
-                    const b = bookingById.get(key.slice(2));
-                    return b ? renderBookingRow(b) : null;
-                  })
-                )}
-                {(selfBookingIds.length > 0 || selfSupportIds.length > 0) && (
-                  <tr>
-                    <td
-                      colSpan={8}
-                      className="border-t border-border bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"
-                    >
-                      Self — not on the bus
-                    </td>
-                  </tr>
-                )}
-                {selfBookingIds.map((id) => {
-                  const b = bookingById.get(id);
-                  return b ? renderBookingRow(b) : null;
-                })}
-                {selfSupportIds.map((id) => {
-                  const s = supportById.get(id);
-                  return s ? renderSupportRow(s) : null;
-                })}
-                {(query.trim()
-                  ? filtered.filter((b) => b.bookingStatus === "Cancelled")
-                  : cancelledBookings
-                ).map((b) => renderBookingRow(b))}
-                {(query.trim()
-                  ? filteredSupport.filter((s) => s.bookingStatus === "Cancelled")
-                  : cancelledSupport
-                ).map((s) => renderSupportRow(s))}
-              </tbody>
-            </table>
-          </TooltipProvider>
-        </div>
+                    <h4 className="border-b bg-muted/40 px-4 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                      {lane.id}
+                      <span className="ml-2 tabular-nums">{lane.itemIds.length}</span>
+                    </h4>
+                    {lane.itemIds.length === 0 ? (
+                      <p className="px-4 py-6 text-sm text-muted-foreground">
+                        {dragEnabled ? "Drag someone here." : "None."}
+                      </p>
+                    ) : (
+                      <table className="w-full text-sm">
+                        <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                          <tr>
+                            <th className="w-14 px-2 py-2" />
+                            <th className="px-4 py-2 font-medium">Person</th>
+                            <th className="px-4 py-2 text-right font-medium">
+                              Booking cost
+                            </th>
+                            <th className="px-4 py-2 text-right font-medium">
+                              Total paid
+                            </th>
+                            <th className="px-4 py-2 text-right font-medium">
+                              Net balance
+                            </th>
+                            <th className="px-4 py-2 text-right font-medium">
+                              Status
+                            </th>
+                            <th className="px-4 py-2 text-right font-medium">Actions</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {lane.itemIds.map((key) => {
+                            const bind = dragEnabled ? bindRow(key) : undefined;
+                            if (key.startsWith("s:")) {
+                              const s = supportById.get(key.slice(2));
+                              return s ? renderSupportRow(s, bind, dragEnabled) : null;
+                            }
+                            const b = bookingById.get(key.slice(2));
+                            return b ? renderBookingRow(b, bind, dragEnabled) : null;
+                          })}
+                        </tbody>
+                      </table>
+                    )}
+                  </section>
+                ))}
+              </div>
+            )}
+          </PointerLaneList>
+        </TooltipProvider>
       )}
 
       <p className="text-xs text-muted-foreground">
-        Staff, volunteers, and carers sit in the same list. Anyone on the bus (either way) can be
-        dragged into pickup order. Self both ways stays underneath. Their cost starts at the full
-        event price. They have no medication fields, and they stay off meals, medication, and
-        overnight roll call.
+        Staff, volunteers, and carers sit in the same lists. Their cost starts at the full event
+        price. They have no medication fields, and they stay off meals, medication, and overnight
+        roll call.
       </p>
 
       <AddEventSupportModal
         open={supportOpen}
         eventId={event.id}
         ticketPrice={event.ticketPrice}
+        existingBookings={supportBookings}
         onClose={() => setSupportOpen(false)}
       />
 

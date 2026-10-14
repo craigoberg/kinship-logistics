@@ -16,6 +16,7 @@ function eventManageTab(raw: unknown): ManageEventTabKey | undefined {
   if (raw === "days") return "itinerary";
   if (
     raw === "roster" ||
+    raw === "travel" ||
     raw === "finance" ||
     raw === "details" ||
     raw === "itinerary" ||

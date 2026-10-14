@@ -73,12 +73,18 @@ function contentOverflows(target: Window | HTMLElement): boolean {
  */
 export function useHideChromeOnScroll(target: Window | HTMLElement | null | "window") {
   const { chromeHidden, setChromeHidden } = useChromeVisibility();
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
   const hiddenRef = useRef(chromeHidden);
   hiddenRef.current = chromeHidden;
+  // Manifest stays still. Collapsing the header while scrolling moves Depart / Arrive.
+  const skip = pathname.startsWith("/manifest");
 
   useEffect(() => {
     const el = target === "window" ? window : target;
-    if (!el) return;
+    if (!el || skip) {
+      setChromeHidden(false);
+      return;
+    }
 
     // New pane / route attach: chrome starts visible.
     setChromeHidden(false);
@@ -156,7 +162,7 @@ export function useHideChromeOnScroll(target: Window | HTMLElement | null | "win
       window.clearTimeout(revealTimer);
       if (frame) window.cancelAnimationFrame(frame);
     };
-  }, [target, setChromeHidden]);
+  }, [target, setChromeHidden, skip]);
 }
 
 export function useHideChromeOnScrollRef<T extends HTMLElement = HTMLElement>() {

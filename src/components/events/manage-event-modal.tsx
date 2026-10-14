@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Compass,
   Eye,
+  Bus,
   FileText,
   Map,
   Users,
@@ -39,6 +40,7 @@ import { useIsMobile } from "@/hooks/use-mobile";
 import type { EventManifest } from "@/lib/data-store";
 import { IncidentIntakeDialog } from "@/components/global/incident-intake-dialog";
 import { RosterTab } from "./roster-tab";
+import { EventTravelTab } from "./event-travel-tab";
 import { EventFinanceTab } from "./event-finance-tab";
 import { EventDetailsTab } from "./event-details-tab";
 import { ItineraryTab } from "./itinerary-tab";
@@ -48,6 +50,7 @@ import { EventLiveWatchTab } from "./event-live-watch-tab";
 
 export type ManageEventTabKey =
   | "roster"
+  | "travel"
   | "finance"
   | "details"
   | "itinerary"
@@ -154,6 +157,7 @@ export function ManageEventModal({
       { key: "itinerary" as TabKey, label: "Itinerary", icon: Map },
     ] : []),
     { key: "roster", label: "Roster", icon: Users },
+    { key: "travel", label: "Travel", icon: Bus },
     ...(isOuting ? [
       { key: "live" as TabKey, label: "Live", icon: Eye },
     ] : []),
@@ -363,6 +367,8 @@ export function ManageEventModal({
     <>
       {tab === "roster" ? (
         <RosterTab event={event} eventKind={scopeKind} />
+      ) : tab === "travel" ? (
+        <EventTravelTab event={event} eventKind={scopeKind} />
       ) : tab === "itinerary" || tab === "days" ? (
         <ItineraryTab event={event} />
       ) : tab === "live" ? (
