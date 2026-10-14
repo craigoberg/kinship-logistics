@@ -1562,7 +1562,7 @@ export async function updateCompanionCarerTravel(input: {
 /** One drag order for everyone on the trip bus (participants, support, and carers on a booking). */
 export async function reorderEventTravelOrder(
   eventId: string,
-  ordered: Array<{ kind: "participant" | "support" | "carer"; id: string }>,
+  ordered: Array<{ kind: "participant" | "support" | "carer"; id: string; order?: number }>,
 ): Promise<void> {
   const results = await Promise.all(
     ordered.map((row, idx) =>
@@ -1570,8 +1570,8 @@ export async function reorderEventTravelOrder(
         .from(row.kind === "support" ? "event_support_bookings" : "event_roster_bookings")
         .update(
           row.kind === "carer"
-            ? { carer_pickup_order: (idx + 1) * 10 }
-            : { pickup_order: (idx + 1) * 10 },
+            ? { carer_pickup_order: (row.order ?? idx + 1) * 10 }
+            : { pickup_order: (row.order ?? idx + 1) * 10 },
         )
         .eq("id", row.id)
         .eq("event_id", eventId),

@@ -23,6 +23,7 @@ export const addParticipantsTopic: HelpTopic = {
     "add-staff",
     "medication-rounds",
     "events-create-confirm-open",
+    "event-travel",
     "client-support-plan",
     "run-planning",
   ],
@@ -45,7 +46,7 @@ export const addParticipantsTopic: HelpTopic = {
     },
     {
       heading: "Put them on a roster",
-      body: "Day Centre attendance and Event Manage (click the event row → Roster) book participants from this directory. For bus passengers set Transport med bag before Confirm event. Weekly IN/OUT for the centre is on Run Planning, and only on operating days.",
+      body: "Day Centre attendance and Event Manage (click the event row → Roster) book participants from this directory. How they join and leave is on that event’s Travel tab. For bus passengers set Transport med bag before Confirm event. Weekly IN/OUT for the centre is on Run Planning, and only on operating days.",
     },
     {
       heading: "Client onboarding pack",

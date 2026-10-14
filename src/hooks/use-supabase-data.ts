@@ -874,7 +874,7 @@ export function useReorderEventRosterPickupOrder() {
       ordered,
     }: {
       eventId: string;
-      ordered: Array<{ kind: "participant" | "support" | "carer"; id: string }>;
+      ordered: Array<{ kind: "participant" | "support" | "carer"; id: string; order?: number }>;
     }) => reorderEventTravelOrder(eventId, ordered),
     onSuccess: (_data, { eventId }) => {
       void qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });

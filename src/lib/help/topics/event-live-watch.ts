@@ -20,6 +20,7 @@ export const eventLiveWatchTopic: HelpTopic = {
   roles: ["manager", "assistant_manager", "support_worker"],
   relatedIds: [
     "events-create-confirm-open",
+    "event-travel",
     "event-deliver-happy-path",
     "manifest-active-run",
     "governance-hub-issue",

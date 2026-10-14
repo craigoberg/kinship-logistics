@@ -55,6 +55,20 @@ function orderRank(order: number | null | undefined) {
   return n > 0 ? n : Number.MAX_SAFE_INTEGER;
 }
 
+function surnameKey(name: string, lastName?: string | null): string {
+  const last =
+    (lastName ?? "").trim() ||
+    name.trim().split(/\s+/).filter(Boolean).at(-1) ||
+    name;
+  return `${last}\u0000${name}`.toLocaleLowerCase();
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
+
 function coming(status: string) {
   return status !== "Cancelled" && status !== "Waitlisted";
 }
@@ -138,27 +152,45 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
   );
 
   const companions = useMemo(() => {
-    return confirmedBookings.flatMap((b) => {
-      if (!b.bringsCarer) return [];
+    const groups = new Map<string, EventRosterBooking[]>();
+    for (const b of confirmedBookings) {
+      if (!b.bringsCarer) continue;
       const carerId = b.carerId || b.companionCarerId;
-      if (!carerId || supportCarerIds.has(carerId)) return [];
+      if (!carerId || supportCarerIds.has(carerId)) continue;
+      const list = groups.get(carerId) ?? [];
+      list.push(b);
+      groups.set(carerId, list);
+    }
+    return [...groups.entries()].map(([carerId, bookings]) => {
+      const ordered = [...bookings].sort(
+        (a, b) =>
+          surnameKey(a.participantName, a.participantLastName).localeCompare(
+            surnameKey(b.participantName, b.participantLastName),
+          ) || a.id.localeCompare(b.id),
+      );
+      const booking =
+        [...ordered].sort(
+          (a, b) =>
+            (a.carerPickupOrder ?? a.pickupOrder ?? 9999) -
+            (b.carerPickupOrder ?? b.pickupOrder ?? 9999),
+        )[0] ?? ordered[0]!;
       const carer = carersById.get(carerId);
-      const outbound = carerLegMode(b.carerOutboundTransportMode, b.carerTransportRequired);
-      const ret = carerLegMode(b.carerReturnTransportMode, b.carerTransportRequired);
+      const outbound = carerLegMode(booking.carerOutboundTransportMode, booking.carerTransportRequired);
+      const ret = carerLegMode(booking.carerReturnTransportMode, booking.carerTransportRequired);
       const profile = (carer?.streetAddress ?? "").trim();
-      const meeting = legAddress(b.carerTripPickupAddressOverride, profile);
-      return [
-        {
-          booking: b,
-          carerId,
-          name: carer?.fullName || "Carer",
-          outbound,
-          ret,
-          profile,
-          meeting,
-          home: legAddress(b.carerTripReturnAddressOverride, meeting || profile),
-        },
-      ];
+      const meeting = legAddress(booking.carerTripPickupAddressOverride, profile);
+      return {
+        booking,
+        bookingIds: ordered.map((row) => row.id),
+        withLabel: joinNames(ordered.map((row) => row.participantName)),
+        carerId,
+        name: carer?.fullName || "Carer",
+        outbound,
+        ret,
+        profile,
+        meeting,
+        home: legAddress(booking.carerTripReturnAddressOverride, meeting || profile),
+      };
     });
   }, [carersById, confirmedBookings, supportCarerIds]);
 
@@ -278,8 +310,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
   });
 
   const saveCarer = useMutation({
-    mutationFn: (input: {
-      bookingId: string;
+    mutationFn: async (input: {
+      bookingIds: string[];
       displayName: string;
       outbound: "bus" | "self";
       ret: "bus" | "self";
@@ -287,17 +319,20 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       home?: string | null;
       pickupJoin?: string | null;
       alightMode?: string | null;
-    }) =>
-      updateCompanionCarerTravel({
-        bookingId: input.bookingId,
-        displayName: input.displayName,
-        outbound: input.outbound,
-        ret: input.ret,
-        pickupAddress: input.pickup,
-        returnAddress: input.home,
-        pickupJoin: input.pickupJoin,
-        alightMode: input.alightMode,
-      }),
+    }) => {
+      for (const bookingId of input.bookingIds) {
+        await updateCompanionCarerTravel({
+          bookingId,
+          displayName: input.displayName,
+          outbound: input.outbound,
+          ret: input.ret,
+          pickupAddress: input.pickup,
+          returnAddress: input.home,
+          pickupJoin: input.pickupJoin,
+          alightMode: input.alightMode,
+        });
+      }
+    },
     onSuccess: () => invalidate(),
     onError: (err: Error) => toast.error(err.message),
     onSettled: () => setSavingId(null),
@@ -305,19 +340,28 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
 
   const handlePickupReorder = useCallback(
     (orderedIds: string[]) => {
-      reorderPickup.mutate({
-        eventId: event.id,
-        ordered: orderedIds.map((key) => ({
-          kind: key.startsWith("s:")
-            ? ("support" as const)
-            : key.startsWith("c:")
-              ? ("carer" as const)
-              : ("participant" as const),
+      const ordered: Array<{
+        kind: "participant" | "support" | "carer";
+        id: string;
+        order: number;
+      }> = [];
+      orderedIds.forEach((key, index) => {
+        const order = index + 1;
+        if (key.startsWith("c:")) {
+          const group = companionByBookingId.get(key.slice(2));
+          const ids = group?.bookingIds ?? [key.slice(2)];
+          for (const id of ids) ordered.push({ kind: "carer", id, order });
+          return;
+        }
+        ordered.push({
+          kind: key.startsWith("s:") ? "support" : "participant",
           id: key.slice(2),
-        })),
+          order,
+        });
       });
+      reorderPickup.mutate({ eventId: event.id, ordered });
     },
-    [event.id, reorderPickup],
+    [companionByBookingId, event.id, reorderPickup],
   );
 
   const setParticipantMode = (
@@ -626,7 +670,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     }) => {
       setSavingId(c.booking.id);
       saveCarer.mutate({
-        bookingId: c.booking.id,
+        bookingIds: c.bookingIds,
         displayName: c.name,
         outbound: patch.outbound ?? c.outbound,
         ret: patch.ret ?? c.ret,
@@ -641,7 +685,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     return personRow(
       c.name,
       "carer",
-      `Carer for ${c.booking.participantName}`,
+      `Carer for ${c.withLabel}`,
       c.outbound,
       c.ret,
       pickupJoin === "address" ? (c.booking.carerTripPickupAddressOverride ?? "") : c.meeting,
@@ -712,6 +756,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
             their own way to the address and the bus collects them there. Before departure, the bus
             drops them at that address and the itinerary gains a line. From the departure point,
             Bus or Self is how they get home. A carer, staff member, or volunteer is their own line.
+            One carer with several people is still one line, and a change is saved for each of them.
           </p>
         </div>
         <div className="flex items-center gap-1.5 rounded-md border border-border bg-card/60 px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wide">

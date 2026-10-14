@@ -32,9 +32,6 @@ import {
 import { EditEventSupportModal } from "./edit-event-support-modal";
 import { RecordSupportMoneyModal } from "./record-support-money-modal";
 import { supportPersonKindLabel } from "@/lib/support-person";
-import { carerLegMode, legAddress, legOverrideToStore } from "@/lib/event-travel-legs";
-import { updateCompanionCarerTravel } from "@/lib/api/event-outing";
-import { TravelLegControls } from "./travel-leg-controls";
 import { WalkOnBadge } from "./walk-on-person-modal";
 import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
@@ -43,6 +40,20 @@ import { BookingPaymentHistory } from "./booking-payment-history";
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { PointerLaneList } from "./pointer-lane-list";
 import { cn, formatDate } from "@/lib/utils";
+
+function surnameKey(name: string, lastName?: string | null): string {
+  const last =
+    (lastName ?? "").trim() ||
+    name.trim().split(/\s+/).filter(Boolean).at(-1) ||
+    name;
+  return `${last}\u0000${name}`.toLocaleLowerCase();
+}
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")}, and ${names[names.length - 1]}`;
+}
 
 interface Props {
   event: EventManifest;
@@ -84,16 +95,6 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const listedBookings = bookings;
   const listedSupport = supportBookings;
   const updateBooking = useUpdateEventBooking();
-  const [savingCarerId, setSavingCarerId] = useState<string | null>(null);
-  const saveCarerTravel = useMutation({
-    mutationFn: updateCompanionCarerTravel,
-    onSuccess: () => {
-      void qc.invalidateQueries({ queryKey: ["event_roster_bookings", event.id] });
-      void qc.invalidateQueries({ queryKey: ["event-venue-stops", event.id] });
-    },
-    onError: (err: Error) => toast.error(err.message),
-    onSettled: () => setSavingCarerId(null),
-  });
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
   const { data: carersAll = [] } = useCarersRegistry();
 
@@ -210,8 +211,19 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
       Waitlisted: [],
       Cancelled: [],
     };
-    for (const b of filtered) buckets[laneOf(b.bookingStatus)].push(`p:${b.id}`);
-    for (const s of filteredSupport) buckets[laneOf(s.bookingStatus)].push(`s:${s.id}`);
+    const rows = [
+      ...filtered.map((b) => ({
+        key: `p:${b.id}`,
+        sort: surnameKey(b.participantName, b.participantLastName),
+        lane: laneOf(b.bookingStatus),
+      })),
+      ...filteredSupport.map((s) => ({
+        key: `s:${s.id}`,
+        sort: surnameKey(s.displayName),
+        lane: laneOf(s.bookingStatus),
+      })),
+    ].sort((a, b) => a.sort.localeCompare(b.sort) || a.key.localeCompare(b.key));
+    for (const row of rows) buckets[row.lane].push(row.key);
     return (["Confirmed", "Waitlisted", "Cancelled"] as const).map((id) => ({
       id,
       itemIds: buckets[id],
@@ -410,97 +422,28 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
               {(() => {
                 const carerId = b.carerId || b.companionCarerId;
                 const carer = carerId ? carersById.get(carerId) : undefined;
-                const outbound = carerLegMode(b.carerOutboundTransportMode, b.carerTransportRequired);
-                const ret = carerLegMode(b.carerReturnTransportMode, b.carerTransportRequired);
-                const profile = (carer?.streetAddress ?? "").trim();
-                const meeting = legAddress(b.carerTripPickupAddressOverride, profile);
-                const home = legAddress(b.carerTripReturnAddressOverride, meeting || profile);
                 const name = carer?.fullName || "Carer";
-                const save = (patch: {
-                  outbound?: "bus" | "self";
-                  ret?: "bus" | "self";
-                  pickup?: string | null;
-                  home?: string | null;
-                  pickupJoin?: string | null;
-                  alightMode?: string | null;
-                }) => {
-                  setSavingCarerId(b.id);
-                  saveCarerTravel.mutate({
-                    bookingId: b.id,
-                    displayName: name,
-                    outbound: patch.outbound ?? outbound,
-                    ret: patch.ret ?? ret,
-                    pickupAddress: patch.pickup,
-                    returnAddress: patch.home,
-                    pickupJoin: patch.pickupJoin,
-                    alightMode: patch.alightMode,
-                  });
-                };
+                const alsoWith = carerId
+                  ? listedBookings
+                      .filter(
+                        (other) =>
+                          other.id !== b.id &&
+                          other.bringsCarer &&
+                          (other.carerId || other.companionCarerId) === carerId,
+                      )
+                      .map((other) => other.participantName)
+                  : [];
                 return (
-                  <div className="flex flex-wrap items-start gap-3">
-                    <div className="min-w-[12rem] pt-1">
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        <HeartHandshake className="h-3.5 w-3.5 text-info" />
-                        <span className="font-medium">{name}</span>
-                        <PersonKindBadge kind="carer" />
-                      </div>
-                      <p className="text-xs text-muted-foreground">Carer for {b.participantName}</p>
+                  <div className="min-w-[12rem] py-0.5">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <HeartHandshake className="h-3.5 w-3.5 text-info" />
+                      <span className="font-medium">{name}</span>
+                      <PersonKindBadge kind="carer" />
                     </div>
-                    <TravelLegControls
-                      outbound={outbound}
-                      ret={ret}
-                      disabled={savingCarerId === b.id}
-                      meetingAddress={
-                        b.carerPickupJoin === "address"
-                          ? (b.carerTripPickupAddressOverride ?? "")
-                          : meeting
-                      }
-                      homeAddress={
-                        b.carerAlightMode === "same"
-                          ? meeting
-                          : b.carerAlightMode === "address"
-                            ? (b.carerTripReturnAddressOverride ?? "")
-                            : home
-                      }
-                      onMeet={(mode) => save({ outbound: mode })}
-                      onHome={(mode) => save({ ret: mode })}
-                      onMeetingAddress={(next) =>
-                        save({
-                          pickup:
-                            b.carerPickupJoin === "address"
-                              ? next.trim() || null
-                              : legOverrideToStore(next, profile),
-                          pickupJoin: b.carerPickupJoin === "address" ? "address" : undefined,
-                        })
-                      }
-                      onHomeAddress={(next) =>
-                        save({
-                          home:
-                            b.carerAlightMode === "address" || b.carerAlightMode === "same"
-                              ? next.trim() || null
-                              : legOverrideToStore(next, meeting || profile),
-                          alightMode:
-                            b.carerAlightMode === "address" || b.carerAlightMode === "same"
-                              ? "address"
-                              : undefined,
-                        })
-                      }
-                      pickupJoin={b.carerPickupJoin}
-                      alightMode={b.carerAlightMode}
-                      onPickupJoin={(mode) =>
-                        save({
-                          pickupJoin: mode,
-                          outbound: mode === "address" ? "self" : outbound,
-                        })
-                      }
-                      onAlightMode={(mode) =>
-                        save({
-                          alightMode: mode,
-                          ret: mode === "address" || mode === "home" ? "bus" : ret,
-                        })
-                      }
-                      addressOwner={carerId ? { kind: "carer", id: carerId } : null}
-                    />
+                    <p className="text-xs text-muted-foreground">
+                      Carer for {b.participantName}
+                      {alsoWith.length > 0 ? ` · also with ${joinNames(alsoWith)}` : ""}
+                    </p>
                   </div>
                 );
               })()}
@@ -771,8 +714,9 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
       </div>
       <p className="text-xs text-muted-foreground">
         Drag a person between Confirmed, Waitlisted, and Cancelled. That sets their booking.
-        Money stays on the row. A carer travelling with someone is listed under them, with their
-        own Bus or Self. Everyone else’s travel is on the Travel tab.
+        Each list stays alphabetical by surname. Money stays on the row. A carer travelling with
+        someone is listed under them. When that carer is with more than one person, the line
+        names the others. How anyone joins or leaves is on the Travel tab.
       </p>
 
       {error && (

@@ -52,6 +52,7 @@ function toBooking(r: EventBookingWithEvent, netLedgerSum = 0): EventRosterBooki
     eventId: r.eventId,
     participantId: r.participantId,
     participantName: r.participantName,
+    participantLastName: r.participantLastName,
     bookingStatus: r.bookingStatus,
     amountPaid: netLedgerSum,
     isFullyPaid: trueBalance <= 0,

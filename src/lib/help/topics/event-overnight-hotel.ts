@@ -21,6 +21,7 @@ export const eventOvernightHotelTopic: HelpTopic = {
   relatedIds: [
     "admin-venues",
     "events-create-confirm-open",
+    "event-travel",
     "event-open-checks",
     "event-deliver-happy-path",
   ],
@@ -31,7 +32,7 @@ export const eventOvernightHotelTopic: HelpTopic = {
     },
     {
       heading: "Build each day’s itinerary",
-      body: "On the Itinerary tab, add stops in order. First stop is the day’s origin; last stop is end of day. Use venues from Admin → Venues.",
+      body: "On the Itinerary tab, add places in order. The first place is the meeting point. The last place is the departure point. Use venues from Admin → Venues. Pickup and Drop-off rows added from Travel sit between places. They are not the meeting point or the departure point, and they do not count as the overnight hotel.",
     },
     {
       heading: "Non-final nights → last stop = Hotel",

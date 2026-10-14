@@ -3413,6 +3413,8 @@ export interface EventRosterBooking {
   eventId: string;
   participantId: string;
   participantName: string;
+  /** Surname used to sort the roster. Empty when the profile has no last name. */
+  participantLastName: string;
   bookingStatus: string;
   amountPaid: number;
   isFullyPaid: boolean;
@@ -3584,6 +3586,7 @@ function rowToBooking(r: BookingRow): EventRosterBooking {
     eventId: r.event_id,
     participantId: r.participant_id,
     participantName: `${fn} ${ln}`.trim() || "(unknown)",
+    participantLastName: ln.trim(),
     bookingStatus: r.booking_status,
     amountPaid: Number(r.amount_paid ?? 0),
     isFullyPaid: r.is_fully_paid,
@@ -8738,13 +8741,21 @@ export async function getTodayManifestSummary(
 
   const rows = (bookings ?? []).map((r) => rowToBooking(r as BookingRow));
   let totalSeatsBooked = 0;
+  const carerSeats = new Set<string>();
   const hoistDependents: HoistDependent[] = [];
   for (const b of rows) {
     // Skip explicitly cancelled/rerouted bookings.
     const status = (b.bookingStatus ?? "").toLowerCase();
     if (status.includes("cancel") || status.includes("rerout")) continue;
     if (b.participantTransportRequired) totalSeatsBooked += 1;
-    if (b.bringsCarer && b.carerTransportRequired) totalSeatsBooked += 1;
+    if (b.bringsCarer && b.carerTransportRequired) {
+      const carerKey = b.carerId || b.companionCarerId;
+      const seatKey = carerKey ? `${b.eventId}:${carerKey}` : b.id;
+      if (!carerSeats.has(seatKey)) {
+        carerSeats.add(seatKey);
+        totalSeatsBooked += 1;
+      }
+    }
     if (HOIST_HINT.test(b.dynamicMedicalNotesSnapshot ?? "")) {
       hoistDependents.push({
         bookingId: b.id,

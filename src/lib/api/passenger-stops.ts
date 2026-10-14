@@ -117,6 +117,7 @@ async function loadPeople(eventId: string): Promise<PersonPick[] | null> {
   }
 
   const people: PersonPick[] = [];
+  const seenCarers = new Set<string>();
   for (const raw of data ?? []) {
     const row = raw as {
       booking_status?: string | null;
@@ -166,7 +167,8 @@ async function loadPeople(eventId: string): Promise<PersonPick[] | null> {
       profileAddress: profile,
     });
 
-    if (row.brings_carer && row.carer_id) {
+    if (row.brings_carer && row.carer_id && !seenCarers.has(row.carer_id)) {
+      seenCarers.add(row.carer_id);
       const carer = carerAddress.get(row.carer_id);
       people.push({
         name: carer?.name ?? "Carer",
@@ -230,6 +232,8 @@ async function loadPeople(eventId: string): Promise<PersonPick[] | null> {
       trip_return_address_override?: string | null;
     };
     if (!coming(row.booking_status)) continue;
+    if (row.carer_id && seenCarers.has(row.carer_id)) continue;
+    if (row.carer_id) seenCarers.add(row.carer_id);
     const named =
       row.person_kind === "carer"
         ? carerAddress.get(row.carer_id ?? "")
@@ -477,6 +481,7 @@ export async function listPassengerAssignments(eventId: string): Promise<Passeng
   }
 
   const out: PassengerAssignment[] = [];
+  const seenCarers = new Set<string>();
   for (const raw of data ?? []) {
     const row = raw as {
       participant_id: string;
@@ -541,7 +546,8 @@ export async function listPassengerAssignments(eventId: string): Promise<Passeng
         dropoffAddress: drop || null,
       });
     }
-    if (row.brings_carer && row.carer_id) {
+    if (row.brings_carer && row.carer_id && !seenCarers.has(row.carer_id)) {
+      seenCarers.add(row.carer_id);
       const carer = carers.get(row.carer_id);
       const carerPerson: PersonPick = {
         name: carer?.name ?? "Carer",

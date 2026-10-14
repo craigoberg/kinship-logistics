@@ -401,6 +401,7 @@ export async function seedBusManifest(opts: {
   }
 
   const rows: Record<string, unknown>[] = [];
+  const seenCarers = new Set<string>();
   for (const bk of bookings) {
     rows.push({
       event_day_session_id: opts.eventDaySessionId,
@@ -410,7 +411,8 @@ export async function seedBusManifest(opts: {
       expected_on_bus: true,
       status: "expected",
     });
-    if (bk.brings_carer && bk.carer_transport_required && bk.carer_id) {
+    if (bk.brings_carer && bk.carer_transport_required && bk.carer_id && !seenCarers.has(bk.carer_id)) {
+      seenCarers.add(bk.carer_id);
       rows.push({
         event_day_session_id: opts.eventDaySessionId,
         transport_trip_id: opts.tripId,
@@ -430,6 +432,8 @@ export async function seedBusManifest(opts: {
           ? s.outboundTransportMode === "bus"
           : s.returnTransportMode === "bus";
       if (!onBus) continue;
+      if (s.carerId && seenCarers.has(s.carerId)) continue;
+      if (s.carerId) seenCarers.add(s.carerId);
       rows.push({
         event_day_session_id: opts.eventDaySessionId,
         transport_trip_id: opts.tripId,

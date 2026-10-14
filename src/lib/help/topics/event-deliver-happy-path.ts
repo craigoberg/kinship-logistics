@@ -21,6 +21,7 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
   roles: ["support_worker", "manager", "assistant_manager", "driver"],
   relatedIds: [
     "events-create-confirm-open",
+    "event-travel",
     "event-live-watch",
     "event-open-checks",
     "event-overnight-hotel",
@@ -45,7 +46,7 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
     },
     {
       heading: "Programme and bus hops",
-      body: "Open a venue/activity from Programme (venue safety ticks + PIN). Boarding hops run through Manifest — complete the hop run, then continue on the floor. Close the location when leaving.",
+      body: "Open a venue/activity from Programme (venue safety ticks + PIN). Boarding hops run through Manifest — complete the hop run, then continue on the floor. Someone who joins on the trip is collected at their Pickup stop, not at the meeting point. Someone who leaves before the departure point gets off at their Drop-off stop. Close the location when leaving.",
     },
     {
       heading: "Evening roll and Close day",
