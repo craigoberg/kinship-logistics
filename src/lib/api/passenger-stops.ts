@@ -5,6 +5,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { recordOfficeChangeBestEffort } from "@/lib/api/office-change-log";
+import { loadLinkedHomeStreets } from "@/lib/api/person-addresses";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
   addressKey,
@@ -65,6 +66,18 @@ function busMode(value: string | null | undefined, fallbackBus: boolean): boolea
   return fallbackBus;
 }
 
+async function fillCarerStreets(
+  map: Map<string, { name: string; address: string }>,
+): Promise<void> {
+  const missing = [...map.entries()].filter(([, row]) => !row.address).map(([id]) => id);
+  if (missing.length === 0) return;
+  const linked = await loadLinkedHomeStreets("carer", missing);
+  for (const [id, street] of linked) {
+    const row = map.get(id);
+    if (row && !row.address) row.address = street;
+  }
+}
+
 function dropAddress(person: PersonPick): string {
   const mode = effectiveAlightMode(person.alightMode);
   if (mode === "address") return normalizeStopAddress(person.alightText);
@@ -115,6 +128,7 @@ async function loadPeople(eventId: string): Promise<PersonPick[] | null> {
       });
     }
   }
+  await fillCarerStreets(carerAddress);
 
   const people: PersonPick[] = [];
   const seenCarers = new Set<string>();
@@ -479,6 +493,7 @@ export async function listPassengerAssignments(eventId: string): Promise<Passeng
       });
     }
   }
+  await fillCarerStreets(carers);
 
   const out: PassengerAssignment[] = [];
   const seenCarers = new Set<string>();

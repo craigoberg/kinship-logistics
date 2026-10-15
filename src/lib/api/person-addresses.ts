@@ -99,7 +99,7 @@ function throwIfMissing(error: { message?: string | null; code?: string | null }
   throw new Error(error.message ?? "Address book request failed");
 }
 
-export async function listPersonAddresses(owner: AddressOwner): Promise<PersonAddress[]> {
+async function listOwnAddresses(owner: AddressOwner): Promise<PersonAddress[]> {
   const { data, error } = await supabase
     .from("person_addresses")
     .select("id, participant_id, staff_id, carer_id, label, address, sort_order, archived_at")
@@ -113,15 +113,103 @@ export async function listPersonAddresses(owner: AddressOwner): Promise<PersonAd
   return (data ?? []).map((r) => rowToAddress(r as AddressRow));
 }
 
-export async function loadHomeAddress(owner: AddressOwner): Promise<string | null> {
+/** Staff and carer rows for one person share person_id. The other hat, when this one has no street. */
+async function linkedHatOwners(owner: AddressOwner): Promise<AddressOwner[]> {
+  if (owner.kind === "participant") return [];
   const { data, error } = await supabase
     .from(homeTable(owner.kind))
-    .select("street_address")
+    .select("person_id")
     .eq("id", owner.id)
     .maybeSingle();
-  if (error) return null;
-  const street = ((data as { street_address?: string | null } | null)?.street_address ?? "").trim();
-  return street || null;
+  if (error) return [];
+  const personId = (data as { person_id?: string | null } | null)?.person_id;
+  if (!personId) return [];
+  const otherKind: AddressOwnerKind = owner.kind === "carer" ? "staff" : "carer";
+  const { data: rows, error: otherErr } = await supabase
+    .from(homeTable(otherKind))
+    .select("id")
+    .eq("person_id", personId);
+  if (otherErr) return [];
+  return ((rows ?? []) as { id: string }[]).map((row) => ({ kind: otherKind, id: row.id }));
+}
+
+export async function listPersonAddresses(owner: AddressOwner): Promise<PersonAddress[]> {
+  const own = await listOwnAddresses(owner);
+  const hats = await linkedHatOwners(owner);
+  if (hats.length === 0) return own;
+  const extra = (await Promise.all(hats.map((hat) => listOwnAddresses(hat)))).flat();
+  const seen = new Set(own.map((place) => place.address.trim().toLowerCase()));
+  return [
+    ...own,
+    ...extra.filter((place) => {
+      const key = place.address.trim().toLowerCase();
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    }),
+  ];
+}
+
+/**
+ * Home street for this person. A carer who is also staff keeps the address on the
+ * staff record; use that when the carer row itself is blank, and the other way around.
+ */
+export async function loadLinkedHomeStreets(
+  kind: "staff" | "carer",
+  ids: string[],
+): Promise<Map<string, string>> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  const out = new Map<string, string>();
+  if (unique.length === 0) return out;
+  const { data, error } = await supabase
+    .from(homeTable(kind))
+    .select("id, person_id, street_address")
+    .in("id", unique);
+  if (error) return out;
+  const personToIds = new Map<string, string[]>();
+  for (const raw of data ?? []) {
+    const row = raw as { id: string; person_id?: string | null; street_address?: string | null };
+    const street = (row.street_address ?? "").trim();
+    if (street) {
+      out.set(row.id, street);
+      continue;
+    }
+    if (!row.person_id) continue;
+    const list = personToIds.get(row.person_id) ?? [];
+    list.push(row.id);
+    personToIds.set(row.person_id, list);
+  }
+  if (personToIds.size === 0) return out;
+  const otherKind: AddressOwnerKind = kind === "carer" ? "staff" : "carer";
+  const { data: others, error: otherErr } = await supabase
+    .from(homeTable(otherKind))
+    .select("person_id, street_address")
+    .in("person_id", [...personToIds.keys()]);
+  if (otherErr) return out;
+  for (const raw of others ?? []) {
+    const row = raw as { person_id?: string | null; street_address?: string | null };
+    const street = (row.street_address ?? "").trim();
+    if (!street || !row.person_id) continue;
+    for (const id of personToIds.get(row.person_id) ?? []) {
+      if (!out.has(id)) out.set(id, street);
+    }
+  }
+  return out;
+}
+
+export async function loadHomeAddress(owner: AddressOwner): Promise<string | null> {
+  if (owner.kind === "participant") {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("street_address")
+      .eq("id", owner.id)
+      .maybeSingle();
+    if (error) return null;
+    const street = ((data as { street_address?: string | null } | null)?.street_address ?? "").trim();
+    return street || null;
+  }
+  const linked = await loadLinkedHomeStreets(owner.kind, [owner.id]);
+  return linked.get(owner.id) ?? null;
 }
 
 export const BUS_HOME_ADDRESS_REQUIRED =
@@ -166,13 +254,7 @@ export async function assertHomeAddressForBusAssignment(input: {
 }): Promise<void> {
   const codes = await loadBusRunCodes();
   if (!assignmentNeedsHomeAddress(input.inbound, input.outbound, codes)) return;
-  const { data, error } = await supabase
-    .from(homeTable(input.owner.kind))
-    .select("street_address")
-    .eq("id", input.owner.id)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
-  const street = ((data as { street_address?: string | null } | null)?.street_address ?? "").trim();
+  const street = await loadHomeAddress(input.owner);
   if (!street) throw new Error(BUS_HOME_ADDRESS_REQUIRED);
 }
 

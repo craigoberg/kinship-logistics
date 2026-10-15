@@ -1,7 +1,7 @@
 ﻿import { Fragment, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { AlertTriangle, ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
+import { ChevronDown, ChevronRight, CircleDollarSign, GripVertical, HeartHandshake, Pencil, RotateCcw, Search, UserPlus, UserRoundPlus, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { Input } from "@/components/ui/input";
@@ -37,7 +37,6 @@ import { RecordPaymentMilestoneModal } from "./record-payment-milestone-modal";
 import { RecordRefundMilestoneModal } from "./record-refund-milestone-modal";
 import { EditRosterBookingModal } from "./edit-roster-booking-modal";
 import { BookingPaymentHistory } from "./booking-payment-history";
-import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
 import { PointerLaneList } from "./pointer-lane-list";
 import { cn, formatDate } from "@/lib/utils";
 
@@ -78,7 +77,6 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
   const [editSupport, setEditSupport] = useState<EventSupportBooking | null>(null);
   const [paySupport, setPaySupport] = useState<EventSupportBooking | null>(null);
   const [refundSupport, setRefundSupport] = useState<EventSupportBooking | null>(null);
-  const [noShowFor, setNoShowFor] = useState<EventRosterBooking | null>(null);
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const qc = useQueryClient();
   const { data: bookings = [], isLoading, error } = useEventBookings(event.id);
@@ -397,20 +395,6 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Edit Booking</TooltipContent>
-              </Tooltip>
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    onClick={() => setNoShowFor(b)}
-                    className="h-7 w-7 text-destructive hover:text-destructive"
-                    aria-label="Trigger no-show countdown"
-                  >
-                    <AlertTriangle className="h-4 w-4" />
-                  </Button>
-                </TooltipTrigger>
-                <TooltipContent>Trigger No-Show Countdown</TooltipContent>
               </Tooltip>
             </div>
           </td>,
@@ -873,14 +857,6 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
         mode="refund"
       />
 
-      {noShowFor && (
-        <NoShowCountdownModal
-          open={true}
-          onOpenChange={(o) => !o && setNoShowFor(null)}
-          participantId={noShowFor.participantId}
-          participantName={noShowFor.participantName}
-        />
-      )}
     </div>
   );
 }

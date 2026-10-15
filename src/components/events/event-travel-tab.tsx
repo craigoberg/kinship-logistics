@@ -20,7 +20,7 @@ import {
   type EventManifest,
   type EventRosterBooking,
 } from "@/lib/data-store";
-import { ownerFromLeg, type AddressOwner } from "@/lib/api/person-addresses";
+import { loadLinkedHomeStreets, ownerFromLeg, type AddressOwner } from "@/lib/api/person-addresses";
 import { carerLegMode, legAddress, legOverrideToStore } from "@/lib/event-travel-legs";
 import {
   EVENT_SUPPORT_KEY,
@@ -151,6 +151,23 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
     [confirmedSupport],
   );
 
+  const companionCarerIds = useMemo(() => {
+    const ids = new Set<string>();
+    for (const b of confirmedBookings) {
+      if (!b.bringsCarer) continue;
+      const carerId = b.carerId || b.companionCarerId;
+      if (!carerId || supportCarerIds.has(carerId)) continue;
+      ids.add(carerId);
+    }
+    return [...ids].sort();
+  }, [confirmedBookings, supportCarerIds]);
+
+  const linkedCarerHomes = useQuery({
+    queryKey: ["linked-home", "carer", companionCarerIds],
+    queryFn: () => loadLinkedHomeStreets("carer", companionCarerIds),
+    enabled: companionCarerIds.length > 0,
+  });
+
   const companions = useMemo(() => {
     const groups = new Map<string, EventRosterBooking[]>();
     for (const b of confirmedBookings) {
@@ -177,7 +194,8 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
       const carer = carersById.get(carerId);
       const outbound = carerLegMode(booking.carerOutboundTransportMode, booking.carerTransportRequired);
       const ret = carerLegMode(booking.carerReturnTransportMode, booking.carerTransportRequired);
-      const profile = (carer?.streetAddress ?? "").trim();
+      const profile =
+        (carer?.streetAddress ?? "").trim() || linkedCarerHomes.data?.get(carerId) || "";
       const meeting = legAddress(booking.carerTripPickupAddressOverride, profile);
       return {
         booking,
@@ -192,7 +210,7 @@ export function EventTravelTab({ event, eventKind = "legacy" }: Props) {
         home: legAddress(booking.carerTripReturnAddressOverride, meeting || profile),
       };
     });
-  }, [carersById, confirmedBookings, supportCarerIds]);
+  }, [carersById, confirmedBookings, linkedCarerHomes.data, supportCarerIds]);
 
   const { busIds, selfBookingIds, selfSupportIds, selfCarerIds } = useMemo(() => {
     const busPeople = [

@@ -33,7 +33,7 @@ export const manifestActiveRunTopic: HelpTopic = {
     },
     {
       heading: "Cancel pickup or no-show",
-      body: "If a passenger is not travelling, use the cancel / not-travelling flow (bottom sheet). Acknowledge cancelled pickups before Close Run when the summary asks.",
+      body: "On an outbound pickup, tap the passenger row for no-show, then Trigger No-Show Countdown. That starts the five-minute call to their primary carer. If they are not travelling at all, use the cancel / not-travelling flow. Acknowledge cancelled pickups before Close Run when the summary asks.",
     },
     {
       heading: "Odometer",

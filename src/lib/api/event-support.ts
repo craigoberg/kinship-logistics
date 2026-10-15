@@ -156,6 +156,21 @@ async function resolveNames(): Promise<NameMaps> {
       address: (row.street_address ?? "").trim() || null,
     });
   }
+  const { loadLinkedHomeStreets } = await import("@/lib/api/person-addresses");
+  const blankCarers = [...carer.entries()].filter(([, row]) => !row.address).map(([id]) => id);
+  const blankStaff = [...staff.entries()].filter(([, row]) => !row.address).map(([id]) => id);
+  const [carerHomes, staffHomes] = await Promise.all([
+    loadLinkedHomeStreets("carer", blankCarers),
+    loadLinkedHomeStreets("staff", blankStaff),
+  ]);
+  for (const [id, street] of carerHomes) {
+    const row = carer.get(id);
+    if (row && !row.address) row.address = street;
+  }
+  for (const [id, street] of staffHomes) {
+    const row = staff.get(id);
+    if (row && !row.address) row.address = street;
+  }
   return { staff, carer };
 }
 
