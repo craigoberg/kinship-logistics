@@ -92,7 +92,7 @@ export function DayLoginForm({ personName, defaultEmail, onConfirm, onBack }: Pr
         />
       </div>
 
-      {missing.length > 0 && !busy && (
+      {missing.length > 0 && !busy && !error && (
         <p className="text-center text-sm font-medium text-destructive">
           Enter {missing.join(" and ")}.
         </p>

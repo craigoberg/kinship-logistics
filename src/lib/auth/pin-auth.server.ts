@@ -788,6 +788,7 @@ export async function confirmManagerPassword(args: {
     password: args.password,
   });
   if (signErr || !signed.session || !signed.user?.id) {
+    console.error("manager password sign-in failed", signErr?.message ?? "no session");
     await notePasswordFailure(row);
     throw new PinAuthError("That password does not match this PIN.");
   }
