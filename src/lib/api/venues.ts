@@ -632,6 +632,62 @@ export async function batchLatestBaselineSignoffs(
   return result;
 }
 
+/**
+ * True when the venue has a baseline that is still current: signed, not voided,
+ * and the annual review has not passed. A missing review asset still counts as current.
+ */
+export async function batchVenueBaselineCurrent(
+  venueIds: string[],
+): Promise<Map<string, boolean>> {
+  const unique = [...new Set(venueIds.filter(Boolean))];
+  const out = new Map<string, boolean>();
+  if (unique.length === 0) return out;
+
+  const [venuesRes, signoffs, complianceRes] = await Promise.all([
+    supabase.from("venues").select("id, status, baseline_voided_at").in("id", unique),
+    batchLatestBaselineSignoffs(unique),
+    supabase
+      .from("compliance_assets")
+      .select("subject_id, expiry_date, status")
+      .eq("subject_table", "venues")
+      .in("subject_id", unique)
+      .eq("type", "venue_annual_review")
+      .eq("status", "active"),
+  ]);
+  if (venuesRes.error) throw new Error(venuesRes.error.message);
+  if (complianceRes.error) throw new Error(complianceRes.error.message);
+
+  const today = todayLocalIso();
+  const venueById = new Map(
+    ((venuesRes.data ?? []) as Array<{
+      id: string;
+      status?: string | null;
+      baseline_voided_at?: string | null;
+    }>).map((row) => [row.id, row]),
+  );
+  const expiryByVenue = new Map<string, string>();
+  for (const raw of complianceRes.data ?? []) {
+    const row = raw as { subject_id?: string | null; expiry_date?: string | null };
+    if (!row.subject_id || !row.expiry_date) continue;
+    const prev = expiryByVenue.get(row.subject_id);
+    if (!prev || row.expiry_date > prev) expiryByVenue.set(row.subject_id, row.expiry_date);
+  }
+
+  for (const id of unique) {
+    const venue = venueById.get(id);
+    const signoff = signoffs.get(id) ?? null;
+    const voidedAt = venue?.baseline_voided_at ?? null;
+    const stale = !!signoff && !!voidedAt && signoff.signed_off_at < voidedAt;
+    if (!venue || venue.status === "archived" || !signoff || stale) {
+      out.set(id, false);
+      continue;
+    }
+    const expiry = expiryByVenue.get(id);
+    out.set(id, !expiry || isoDateOnly(expiry) >= today);
+  }
+  return out;
+}
+
 // ============================================================================
 // Venue usability gate (§12.2.2 — strict compliance)
 // ============================================================================

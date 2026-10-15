@@ -370,7 +370,7 @@ export function ManageEventModal({
       ) : tab === "travel" ? (
         <EventTravelTab event={event} eventKind={scopeKind} />
       ) : tab === "itinerary" || tab === "days" ? (
-        <ItineraryTab event={event} />
+        <ItineraryTab event={event} eventKind={scopeKind} />
       ) : tab === "live" ? (
         <EventLiveWatchTab event={event} />
       ) : tab === "report" ? (

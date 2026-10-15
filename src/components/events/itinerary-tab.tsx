@@ -7,7 +7,7 @@
  * Per §12.1: each adjacent stop pair = one hop = one transport_trip.
  * The UI shows them as an ordered chain: Stop 0 → Stop 1 → Stop 2 → …
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -56,7 +56,6 @@ import {
   assessItineraryDayAnchors,
   assessOvernightHotelStops,
   deleteEventVenueStop,
-  inferEventKind,
   isPassengerStop,
   isAccommodationVenueType,
   isVenueTransportStop,
@@ -67,6 +66,7 @@ import {
   seedEventDaySessions,
   upsertEventVenueStop,
   type EventDaySession,
+  type EventKind,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
 import { invalidateEventDayCaches } from "@/lib/query/invalidation";
@@ -74,17 +74,62 @@ import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import type { EventManifest } from "@/lib/data-store";
 import { ItineraryDayPlan } from "./itinerary-day-plan";
+import { VenueBaselineSignoffHost } from "@/components/admin/venues-workspace";
+import { batchVenueBaselineCurrent } from "@/lib/api/venues";
 import {
-  CAUTION_BADGE_CLASS,
   CAUTION_CALLOUT_BODY_CLASS,
   CAUTION_CALLOUT_CLASS,
   CAUTION_CALLOUT_ICON_CLASS,
-  CAUTION_OK_BADGE_CLASS,
   CAUTION_STRIP_CLASS,
 } from "@/lib/ui/caution-callout";
 
+/** Green when the check passes, red when it is missing or wrong. */
+function ItineraryStatusChip({
+  ok,
+  children,
+  onClick,
+  compact = false,
+  pending = false,
+}: {
+  ok: boolean;
+  children: ReactNode;
+  onClick?: () => void;
+  compact?: boolean;
+  /** Still reading the check. Stays quiet until the answer arrives. */
+  pending?: boolean;
+}) {
+  const className = cn(
+    "inline-flex shrink-0 items-center gap-1 border font-semibold",
+    compact ? "rounded px-1.5 py-0.5 text-[10px]" : "rounded-full px-2 py-0.5 text-[11px]",
+    pending
+      ? "border-border bg-muted/40 text-muted-foreground"
+      : ok
+        ? "border-emerald-600/50 bg-emerald-500/15 text-emerald-900 dark:border-emerald-400/50 dark:bg-emerald-500/20 dark:text-emerald-100"
+        : "border-red-600/60 bg-red-500/15 text-red-900 dark:border-red-400/55 dark:bg-red-500/20 dark:text-red-100",
+    onClick && !pending && (ok ? "hover:bg-emerald-500/25" : "hover:bg-red-500/25"),
+  );
+  if (onClick) {
+    return (
+      <button
+        type="button"
+        className={className}
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onClick();
+        }}
+      >
+        {children}
+      </button>
+    );
+  }
+  return <span className={className}>{children}</span>;
+}
+
 interface Props {
   event: EventManifest;
+  /** Same scope the event dialog header uses, including the type's display name. */
+  eventKind: EventKind;
 }
 
 const stopsKey = (eventId: string) => ["event-venue-stops", eventId] as const;
@@ -108,7 +153,7 @@ function fmtDate(iso: string): string {
   return formatDateWithWeekday(iso);
 }
 
-export function ItineraryTab({ event }: Props) {
+export function ItineraryTab({ event, eventKind }: Props) {
   const qc = useQueryClient();
   const days = useMemo(
     () => dateRange(event.startDate, event.endDate ?? event.startDate),
@@ -202,18 +247,6 @@ export function ItineraryTab({ event }: Props) {
     return m;
   }, [stops, days]);
 
-  const eventKind = useMemo(
-    () =>
-      inferEventKind({
-        startDate: event.startDate,
-        endDate: event.endDate,
-        eventTypeCode: event.eventTypeCode,
-        primaryVenueId: event.primaryVenueId,
-        storedEventKind: event.eventKind,
-      }),
-    [event],
-  );
-
   const hotelGate = useMemo(
     () =>
       assessOvernightHotelStops({
@@ -237,6 +270,17 @@ export function ItineraryTab({ event }: Props) {
   const finalDate = days.length > 0 ? days[days.length - 1]! : null;
   const hasMeeting = anchorGate.meetFailingDates.length === 0;
   const hasDeparture = anchorGate.departFailingDates.length === 0;
+  const placeVenueIds = useMemo(
+    () =>
+      [...new Set(stops.flatMap((stop) => (stop.venue_id && !isPassengerStop(stop) ? [stop.venue_id] : [])))].sort(),
+    [stops],
+  );
+  const baselineQ = useQuery({
+    queryKey: ["venue-baseline-current", placeVenueIds.join(",")],
+    queryFn: () => batchVenueBaselineCurrent(placeVenueIds),
+    enabled: placeVenueIds.length > 0,
+    staleTime: 15_000,
+  });
 
   if (isLoading) {
     return (
@@ -347,6 +391,8 @@ export function ItineraryTab({ event }: Props) {
           managers={managers}
           multiDay={multiDay}
           onPlanSaved={invalidateDays}
+          baselineCurrent={baselineQ.data}
+          baselinePending={baselineQ.isLoading}
         />
       ))}
     </div>
@@ -387,6 +433,9 @@ interface DayItineraryProps {
   managers: Array<{ id: string; fullName: string }>;
   multiDay: boolean;
   onPlanSaved: () => void;
+  /** venue id → baseline is signed and the annual review has not passed. */
+  baselineCurrent?: Map<string, boolean>;
+  baselinePending?: boolean;
 }
 
 function DayItinerary({
@@ -403,6 +452,8 @@ function DayItinerary({
   managers,
   multiDay,
   onPlanSaved,
+  baselineCurrent,
+  baselinePending = false,
 }: DayItineraryProps) {
   const sorted = useMemo(
     () => [...stops].sort((a, b) => a.stop_order - b.stop_order),
@@ -423,6 +474,8 @@ function DayItinerary({
   const [leaderEditOpen, setLeaderEditOpen] = useState(false);
   const [pendingLeaderId, setPendingLeaderId] = useState<string | null>(null);
   const [expanded, setExpanded] = useState(false);
+  const [baselineVenueId, setBaselineVenueId] = useState<string | null>(null);
+  const qc = useQueryClient();
   const gate = useVenueGate();
   const typesQ = useVenueTypes();
 
@@ -582,54 +635,27 @@ function DayItinerary({
             <Badge variant="outline" className="text-[10px]">
               {hopCount} hop{hopCount === 1 ? "" : "s"}
             </Badge>
-          {requiresOvernightHotel && (
-            <Badge
-              variant="outline"
-              className={cn(
-                "gap-1 text-[10px]",
-                overnightMissing ? CAUTION_BADGE_CLASS : CAUTION_OK_BADGE_CLASS,
-              )}
-            >
-              <BedDouble className="h-3 w-3" />
-              {overnightMissing ? "Needs overnight hotel" : "Overnight OK"}
-            </Badge>
-          )}
-          <Badge
-            variant="outline"
-            className={cn(
-              "gap-1 text-[10px]",
-              meetOk ? CAUTION_OK_BADGE_CLASS : CAUTION_BADGE_CLASS,
-            )}
-          >
+          <ItineraryStatusChip ok={meetOk}>
             <MapPin className="h-3 w-3" />
-            {meetOk ? "Meet place" : "Needs a meeting place"}
-          </Badge>
+            {meetOk ? "Meeting point" : "Needs a meeting place"}
+          </ItineraryStatusChip>
+          {requiresOvernightHotel && (
+            <ItineraryStatusChip ok={!overnightMissing}>
+              <BedDouble className="h-3 w-3" />
+              {overnightMissing ? "Needs a hotel" : "Hotel"}
+            </ItineraryStatusChip>
+          )}
           {isLastDay && (
-            <Badge
-              variant="outline"
-              className={cn(
-                "gap-1 text-[10px]",
-                departOk ? CAUTION_OK_BADGE_CLASS : CAUTION_BADGE_CLASS,
-              )}
-            >
+            <ItineraryStatusChip ok={departOk}>
               <MapPin className="h-3 w-3" />
               {departOk ? "Departure place" : "Needs a departure place"}
-            </Badge>
-          )}
-          {!leaderName && (
-            <span className="text-[11px] font-medium text-yellow-600">No trip leader</span>
+            </ItineraryStatusChip>
           )}
           </button>
-          {leaderName && (
-            <button
-              type="button"
-              onClick={() => setLeaderEditOpen(true)}
-              className="inline-flex items-center gap-1 rounded-full border border-primary/40 bg-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary hover:bg-primary/25"
-            >
-              <ShieldCheck className="h-3 w-3" />
-              {leaderName}
-            </button>
-          )}
+          <ItineraryStatusChip ok={!!leaderName} onClick={() => setLeaderEditOpen(true)}>
+            <ShieldCheck className="h-3 w-3" />
+            {leaderName ?? "No trip leader"}
+          </ItineraryStatusChip>
           {multiDay && leaderName && eveningLabel && (
             <button
               type="button"
@@ -862,8 +888,10 @@ function DayItinerary({
                   const passenger = isPassengerStop(stop);
                   const isMeeting = !!firstStop && stop.id === firstStop.id;
                   const isDeparture = isLastDay && !!lastStop && stop.id === lastStop.id;
-                  const showOvernight =
-                    requiresOvernightHotel && isLast && isAccommodationVenueType(stop.venue_type) && isPlace;
+                  const hotelOk =
+                    requiresOvernightHotel && isLast && isPlace && isAccommodationVenueType(stop.venue_type);
+                  const hotelBad = requiresOvernightHotel && isLast && !hotelOk;
+                  const showOvernight = hotelOk;
 
                   return (
                     <div key={id} className="space-y-1">
@@ -895,35 +923,57 @@ function DayItinerary({
                           <span className="truncate text-sm font-medium">
                             {stop.label_override ?? stop.venue_name ?? "Unknown venue"}
                           </span>
-                          {stopVenueTypeName(stop, typesQ.data?.types) && (
+                          {stopVenueTypeName(stop, typesQ.data?.types) && stop.venue_id && !passenger && (
+                            <ItineraryStatusChip
+                              ok={baselineCurrent?.get(stop.venue_id) === true}
+                              pending={baselinePending && baselineCurrent?.get(stop.venue_id) == null}
+                              compact
+                              onClick={() => setBaselineVenueId(stop.venue_id)}
+                            >
+                              {stopVenueTypeName(stop, typesQ.data?.types)}
+                            </ItineraryStatusChip>
+                          )}
+                          {stopVenueTypeName(stop, typesQ.data?.types) && (!stop.venue_id || passenger) && (
                             <span className="shrink-0 text-[10px] text-muted-foreground">
                               {stopVenueTypeName(stop, typesQ.data?.types)}
                             </span>
                           )}
                           {passenger && (
-                            <span className="inline-flex shrink-0 items-center rounded bg-info/15 px-1.5 py-0.5 text-[10px] font-semibold text-info">
+                            <ItineraryStatusChip ok compact>
                               {stop.activity_kind === "passenger_dropoff" ? "Drop-off" : "Pickup"}
-                            </span>
+                            </ItineraryStatusChip>
                           )}
-                          {(isMeeting || isDeparture) && (
-                            <span className="inline-flex shrink-0 items-center rounded bg-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary">
-                              {isMeeting && isDeparture
-                                ? "Meeting point · Departure point"
-                                : isMeeting
-                                  ? "Meeting point"
-                                  : "Departure point"}
-                            </span>
+                          {isMeeting && meetOk && (
+                            <ItineraryStatusChip ok compact>
+                              {isDeparture && departOk ? "Meeting point · Departure point" : "Meeting point"}
+                            </ItineraryStatusChip>
                           )}
-                          {showOvernight && (
-                            <span
-                              className={cn(
-                                "inline-flex shrink-0 items-center gap-0.5 rounded px-1.5 py-0.5 text-[10px] font-semibold",
-                                CAUTION_OK_BADGE_CLASS,
-                              )}
-                            >
+                          {isDeparture && departOk && !(isMeeting && meetOk) && (
+                            <ItineraryStatusChip ok compact>
+                              Departure point
+                            </ItineraryStatusChip>
+                          )}
+                          {!meetOk && isMeeting && (
+                            <ItineraryStatusChip ok={false} compact>
+                              Needs a meeting place
+                            </ItineraryStatusChip>
+                          )}
+                          {isLastDay && !departOk && isLast && (
+                            <ItineraryStatusChip ok={false} compact>
+                              Needs a departure place
+                            </ItineraryStatusChip>
+                          )}
+                          {hotelOk && (
+                            <ItineraryStatusChip ok compact>
                               <BedDouble className="h-3 w-3" />
-                              Overnight
-                            </span>
+                              Hotel
+                            </ItineraryStatusChip>
+                          )}
+                          {hotelBad && (
+                            <ItineraryStatusChip ok={false} compact>
+                              <BedDouble className="h-3 w-3" />
+                              Needs a hotel
+                            </ItineraryStatusChip>
                           )}
                         </div>
                         {passenger && stop.street_address ? (
@@ -1001,6 +1051,18 @@ function DayItinerary({
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <VenueBaselineSignoffHost
+        venueId={baselineVenueId}
+        open={!!baselineVenueId}
+        onOpenChange={(open) => {
+          if (!open) setBaselineVenueId(null);
+        }}
+        onSigned={() => {
+          setBaselineVenueId(null);
+          void qc.invalidateQueries({ queryKey: ["venue-baseline-current"] });
+        }}
+      />
     </div>
   );
 }

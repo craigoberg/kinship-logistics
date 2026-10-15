@@ -89,6 +89,7 @@ import {
   cloneVenue,
   deleteVenueTemplateField,
   getLatestBaselineSignoff,
+  getVenue,
   listBaselineSignoffs,
   listVenueTemplateFields,
   listVenues,
@@ -514,10 +515,7 @@ function VenueDetailPanel({ venue, embedded = false, onClose, onEdit, onInvalida
   });
 
   const latestSignoff = signoffs[0] ?? null;
-  const currentFields = fields.filter((f) => f.is_current !== false).filter((f, i, all) => {
-    if (!f.requirement_code) return true;
-    return all.findIndex((other) => other.requirement_code === f.requirement_code) === i;
-  });
+  const currentFields = currentTemplateFields(fields);
 
   useEffect(() => {
     let cancel = false;
@@ -1235,6 +1233,61 @@ function CloneVenueDialog({ open, source, onOpenChange, onCloned }: CloneDialogP
         </DialogFooter>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function currentTemplateFields(fields: VenueTemplateField[]): VenueTemplateField[] {
+  return fields.filter((f) => f.is_current !== false).filter((f, i, all) => {
+    if (!f.requirement_code) return true;
+    return all.findIndex((other) => other.requirement_code === f.requirement_code) === i;
+  });
+}
+
+/** Opens the baseline sign-off on top of whatever screen called it. Close returns there. */
+export function VenueBaselineSignoffHost({
+  venueId,
+  open,
+  onOpenChange,
+  onSigned,
+}: {
+  venueId: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSigned: () => void;
+}) {
+  const qc = useQueryClient();
+  const venueQ = useQuery({
+    queryKey: ["venue", venueId],
+    queryFn: () => getVenue(venueId!),
+    enabled: open && !!venueId,
+  });
+  const fieldsQ = useQuery({
+    queryKey: venueFieldsKey(venueId ?? ""),
+    queryFn: () => listVenueTemplateFields(venueId!),
+    enabled: open && !!venueId,
+  });
+
+  useEffect(() => {
+    const venue = venueQ.data;
+    if (!open || !venue) return;
+    let cancel = false;
+    void syncVenueTypeRequirements(venue.id, venue.venue_type).then((changed) => {
+      if (!cancel && changed) void qc.invalidateQueries({ queryKey: venueFieldsKey(venue.id) });
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [open, venueQ.data, qc]);
+
+  if (!open || !venueId || !venueQ.data || fieldsQ.isLoading) return null;
+  return (
+    <BaselineSignoffDialog
+      open
+      venue={venueQ.data}
+      fields={currentTemplateFields(fieldsQ.data ?? [])}
+      onOpenChange={onOpenChange}
+      onSigned={onSigned}
+    />
   );
 }
 
