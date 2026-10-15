@@ -5,7 +5,7 @@
  *   Venues — list; expand a row for template, baseline, and compliance
  *   Venue types — names offered on the venue form
  */
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -74,7 +74,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
-import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { getActiveUserProfile } from "@/lib/data-store";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
@@ -97,6 +97,7 @@ import {
   updateVenueTemplateField,
   saveVenueFieldAssessment,
   upsertVenue,
+  venueAssessmentResult,
   type AnswerType,
   type BaselineSignoffAnswer,
   type RiskTier,
@@ -650,27 +651,33 @@ function VenueAssessmentNote({
   field: VenueTemplateField;
   onSaved: () => void;
 }) {
+  const result = venueAssessmentResult(field);
   const [text, setText] = useState(field.assessment_reason ?? "");
   useEffect(() => {
     setText(field.assessment_reason ?? "");
   }, [field.id, field.assessment_reason]);
+  if (result !== "no" && result !== "partial") return null;
 
   return (
     <div className="mt-2 max-w-md">
       <CharacterCountedInput
-        label={field.is_mandatory ? "Why this is still all right" : "Note (optional)"}
+        label={field.is_mandatory ? "Why this is still OK" : "Note (optional)"}
         value={text}
         onValueChange={setText}
         onBlur={() => {
           if (text.trim() === (field.assessment_reason ?? "").trim()) return;
-          void saveVenueFieldAssessment(field.id, false, text)
+          void saveVenueFieldAssessment(field.id, result, text)
             .then(onSaved)
             .catch((err: Error) => toast.error(err.message));
         }}
         minChars={field.is_mandatory ? 8 : 0}
         maxChars={200}
         required={!!field.is_mandatory}
-        placeholder="Who this affects, and why the visit can still go ahead"
+        placeholder={
+          result === "partial"
+            ? "What complies, and the workaround in place"
+            : "Why the visit can still go ahead"
+        }
       />
     </div>
   );
@@ -742,8 +749,9 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          Mark each check for this venue. No, on a required check, needs a reason why the visit
-          can still go ahead. Then sign the baseline.
+          Yes means the venue has this and it meets the requirement. Partial means some of it
+          complies, with the workaround in the note. No means it does not have this, and the same
+          note says why the visit is still OK. Then sign the baseline.
         </p>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -767,36 +775,37 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
                     <Badge variant="secondary" className="text-[10px]">From type</Badge>
                   )}
                 </div>
-                {f.assessment_met === false && (f.requirement_code || f.answer_type === "yes_no") && (
+                {(f.requirement_code || f.answer_type === "yes_no") && (
                   <VenueAssessmentNote field={f} onSaved={invalidate} />
                 )}
               </div>
               {(f.requirement_code || f.answer_type === "yes_no") && (
               <div className="flex items-center gap-1">
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={f.assessment_met === true ? "default" : "outline"}
-                  onClick={() => {
-                    void saveVenueFieldAssessment(f.id, true, null)
-                      .then(() => invalidate())
-                      .catch((err: Error) => toast.error(err.message));
-                  }}
-                >
-                  Yes
-                </Button>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant={f.assessment_met === false ? "default" : "outline"}
-                  onClick={() => {
-                    void saveVenueFieldAssessment(f.id, false, f.assessment_reason ?? "")
-                      .then(() => invalidate())
-                      .catch((err: Error) => toast.error(err.message));
-                  }}
-                >
-                  No
-                </Button>
+                {(
+                  [
+                    ["yes", "Yes"],
+                    ["partial", "Partial"],
+                    ["no", "No"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={venueAssessmentResult(f) === value ? "default" : "outline"}
+                    onClick={() => {
+                      void saveVenueFieldAssessment(
+                        f.id,
+                        value,
+                        value === "yes" ? null : f.assessment_reason ?? "",
+                      )
+                        .then(() => invalidate())
+                        .catch((err: Error) => toast.error(err.message));
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
               </div>
               )}
               {!f.is_system_core && !f.requirement_code && (
@@ -1311,9 +1320,7 @@ function BaselineSignoffDialog({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [evidence, setEvidence] = useState("");
   const [notes, setNotes] = useState("");
-  const [managerPinVerified, setManagerPinVerified] = useState(false);
-  const verifiedManagerPinRef = useRef("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const managerStaffId = getActiveUserProfile()?.staffId ?? "";
@@ -1323,9 +1330,8 @@ function BaselineSignoffDialog({
       setAnswers({});
       setEvidence("");
       setNotes("");
-      setManagerPinVerified(false);
-      verifiedManagerPinRef.current = "";
-      setPinError(null);
+      setPinOpen(false);
+      setBusy(false);
     }
   }, [open]);
 
@@ -1337,51 +1343,31 @@ function BaselineSignoffDialog({
     (f) => f.is_mandatory && usesRowAnswer(f) && !requirementAnswerOk(f, rowAnswer(f, "")),
   );
   const evidenceOk = evidence.trim().length >= MIN_EVIDENCE;
-  const pinOk = managerPinVerified;
-  const canSubmit = allMandatoryAnswered && evidenceOk && pinOk && !busy;
+  const canSubmit = fields.length > 0 && allMandatoryAnswered && evidenceOk && !!managerStaffId && !busy;
 
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setBusy(true);
-    setPinError(null);
-    try {
-      const answerRows: BaselineSignoffAnswer[] = fields
-        .map((f) => ({ field_id: f.id, answer_text: rowAnswer(f, answers[f.id] ?? "") }))
-        .filter((row) => row.answer_text.trim().length > 0);
-
-      await submitBaselineSignoff({
-        venue_id: venue.id,
-        managerStaffId,
-        managerPin: verifiedManagerPinRef.current,
-        evidence_ref: evidence.trim(),
-        notes: notes.trim() || null,
-        answers: answerRows,
-      });
-
-      toast.success("Baseline sign-off recorded.");
-      onSigned();
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.toLowerCase().includes("pin") || msg.toLowerCase().includes("manager")) {
-        setPinError(msg);
-        setManagerPinVerified(false);
-        verifiedManagerPinRef.current = "";
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setBusy(false);
-    }
+  const saveWithPin = async (pin: string) => {
+    const answerRows: BaselineSignoffAnswer[] = fields
+      .map((f) => ({ field_id: f.id, answer_text: rowAnswer(f, answers[f.id] ?? "") }))
+      .filter((row) => row.answer_text.trim().length > 0);
+    await submitBaselineSignoff({
+      venue_id: venue.id,
+      managerStaffId,
+      managerPin: pin,
+      evidence_ref: evidence.trim(),
+      notes: notes.trim() || null,
+      answers: answerRows,
+    });
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Venue safety baseline sign-off</DialogTitle>
           <DialogDescription>
-            Yes and No are already on the safety template. Sign with your Manager PIN. This
-            record is immutable once saved.
+            Finish the answers and the evidence, then sign off. Your manager PIN confirms the save.
+            This record is immutable once saved.
           </DialogDescription>
         </DialogHeader>
 
@@ -1402,11 +1388,13 @@ function BaselineSignoffDialog({
                   <li key={f.id}>
                     <span className="font-medium">{f.prompt}</span>
                     {" — "}
-                    {f.assessment_met === true
+                    {venueAssessmentResult(f) === "yes"
                       ? "Yes"
-                      : f.assessment_met === false
-                        ? `No. ${f.assessment_reason ?? ""}`
-                        : "Not answered"}
+                      : venueAssessmentResult(f) === "partial"
+                        ? `Partial. ${f.assessment_reason ?? ""}`
+                        : venueAssessmentResult(f) === "no"
+                          ? `No. ${f.assessment_reason ?? ""}`
+                          : "Not answered"}
                   </li>
                 ))}
               </ul>
@@ -1438,34 +1426,6 @@ function BaselineSignoffDialog({
                     className="text-sm"
                   />
                 </div>
-
-                {/* Manager PIN */}
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-semibold">
-                    Manager PIN <span className="text-destructive">*</span>
-                  </Label>
-                  <PinEntryTrigger
-                    label="Tap to enter manager PIN"
-                    verified={managerPinVerified}
-                    verifiedLabel="Manager PIN verified"
-                    length={4}
-                    title="Venue safety baseline sign-off"
-                    description="Immutable record — manager PIN required."
-                    disabled={!managerStaffId}
-                    required
-                    onVerify={async (p) => {
-                      await verifyManagerPin(managerStaffId, p);
-                    }}
-                    onSuccess={(p) => {
-                      verifiedManagerPinRef.current = p;
-                      setManagerPinVerified(true);
-                      setPinError(null);
-                    }}
-                  />
-                  {pinError && (
-                    <p className="text-sm text-destructive font-medium">{pinError}</p>
-                  )}
-                </div>
               </div>
             </>
           )}
@@ -1475,7 +1435,7 @@ function BaselineSignoffDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button type="button" onClick={() => canSubmit && setPinOpen(true)} disabled={!canSubmit}>
             {busy ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving…</>
             ) : (
@@ -1485,6 +1445,28 @@ function BaselineSignoffDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <PinEntryDialog
+      open={pinOpen}
+      onOpenChange={setPinOpen}
+      title="Venue safety baseline sign-off"
+      description="Manager PIN confirms this sign-off. It is saved only after the PIN is accepted."
+      length={6}
+      busy={busy}
+      onVerify={async (pin) => {
+        setBusy(true);
+        try {
+          await verifyManagerPin(managerStaffId, pin);
+          await saveWithPin(pin);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onSuccess={() => {
+        toast.success("Baseline sign-off recorded.");
+        onSigned();
+      }}
+    />
+    </>
   );
 }
 
@@ -1496,15 +1478,18 @@ function usesRowAnswer(field: VenueTemplateField): boolean {
 
 function rowAnswer(field: VenueTemplateField, typed: string): string {
   if (!usesRowAnswer(field)) return typed;
-  if (field.assessment_met === true) return "Present";
-  if (field.assessment_met === false) return `Not present: ${field.assessment_reason ?? ""}`;
+  const result = venueAssessmentResult(field);
+  if (result === "yes") return "Yes";
+  if (result === "partial") return `Partial: ${field.assessment_reason ?? ""}`;
+  if (result === "no") return `No: ${field.assessment_reason ?? ""}`;
   return "";
 }
 
 function requirementAnswerOk(field: VenueTemplateField, value: string): boolean {
   if (usesRowAnswer(field)) {
-    if (field.assessment_met === true) return true;
-    if (field.assessment_met === false) {
+    const result = venueAssessmentResult(field);
+    if (result === "yes") return true;
+    if (result === "no" || result === "partial") {
       if (!field.is_mandatory) return true;
       return (field.assessment_reason ?? "").trim().length >= 8;
     }

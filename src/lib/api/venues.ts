@@ -55,8 +55,10 @@ export interface VenueTemplateField {
   is_system_core: boolean;
   requirement_code?: string | null;
   is_current?: boolean | null;
-  /** This venue: true = met, false = not here, null = not answered yet. */
+  /** This venue: true = met, false = not here, null = unanswered or partial. */
   assessment_met?: boolean | null;
+  /** yes = compliant, no = not here, partial = some of it, with a workaround. */
+  assessment_result?: "yes" | "no" | "partial" | null;
   assessment_reason?: string | null;
   sort_order: number;
   created_at: string;
@@ -325,35 +327,77 @@ export async function addVenueTemplateField(
   return data as VenueTemplateField;
 }
 
-/** Yes or No for this venue, plus why a required check is not met. */
+export type VenueAssessmentResult = "yes" | "no" | "partial";
+
+/** Stored result, or the older yes/no flag when Partial was not on the row yet. */
+export function venueAssessmentResult(
+  field: Pick<VenueTemplateField, "assessment_result" | "assessment_met">,
+): VenueAssessmentResult | null {
+  if (field.assessment_result === "yes" || field.assessment_result === "no" || field.assessment_result === "partial") {
+    return field.assessment_result;
+  }
+  if (field.assessment_met === true) return "yes";
+  if (field.assessment_met === false) return "no";
+  return null;
+}
+
+/** Yes, No, or Partial for this venue. No and Partial keep why the visit is still OK. */
 export async function saveVenueFieldAssessment(
   fieldId: string,
-  met: boolean,
+  result: VenueAssessmentResult,
   reason: string | null,
 ): Promise<void> {
   const allowed = await canManageSystemParameters();
   if (!allowed) throw new Error("Only Managers can record venue checks.");
-  const nextReason = met ? null : reason?.trim() || null;
-  const { data: before, error: readErr } = await supabase
+  const nextReason = result === "yes" ? null : reason?.trim() || null;
+  const met = result === "yes" ? true : result === "no" ? false : null;
+  const partialSql = "Run docs/sql/2026-10-15_venue_assessment_partial.sql, then hard refresh.";
+  let { data: before, error: readErr } = await supabase
     .from("venue_template_fields")
-    .select("venue_id, assessment_met, assessment_reason")
+    .select("venue_id, assessment_met, assessment_result, assessment_reason")
     .eq("id", fieldId)
     .single();
+  if (readErr && /assessment_result/i.test(readErr.message)) {
+    if (result === "partial") throw new Error(partialSql);
+    const retry = await supabase
+      .from("venue_template_fields")
+      .select("venue_id, assessment_met, assessment_reason")
+      .eq("id", fieldId)
+      .single();
+    before = retry.data;
+    readErr = retry.error;
+  }
   if (readErr) throw new Error(readErr.message);
   const row = before as {
     venue_id: string;
     assessment_met: boolean | null;
+    assessment_result?: VenueAssessmentResult | null;
     assessment_reason: string | null;
   };
-  if (row.assessment_met === met && (row.assessment_reason ?? null) === nextReason) return;
+  if (
+    venueAssessmentResult(row) === result &&
+    (row.assessment_reason ?? null) === nextReason
+  ) {
+    return;
+  }
 
-  const { error } = await supabase
-    .from("venue_template_fields")
-    .update({
-      assessment_met: met,
-      assessment_reason: nextReason,
-    })
-    .eq("id", fieldId);
+  const payload: {
+    assessment_met: boolean | null;
+    assessment_reason: string | null;
+    assessment_result?: VenueAssessmentResult;
+  } = {
+    assessment_met: met,
+    assessment_reason: nextReason,
+    assessment_result: result,
+  };
+  let { error } = await supabase.from("venue_template_fields").update(payload).eq("id", fieldId);
+  if (error && /assessment_result/i.test(error.message)) {
+    if (result === "partial") throw new Error(partialSql);
+    ({ error } = await supabase
+      .from("venue_template_fields")
+      .update({ assessment_met: met, assessment_reason: nextReason })
+      .eq("id", fieldId));
+  }
   if (error) {
     if (String(error.message).toLowerCase().includes("assessment_met")) {
       throw new Error("Run docs/sql/2026-10-14_venue_type_requirements.sql again, then hard refresh.");
