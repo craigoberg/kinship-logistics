@@ -1099,6 +1099,58 @@ export async function updateStaffMember(id: string, p: StaffPayload): Promise<St
   return updated;
 }
 
+/** Fields a staff-sheet section may save without rewriting the rest of the row. */
+export type StaffFieldPatch = Partial<{
+  fullName: string;
+  role: string | null;
+  personnelType: string | null;
+  phone: string | null;
+  email: string | null;
+  streetAddress: string | null;
+  notes: string | null;
+  certifications: StaffCertification[];
+}>;
+
+/** Update only the columns in `patch`. Other columns, including certificates, stay as stored. */
+export async function patchStaffMember(id: string, patch: StaffFieldPatch): Promise<StaffMember> {
+  assertManagerRole("update personnel");
+  const row: Record<string, unknown> = {};
+  if (patch.fullName !== undefined) row.full_name = patch.fullName.trim();
+  if (patch.role !== undefined) row.role = patch.role;
+  if (patch.personnelType !== undefined) row.personnel_type = patch.personnelType;
+  if (patch.phone !== undefined) row.phone = patch.phone;
+  if (patch.email !== undefined) row.email = patch.email;
+  if (patch.streetAddress !== undefined) row.street_address = patch.streetAddress;
+  if (patch.notes !== undefined) row.notes = patch.notes;
+  if (patch.certifications !== undefined) row.certifications = patch.certifications;
+  if (Object.keys(row).length === 0) {
+    throw new Error("Nothing to save.");
+  }
+  const { data: beforeRow } = await supabase
+    .from("staff_registry")
+    .select(STAFF_COLS)
+    .eq("id", id)
+    .maybeSingle();
+  const before = beforeRow ? rowToStaff(beforeRow as StaffRow) : null;
+  const { data, error } = await supabase
+    .from("staff_registry")
+    .update(row)
+    .eq("id", id)
+    .select(STAFF_COLS)
+    .single();
+  if (error) throw error;
+  const updated = rowToStaff(data as StaffRow);
+  logOfficeChange({
+    action: "updated",
+    entity: "staff",
+    recordId: updated.id,
+    recordName: updated.fullName,
+    before: before ? staffPublicFields(before) : null,
+    after: staffPublicFields(updated),
+  });
+  return updated;
+}
+
 /** True when the active session has Manager-level (coordinator) privileges. */
 export function isActiveUserManager(): boolean {
   return getActiveUserProfile()?.role === "coordinator";

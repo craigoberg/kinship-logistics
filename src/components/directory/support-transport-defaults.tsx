@@ -165,7 +165,7 @@ export function SupportTransportDefaults({
               Centre run (IN / OUT)
             </div>
             <p className="mt-0.5 text-[11px] font-normal text-muted-foreground">
-              Centre open {openDayLabels}. How {personName || "they"} get in and out.
+              Centre open {openDayLabels}. How {personName || "they"} get in and out. Changes save automatically.
             </p>
           </div>
         </AccordionTrigger>

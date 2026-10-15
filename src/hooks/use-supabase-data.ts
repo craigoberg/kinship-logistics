@@ -29,6 +29,7 @@ import {
   listStaffRegistry,
   insertStaffMember,
   updateStaffMember,
+  patchStaffMember,
   listCarersRegistry,
   listCarersForParticipant,
   getPrimaryCarer,
@@ -41,6 +42,7 @@ import {
   unlinkCarer,
 
   type StaffPayload,
+  type StaffFieldPatch,
   type CarerPayload,
   listSchedulesForParticipant,
   listAllActiveSchedules,
@@ -518,6 +520,17 @@ export function useUpdateStaffMember() {
   return useMutation({
     mutationFn: ({ id, payload }: { id: string; payload: StaffPayload }) =>
       updateStaffMember(id, payload),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["staff_registry"] });
+    },
+  });
+}
+
+export function usePatchStaffMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: StaffFieldPatch }) =>
+      patchStaffMember(id, patch),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["staff_registry"] });
     },
