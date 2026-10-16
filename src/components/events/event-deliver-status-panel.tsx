@@ -1,7 +1,7 @@
 /**
  * EventDeliverStatusPanel — group journey status banner (GUARDRAILS §12.13.8)
  */
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, type QueryKey } from "@tanstack/react-query";
 import {
   Bus,
   CheckCircle2,
@@ -14,18 +14,34 @@ import {
   Users,
   Utensils,
 } from "lucide-react";
+import { ClientTime } from "@/components/ui/client-time";
 import { cn } from "@/lib/utils";
 import {
   eventDeliverStatusKey,
   fetchEventDeliverGroupStatus,
   type EventDeliverStatusStep,
+  type StatusStamp,
 } from "@/lib/api/event-deliver-status";
-import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import { useRealtimeInvalidateMany } from "@/hooks/use-realtime-invalidate";
+
+const GROUP_STATUS_TABLES = [
+  "event_attendance_log",
+  "event_venue_stops",
+  "event_bus_manifest",
+  "transport_trips",
+  "trip_legs",
+  "event_day_sessions",
+  "event_morning_log",
+  "event_curfew_log",
+  "asset_daily_clearance",
+] as const;
 
 interface Props {
   eventId: string;
   sessionId: string;
   sessionDate: string;
+  /** Also invalidate these keys when group-status tables change (e.g. office Live). */
+  extraQueryKeys?: QueryKey[];
 }
 
 const TONE_HEADLINE: Record<string, string> = {
@@ -38,38 +54,15 @@ const TONE_HEADLINE: Record<string, string> = {
   closed: "border-zinc-500/40 bg-zinc-500/10",
 };
 
-export function EventDeliverStatusPanel({ eventId, sessionId, sessionDate }: Props) {
-  useRealtimeInvalidate({
-    table: "event_attendance_log",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "event_venue_stops",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "event_bus_manifest",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "transport_trips",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "trip_legs",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "event_day_sessions",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "event_morning_log",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
-  });
-  useRealtimeInvalidate({
-    table: "event_curfew_log",
-    queryKeys: [eventDeliverStatusKey(sessionId)],
+export function EventDeliverStatusPanel({
+  eventId,
+  sessionId,
+  sessionDate,
+  extraQueryKeys = [],
+}: Props) {
+  useRealtimeInvalidateMany({
+    tables: GROUP_STATUS_TABLES,
+    queryKeys: [eventDeliverStatusKey(sessionId), ...extraQueryKeys],
   });
 
   const { data, isLoading } = useQuery({
@@ -146,11 +139,13 @@ function StatusStepRow({ step }: { step: EventDeliverStatusStep }) {
               ? step.label.toLowerCase().includes("medication")
                 ? Pill
                 : Utensils
-              : step.id.includes("-at")
-                ? MapPin
-                : step.id.includes("depart")
-                  ? Bus
-                  : MapPin
+              : step.id.includes("collect")
+                ? Users
+                : step.id.includes("-at")
+                  ? MapPin
+                  : step.id.includes("depart")
+                    ? Bus
+                    : MapPin
         : Circle;
 
   return (
@@ -184,7 +179,22 @@ function StatusStepRow({ step }: { step: EventDeliverStatusStep }) {
             {step.detail}
           </div>
         )}
+        {step.stamps && step.stamps.length > 0 && <StepStamps stamps={step.stamps} />}
       </div>
     </li>
+  );
+}
+
+function StepStamps({ stamps }: { stamps: StatusStamp[] }) {
+  return (
+    <div className="mt-0.5 text-[11px] tabular-nums leading-snug text-muted-foreground">
+      {stamps.map((stamp, i) => (
+        <span key={`${stamp.label}-${stamp.at}`}>
+          {i > 0 ? " · " : null}
+          {stamp.label}{" "}
+          <ClientTime iso={stamp.at} options={{ hour: "2-digit", minute: "2-digit" }} />
+        </span>
+      ))}
+    </div>
   );
 }

@@ -18,11 +18,8 @@ import {
   useSystemParameter,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { isValidClockTime } from "@/lib/tour-roll-call";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 /**
  * Default evening + morning roll call times and alert thresholds for multi-day tours.
@@ -36,7 +33,7 @@ export function TourRollCallDefaultsPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const savedEvening = useDefaultEveningRollCallTime();
   const savedMorning = useDefaultMorningRollCallTime();

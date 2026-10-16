@@ -21,6 +21,7 @@ export const eventOvernightHotelTopic: HelpTopic = {
   relatedIds: [
     "admin-venues",
     "events-create-confirm-open",
+    "event-travel",
     "event-open-checks",
     "event-deliver-happy-path",
   ],
@@ -31,15 +32,15 @@ export const eventOvernightHotelTopic: HelpTopic = {
     },
     {
       heading: "Build each day’s itinerary",
-      body: "On the Itinerary tab, add stops in order. First stop is the day’s origin; last stop is end of day. Use venues from Admin → Venues.",
+      body: "On the Itinerary tab, add places in order. The first place is the meeting point. The last place is the departure point. Use venues from Admin → Venues. Pickup and Drop-off rows added from Travel sit between places. They are not the meeting point or the departure point, and they do not count as the overnight hotel.",
     },
     {
       heading: "Non-final nights → last stop = Hotel",
-      body: "For every night that is not the final day of the tour, the last stop must be a venue typed Hotel / accommodation. The itinerary shows Overnight OK or Needs overnight hotel badges.",
+      body: "For every night that is not the final day of the tour, the last stop must be a venue typed Hotel / accommodation. The day header shows a green Hotel chip when that is true, and a red Needs a hotel chip when it is not. The last stop itself carries the same Hotel chip.",
     },
     {
       heading: "Fix amber failures",
-      body: "If a day shows Needs overnight hotel, add a hotel venue as the last stop or drag an existing hotel stop to the end. Confirm event, Open event, and Open location stay blocked until all overnight days pass.",
+      body: "If a day shows a red Needs a hotel chip, add a hotel venue as the last stop or drag an existing hotel stop to the end. Confirm event, Open event, and Open location stay blocked until all overnight days pass.",
     },
     {
       heading: "Final day is exempt",

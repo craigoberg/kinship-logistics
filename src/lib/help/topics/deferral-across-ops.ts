@@ -35,7 +35,7 @@ export const deferralAcrossOpsTopic: HelpTopic = {
     },
     {
       heading: "Hub — Defer / Set next action date",
-      body: "In Manage issue (Human or Maintenance), tick Defer / Set next action date, choose when, and record the defer reason / next action. Status becomes Deferred; the item leaves the hot Active focus until deferred_until is due, then resurfaces. Repeat deferrals are counted. Log Note without defer just adds timeline text.",
+      body: "Open the card (click the row), then tick Defer / Set next action date, choose when, and record the defer reason / next action. The card then shows Deferred until with the time left in brackets, using SIM TIME. Past that time it says overdue. The item leaves the hot Active focus until that time, then resurfaces. Repeat deferrals are counted. Log Note without defer just adds timeline text. The same Deferred until line is used on Human, Maintenance, Compliance, and App tickets.",
     },
     {
       heading: "What Hub defer does and does not do",

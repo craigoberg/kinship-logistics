@@ -30,6 +30,7 @@ import { useUpdateAttendanceLog } from "@/hooks/use-supabase-data";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { enqueue } from "@/lib/sync-queue";
 import { formatDate } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
 
 interface Props {
   open: boolean;
@@ -70,7 +71,7 @@ export function EditAttendanceLogModal({ open, onOpenChange, log }: Props) {
     },
     network_state: network,
     device_uuid: getDeviceUuid(),
-    timestamp: new Date().toISOString(),
+    timestamp: operationalNowIso(),
   });
 
   const submit = async () => {

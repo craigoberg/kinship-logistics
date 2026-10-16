@@ -206,6 +206,7 @@ export function PointerSortableList({
 }) {
   const [order, setOrder] = useState(itemIds);
   const orderRef = useRef(itemIds);
+  const dragStartOrderRef = useRef<string[] | null>(null);
   const rowRefs = useRef<Map<string, HTMLElement>>(new Map());
   const dragRef = useRef<{
     id: string;
@@ -219,25 +220,30 @@ export function PointerSortableList({
     orderRef.current = itemIds;
   }, [itemIds.join("|")]);
 
+  /**
+   * Insert the dragged id among the *other* rows by pointer Y.
+   * Ignore the dragged row's own box — it jumps on each swap, and the
+   * Active card is much taller than upcoming stops, so min/max midpoint
+   * scans were walking people down the list on longer runs.
+   */
   const swapByPointerY = useCallback((clientY: number, activeId: string) => {
     setOrder((prev) => {
-      const fromIndex = prev.indexOf(activeId);
-      if (fromIndex < 0) return prev;
-
-      let toIndex = fromIndex;
-      for (let i = 0; i < prev.length; i++) {
-        if (i === fromIndex) continue;
-        const el = rowRefs.current.get(prev[i]);
+      if (!prev.includes(activeId)) return prev;
+      const others = prev.filter((id) => id !== activeId);
+      let insertAt = others.length;
+      for (let i = 0; i < others.length; i++) {
+        const el = rowRefs.current.get(others[i]);
         if (!el) continue;
         const rect = el.getBoundingClientRect();
         const mid = rect.top + rect.height / 2;
-        if (i < fromIndex && clientY < mid) toIndex = Math.min(toIndex, i);
-        if (i > fromIndex && clientY > mid) toIndex = Math.max(toIndex, i);
+        if (clientY < mid) {
+          insertAt = i;
+          break;
+        }
       }
-      if (toIndex === fromIndex) return prev;
-      const next = [...prev];
-      const [moved] = next.splice(fromIndex, 1);
-      next.splice(toIndex, 0, moved);
+      const next = [...others];
+      next.splice(insertAt, 0, activeId);
+      if (next.every((id, i) => id === prev[i])) return prev;
       orderRef.current = next;
       return next;
     });
@@ -255,8 +261,11 @@ export function PointerSortableList({
       unlockScrollAncestors(dragRef.current.lockedScroll);
       dragRef.current = null;
       setDragId(null);
-      // Call parent outside setState — onReorder triggers ActiveTripScreen updates.
-      onReorder([...orderRef.current]);
+      const next = [...orderRef.current];
+      const start = dragStartOrderRef.current;
+      dragStartOrderRef.current = null;
+      if (!start || next.join("|") === start.join("|")) return;
+      onReorder(next);
     };
 
     window.addEventListener("pointermove", onPointerMove, { passive: false });
@@ -293,6 +302,7 @@ export function PointerSortableList({
         grip.setPointerCapture(e.pointerId);
         const lockedScroll = lockScrollAncestors(grip);
         dragRef.current = { id, pointerId: e.pointerId, lockedScroll };
+        dragStartOrderRef.current = [...orderRef.current];
         setDragId(id);
       },
       isDragging: dragId === id,

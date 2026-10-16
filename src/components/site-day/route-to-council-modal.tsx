@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ClientTime } from "@/components/ui/client-time";
-import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatDate, formatDateTime, todayLocalIso } from "@/lib/utils";
 import { usePersistedForm } from "@/hooks/use-persisted-form";
 import {
   dispatchCouncilEmail,
@@ -90,7 +90,7 @@ export function RouteToCouncilModal({ open, onOpenChange, issue }: Props) {
       deadline: formatDateTime(suggested.deadlineIso),
       description: cleanCouncilIssueText(issue.issueDescription),
       workaround: issue.workaroundPlan ?? "—",
-      date: formatDate(new Date().toISOString().slice(0, 10)),
+      date: formatDate(todayLocalIso()),
     }),
     [suggested.category, suggested.deadlineIso, issue.issueDescription, issue.workaroundPlan],
   );

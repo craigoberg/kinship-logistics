@@ -19,7 +19,7 @@ export function HubListCardBody({ lines, severity }: HubListCardBodyProps) {
       <p className="line-clamp-3">
         <Label>Issue:</Label> {hubBodyDisplay(lines.issue)}
       </p>
-      {sev === "red" && (
+      {sev === "red" && !lines.issueOnly && (
         <>
           <p className="line-clamp-2">
             <Label>Authorising manager:</Label>{" "}
@@ -30,7 +30,7 @@ export function HubListCardBody({ lines, severity }: HubListCardBodyProps) {
           </p>
         </>
       )}
-      {sev === "yellow" && (
+      {sev === "yellow" && !lines.issueOnly && (
         <p className="line-clamp-3">
           <Label>Workaround:</Label> {hubBodyDisplay(lines.workaround)}
         </p>

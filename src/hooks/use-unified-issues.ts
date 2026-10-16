@@ -22,13 +22,16 @@ export const unifiedIssuesTabKey = (tab: UnifiedIssueTab, deferRewarnMs: number)
  * within `issue_defer_rewarn_hours` (Admin → System Parameters, default 1 h).
  * Human issues use hours; the days-based key is legacy.
  */
-export function useUnifiedIssues(tab: UnifiedIssueTab = "active") {
+export function useUnifiedIssues(
+  tab: UnifiedIssueTab = "active",
+  options?: { enabled?: boolean },
+) {
   const { isReady } = useAuthReady();
   const deferRewarnMs = useIssueDeferRewarnMs();
   return useQuery<UnifiedIssue[]>({
     queryKey: unifiedIssuesTabKey(tab, deferRewarnMs),
     queryFn: () => listOpenUnifiedIssues({ tab, deferRewarnMs }),
-    enabled: isReady,
+    enabled: isReady && (options?.enabled ?? true),
     refetchOnWindowFocus: true,
     staleTime: 15_000,
     refetchInterval: 30_000,

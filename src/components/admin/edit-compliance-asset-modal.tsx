@@ -410,7 +410,8 @@ export function EditComplianceAssetModal({
       <PinReauthDialog
         open={pinOpen}
         onOpenChange={setPinOpen}
-        reason="Manager PIN required to save registry changes."
+        requireManager
+        reason="Enter your PIN to save this registry change."
         onAuthenticated={handlePinAuthenticated}
       />
     </Dialog>

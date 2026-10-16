@@ -4,7 +4,7 @@
  *
  * Interim Alpha helper (BL-002 will revisit invite / self-reset / RBAC).
  */
-import { verifyManagerPin } from "@/lib/backup-restore/engine.server";
+import { assertManagerPin } from "@/lib/auth/pin-auth.server";
 import { createServiceServerClient } from "@/lib/supabase.server";
 
 const MIN_PASSWORD_LEN = 6;
@@ -16,10 +16,9 @@ export type SetStaffAuthPasswordResult = {
   linkedAuthUserId: boolean;
 };
 
-async function findAuthUserIdByEmail(
-  service: ReturnType<typeof createServiceServerClient>,
-  email: string,
-): Promise<string | null> {
+type ServiceClient = ReturnType<typeof createServiceServerClient>;
+
+async function findAuthUserIdByEmail(service: ServiceClient, email: string): Promise<string | null> {
   const target = email.trim().toLowerCase();
   for (let page = 1; page <= 20; page++) {
     const { data, error } = await service.auth.admin.listUsers({ page, perPage: 200 });
@@ -33,6 +32,41 @@ async function findAuthUserIdByEmail(
   return null;
 }
 
+/** True when this Auth user is already the sign-in for a different person. */
+async function authUserBelongsToSomeoneElse(
+  service: ServiceClient,
+  authUserId: string,
+  staffId: string,
+): Promise<boolean> {
+  const { data: self, error: selfErr } = await service
+    .from("staff_registry")
+    .select("person_id")
+    .eq("id", staffId)
+    .maybeSingle();
+  if (selfErr) throw new Error(`Could not load staff: ${selfErr.message}`);
+  const personId = ((self as { person_id?: string | null } | null)?.person_id ?? "").trim();
+
+  const [staffRes, carerRes] = await Promise.all([
+    service.from("staff_registry").select("id, person_id").eq("auth_user_id", authUserId),
+    service.from("carers_registry").select("id, person_id").eq("auth_user_id", authUserId),
+  ]);
+  if (staffRes.error) throw new Error(`Could not check sign-in link: ${staffRes.error.message}`);
+  if (carerRes.error) throw new Error(`Could not check sign-in link: ${carerRes.error.message}`);
+
+  const samePerson = (rowPersonId: string | null | undefined) =>
+    !!personId && (rowPersonId ?? "").trim() === personId;
+
+  for (const row of (staffRes.data ?? []) as Array<{ id: string; person_id?: string | null }>) {
+    if (row.id === staffId || samePerson(row.person_id)) continue;
+    return true;
+  }
+  for (const row of (carerRes.data ?? []) as Array<{ id: string; person_id?: string | null }>) {
+    if (samePerson(row.person_id)) continue;
+    return true;
+  }
+  return false;
+}
+
 export async function setStaffAuthPassword(args: {
   targetStaffId: string;
   newPassword: string;
@@ -44,7 +78,7 @@ export async function setStaffAuthPassword(args: {
     throw new Error(`Password must be at least ${MIN_PASSWORD_LEN} characters.`);
   }
 
-  await verifyManagerPin(args.actorStaffId, args.actorPin);
+  await assertManagerPin(args.actorStaffId, args.actorPin);
 
   const service = createServiceServerClient();
   const { data: staff, error: staffErr } = await service
@@ -66,58 +100,56 @@ export async function setStaffAuthPassword(args: {
 
   const linkedId =
     ((staff as { auth_user_id?: string | null }).auth_user_id ?? "").trim() || null;
-  let authUserId = linkedId;
+  // Sign-in uses the staff email. The password has to land on that Auth account,
+  // even when auth_user_id still points at an older internal address.
+  const emailOwnerId = await findAuthUserIdByEmail(service, email);
+  if (emailOwnerId && (await authUserBelongsToSomeoneElse(service, emailOwnerId, args.targetStaffId))) {
+    throw new Error(
+      "That email is already the sign-in for someone else. Change the email on this person, then set the password again.",
+    );
+  }
+
+  let authUserId = emailOwnerId;
   let createdAuthUser = false;
-  let passwordSet = false;
 
   if (authUserId) {
     const { error } = await service.auth.admin.updateUserById(authUserId, {
       password,
       email_confirm: true,
     });
-    if (!error) {
-      passwordSet = true;
-    } else if (/not.*(found|exist)|user.*not/i.test(error.message)) {
-      authUserId = null;
-    } else {
-      throw new Error(`Could not update Auth password: ${error.message}`);
-    }
-  }
-
-  if (!passwordSet) {
-    if (!authUserId) {
-      authUserId = await findAuthUserIdByEmail(service, email);
-    }
-
-    if (!authUserId) {
-      const { data: created, error: createErr } = await service.auth.admin.createUser({
+    if (error) throw new Error(`Could not update Auth password: ${error.message}`);
+  } else if (
+    linkedId &&
+    !(await authUserBelongsToSomeoneElse(service, linkedId, args.targetStaffId))
+  ) {
+    const { data: linked, error: linkedErr } = await service.auth.admin.getUserById(linkedId);
+    if (!linkedErr && linked.user) {
+      const { error } = await service.auth.admin.updateUserById(linkedId, {
         email,
-        password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: (staff as { full_name?: string | null }).full_name ?? undefined,
-          staff_id: args.targetStaffId,
-        },
-      });
-      if (createErr) {
-        throw new Error(`Could not create Auth user: ${createErr.message}`);
-      }
-      authUserId = created.user?.id ?? null;
-      createdAuthUser = true;
-      if (!authUserId) throw new Error("Auth user create returned no id.");
-      passwordSet = true;
-    } else {
-      const { error } = await service.auth.admin.updateUserById(authUserId, {
         password,
         email_confirm: true,
       });
       if (error) throw new Error(`Could not update Auth password: ${error.message}`);
-      passwordSet = true;
+      authUserId = linkedId;
     }
   }
 
-  if (!passwordSet || !authUserId) {
-    throw new Error("Password was not set.");
+  if (!authUserId) {
+    const { data: created, error: createErr } = await service.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: {
+        full_name: (staff as { full_name?: string | null }).full_name ?? undefined,
+        staff_id: args.targetStaffId,
+      },
+    });
+    if (createErr) {
+      throw new Error(`Could not create Auth user: ${createErr.message}`);
+    }
+    authUserId = created.user?.id ?? null;
+    createdAuthUser = true;
+    if (!authUserId) throw new Error("Auth user create returned no id.");
   }
 
   let linkedAuthUserId = false;

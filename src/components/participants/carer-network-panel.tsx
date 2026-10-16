@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   ChevronsUpDown,
@@ -51,7 +52,8 @@ import {
   useUnlinkCarer,
 } from "@/hooks/use-supabase-data";
 import type { Carer } from "@/lib/data-store";
-import { cn } from "@/lib/utils";
+import { listCarerClientTerms } from "@/lib/api/carer-offboard";
+import { cn, formatDate } from "@/lib/utils";
 
 interface Props {
   participantId: string;
@@ -63,6 +65,11 @@ const RED_TOAST = "!bg-red-600 !text-white !border-red-700";
 export function CarerNetworkPanel({ participantId, participantName }: Props) {
   const { data: linked = [], isLoading } = useCarersForParticipant(participantId);
   const { data: registry = [] } = useCarersRegistry();
+  const { data: terms = [] } = useQuery({
+    queryKey: ["carer-client-terms", participantId],
+    queryFn: () => listCarerClientTerms(participantId),
+    enabled: !!participantId,
+  });
   const setPrimary = useSetPrimaryCarer();
   const demote = useDemoteCarer();
   const link = useLinkCarerToParticipant();
@@ -75,7 +82,7 @@ export function CarerNetworkPanel({ participantId, participantName }: Props) {
 
   const linkedIds = useMemo(() => new Set(linked.map((c) => c.id)), [linked]);
   const linkable = useMemo(
-    () => registry.filter((c) => !linkedIds.has(c.id)),
+    () => registry.filter((c) => !linkedIds.has(c.id) && !c.exitedAt),
     [registry, linkedIds],
   );
 
@@ -283,8 +290,18 @@ export function CarerNetworkPanel({ participantId, participantName }: Props) {
                               <Pencil className="h-4 w-4" />
                             </IconActionButton>
                             <IconActionButton
-                              onClick={() => setUnlinkTarget(c)}
-                              tooltip="Unlink carer"
+                              onClick={() => {
+                                if (c.isPrimaryContact) {
+                                  toast.error("Choose a new primary contact first", {
+                                    description: "Open this carer and use Off-board. Their time with this client stays on the file.",
+                                    className: RED_TOAST,
+                                    duration: 12_000,
+                                  });
+                                  return;
+                                }
+                                setUnlinkTarget(c);
+                              }}
+                              tooltip={c.isPrimaryContact ? "Off-board to change the primary contact" : "Unlink carer"}
                             >
                               <Link2Off className="h-4 w-4" />
                             </IconActionButton>
@@ -294,6 +311,26 @@ export function CarerNetworkPanel({ participantId, participantName }: Props) {
                     ))}
                   </tbody>
                 </table>
+              </div>
+            )}
+            {terms.length > 0 && (
+              <div className="mt-4 space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+                  Who has been the contact
+                </p>
+                <ul className="space-y-1.5 text-sm">
+                  {terms.map((term) => (
+                    <li key={term.id} className="rounded-md border border-border px-3 py-2">
+                      <span className="font-medium">{term.carerName}</span>
+                      {term.relationship ? ` · ${term.relationship}` : ""}
+                      {term.wasPrimary ? " · Primary" : " · Secondary"}
+                      <span className="mt-0.5 block text-xs text-muted-foreground">
+                        {formatDate(term.startedAt)}
+                        {term.endedAt ? ` – ${formatDate(term.endedAt)}` : " – current"}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
               </div>
             )}
           </AccordionContent>

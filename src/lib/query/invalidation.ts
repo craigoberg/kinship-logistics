@@ -98,6 +98,8 @@ export function invalidateTransportCaches(qc: QueryClient): void {
   qc.invalidateQueries({ queryKey: ["events", "confirmed"] });
   qc.invalidateQueries({ queryKey: ["events", "manifest-picker"] });
   qc.invalidateQueries({ queryKey: ["event-return-transport"] });
+  qc.invalidateQueries({ queryKey: ["bus-home-handover-gaps"] });
+  qc.invalidateQueries({ queryKey: ["transport-run-slot"] });
 
   // Participants directory Bus/Self indicator grid (reads participant_attendance_schedules).
   qc.invalidateQueries({ queryKey: ["participant-directory-indicators", "v3-split-transport"] });

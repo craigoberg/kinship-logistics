@@ -15,6 +15,7 @@ export function cn(...inputs: ClassValue[]) {
  */
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"] as const;
+const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
 
 function toDate(input: Date | string | number | null | undefined): Date | null {
   if (input === null || input === undefined || input === "") return null;
@@ -24,6 +25,8 @@ function toDate(input: Date | string | number | null | undefined): Date | null {
 
 /** Canonical date-picker display format (date-fns token). */
 export const REGIONAL_DATE_FORMAT = "dd-MMM-yy";
+/** Calendar date with weekday (date-fns token), e.g. Thu 27-Aug-26. */
+export const REGIONAL_DATE_WITH_WEEKDAY_FORMAT = "EEE dd-MMM-yy";
 
 /** Parse YYYY-MM-DD (or ISO prefix) as local calendar date — no UTC shift. */
 export function parseIsoDateLocal(iso: string | null | undefined): Date | undefined {
@@ -124,18 +127,30 @@ export function startOfTodayLocal(): Date {
   );
 }
 
+function toCalendarDate(input: Date | string | number | null | undefined): Date | null {
+  // Calendar YYYY-MM-DD must not go through Date.parse (UTC midnight → prior day in some TZs).
+  return typeof input === "string" && /^\d{4}-\d{2}-\d{2}/.test(input)
+    ? (parseIsoDateLocal(input) ?? null)
+    : toDate(input);
+}
+
 /** dd-Mmm-YY (e.g. 17-Jun-26) */
 export function formatDate(input: Date | string | number | null | undefined): string {
-  // Calendar YYYY-MM-DD must not go through Date.parse (UTC midnight → prior day in some TZs).
-  const d =
-    typeof input === "string" && /^\d{4}-\d{2}-\d{2}/.test(input)
-      ? (parseIsoDateLocal(input) ?? null)
-      : toDate(input);
+  const d = toCalendarDate(input);
   if (!d) return "—";
   const dd = String(d.getDate()).padStart(2, "0");
   const mmm = MONTHS[d.getMonth()];
   const yy = String(d.getFullYear() % 100).padStart(2, "0");
   return `${dd}-${mmm}-${yy}`;
+}
+
+/** Ddd dd-Mmm-yy (e.g. Thu 27-Aug-26) — End of Day Report and similar session dates. */
+export function formatDateWithWeekday(
+  input: Date | string | number | null | undefined,
+): string {
+  const d = toCalendarDate(input);
+  if (!d) return "—";
+  return `${WEEKDAYS_SHORT[d.getDay()]} ${formatDate(d)}`;
 }
 
 const REGIONAL_DATE_INPUT_RE = /^(\d{1,2})-([A-Za-z]{3})-(\d{2})$/;

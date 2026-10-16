@@ -1,8 +1,9 @@
-import { useState } from "react";
-import { createFileRoute } from "@tanstack/react-router";
-import { ShieldCheck, UserPlus, Search } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { createFileRoute, Link } from "@tanstack/react-router";
+import { ClipboardList, ShieldCheck, UserPlus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import {
   Select,
   SelectContent,
@@ -14,9 +15,14 @@ import { ParticipantTable } from "@/components/participants/participant-table";
 import { CareProfileModal } from "@/components/participants/care-profile-modal";
 import { AddParticipantModal } from "@/components/participants/add-participant-modal";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
-import { useParticipants, useLookupParameters } from "@/hooks/use-supabase-data";
+import { OnboardingCaseDialog } from "@/components/onboarding/onboarding-case-dialog";
+import { OnboardingBlankPrintButton } from "@/components/onboarding/onboarding-blank-print-button";
+import { type OnboardingCase } from "@/lib/api/onboarding";
+import { useParticipantDirectory, useLookupParameters } from "@/hooks/use-supabase-data";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
+import { operatingBoardDays } from "@/lib/api/run-planning";
 import type { Participant } from "@/lib/data-store";
 
 const DIRECTORY_INDICATORS_KEY = ["participant-directory-indicators", "v3-split-transport"] as const;
@@ -32,23 +38,34 @@ export const Route = createFileRoute("/participants")({
   component: ParticipantsPage,
 });
 
-const DAY_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "All Days" },
-  { value: "DAY-MON", label: "Monday" },
-  { value: "DAY-TUE", label: "Tuesday" },
-  { value: "DAY-WED", label: "Wednesday" },
-  { value: "DAY-THU", label: "Thursday" },
-  { value: "DAY-FRI", label: "Friday" },
-];
+const DIRECTORY_FILTER_CLASS =
+  "h-11 !border-transparent !bg-muted px-3 !text-foreground !shadow-none hover:!bg-muted hover:!text-foreground data-[state=on]:!border-success data-[state=on]:!bg-success data-[state=on]:!text-success-foreground data-[state=on]:hover:!bg-success data-[state=on]:hover:!text-success-foreground";
+
+function isArchivedDirectoryRow(p: Participant): boolean {
+  if (p.participantKind === "guest") return !!p.archivedAt;
+  return p.serviceStatus === "exited";
+}
 
 function ParticipantsPage() {
-  const { data: participants = [], isLoading, error } = useParticipants();
+  const { data: participants = [], isLoading, error } = useParticipantDirectory();
 
   // BMS-style silent refresh: any schedule change (this device or coordinator on
   // another screen) immediately re-fetches the Bus/Self indicator grid.
   useRealtimeInvalidate({
     table: "participant_attendance_schedules",
-    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"]],
+    queryKeys: [DIRECTORY_INDICATORS_KEY, ["attendance_schedules"], ["bus-run-default-routes"]],
+  });
+  useRealtimeInvalidate({
+    table: "bus_run_default_routes",
+    queryKeys: [["bus-run-default-routes"]],
+  });
+  useRealtimeInvalidate({
+    table: "trip_legs",
+    queryKeys: [["run-live-status"]],
+  });
+  useRealtimeInvalidate({
+    table: "attendance_roster_logs",
+    queryKeys: [["run-live-status"], ["attendance_logs"]],
   });
 
   const [selected, setSelected] = useState<Participant | null>(null);
@@ -58,8 +75,34 @@ function ParticipantsPage() {
   const [search, setSearch] = useState("");
   const [dayFilter, setDayFilter] = useState("all");
   const [transportFilter, setTransportFilter] = useState("all");
+  const [onboardingCase, setOnboardingCase] = useState<OnboardingCase | null>(null);
+  const [onboardingOpen, setOnboardingOpen] = useState(false);
+  const { canOpen } = useMenuAccess();
 
   const { data: busRuns = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const { data: operatingDays = [], isLoading: daysLoading } = useLookupParameters(
+    LOOKUP_CATEGORIES.operatingDay,
+  );
+  const boardDays = useMemo(() => operatingBoardDays(operatingDays), [operatingDays]);
+  useEffect(() => {
+    if (daysLoading) return;
+    if (dayFilter !== "all" && !boardDays.some((d) => d.code === dayFilter)) {
+      setDayFilter("all");
+    }
+  }, [boardDays, dayFilter, daysLoading]);
+  const [directoryFilters, setDirectoryFilters] = useState<string[]>(["participants", "guests"]);
+  const showParticipants = directoryFilters.includes("participants");
+  const showGuests = directoryFilters.includes("guests");
+  const showArchived = directoryFilters.includes("archived");
+  const visibleParticipants = useMemo(
+    () =>
+      participants.filter((p) => {
+        const guest = p.participantKind === "guest";
+        if (guest ? !showGuests : !showParticipants) return false;
+        return isArchivedDirectoryRow(p) === showArchived;
+      }),
+    [participants, showParticipants, showGuests, showArchived],
+  );
 
   return (
     <div className="mx-auto max-w-6xl space-y-4">
@@ -67,7 +110,29 @@ function ParticipantsPage() {
         <div>
           <h2 className="text-xl font-semibold tracking-tight md:text-2xl">Participants directory</h2>
           <p className="text-sm text-muted-foreground">
-            {isLoading ? "Loading…" : `${participants.length} active · tap a row to open the care profile.`}
+            {isLoading
+              ? "Loading…"
+              : `${visibleParticipants.length} shown · tap a row to open the care profile. Event guests show a Guest badge — Archive guest on the profile.`}
+            {canOpen("onboarding") ? (
+              <>
+                {" "}
+                Full intake pack (print / sign / file):{" "}
+                <Link to="/governance" search={{ tab: "onboarding" }} className="underline underline-offset-2">
+                  Hub → Onboarding
+                </Link>
+                .
+              </>
+            ) : null}
+            {canOpen("run_planning") ? (
+              <>
+                {" "}
+                Bus run order for everyone is in{" "}
+                <Link to="/run-planning" className="underline underline-offset-2">
+                  Run Planning
+                </Link>
+                .
+              </>
+            ) : null}
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
@@ -75,32 +140,67 @@ function ParticipantsPage() {
             <ShieldCheck className="h-4 w-4" />
             Record medication admin
           </Button>
-          <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+          <Button
+            variant="outline"
+            onClick={() => setAddOpen(true)}
+            className="gap-1.5"
+          >
             <UserPlus className="h-4 w-4" />
-            Add new participant
+            Quick add
+          </Button>
+          <OnboardingBlankPrintButton pack="client" size="default" />
+          <Button
+            onClick={() => {
+              setOnboardingCase(null);
+              setOnboardingOpen(true);
+            }}
+            className="gap-1.5"
+          >
+            <ClipboardList className="h-4 w-4" />
+            Client onboarding
           </Button>
         </div>
       </header>
 
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 flex-1">
+      <div className="space-y-2">
+        <div className="relative">
           <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             value={search}
             onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search by name or NDIS number…"
+            placeholder="Search this list by name or NDIS number…"
             className="h-11 pl-9"
-            aria-label="Search participants"
+            aria-label="Search the current list"
           />
         </div>
+        <div className="flex flex-wrap items-center gap-2">
+        <ToggleGroup
+          type="multiple"
+          variant="outline"
+          value={directoryFilters}
+          onValueChange={setDirectoryFilters}
+          aria-label="Who to show"
+          className="justify-start"
+        >
+          <ToggleGroupItem value="participants" className={DIRECTORY_FILTER_CLASS}>
+            Participants
+          </ToggleGroupItem>
+          <ToggleGroupItem value="guests" className={DIRECTORY_FILTER_CLASS}>
+            Guests
+          </ToggleGroupItem>
+          <ToggleGroupItem value="archived" className={DIRECTORY_FILTER_CLASS}>
+            Archived
+          </ToggleGroupItem>
+        </ToggleGroup>
         <Select value={dayFilter} onValueChange={setDayFilter}>
           <SelectTrigger className="h-11 w-40" aria-label="Filter by day">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {DAY_OPTIONS.map((o) => (
-              <SelectItem key={o.value} value={o.value}>
-                {o.label}
+            <SelectItem value="all">All Days</SelectItem>
+            {boardDays.map((d) => (
+              <SelectItem key={d.code} value={d.code}>
+                {d.long}
               </SelectItem>
             ))}
           </SelectContent>
@@ -128,6 +228,7 @@ function ParticipantsPage() {
             <SelectItem value="walk_in">🟢 Walk-in</SelectItem>
           </SelectContent>
         </Select>
+        </div>
       </div>
 
       {error && (
@@ -137,9 +238,10 @@ function ParticipantsPage() {
       )}
 
       <ParticipantTable
-        participants={participants}
+        participants={visibleParticipants}
         search={search}
         dayFilter={dayFilter}
+        boardDays={boardDays}
         transportFilter={transportFilter}
         onSelect={(p) => {
           setSelected(p);
@@ -151,10 +253,21 @@ function ParticipantsPage() {
         participant={selected}
         open={open}
         onOpenChange={setOpen}
+        onSaved={setSelected}
       />
 
       <AddParticipantModal open={addOpen} onOpenChange={setAddOpen} />
       <MedicationAdminModal open={medOpen} onOpenChange={setMedOpen} participant={selected} />
+      <OnboardingCaseDialog
+        open={onboardingOpen}
+        onOpenChange={(o) => {
+          setOnboardingOpen(o);
+          if (!o) setOnboardingCase(null);
+        }}
+        caseRow={onboardingCase}
+        packType="client"
+        onSaved={setOnboardingCase}
+      />
     </div>
   );
 }

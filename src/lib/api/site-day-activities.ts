@@ -4,6 +4,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import {
@@ -278,10 +279,11 @@ export async function openSiteDayActivity(
     action_type: "SITE_DAY_ACTIVITY_OPENED",
     gps_lat: null,
     gps_lng: null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       activity_id: act.id,
       title: act.title,
       meal_source: act.mealSource,
+      location: "Day Centre",
       prepared_by_staff_id: act.preparedByStaffId,
       preparer_cert_status: act.preparerCertStatus,
       prep_checks_completed: act.prepChecksCompleted,
@@ -291,7 +293,10 @@ export async function openSiteDayActivity(
       prep_attestation_note: act.prepAttestationNote,
       sfh_approved_by_staff_id:
         mealOpen?.sfhManagerApproval?.managerStaffId ?? null,
-    },
+      summary: act.mealSource
+        ? `Opened ${act.title} at Day Centre (${MEAL_SOURCE_LABELS[act.mealSource] ?? act.mealSource})`
+        : `Opened ${act.title} at Day Centre`,
+    }),
   });
   return act;
 }
@@ -381,7 +386,12 @@ export async function completeSiteDayActivity(
     action_type: "SITE_DAY_ACTIVITY_COMPLETED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { activity_id: act.id, title: act.title },
+    metadata: await withAuditActorMeta({
+      activity_id: act.id,
+      title: act.title,
+      location: "Day Centre",
+      summary: `Completed ${act.title} at Day Centre`,
+    }),
   });
   return act;
 }

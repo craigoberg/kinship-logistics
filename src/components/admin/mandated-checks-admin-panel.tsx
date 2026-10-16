@@ -20,11 +20,8 @@ import {
   useVenueOpenChecks,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import { MEAL_PREP_CHECKS_PARAM_KEY } from "@/lib/meal-open";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 function listsEqual(a: string[], b: string[]): boolean {
   if (a.length !== b.length) return false;
@@ -256,7 +253,7 @@ export function MandatedChecksAdminPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const openChecks = useMandatedChecks();
   const closeChecks = useMandatedCloseChecks();

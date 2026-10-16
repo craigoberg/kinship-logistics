@@ -8,12 +8,18 @@ export interface PinPadProps {
   value: string;
   onChange: (next: string) => void;
   length?: PinLength;
+  /**
+   * Lengths that may be submitted. During the 4-digit to 6-digit move, a pad
+   * asked for 4 digits accepts 4 or 6 and does not auto-submit at 4.
+   */
+  submitLengths?: number[];
   /** Called when `value` reaches `length` (auto-submit hook). */
   onComplete?: (pin: string) => void;
   disabled?: boolean;
   className?: string;
   /** Show explicit confirm key (default: auto-fire onComplete at length). */
   showConfirmKey?: boolean;
+  confirmLabel?: string;
   /** Listen for 0–9 / Backspace / Enter on a physical keyboard (default true). */
   keyboardActive?: boolean;
 }
@@ -28,22 +34,33 @@ export function PinPad({
   value,
   onChange,
   length = 4,
+  submitLengths,
   onComplete,
   disabled,
   className,
   showConfirmKey = false,
+  confirmLabel = "OK",
   keyboardActive = true,
 }: PinPadProps) {
+  const flexible = !submitLengths && length === 4;
+  const maxLength = flexible ? 6 : length;
+  const accepts = submitLengths ?? (flexible ? [4, 6] : [length]);
+  const confirmVisible = showConfirmKey || accepts.length > 1;
+
   const push = useCallback(
     (digit: string) => {
-      if (disabled || value.length >= length) return;
+      if (disabled || value.length >= maxLength) return;
       const next = value + digit;
       onChange(next);
-      if (!showConfirmKey && next.length === length) {
+      if (!confirmVisible && next.length === maxLength) {
+        onComplete?.(next);
+        return;
+      }
+      if (confirmVisible && accepts.length > 1 && next.length === maxLength && accepts.includes(next.length)) {
         onComplete?.(next);
       }
     },
-    [disabled, length, onChange, onComplete, showConfirmKey, value.length],
+    [accepts, confirmVisible, disabled, maxLength, onChange, onComplete, value.length],
   );
 
   const backspace = useCallback(() => {
@@ -52,16 +69,15 @@ export function PinPad({
   }, [disabled, onChange, value]);
 
   const confirm = useCallback(() => {
-    if (disabled || value.length !== length) return;
+    if (disabled || !accepts.includes(value.length)) return;
     onComplete?.(value);
-  }, [disabled, length, onComplete, value]);
+  }, [accepts, disabled, onComplete, value]);
 
   useEffect(() => {
     if (!keyboardActive || disabled) return;
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.ctrlKey || e.metaKey || e.altKey) return;
-      // Ignore when typing in a text field elsewhere.
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
 
@@ -75,37 +91,24 @@ export function PinPad({
         backspace();
         return;
       }
-      if (e.key === "Enter") {
-        if (value.length === length) {
-          e.preventDefault();
-          if (showConfirmKey) confirm();
-          else onComplete?.(value);
-        }
+      if (e.key === "Enter" && accepts.includes(value.length)) {
+        e.preventDefault();
+        confirm();
       }
     };
 
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [
-    keyboardActive,
-    disabled,
-    push,
-    backspace,
-    confirm,
-    value,
-    length,
-    onComplete,
-    showConfirmKey,
-  ]);
+  }, [keyboardActive, disabled, push, backspace, confirm, value, accepts]);
 
   return (
     <div className={cn("select-none touch-manipulation", className)}>
       <div
         className="mb-4 flex justify-center gap-3"
-        aria-label={`PIN entry, ${value.length} of ${length} digits`}
+        aria-label={`PIN entry, ${value.length} of ${maxLength} digits`}
         role="status"
       >
-        {Array.from({ length }, (_, i) => (
+        {Array.from({ length: maxLength }, (_, i) => (
           <span
             key={i}
             className={cn(
@@ -158,10 +161,10 @@ export function PinPad({
         >
           0
         </button>
-        {showConfirmKey ? (
+        {confirmVisible ? (
           <button
             type="button"
-            disabled={disabled || value.length !== length}
+            disabled={disabled || !accepts.includes(value.length)}
             onClick={confirm}
             className={cn(
               "flex h-14 items-center justify-center rounded-xl text-sm font-bold",
@@ -169,7 +172,7 @@ export function PinPad({
               "transition active:scale-95 disabled:opacity-50",
             )}
           >
-            OK
+            {confirmLabel}
           </button>
         ) : (
           <div className="h-14" aria-hidden />

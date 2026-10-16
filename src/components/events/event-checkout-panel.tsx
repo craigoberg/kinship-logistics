@@ -27,9 +27,11 @@ import {
   type EventAttendanceRow,
   type ReturnTransport,
 } from "@/lib/api/event-attendance";
+import { busHomeHandoverGapsKey } from "@/lib/api/event-transport";
 import { type EventDaySession } from "@/lib/api/event-outing";
 import { EventTransportBadge } from "@/components/events/event-transport-badge";
 import { EventCloseDayPanel } from "@/components/events/event-close-day-panel";
+import { EventSupportRoll } from "@/components/events/event-support-roll";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { eventDeliverStatusKey } from "@/lib/api/event-deliver-status";
@@ -40,6 +42,10 @@ import {
   selectionFromEventMode,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 const rollKey = (sessionId: string) => ["event-attendance-log", sessionId] as const;
 
@@ -80,6 +86,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-actual-transport" });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "trip-report" });
     qc.invalidateQueries({ queryKey: eventDeliverStatusKey(session.id) });
+    qc.invalidateQueries({ queryKey: busHomeHandoverGapsKey(session.id) });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-accountability-roll" });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-issues" });
   };
@@ -136,9 +143,34 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
   const { data: busRunLookups = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   const busRunOpts = useMemo(() => eventBusRunOptions(busRunLookups), [busRunLookups]);
 
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  // One surname A–Z list for assignable + handed-over — status styles the row
+  // only (no jump into a separate “Handed to transport” block).
+  const activeRoll = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rows.filter(
+          (r) => r.status === "checked_in" || r.status === "checked_out",
+        ),
+        (r) => r.participantId,
+        surnameById,
+      ),
+    [rows, surnameById],
+  );
+  const leftTrip = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rows.filter((r) => r.status === "absent"),
+        (r) => r.participantId,
+        surnameById,
+      ),
+    [rows, surnameById],
+  );
   const pending = rows.filter((r) => r.status === "checked_in");
   const done = rows.filter((r) => r.status === "checked_out");
-  const leftTrip = rows.filter((r) => r.status === "absent");
   /** Still with the group — gates Close trip (Absent placeholders do not block). */
   const stillWithGroup = pending.length;
   const assignedCount = done.length;
@@ -185,7 +217,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
         </div>
       ) : (
         <ul className="space-y-2">
-          {pending.map((row) => (
+          {activeRoll.map((row) => (
             <CheckOutCard
               key={row.id}
               row={row}
@@ -225,30 +257,10 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
               </ul>
             </li>
           )}
-
-          {done.length > 0 && (
-            <li className="pt-1">
-              <p className="mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
-                Handed to transport
-              </p>
-              <ul className="space-y-2">
-                {done.map((row) => (
-                  <CheckOutCard
-                    key={row.id}
-                    row={row}
-                    name={nameMap[row.participantId] ?? "Loading…"}
-                    busy={busy}
-                    editable={!isClosed}
-                    onCheckout={() => {}}
-                    busRunOpts={busRunOpts}
-                    onUndo={() => undoMut.mutate(row)}
-                  />
-                ))}
-              </ul>
-            </li>
-          )}
         </ul>
       )}
+
+      <EventSupportRoll sessionId={session.id} eventId={session.event_id} mode="check_out" />
 
       {allDone && (
         <div className="space-y-2">
@@ -256,7 +268,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
             <p className="text-xs font-medium text-emerald-800 dark:text-emerald-200">
               {stillWithGroup === 0 && assignedCount > 0
                 ? "Everyone still with the group has return transport"
-                : "No one left with the group — trip can be closed"}
+                : "No one left with the group"}
             </p>
           )}
           <EventCloseDayPanel
@@ -360,6 +372,10 @@ function CheckOutCard({
   );
 
   const isOut = row.status === "checked_out";
+  const needsRunChoice =
+    selection.kind === "bus" &&
+    !selection.busRunCode &&
+    busRunOpts.length > 1;
   const assignedLabel =
     row.returnTransport === "self"
       ? "Self"
@@ -440,7 +456,7 @@ function CheckOutCard({
         <div className="flex items-start gap-2">
           <button
             type="button"
-            disabled={busy}
+            disabled={busy || needsRunChoice}
             onClick={() =>
               onCheckout(
                 selection.kind === "self" ? "self" : "bus",
@@ -464,7 +480,9 @@ function CheckOutCard({
               </Badge>
             </div>
             <p className="mt-1 text-xs text-muted-foreground">
-              Tap to hand to {selection.label}
+              {needsRunChoice
+                ? "Choose R1 or R2 first"
+                : `Tap to hand to ${selection.label}`}
             </p>
           </button>
           <EmbeddedMethodButton

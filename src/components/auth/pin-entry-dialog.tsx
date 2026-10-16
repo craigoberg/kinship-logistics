@@ -20,6 +20,7 @@ import { Button } from "@/components/ui/button";
 import { useIsMobile } from "@/hooks/use-mobile";
 import { cn } from "@/lib/utils";
 import { PinPad, type PinLength } from "@/components/auth/pin-pad";
+import { useHideGlobalFabs } from "@/lib/ui/global-fab-visibility";
 
 export interface PinEntryDialogProps {
   open: boolean;
@@ -107,6 +108,7 @@ export function PinEntryDialog({
   busy: externalBusy,
 }: PinEntryDialogProps) {
   const isMobile = useIsMobile();
+  useHideGlobalFabs(open);
   const [pin, setPin] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -164,6 +166,7 @@ export function PinEntryDialog({
       <Sheet open={open} onOpenChange={(o) => !isBusy && onOpenChange(o)}>
         <SheetContent
           side="bottom"
+          hideTicket
           className="z-[110] rounded-t-2xl pb-[max(1.5rem,env(safe-area-inset-bottom))]"
         >
           <SheetHeader className="sr-only">
@@ -178,7 +181,7 @@ export function PinEntryDialog({
 
   return (
     <Dialog open={open} onOpenChange={(o) => !isBusy && onOpenChange(o)}>
-      <DialogContent className="z-[110] max-w-sm">
+      <DialogContent hideTicket className="z-[110] max-w-sm">
         <DialogHeader className="sr-only">
           <DialogTitle>{title}</DialogTitle>
           {description && <DialogDescription>{description}</DialogDescription>}

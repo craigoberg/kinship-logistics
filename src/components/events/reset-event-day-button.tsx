@@ -10,8 +10,6 @@ import { TestOnly } from "@/components/dev/test-only";
 import { Button } from "@/components/ui/button";
 import {
   AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
   AlertDialogContent,
   AlertDialogDescription,
   AlertDialogFooter,
@@ -41,6 +39,7 @@ export function ResetEventDayButton({
 }: Props) {
   const qc = useQueryClient();
   const [open, setOpen] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const mut = useMutation({
     mutationFn: () => resetEventDayToStartOfDay(sessionId),
@@ -55,23 +54,35 @@ export function ResetEventDayButton({
       void qc.invalidateQueries({ queryKey: ["event-deliver-today-sessions"] });
       void qc.invalidateQueries({ queryKey: ["event-attendance-log", sessionId] });
       void qc.invalidateQueries({ queryKey: ["event-accountability-roll"] });
-      const overnight = (next.open_leader_notes ?? "").includes("overnight start of day");
+      const notes = next.open_leader_notes ?? "";
+      const overnight = notes.includes("overnight start of day");
+      const noRoster = notes.includes("no confirmed roster");
       toast.success("Trip day reset to Start of Day", {
-        description: overnight
-          ? `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Overnight base open — Morning Roll ready.`
-          : `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Open Location to begin (Day 1).`,
+        description: noRoster
+          ? `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Nobody is confirmed on the roster, so this day was left unopened.`
+          : overnight
+            ? `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Overnight base open — Morning Roll ready.`
+            : `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Open Location to begin (Day 1).`,
       });
+      setError(null);
       setOpen(false);
       onReset?.();
     },
     onError: (e: Error) => {
-      toast.error("Reset failed", { description: e.message });
+      setError(e.message);
     },
   });
 
   return (
     <TestOnly>
-      <AlertDialog open={open} onOpenChange={setOpen}>
+      <AlertDialog
+        open={open}
+        onOpenChange={(next) => {
+          if (mut.isPending) return;
+          setOpen(next);
+          if (!next) setError(null);
+        }}
+      >
         <AlertDialogTrigger asChild>
           <Button
             type="button"
@@ -108,28 +119,42 @@ export function ResetEventDayButton({
                   <li>Later venue-stop runtime (itinerary kept)</li>
                 </ul>
                 <p>
-                  <strong>Day 2+:</strong> overnight base stays open — roster checked in so Morning
-                  Roll is available (no re-arrival Check-In).{" "}
+                  <strong>Day 2+:</strong> overnight base stays open — confirmed roster checked in so
+                  Morning Roll is available (no re-arrival Check-In). If nobody is confirmed, the
+                  day is left unopened.{" "}
                   <strong>Day 1:</strong> location closes; Open Location + Check-In as usual.
                 </p>
                 <p>
                   Test clock will be set to <strong>{formatDate(sessionDate)} · 07:00 Syd</strong>.
                 </p>
+                {error && (
+                  <p className="font-medium text-destructive">{error}</p>
+                )}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel disabled={mut.isPending}>Keep going</AlertDialogCancel>
-            <AlertDialogAction
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setError(null);
+                setOpen(false);
+              }}
+            >
+              {error ? "Close" : "Keep going"}
+            </Button>
+            <Button
+              type="button"
               className="bg-amber-600 text-white hover:bg-amber-700"
               disabled={mut.isPending}
-              onClick={(e) => {
-                e.preventDefault();
+              onClick={() => {
+                setError(null);
                 mut.mutate();
               }}
             >
               {mut.isPending ? "Resetting…" : "Reset Start of Day"}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>

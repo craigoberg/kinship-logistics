@@ -3,11 +3,26 @@ import {
   parseHubIssueBody,
   type HubIssueBodyLines,
 } from "@/lib/governance/hub-issue-body-lines";
+import {
+  parsePublicFormHubText,
+  publicFormIssuePreviewTitle,
+} from "@/lib/governance/public-form-hub";
 
 export function unifiedIssueBodyLines(issue: UnifiedIssue): HubIssueBodyLines {
   const raw = (issue.raw ?? {}) as Record<string, unknown>;
   const workaroundPlan =
     typeof raw.workaround_plan === "string" ? raw.workaround_plan : null;
+
+  const publicForm = parsePublicFormHubText(issue.description || issue.title);
+  if (publicForm) {
+    return {
+      issue: publicFormIssuePreviewTitle(publicForm),
+      authorisingManager: null,
+      plan: null,
+      workaround: null,
+      issueOnly: true,
+    };
+  }
 
   return parseHubIssueBody({
     severity: issue.severity,

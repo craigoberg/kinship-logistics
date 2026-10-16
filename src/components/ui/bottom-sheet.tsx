@@ -1,7 +1,8 @@
 /**
  * BottomSheet — mobile-first slide-up panel.
  * Uses the existing Radix Sheet (side=bottom) with driver-friendly sizing.
- * On a phone this fills most of the viewport; on desktop it stays max-h-[60vh].
+ * Fills the visible screen and scrolls to the last row. `svh` stays inside the
+ * window when text is enlarged; `dvh` can sit taller than what is on screen.
  */
 import type { ReactNode } from "react";
 import {
@@ -21,6 +22,8 @@ interface BottomSheetProps {
   children: ReactNode;
   /** Extra class on the content panel — e.g. to set a custom bg. */
   className?: string;
+  /** Do not register this overlay as the Raise-ticket form surface (PIN, Incident, ticket itself). */
+  hideTicket?: boolean;
 }
 
 export function BottomSheet({
@@ -30,20 +33,22 @@ export function BottomSheet({
   description,
   children,
   className,
+  hideTicket = false,
 }: BottomSheetProps) {
   return (
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="bottom"
+        hideTicket={hideTicket}
         className={cn(
           // Sizing: tall on mobile, capped on desktop
-          "max-h-[92dvh] overflow-y-auto rounded-t-2xl",
+          "max-h-[calc(100svh-0.75rem)] overflow-y-auto rounded-t-2xl",
           // Safe area below home bar
           "pb-[max(env(safe-area-inset-bottom),16px)]",
           className,
         )}
       >
-        <SheetHeader className="mb-4 shrink-0 pr-8">
+        <SheetHeader className="mb-4 shrink-0 pr-10">
           <SheetTitle className="text-left text-lg">{title}</SheetTitle>
           {description && (
             <SheetDescription className="text-left text-sm">{description}</SheetDescription>

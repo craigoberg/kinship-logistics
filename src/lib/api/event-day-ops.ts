@@ -12,9 +12,9 @@
  */
 
 import { supabase } from "@/integrations/supabase/client";
-import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store";
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
-import { operationalNowIso, operationalNowMs } from "@/lib/operational-clock";
+import { operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { sydneyWallClockToUtcDate } from "@/lib/operational-time";
 import { listEventVenueStops } from "@/lib/api/event-outing";
 import { formatDate, formatTime } from "@/lib/utils";
@@ -26,6 +26,8 @@ import {
   leftTripHubDescription,
   type LeftTripDisposition,
 } from "@/lib/trip-absent";
+import { compareBySurname } from "@/lib/ui/sort-participants";
+import { isDuplicateKeyError } from "@/lib/api/supabase-errors";
 
 /** Hub attribution for automated roll sweeps (reported_by is text after migration). */
 export const SYSTEM_ISSUE_REPORTER = "System";
@@ -88,6 +90,7 @@ export interface EventBusManifestRow {
   event_day_session_id: string;
   transport_trip_id: string;
   participant_id: string | null;
+  staff_id?: string | null;
   carer_id: string | null;
   expected_on_bus: boolean;
   status: BusManifestStatus;
@@ -203,9 +206,10 @@ async function fetchBusSeedBookings(eventId: string): Promise<BusSeedBooking[]> 
   return (result.data ?? []) as BusSeedBooking[];
 }
 
-async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<void> {
+export async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<void> {
   const participantRows = rows.filter((r) => r.participant_id != null);
   const carerRows = rows.filter((r) => r.carer_id != null && r.participant_id == null);
+  const staffRows = rows.filter((r) => r.staff_id != null && r.participant_id == null && r.carer_id == null);
 
   if (participantRows.length) {
     const { error } = await supabase.from("event_bus_manifest").insert(participantRows);
@@ -213,6 +217,10 @@ async function insertBusManifestRows(rows: Record<string, unknown>[]): Promise<v
   }
   if (carerRows.length) {
     const { error } = await supabase.from("event_bus_manifest").insert(carerRows);
+    if (error && !isDuplicateKeyError(error)) throw error;
+  }
+  if (staffRows.length) {
+    const { error } = await supabase.from("event_bus_manifest").insert(staffRows);
     if (error && !isDuplicateKeyError(error)) throw error;
   }
 }
@@ -233,8 +241,26 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
         .filter((id): id is string => !!id),
     ),
   ];
+  const carerIds = [
+    ...new Set(
+      data
+        .map((r) => (r as { carer_id?: string | null }).carer_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+  const staffIds = [
+    ...new Set(
+      data
+        .map((r) => (r as { staff_id?: string | null }).staff_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
 
   const nameById: Record<string, string> = {};
+  const surnameById = new Map<
+    string,
+    { firstName?: string; lastName?: string; id: string }
+  >();
   if (participantIds.length) {
     const { data: parts, error: pErr } = await supabase
       .from("participants")
@@ -244,18 +270,65 @@ export async function listBusManifest(tripId: string): Promise<EventBusManifestR
     for (const p of parts ?? []) {
       const row = p as { id: string; first_name?: string; last_name?: string };
       nameById[row.id] = `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim();
+      surnameById.set(row.id, {
+        id: row.id,
+        firstName: row.first_name,
+        lastName: row.last_name,
+      });
+    }
+  }
+  if (carerIds.length) {
+    const { data: carers } = await supabase
+      .from("carers_registry")
+      .select("id, full_name")
+      .in("id", carerIds);
+    for (const c of carers ?? []) {
+      const row = c as { id: string; full_name: string };
+      nameById[`c:${row.id}`] = row.full_name;
+    }
+  }
+  if (staffIds.length) {
+    const { data: staff } = await supabase
+      .from("staff_registry")
+      .select("id, full_name")
+      .in("id", staffIds);
+    for (const s of staff ?? []) {
+      const row = s as { id: string; full_name: string };
+      nameById[`s:${row.id}`] = row.full_name;
     }
   }
 
-  return data.map((r) => {
-    const row = r as EventBusManifestRow;
-    return {
-      ...row,
-      participant_name: row.participant_id
-        ? nameById[row.participant_id] || null
-        : null,
-    };
-  });
+  // Surname A–Z — on_bus / not_travelling must not reorder the boarding list.
+  return data
+    .map((r) => {
+      const row = r as EventBusManifestRow;
+      return {
+        ...row,
+        participant_name: row.participant_id
+          ? nameById[row.participant_id] || null
+          : row.carer_id
+            ? nameById[`c:${row.carer_id}`] || null
+            : row.staff_id
+              ? nameById[`s:${row.staff_id}`] || null
+              : null,
+      };
+    })
+    .sort((a, b) =>
+      compareBySurname(
+        {
+          ...(a.participant_id
+            ? surnameById.get(a.participant_id)
+            : undefined),
+          id: a.participant_id ?? a.id,
+        },
+        {
+          ...(b.participant_id
+            ? surnameById.get(b.participant_id)
+            : undefined),
+          id: b.participant_id ?? b.id,
+        },
+      ),
+    );
 }
 
 /** Seed bus manifest for a trip from the event roster (or arrival roll fallback). */
@@ -328,6 +401,7 @@ export async function seedBusManifest(opts: {
   }
 
   const rows: Record<string, unknown>[] = [];
+  const seenCarers = new Set<string>();
   for (const bk of bookings) {
     rows.push({
       event_day_session_id: opts.eventDaySessionId,
@@ -337,7 +411,8 @@ export async function seedBusManifest(opts: {
       expected_on_bus: true,
       status: "expected",
     });
-    if (bk.brings_carer && bk.carer_transport_required && bk.carer_id) {
+    if (bk.brings_carer && bk.carer_transport_required && bk.carer_id && !seenCarers.has(bk.carer_id)) {
+      seenCarers.add(bk.carer_id);
       rows.push({
         event_day_session_id: opts.eventDaySessionId,
         transport_trip_id: opts.tripId,
@@ -347,6 +422,30 @@ export async function seedBusManifest(opts: {
         status: "expected",
       });
     }
+  }
+  try {
+    const { listEventSupportBookings } = await import("@/lib/api/event-support");
+    const support = await listEventSupportBookings(opts.eventId);
+    for (const s of support.filter((b) => b.bookingStatus !== "Cancelled")) {
+      const onBus =
+        opts.direction === "outbound"
+          ? s.outboundTransportMode === "bus"
+          : s.returnTransportMode === "bus";
+      if (!onBus) continue;
+      if (s.carerId && seenCarers.has(s.carerId)) continue;
+      if (s.carerId) seenCarers.add(s.carerId);
+      rows.push({
+        event_day_session_id: opts.eventDaySessionId,
+        transport_trip_id: opts.tripId,
+        participant_id: null,
+        staff_id: s.staffId,
+        carer_id: s.carerId,
+        expected_on_bus: true,
+        status: "expected",
+      });
+    }
+  } catch {
+    /* BL-125 table not migrated yet */
   }
   if (!rows.length) return 0;
 
@@ -358,7 +457,7 @@ export async function seedBusManifest(opts: {
 
 export async function markOnBus(row: EventBusManifestRow): Promise<EventBusManifestRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
   const next: BusManifestStatus = row.status === "on_bus" ? "expected" : "on_bus";
 
   const { data, error } = await supabase
@@ -430,6 +529,8 @@ export interface EventAccountabilityRow {
   id: string;
   event_day_session_id: string;
   participant_id: string;
+  staff_id?: string | null;
+  carer_id?: string | null;
   expected_accounted_at: string;
   accounted_at: string | null;
   accounted_by: string | null;
@@ -451,12 +552,31 @@ export interface EventAccountabilityRow {
   isVirtual?: boolean;
 }
 
+function accPersonKey(r: {
+  participant_id?: string | null;
+  staff_id?: string | null;
+  carer_id?: string | null;
+}): string {
+  if (r.staff_id) return `s:${r.staff_id}`;
+  if (r.carer_id) return `c:${r.carer_id}`;
+  return r.participant_id ?? "";
+}
+
 function mapAccRow(r: Record<string, unknown>): EventAccountabilityRow {
   const p = r.participants as { first_name?: string; last_name?: string } | null | undefined;
+  const staffId = (r.staff_id as string | null) ?? null;
+  const carerId = (r.carer_id as string | null) ?? null;
+  const participantId = (r.participant_id as string | null) ?? accPersonKey({
+    participant_id: r.participant_id as string | null,
+    staff_id: staffId,
+    carer_id: carerId,
+  });
   return {
     id: r.id as string,
     event_day_session_id: r.event_day_session_id as string,
-    participant_id: r.participant_id as string,
+    participant_id: participantId,
+    staff_id: staffId,
+    carer_id: carerId,
     expected_accounted_at: r.expected_accounted_at as string,
     accounted_at: (r.accounted_at as string | null) ?? null,
     accounted_by: (r.accounted_by as string | null) ?? null,
@@ -497,12 +617,34 @@ async function ensureLeftTripPlaceholdersOnAccountabilityRoll(
   }));
 
   // Insert missing only — do not overwrite accounted/expected rows.
-  const { error: upsErr } = await supabase.from(table).upsert(rows, {
-    onConflict: "event_day_session_id,participant_id",
-    ignoreDuplicates: true,
-  });
-  if (upsErr) {
-    console.warn("[ensureLeftTripPlaceholdersOnAccountabilityRoll] upsert failed:", upsErr.message);
+  // Partial unique indexes cannot be used as PostgREST ON CONFLICT targets.
+  const pidsForInsert = rows.map((r) => r.participant_id);
+  const { data: already, error: alreadyErr } = await supabase
+    .from(table)
+    .select("participant_id")
+    .eq("event_day_session_id", sessionId)
+    .in("participant_id", pidsForInsert);
+  if (alreadyErr) {
+    console.warn(
+      "[ensureLeftTripPlaceholdersOnAccountabilityRoll] lookup failed:",
+      alreadyErr.message,
+    );
+  } else {
+    const have = new Set(
+      (already ?? [])
+        .map((r) => (r as { participant_id?: string | null }).participant_id)
+        .filter((id): id is string => !!id),
+    );
+    const missing = rows.filter((r) => !have.has(r.participant_id));
+    if (missing.length) {
+      const { error: insErr } = await supabase.from(table).insert(missing);
+      if (insErr && !isDuplicateKeyError(insErr)) {
+        console.warn(
+          "[ensureLeftTripPlaceholdersOnAccountabilityRoll] insert failed:",
+          insErr.message,
+        );
+      }
+    }
   }
 
   // If they already have expected rows, promote to absent with floor notes.
@@ -578,7 +720,7 @@ export async function listAccountabilityRoll(
 
   const logMap = new Map(
     (logRows ?? []).map((r) => [
-      (r as Record<string, unknown>).participant_id as string,
+      accPersonKey(r as Record<string, unknown>),
       r,
     ]),
   );
@@ -586,24 +728,36 @@ export async function listAccountabilityRoll(
   const checkedInIds: string[] = (attendees ?? []).map(
     (a) => a.participant_id as string,
   );
+
   const checkedInSet = new Set(checkedInIds);
 
-  // Checked-in first (still with group — can mark Safe), then left-trip placeholders.
+  // Morning and evening rolls are participants only. Non-participants use their own roll.
   const orderedIds: string[] = [...checkedInIds];
-  for (const pid of logMap.keys()) {
-    if (!checkedInSet.has(pid)) orderedIds.push(pid);
+  for (const [pid, row] of logMap) {
+    if (checkedInSet.has(pid)) continue;
+    const r = row as {
+      participant_id?: string | null;
+      staff_id?: string | null;
+      carer_id?: string | null;
+    };
+    if (!r.participant_id && (r.staff_id || r.carer_id)) continue;
+    orderedIds.push(pid);
   }
   if (orderedIds.length === 0) return [];
 
   const stamp = operationalNowIso();
   return orderedIds.map((pid) => {
     const existing = logMap.get(pid);
-    if (existing) return mapAccRow(existing as Record<string, unknown>);
+    if (existing) {
+      return mapAccRow(existing as Record<string, unknown>);
+    }
     // Virtual row — not yet in the log table. Name resolved in panel via nameMap.
     return {
       id: `virtual:${pid}`,
       event_day_session_id: sessionId,
       participant_id: pid,
+      staff_id: null,
+      carer_id: null,
       expected_accounted_at: virtualExpectedAt,
       accounted_at: null,
       accounted_by: null,
@@ -629,7 +783,14 @@ export async function countUnreconciledCheckins(sessionId: string): Promise<numb
     .eq("event_day_session_id", sessionId)
     .eq("status", "expected");
   if (error) throw error;
-  return count ?? 0;
+  let extra = 0;
+  try {
+    const { listEventSupportAttendance } = await import("@/lib/api/event-support");
+    extra = (await listEventSupportAttendance(sessionId)).filter((s) => s.status === "expected").length;
+  } catch {
+    /* ignore */
+  }
+  return (count ?? 0) + extra;
 }
 
 /** Seed accountability rows from the event roster for this session. Idempotent. */
@@ -669,12 +830,34 @@ export async function seedAccountabilityRoll(
   }));
   if (!rows.length) return 0;
 
-  const { data: inserted, error: insErr } = await supabase
+  // Partial unique indexes (participant_id IS NOT NULL) cannot be the target of
+  // PostgREST ON CONFLICT — that returns 42P10. Insert only people not already listed.
+  const ids = rows.map((r) => r.participant_id);
+  const { data: existing, error: existErr } = await supabase
     .from(table)
-    .upsert(rows, { onConflict: "event_day_session_id,participant_id", ignoreDuplicates: true })
-    .select("id");
-  if (insErr) throw insErr;
-  return inserted?.length ?? 0;
+    .select("participant_id")
+    .eq("event_day_session_id", opts.sessionId)
+    .in("participant_id", ids);
+  if (existErr) throw existErr;
+  const have = new Set(
+    (existing ?? [])
+      .map((r) => (r as { participant_id?: string | null }).participant_id)
+      .filter((id): id is string => !!id),
+  );
+  const missing = rows.filter((r) => !have.has(r.participant_id));
+  if (!missing.length) return 0;
+
+  const { error: insErr } = await supabase.from(table).insert(missing);
+  if (!insErr) return missing.length;
+  if (!isDuplicateKeyError(insErr)) throw insErr;
+
+  let inserted = 0;
+  for (const row of missing) {
+    const { error: oneErr } = await supabase.from(table).insert(row);
+    if (oneErr && !isDuplicateKeyError(oneErr)) throw oneErr;
+    if (!oneErr) inserted += 1;
+  }
+  return inserted;
 }
 
 /** Ensure a virtual row is persisted before updating it; returns the real DB id. */
@@ -682,19 +865,48 @@ async function materializeVirtualRow(
   table: LogTable,
   row: EventAccountabilityRow,
 ): Promise<string> {
+  const payload: Record<string, unknown> = {
+    event_day_session_id: row.event_day_session_id,
+    expected_accounted_at: row.expected_accounted_at || operationalNowIso(),
+    status: "expected" as AccountabilityStatus,
+  };
+  if (row.staff_id) {
+    payload.staff_id = row.staff_id;
+    payload.participant_id = null;
+  } else if (row.carer_id) {
+    payload.carer_id = row.carer_id;
+    payload.participant_id = null;
+  } else {
+    payload.participant_id = row.participant_id;
+  }
+  const personCol = row.staff_id ? "staff_id" : row.carer_id ? "carer_id" : "participant_id";
+  const personId = row.staff_id || row.carer_id || row.participant_id;
+  const { data: existing, error: existErr } = await supabase
+    .from(table)
+    .select("id")
+    .eq("event_day_session_id", row.event_day_session_id)
+    .eq(personCol, personId)
+    .maybeSingle();
+  if (existErr) throw existErr;
+  if (existing && (existing as { id?: string }).id) {
+    return (existing as { id: string }).id;
+  }
+
   const { data, error } = await supabase
     .from(table)
-    .upsert(
-      {
-        event_day_session_id: row.event_day_session_id,
-        participant_id: row.participant_id,
-        expected_accounted_at: row.expected_accounted_at || new Date().toISOString(),
-        status: "expected" as AccountabilityStatus,
-      },
-      { onConflict: "event_day_session_id,participant_id" },
-    )
+    .insert(payload)
     .select("id")
     .single();
+  if (error && isDuplicateKeyError(error)) {
+    const { data: again, error: againErr } = await supabase
+      .from(table)
+      .select("id")
+      .eq("event_day_session_id", row.event_day_session_id)
+      .eq(personCol, personId)
+      .maybeSingle();
+    if (againErr) throw againErr;
+    if (again && (again as { id?: string }).id) return (again as { id: string }).id;
+  }
   if (error) throw error;
   return (data as { id: string }).id;
 }
@@ -892,7 +1104,7 @@ export async function deferAccountabilityRoll(
 
     const patch: Record<string, unknown> = {
       expected_accounted_at: nextIso,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     };
 
     // Individual only — group reason stays on the banner / session note.
@@ -933,7 +1145,7 @@ export async function deferAccountabilityRoll(
           .from("site_issues_register")
           .update({
             status: "resolved",
-            resolved_at: new Date().toISOString(),
+            resolved_at: operationalNowIso(),
           })
           .eq("id", row.escalation_issue_id);
         await supabase
@@ -966,7 +1178,7 @@ export async function deferAccountabilityRoll(
     const col = isCurfew ? "evening_group_defer_note" : "morning_group_defer_note";
     const { error: sessErr } = await supabase
       .from("event_day_sessions")
-      .update({ [col]: groupBannerNote, updated_at: new Date().toISOString() })
+      .update({ [col]: groupBannerNote, updated_at: operationalNowIso() })
       .eq("id", opts.sessionId);
     if (sessErr) {
       console.warn("[deferAccountabilityRoll] group banner note save failed:", sessErr.message);
@@ -991,14 +1203,20 @@ export async function deferAccountabilityRoll(
       table,
       minutes: opts.minutes,
       reason,
+      why: reason,
       scope: isGroupDefer ? "group" : "individual",
       group_banner_note: groupBannerNote,
       affected_count: affectedIds.length,
       affected_ids: affectedIds,
+      participant_ids: targets.map((t) => t.participant_id),
+      person_names: targets
+        .map((t) => (t.participant_name ?? "").trim())
+        .filter(Boolean),
       yellows_auto_cleared: yellowsAutoCleared,
       manager_staff_id: opts.managerStaffId ?? null,
       manager_name: opts.managerName ?? null,
       operator_staff_id: staffId,
+      location: "trip",
     },
   });
 
@@ -1016,11 +1234,18 @@ export async function fetchRollGroupDeferNotes(sessionId: string): Promise<{
     .eq("id", sessionId)
     .maybeSingle();
   if (error) {
-    // Pre-migration: columns missing — treat as empty.
-    if (/morning_group_defer_note|evening_group_defer_note|column/i.test(error.message)) {
+    // Pre-migration / schema lag — never break Event Deliver for banner notes.
+    const code = String((error as { code?: string }).code ?? "");
+    const msg = error.message ?? "";
+    if (
+      code === "42703" ||
+      code === "PGRST204" ||
+      /morning_group_defer_note|evening_group_defer_note|column|schema cache/i.test(msg)
+    ) {
       return { morning: null, evening: null };
     }
-    throw error;
+    console.warn("[fetchRollGroupDeferNotes]", msg);
+    return { morning: null, evening: null };
   }
   const row = data as {
     morning_group_defer_note?: string | null;
@@ -1049,7 +1274,7 @@ export async function markAccounted(
   await assertEveningRollMarkingAllowed(table, row.event_day_session_id);
 
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = operationalNowIso();
 
   // If this is a virtual row (not yet in the DB), upsert it first.
   const realId = row.isVirtual ? await materializeVirtualRow(table, row) : row.id;
@@ -1098,7 +1323,10 @@ export async function markAccounted(
       log_id: realId,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       notes: mergedNotes,
+      why: mergedNotes || "Accounted on roll",
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1145,6 +1373,8 @@ export async function unmarkAccounted(
       log_id: row.id,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1226,6 +1456,7 @@ export async function markAbsent(
         owner: "internal",
         status: "open",
         update_log: "",
+        ...operationalRowStamps(),
       })
       .select("id")
       .single();
@@ -1251,11 +1482,28 @@ export async function markAbsent(
     .single();
   if (error) throw error;
 
-  await syncFloorAttendanceLeftTrip({
-    eventDaySessionId: row.event_day_session_id,
-    participantId: row.participant_id,
-    notes: leftNotes,
-  });
+  if (row.staff_id || row.carer_id) {
+    try {
+      const { listEventSupportAttendance, markEventSupportAbsent } = await import(
+        "@/lib/api/event-support"
+      );
+      const support = await listEventSupportAttendance(row.event_day_session_id);
+      const match = support.find(
+        (s) =>
+          (row.staff_id && s.staffId === row.staff_id) ||
+          (row.carer_id && s.carerId === row.carer_id),
+      );
+      if (match) await markEventSupportAbsent(match.id);
+    } catch {
+      /* ignore */
+    }
+  } else {
+    await syncFloorAttendanceLeftTrip({
+      eventDaySessionId: row.event_day_session_id,
+      participantId: row.participant_id,
+      notes: leftNotes,
+    });
+  }
 
   await writeToLedger({
     staff_id: staffId,
@@ -1268,11 +1516,14 @@ export async function markAbsent(
       log_id: realId,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       disposition: params.disposition,
       safety_plan: plan,
       severity: params.severity,
       hub_issue_id: newIssueId,
       notes: mergedNotes,
+      why: plan || mergedNotes || params.disposition,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1356,7 +1607,10 @@ export async function reinstateAccountabilityAbsent(
       log_id: row.id,
       session_id: row.event_day_session_id,
       participant_id: row.participant_id,
+      person_name: row.participant_name ?? null,
       reason: trimmed,
+      why: trimmed,
+      location: "trip",
     },
   });
   return mapAccRow(data as Record<string, unknown>);
@@ -1382,6 +1636,7 @@ export async function sweepAccountabilityRoll(
   const now = operationalNowMs();
   let yellowRaised = 0;
   let redRaised = 0;
+  const ledgered = new Set<string>();
   const isCurfew = table === "event_curfew_log";
 
   const hubCtx = await loadRollHubContext(sessionId);
@@ -1415,7 +1670,7 @@ export async function sweepAccountabilityRoll(
       if (isRedZone) {
         try {
           await writeToLedgerOrThrow({
-            staff_id: await resolveStaffIdWithFallback(),
+            staff_id: DEFAULT_STAFF_UUID,
             category: "TRIP",
             severity: "RED",
             action_type: isCurfew ? "CURFEW_RED_AUTO_RAISED" : "MORNING_ROLL_RED_AUTO_RAISED",
@@ -1426,8 +1681,12 @@ export async function sweepAccountabilityRoll(
               session_id: sessionId,
               event_id: hubCtx.eventId,
               participant_id: r.participant_id,
+              person_name: pName,
+              location: hubCtx.eventTitle,
               mins_relative: minsRelative,
               automated: true,
+              actor_name: "System",
+              why: `Unaccounted on ${rollLabel.toLowerCase()} past deadline`,
             },
           });
         } catch {
@@ -1435,7 +1694,7 @@ export async function sweepAccountabilityRoll(
         }
       } else {
         await writeToLedger({
-          staff_id: await resolveStaffIdWithFallback(),
+          staff_id: DEFAULT_STAFF_UUID,
           category: "TRIP",
           severity: "YELLOW",
           action_type: isCurfew ? "CURFEW_YELLOW_RAISED" : "MORNING_ROLL_YELLOW_RAISED",
@@ -1446,11 +1705,16 @@ export async function sweepAccountabilityRoll(
             session_id: sessionId,
             event_id: hubCtx.eventId,
             participant_id: r.participant_id,
+            person_name: pName,
+            location: hubCtx.eventTitle,
             mins_relative: minsRelative,
             automated: true,
+            actor_name: "System",
+            why: `Not yet accounted on ${rollLabel.toLowerCase()}`,
           },
         });
       }
+      ledgered.add(`${isRedZone ? "RED" : "YELLOW"}:${r.id}`);
 
       const desc =
         insertSeverity === "red"
@@ -1469,6 +1733,7 @@ export async function sweepAccountabilityRoll(
           owner: "internal",
           status: "open",
           update_log: "",
+          ...operationalRowStamps(),
         })
         .select("id")
         .single();
@@ -1479,7 +1744,7 @@ export async function sweepAccountabilityRoll(
         .update({
           escalation_issue_id: (issue as { id: string }).id,
           escalation_severity: insertSeverity,
-          escalation_raised_at: new Date().toISOString(),
+          escalation_raised_at: operationalNowIso(),
         })
         .eq("id", r.id);
 
@@ -1494,10 +1759,11 @@ export async function sweepAccountabilityRoll(
 
     // ── Yellow issue exists → promote to RED if threshold crossed ──
     if (isRedZone && r.escalation_severity !== "red") {
-      const staffId = await resolveStaffIdWithFallback();
+      const ledgerKey = `RED:${r.id}`;
+      if (ledgered.has(ledgerKey)) continue;
       try {
         await writeToLedgerOrThrow({
-          staff_id: staffId,
+          staff_id: DEFAULT_STAFF_UUID,
           category: "TRIP",
           severity: "RED",
           action_type: isCurfew ? "CURFEW_RED_AUTO_RAISED" : "MORNING_ROLL_RED_AUTO_RAISED",
@@ -1509,13 +1775,18 @@ export async function sweepAccountabilityRoll(
             session_id: sessionId,
             event_id: hubCtx.eventId,
             participant_id: r.participant_id,
+            person_name: pName,
+            location: hubCtx.eventTitle,
             mins_relative: minsRelative,
             automated: true,
+            actor_name: "System",
+            why: `Unaccounted on ${rollLabel.toLowerCase()} past deadline`,
           },
         });
       } catch {
         continue; // ledger failed — abort RED promotion; retry next sweep
       }
+      ledgered.add(ledgerKey);
 
       await supabase
         .from("site_issues_register")
@@ -1607,7 +1878,7 @@ async function fireEventRedSms(
     }
     await supabase
       .from(table)
-      .update({ red_sms_dispatched_at: new Date().toISOString() })
+      .update({ red_sms_dispatched_at: operationalNowIso() })
       .eq("id", row.id);
   } catch (e) {
     console.error("[event-day-ops] SMS pipeline threw", e);

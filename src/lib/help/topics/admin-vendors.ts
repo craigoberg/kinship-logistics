@@ -31,11 +31,11 @@ export const adminVendorsTopic: HelpTopic = {
     },
     {
       heading: "Edit or Archive",
-      body: "Edit vendor if the trading name changes. Archive vendor hides it from expense pickers — prefer archive over inventing one-off spellings on every expense.",
+      body: "Click the vendor row to edit the trading name. Archive (or Restore) stays a button and does not open the edit. Prefer archive over inventing one-off spellings on every expense.",
     },
     {
       heading: "Log Event Expense",
-      body: "Event Manage → open the event → Finance & P&L → Log Event Expense. Fill Transaction date, Amount ($), Financial code, and Description. Vendor is optional but preferred.",
+      body: "Event Manage → click the event row → Finance & P&L → Log Event Expense. Fill Transaction date, Amount ($), Financial code, and Description. Vendor is optional but preferred.",
     },
     {
       heading: "Unknown name → Add vendor to list?",

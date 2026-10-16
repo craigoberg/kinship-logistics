@@ -8,6 +8,26 @@ import { supabase } from "@/integrations/supabase/client";
  * fire `useQuery` before the publishable client has rehydrated the session
  * from localStorage on a hard refresh.
  */
+async function sessionIfStillActive(user: User | null): Promise<User | null> {
+  const email = user?.email?.trim();
+  if (!user || !email) return user;
+  try {
+    const { data, error } = await supabase
+      .from("staff_registry")
+      .select("active")
+      .ilike("email", email)
+      .maybeSingle();
+    if (error || !data) return user;
+    if ((data as { active?: boolean | null }).active === false) {
+      await supabase.auth.signOut();
+      return null;
+    }
+  } catch {
+    return user;
+  }
+  return user;
+}
+
 export function useAuthReady() {
   const [isReady, setIsReady] = useState(false);
   const [user, setUser] = useState<User | null>(null);
@@ -15,16 +35,19 @@ export function useAuthReady() {
   useEffect(() => {
     let cancelled = false;
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session } }) => {
+      const next = await sessionIfStillActive(session?.user ?? null);
       if (cancelled) return;
-      setUser(session?.user ?? null);
+      setUser(next);
       setIsReady(true);
     });
 
     const {
       data: { subscription },
     } = supabase.auth.onAuthStateChange((_event, session) => {
-      setUser(session?.user ?? null);
+      void sessionIfStillActive(session?.user ?? null).then((next) => {
+        if (!cancelled) setUser(next);
+      });
     });
 
     return () => {

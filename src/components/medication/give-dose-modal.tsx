@@ -25,6 +25,8 @@ import { CharacterCountedTextarea } from "@/components/ui/character-counted-text
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useDutyFunctionGap } from "@/hooks/use-duty-function-gap";
 
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -131,7 +133,23 @@ export function GiveDoseModal({
   const nowMins = operationalNowMinutes();
   const nowLabel = `${String(Math.floor(nowMins / 60)).padStart(2, "0")}:${String(nowMins % 60).padStart(2, "0")}`;
 
+  const adminDuty = useDutyFunctionGap({
+    functionKey: "med_admin",
+    staffId: administeredById || null,
+    subjectLabel: "Give dose",
+    enabled: open && !!administeredById,
+    ledgerCategory: "CENTRE",
+  });
+  const witnessDuty = useDutyFunctionGap({
+    functionKey: "med_witness",
+    staffId: witnessedById || null,
+    subjectLabel: "Dose witness",
+    enabled: open && mode === "dual" && !!witnessedById,
+    ledgerCategory: "CENTRE",
+  });
+
   const requiresNotes = status === "Refused";
+  const dutyReady = adminDuty.approved && (mode === "sole" || witnessDuty.approved);
 
   const saveMut = useMutation({
     mutationFn: async () => {
@@ -139,7 +157,13 @@ export function GiveDoseModal({
       if (requiresNotes && notes.trim().length < 10) {
         throw new Error("Refusal requires at least 10 characters of notes.");
       }
+      if (!(await adminDuty.ensureApproved())) {
+        throw new Error("Manager must approve the administrator duty gap first.");
+      }
       if (mode === "dual") {
+        if (!(await witnessDuty.ensureApproved())) {
+          throw new Error("Manager must approve the witness duty gap first.");
+        }
         if (!administeredById || !witnessedById) {
           throw new Error("Select administering staff and witness.");
         }
@@ -378,6 +402,37 @@ export function GiveDoseModal({
               </div>
             )}
 
+            {adminDuty.needsGap && administeredById && (
+              <DutyRequirementGapPanel
+                actorName={adminName}
+                evalResult={adminDuty.evalResult}
+                note={adminDuty.note}
+                onNoteChange={adminDuty.setNote}
+                managerId={adminDuty.managerId}
+                onManagerIdChange={adminDuty.setManagerId}
+                managerPin={adminDuty.managerPin}
+                onManagerPin={adminDuty.setManagerPin}
+                managers={adminDuty.managers}
+                title="Medical admin"
+                disabled={saveMut.isPending}
+              />
+            )}
+            {mode === "dual" && witnessDuty.needsGap && witnessedById && (
+              <DutyRequirementGapPanel
+                actorName={witnessName}
+                evalResult={witnessDuty.evalResult}
+                note={witnessDuty.note}
+                onNoteChange={witnessDuty.setNote}
+                managerId={witnessDuty.managerId}
+                onManagerIdChange={witnessDuty.setManagerId}
+                managerPin={witnessDuty.managerPin}
+                onManagerPin={witnessDuty.setManagerPin}
+                managers={witnessDuty.managers}
+                title="Medication witness"
+                disabled={saveMut.isPending}
+              />
+            )}
+
             {mode === "dual" && administeredById && (
               <PinEntryTrigger
                 className="w-full"
@@ -391,6 +446,7 @@ export function GiveDoseModal({
                 length={4}
                 title="Administering staff PIN"
                 description={`${adminName}: confirm you administered this dose.`}
+                disabled={adminDuty.needsGap && !adminDuty.approved}
                 onVerify={async (pin) => {
                   await verifyNamedStaffPin(administeredById, pin);
                 }}
@@ -410,6 +466,7 @@ export function GiveDoseModal({
                 length={4}
                 title="Witness PIN"
                 description={`${witnessName}: confirm you witnessed this dose.`}
+                disabled={witnessDuty.needsGap && !witnessDuty.approved}
                 onVerify={async (pin) => {
                   await verifyNamedStaffPin(witnessedById, pin);
                 }}
@@ -429,6 +486,7 @@ export function GiveDoseModal({
                 length={4}
                 title="Sole-carer PIN"
                 description={`${adminName}: you are the only staff attesting this dose.`}
+                disabled={adminDuty.needsGap && !adminDuty.approved}
                 onVerify={async (pin) => {
                   await verifyNamedStaffPin(administeredById, pin);
                 }}
@@ -451,7 +509,7 @@ export function GiveDoseModal({
           </Button>
           <Button
             type="button"
-            disabled={saveMut.isPending || !schedule}
+            disabled={saveMut.isPending || !schedule || !dutyReady}
             onClick={() => saveMut.mutate()}
           >
             {saveMut.isPending ? "Saving…" : "Log administration"}

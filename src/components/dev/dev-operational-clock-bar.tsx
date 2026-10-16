@@ -1,11 +1,13 @@
 /**
  * DEV/TEST tools bar — fake Sydney date/time + Simulate offline (BL-082).
- * Single amber row. Gated by IS_TEST_BUILD. Never mounts in production builds.
+ * Single amber row. SIM Time: anyone on your PC, Craig only on the office site.
+ * Simulate offline stays on the row only when Craig is signed in.
  */
 import { useSyncExternalStore, useState, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock, CloudOff, X } from "lucide-react";
 import { toast } from "sonner";
+import { useCanUseDevTools, useCanUseSimTime } from "@/lib/dev-tools-access";
 import { getAppLaneBadge, IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   clearOperationalClockOverride,
@@ -31,17 +33,20 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { getSydneyIsoDate } from "@/lib/operational-time";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
 
 function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries();
 }
 
 export function DevOperationalClockBar() {
-  if (!IS_TEST_BUILD) return null;
-  return <DevOperationalClockBarInner />;
+  const sim = useCanUseSimTime();
+  const devTools = useCanUseDevTools();
+  if (!IS_TEST_BUILD || !sim) return null;
+  return <DevOperationalClockBarInner showOffline={devTools} />;
 }
 
-function DevOperationalClockBarInner() {
+function DevOperationalClockBarInner({ showOffline }: { showOffline: boolean }) {
   const qc = useQueryClient();
   // Override is null until markOperationalClockClientReady() (root) — matches SSR.
   const snapshot = useSyncExternalStore(
@@ -107,16 +112,21 @@ function DevOperationalClockBarInner() {
   };
 
   const laneBadge = getAppLaneBadge();
+  const { chromeHidden } = useChromeVisibility();
 
   return (
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-1.5 opacity-100",
           override || simOffline
             ? "border-amber-600/60 bg-amber-500 text-amber-950"
             : "border-dashed border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",
         )}
+        aria-hidden={chromeHidden}
       >
         <button
           type="button"
@@ -151,6 +161,7 @@ function DevOperationalClockBarInner() {
             </button>
           ) : null}
 
+          {showOffline ? (
           <label
             className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
             onClick={(e) => e.stopPropagation()}
@@ -163,6 +174,7 @@ function DevOperationalClockBarInner() {
               aria-label="Simulate network offline for field testing"
             />
           </label>
+          ) : null}
         </div>
       </div>
 
@@ -170,7 +182,7 @@ function DevOperationalClockBarInner() {
         open={sheetOpen}
         onOpenChange={setSheetOpen}
         title="DEV operational clock"
-        description="Sydney date + time for multi-day and YELLOW/RED testing. Ledger timestamps stay real."
+        description="Sydney date + time for this sitting only. Kept across refresh the same calendar day. Cleared at Sydney midnight, and when you day-login or PIN on the sign-in screen (not idle unlock). Ledger timestamps stay real."
       >
         <div className="space-y-4 pb-4">
           <div className="grid gap-2">

@@ -2,6 +2,9 @@ import type { HelpTopic } from "../types";
 import { addParticipantsTopic } from "./add-participants";
 import { addStaffTopic } from "./add-staff";
 import { adminOverviewTopic } from "./admin-overview";
+import { appTicketsTopic } from "./app-tickets";
+import { clientSupportPlanTopic } from "./client-support-plan";
+import { adminDutyRolesTopic } from "./admin-duty-roles";
 import { adminVendorsTopic } from "./admin-vendors";
 import { adminVenuesTopic } from "./admin-venues";
 import { dayCentreHappyPathTopic } from "./day-centre-happy-path";
@@ -10,7 +13,9 @@ import { deferralAcrossOpsTopic } from "./deferral-across-ops";
 import { eventDeliverHappyPathTopic } from "./event-deliver-happy-path";
 import { eventOpenChecksTopic } from "./event-open-checks";
 import { eventOvernightHotelTopic } from "./event-overnight-hotel";
+import { eventLiveWatchTopic } from "./event-live-watch";
 import { eventsCreateConfirmOpenTopic } from "./events-create-confirm-open";
+import { eventTravelTopic } from "./event-travel";
 import { governanceHubIssueTopic } from "./governance-hub-issue";
 import { hubThreeStreamsTopic } from "./hub-three-streams";
 import { hubUpdateSlaTopic } from "./hub-update-sla";
@@ -19,6 +24,8 @@ import { manifestStartRunTopic } from "./manifest-start-run";
 import { mealsServiceTopic } from "./meals-service";
 import { medicationRoundsTopic } from "./medication-rounds";
 import { redVerbalConsultationTopic } from "./red-verbal-consultation";
+import { rightsVoiceTopic } from "./rights-voice";
+import { runPlanningTopic } from "./run-planning";
 import { rygePhilosophyTopic } from "./ryge-philosophy";
 import { signInPinTopic } from "./sign-in-pin";
 
@@ -32,11 +39,17 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   checkinRollEscalationsTopic,
   addStaffTopic,
   addParticipantsTopic,
+  runPlanningTopic,
+  rightsVoiceTopic,
+  clientSupportPlanTopic,
   adminOverviewTopic,
   adminVenuesTopic,
   adminVendorsTopic,
+  adminDutyRolesTopic,
   eventOvernightHotelTopic,
   eventsCreateConfirmOpenTopic,
+  eventTravelTopic,
+  eventLiveWatchTopic,
   eventOpenChecksTopic,
   eventDeliverHappyPathTopic,
   dayCentreHappyPathTopic,
@@ -46,4 +59,5 @@ export const HELP_TOPICS: readonly HelpTopic[] = [
   manifestActiveRunTopic,
   redVerbalConsultationTopic,
   governanceHubIssueTopic,
+  appTicketsTopic,
 ];

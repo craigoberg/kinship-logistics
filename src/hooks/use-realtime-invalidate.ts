@@ -68,3 +68,49 @@ export function useRealtimeInvalidate({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [table, filter, enabled, keysSig]);
 }
+
+/** One effect, many tables — avoids a storm of child mounts inside dialogs. */
+export function useRealtimeInvalidateMany({
+  tables,
+  queryKeys,
+  enabled = true,
+}: {
+  tables: readonly string[];
+  queryKeys: QueryKey[];
+  enabled?: boolean;
+}): void {
+  const qc = useQueryClient();
+  const keysSig = JSON.stringify(queryKeys);
+  const tablesSig = tables.join("\0");
+
+  useEffect(() => {
+    if (!enabled) return;
+    if (typeof window === "undefined") return;
+
+    const channels = tables.map((table) => {
+      const channelName = `silent-${table}-all-${Math.random()
+        .toString(36)
+        .slice(2, 8)}`;
+      return supabase
+        .channel(channelName)
+        .on(
+          "postgres_changes",
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          { event: "*", schema: "public", table } as any,
+          () => {
+            for (const key of queryKeys) {
+              qc.invalidateQueries({ queryKey: key });
+            }
+          },
+        )
+        .subscribe();
+    });
+
+    return () => {
+      for (const channel of channels) {
+        void supabase.removeChannel(channel);
+      }
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tablesSig, enabled, keysSig]);
+}

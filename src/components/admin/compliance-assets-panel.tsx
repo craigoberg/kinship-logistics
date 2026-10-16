@@ -19,7 +19,7 @@ import {
   TabsList,
   TabsTrigger,
 } from "@/components/ui/tabs";
-import { FormattedDate, FormattedDateTime } from "@/components/ui/formatted-time";
+import { FormattedDate, FormattedDateTime, FormattedDeferredUntil } from "@/components/ui/formatted-time";
 import { HubListCard } from "@/components/governance/hub-list-card";
 import { canManageSystemParameters } from "@/lib/api/system-parameters";
 import {
@@ -359,7 +359,7 @@ function AssetsList({
                     {isDeferred && defer && (
                       <div className="font-medium text-amber-700 dark:text-amber-300">
                         Deferred until{" "}
-                        <FormattedDateTime value={defer.deferredUntil.toISOString()} />
+                        <FormattedDeferredUntil value={defer.deferredUntil.toISOString()} />
                         {tab === "active" && " · deadline approaching"}
                       </div>
                     )}

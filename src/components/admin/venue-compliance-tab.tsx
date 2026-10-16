@@ -12,14 +12,15 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
   CheckCircle2,
+  ChevronRight,
   FileCheck2,
   Loader2,
-  Pencil,
   Plus,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
@@ -198,7 +199,19 @@ function AssetRow({ asset, warningDays, onEdit }: AssetRowProps) {
   const days = daysUntil(asset.expiry_date);
 
   return (
-    <div className="flex items-start gap-3 px-4 py-3">
+    <div
+      className={cn(officeClickRowClass, "flex items-start gap-3 px-4 py-3")}
+      onClick={onEdit}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onEdit();
+        }
+      }}
+      role="button"
+      tabIndex={0}
+      aria-label={`Edit ${asset.name}`}
+    >
       <div className="mt-0.5">{rygeBadge(asset, warningDays)}</div>
       <div className="flex-1 min-w-0">
         <div className="flex flex-wrap items-center gap-1.5">
@@ -230,13 +243,7 @@ function AssetRow({ asset, warningDays, onEdit }: AssetRowProps) {
           )}
         </div>
       </div>
-      <IconActionButton
-        className="h-7 w-7 shrink-0"
-        onClick={onEdit}
-        tooltip="Edit compliance asset"
-      >
-        <Pencil className="h-3.5 w-3.5" />
-      </IconActionButton>
+      <ChevronRight className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
     </div>
   );
 }

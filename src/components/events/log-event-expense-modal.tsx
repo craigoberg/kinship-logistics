@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Plus } from "lucide-react";
+import { Plus, Save } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -26,9 +26,15 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { LookupSelect } from "@/components/lookups/lookup-select";
 import { DatePicker } from "@/components/ui/date-picker";
-import { parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
+import { parseIsoDateLocal, toIsoDateString, cn } from "@/lib/utils";
+import { requiredFieldOutline } from "@/lib/ui/required-field";
 import { VendorPicker } from "@/components/vendors/vendor-picker";
-import { useInsertEventLedger, useVendors } from "@/hooks/use-supabase-data";
+import {
+  useInsertEventLedger,
+  useUpdateEventLedger,
+  useVendors,
+} from "@/hooks/use-supabase-data";
+import type { EventLedgerEntry } from "@/lib/data-store";
 import {
   createVendor,
   findVendorByName,
@@ -40,6 +46,8 @@ interface Props {
   onOpenChange: (open: boolean) => void;
   eventId: string;
   eventTitle: string;
+  /** When set, modal edits this expense instead of creating. */
+  entry?: EventLedgerEntry | null;
 }
 
 function todayIso(): string {
@@ -47,7 +55,14 @@ function todayIso(): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
 }
 
-export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }: Props) {
+export function LogEventExpenseModal({
+  open,
+  onOpenChange,
+  eventId,
+  eventTitle,
+  entry = null,
+}: Props) {
+  const isEdit = !!entry;
   const qc = useQueryClient();
   const { data: vendors = [] } = useVendors();
   const [transactionDate, setTransactionDate] = useState(todayIso());
@@ -58,43 +73,59 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
   const [dirty, setDirty] = useState(false);
   const [createVendorPrompt, setCreateVendorPrompt] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
-  const mutation = useInsertEventLedger();
+  const insertMut = useInsertEventLedger();
+  const updateMut = useUpdateEventLedger();
 
   useEffect(() => {
-    if (open) {
+    if (!open) return;
+    if (entry) {
+      setTransactionDate(entry.transactionDate.slice(0, 10));
+      setVendor(entry.vendorName ?? "");
+      setFinancialCode(entry.financialCode);
+      setAmount(Math.abs(entry.amount).toFixed(2));
+      setDescription(entry.description);
+    } else {
       setTransactionDate(todayIso());
       setVendor("");
       setFinancialCode("");
       setAmount("");
       setDescription("");
-      setDirty(false);
-      setCreateVendorPrompt(null);
     }
-  }, [open]);
+    setDirty(false);
+    setCreateVendorPrompt(null);
+  }, [open, entry]);
 
   const amountNumber = Number(amount);
-  const valid =
-    transactionDate.length === 10 &&
-    financialCode.trim().length > 0 &&
-    description.trim().length > 0 &&
-    Number.isFinite(amountNumber) &&
-    amountNumber > 0;
-  const canSubmit = dirty && valid && !mutation.isPending && !saving;
+  const dateInvalid = transactionDate.length !== 10;
+  const codeInvalid = financialCode.trim().length === 0;
+  const descInvalid = description.trim().length === 0;
+  const amountInvalid = !Number.isFinite(amountNumber) || amountNumber <= 0;
+  const valid = !dateInvalid && !codeInvalid && !descInvalid && !amountInvalid;
+  const pending = insertMut.isPending || updateMut.isPending || saving;
+  const canSubmit = dirty && valid && !pending;
 
-  async function logExpense(vendorName: string | null) {
+  async function saveExpense(vendorName: string | null) {
     setSaving(true);
     try {
-      await mutation.mutateAsync({
+      const payload = {
         eventId,
         transactionDate,
         description: description.trim(),
         amount: -Math.abs(amountNumber),
         financialCode,
         vendorName,
-      });
-      toast.success("Expense logged", {
-        description: `${eventTitle} · −$${Math.abs(amountNumber).toFixed(2)}`,
-      });
+      };
+      if (isEdit && entry) {
+        await updateMut.mutateAsync({ id: entry.id, ...payload });
+        toast.success("Expense updated", {
+          description: `${eventTitle} · −$${Math.abs(amountNumber).toFixed(2)}`,
+        });
+      } else {
+        await insertMut.mutateAsync(payload);
+        toast.success("Expense logged", {
+          description: `${eventTitle} · −$${Math.abs(amountNumber).toFixed(2)}`,
+        });
+      }
       onOpenChange(false);
     } catch {
       /* surfaced via hook onError */
@@ -103,12 +134,12 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
     }
   }
 
-  async function addVendorAndLog(name: string) {
+  async function addVendorAndSave(name: string) {
     setSaving(true);
     try {
       const created = await createVendor(name);
       qc.invalidateQueries({ queryKey: ["vendors"] });
-      await logExpense(created.name);
+      await saveExpense(created.name);
     } catch (e) {
       const message = e instanceof Error ? e.message : "Could not add vendor.";
       toast.error("Could not add vendor", { description: message });
@@ -121,13 +152,13 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
 
     const vendorTrim = normalizeVendorName(vendor);
     if (!vendorTrim) {
-      await logExpense(null);
+      await saveExpense(null);
       return;
     }
 
     const match = findVendorByName(vendors, vendorTrim);
     if (match) {
-      await logExpense(match.name);
+      await saveExpense(match.name);
       return;
     }
 
@@ -139,18 +170,29 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
     fn(v);
   };
 
+  const missing: string[] = [];
+  if (dateInvalid) missing.push("Transaction date");
+  if (amountInvalid) missing.push("Amount");
+  if (codeInvalid) missing.push("Financial code");
+  if (descInvalid) missing.push("Description");
+
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent className="max-w-lg border-border bg-card">
           <DialogHeader>
-            <DialogTitle>Log event expense</DialogTitle>
+            <DialogTitle>{isEdit ? "Edit event expense" : "Log event expense"}</DialogTitle>
             <DialogDescription>
               {eventTitle} — negative amount posts to the event P&amp;L ledger.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
+            {!valid && dirty && (
+              <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                Required: {missing.join(" · ")}
+              </div>
+            )}
             <div className="grid gap-4 sm:grid-cols-2">
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
@@ -160,7 +202,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                   value={parseIsoDateLocal(transactionDate)}
                   onChange={(d) => mark(setTransactionDate)(d ? toIsoDateString(d) : "")}
                   dateFormat="dd-MMM-yy"
-                  className="h-9 text-sm"
+                  className={cn("h-9 text-sm", requiredFieldOutline(dateInvalid))}
                 />
               </div>
               <div className="space-y-2">
@@ -174,6 +216,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                   value={amount}
                   onChange={(e) => mark(setAmount)(e.target.value)}
                   placeholder="0.00"
+                  className={requiredFieldOutline(amountInvalid)}
                 />
               </div>
             </div>
@@ -182,12 +225,14 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
                 Financial code
               </Label>
-              <LookupSelect
-                category="financial_codes"
-                value={financialCode}
-                onChange={(code) => mark(setFinancialCode)(code)}
-                placeholder="Select financial code"
-              />
+              <div className={cn(codeInvalid && "rounded-md ring-2 ring-destructive/60")}>
+                <LookupSelect
+                  category="financial_codes"
+                  value={financialCode}
+                  onChange={(code) => mark(setFinancialCode)(code)}
+                  placeholder="Select financial code"
+                />
+              </div>
             </div>
 
             <div className="space-y-2">
@@ -213,6 +258,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                 onChange={(e) => mark(setDescription)(e.target.value)}
                 rows={3}
                 placeholder="Short description shown on the ledger row…"
+                className={requiredFieldOutline(descInvalid)}
               />
             </div>
           </div>
@@ -222,8 +268,8 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
               Close
             </Button>
             <Button onClick={submit} disabled={!canSubmit} className="gap-1.5">
-              <Plus className="h-4 w-4" />
-              {mutation.isPending || saving ? "Saving…" : "Save Expense"}
+              {isEdit ? <Save className="h-4 w-4" /> : <Plus className="h-4 w-4" />}
+              {pending ? "Saving…" : isEdit ? "Save changes" : "Save Expense"}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -251,7 +297,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                 if (!createVendorPrompt) return;
                 const name = createVendorPrompt;
                 setCreateVendorPrompt(null);
-                await logExpense(name);
+                await saveExpense(name);
               }}
             >
               Save without adding
@@ -263,7 +309,7 @@ export function LogEventExpenseModal({ open, onOpenChange, eventId, eventTitle }
                 if (!createVendorPrompt) return;
                 const name = createVendorPrompt;
                 setCreateVendorPrompt(null);
-                await addVendorAndLog(name);
+                await addVendorAndSave(name);
               }}
             >
               Add &amp; save expense

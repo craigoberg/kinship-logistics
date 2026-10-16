@@ -1,12 +1,38 @@
 import { useMemo, useState } from "react";
-import { Plus, Search, BadgeDollarSign, Wallet, TrendingUp } from "lucide-react";
+import { useQuery } from "@tanstack/react-query";
+import { Plus, Search, BadgeDollarSign, CircleDollarSign, Wallet, TrendingUp, Pencil, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { useEventLedger, useEventPaymentLedgerForEvent } from "@/hooks/use-supabase-data";
-import { summarizeEventFinance } from "@/lib/data-store";
+import { IconActionButton } from "@/components/ui/icon-action-button";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
+import {
+  useDeleteEventLedger,
+  useEventBookings,
+  useEventLedger,
+  useEventPaymentLedgerForEvent,
+} from "@/hooks/use-supabase-data";
+import { isEventFinanceLocked, summarizeEventFinance } from "@/lib/data-store";
+import {
+  EVENT_SUPPORT_KEY,
+  EVENT_SUPPORT_PAYMENTS_KEY,
+  listEventSupportBookings,
+  listEventSupportPayments,
+  supportBookingCost,
+} from "@/lib/api/event-support";
+import type { EventLedgerEntry, EventManifest } from "@/lib/data-store";
 import { formatDate } from "@/lib/utils";
-import type { EventManifest } from "@/lib/data-store";
 import { LogEventExpenseModal } from "./log-event-expense-modal";
+import { TooltipProvider } from "@/components/ui/tooltip";
 
 interface Props {
   event: EventManifest;
@@ -21,19 +47,40 @@ function fmtMoney(n: number): string {
 }
 
 export function EventFinanceTab({ event }: Props) {
+  const financeLocked = isEventFinanceLocked(event);
   const [addOpen, setAddOpen] = useState(false);
+  const [editEntry, setEditEntry] = useState<EventLedgerEntry | null>(null);
+  const [deleteEntry, setDeleteEntry] = useState<EventLedgerEntry | null>(null);
   const [query, setQuery] = useState("");
   const { data: ledger = [], isLoading, error } = useEventLedger(event.id);
   const { data: paymentLedger = [] } = useEventPaymentLedgerForEvent(event.id);
+  const { data: bookings = [] } = useEventBookings(event.id);
+  const { data: supportBookings = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_KEY(event.id),
+    queryFn: () => listEventSupportBookings(event.id),
+  });
+  const { data: supportPayments = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_PAYMENTS_KEY(event.id),
+    queryFn: () => listEventSupportPayments(event.id),
+  });
+  const deleteMut = useDeleteEventLedger();
 
-  const { revenue, expenses, net } = useMemo(() => {
-    const totals = summarizeEventFinance(paymentLedger, ledger);
+  const { expected, revenue, expenses, net } = useMemo(() => {
+    const totals = summarizeEventFinance([...paymentLedger, ...supportPayments], ledger);
+    const ticket = event.ticketPrice ?? 0;
+    const booked = bookings
+      .filter((b) => b.bookingStatus !== "Cancelled")
+      .reduce((sum, b) => sum + (b.customPrice ?? ticket), 0);
+    const support = supportBookings
+      .filter((b) => b.bookingStatus !== "Cancelled")
+      .reduce((sum, b) => sum + supportBookingCost(b, ticket), 0);
     return {
+      expected: Number((booked + support).toFixed(2)),
       revenue: totals.ticketRevenue,
       expenses: totals.vendorExpenses,
       net: totals.netPnl,
     };
-  }, [paymentLedger, ledger]);
+  }, [paymentLedger, supportPayments, ledger, bookings, supportBookings, event.ticketPrice]);
 
   const filtered = useMemo(() => {
     const n = query.trim().toLowerCase();
@@ -48,14 +95,25 @@ export function EventFinanceTab({ event }: Props) {
 
   return (
     <div className="space-y-5">
-      <div className="grid gap-3 sm:grid-cols-3">
+      {financeLocked && (
+        <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2 text-sm text-muted-foreground">
+          Billing locked — this event is Closed. Expenses are read-only.
+        </div>
+      )}
+
+      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <SummaryCard
-          label="Ticket revenue"
+          label="Expected Income"
+          value={`$${fmtMoney(expected)}`}
+          icon={<CircleDollarSign className="h-4 w-4" />}
+        />
+        <SummaryCard
+          label="Actual Income"
           value={`$${fmtMoney(revenue)}`}
           icon={<BadgeDollarSign className="h-4 w-4" />}
         />
         <SummaryCard
-          label="Vendor expenses"
+          label="Expenses"
           value={`$${fmtMoney(expenses)}`}
           tone="expense"
           icon={<Wallet className="h-4 w-4" />}
@@ -79,7 +137,12 @@ export function EventFinanceTab({ event }: Props) {
             className="h-9 pl-9"
           />
         </div>
-        <Button onClick={() => setAddOpen(true)} className="gap-1.5">
+        <Button
+          onClick={() => setAddOpen(true)}
+          className="gap-1.5"
+          disabled={financeLocked}
+          title={financeLocked ? "Billing locked" : undefined}
+        >
           <Plus className="h-4 w-4" />
           Log Event Expense
         </Button>
@@ -98,44 +161,67 @@ export function EventFinanceTab({ event }: Props) {
           {query ? `No ledger rows match "${query}".` : "No expenses logged yet."}
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg border border-border">
-          <table className="w-full text-sm">
-            <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
-              <tr>
-                <th className="px-4 py-2 font-medium">Date</th>
-                <th className="px-4 py-2 font-medium">Vendor</th>
-                <th className="px-4 py-2 font-medium">Code</th>
-                <th className="px-4 py-2 font-medium">Description</th>
-                <th className="px-4 py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map((e) => {
-                const negative = e.amount < 0;
-                return (
-                  <tr key={e.id} className="border-t border-border align-top">
-                    <td className="whitespace-nowrap px-4 py-2 font-medium tabular-nums">
-                      {formatDate(e.transactionDate)}
-                    </td>
-                    <td className="px-4 py-2">{e.vendorName || "—"}</td>
-                    <td className="px-4 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
-                      {e.financialCode}
-                    </td>
-                    <td className="px-4 py-2">{e.description}</td>
-                    <td
-                      className={
-                        "whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums " +
-                        (negative ? "text-destructive" : "text-success")
-                      }
-                    >
-                      ${fmtMoney(e.amount)}
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+        <TooltipProvider>
+          <div className="overflow-hidden rounded-lg border border-border">
+            <table className="w-full text-sm">
+              <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-2 font-medium">Date</th>
+                  <th className="px-4 py-2 font-medium">Vendor</th>
+                  <th className="px-4 py-2 font-medium">Code</th>
+                  <th className="px-4 py-2 font-medium">Description</th>
+                  <th className="px-4 py-2 text-right font-medium">Amount</th>
+                  <th className="px-4 py-2 text-right font-medium">Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((e) => {
+                  const negative = e.amount < 0;
+                  return (
+                    <tr key={e.id} className="border-t border-border align-top">
+                      <td className="whitespace-nowrap px-4 py-2 font-medium tabular-nums">
+                        {formatDate(e.transactionDate)}
+                      </td>
+                      <td className="px-4 py-2">{e.vendorName || "—"}</td>
+                      <td className="px-4 py-2 font-mono text-xs uppercase tracking-wide text-muted-foreground">
+                        {e.financialCode}
+                      </td>
+                      <td className="px-4 py-2">{e.description}</td>
+                      <td
+                        className={
+                          "whitespace-nowrap px-4 py-2 text-right font-semibold tabular-nums " +
+                          (negative ? "text-destructive" : "text-success")
+                        }
+                      >
+                        ${fmtMoney(e.amount)}
+                      </td>
+                      <td className="px-4 py-2 text-right">
+                        <div className="flex items-center justify-end gap-0.5">
+                          <IconActionButton
+                            tooltip="Edit expense"
+                            disabled={financeLocked || deleteMut.isPending}
+                            className="h-8 w-8 text-info"
+                            onClick={() => setEditEntry(e)}
+                          >
+                            <Pencil className="h-3.5 w-3.5" />
+                          </IconActionButton>
+                          <IconActionButton
+                            tooltip="Delete expense"
+                            disabled={financeLocked || deleteMut.isPending}
+                            className="h-8 w-8 text-destructive"
+                            onClick={() => setDeleteEntry(e)}
+                          >
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </IconActionButton>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </TooltipProvider>
       )}
 
       <LogEventExpenseModal
@@ -144,6 +230,53 @@ export function EventFinanceTab({ event }: Props) {
         eventId={event.id}
         eventTitle={event.title}
       />
+
+      <LogEventExpenseModal
+        open={editEntry !== null}
+        onOpenChange={(o) => !o && setEditEntry(null)}
+        eventId={event.id}
+        eventTitle={event.title}
+        entry={editEntry}
+      />
+
+      <AlertDialog
+        open={deleteEntry !== null}
+        onOpenChange={(o) => !o && setDeleteEntry(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete this expense?</AlertDialogTitle>
+            <AlertDialogDescription>
+              {deleteEntry
+                ? `${formatDate(deleteEntry.transactionDate)} · ${deleteEntry.description} · $${fmtMoney(deleteEntry.amount)}. This cannot be undone.`
+                : null}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={deleteMut.isPending}
+              onClick={async (ev) => {
+                ev.preventDefault();
+                if (!deleteEntry) return;
+                try {
+                  await deleteMut.mutateAsync({
+                    id: deleteEntry.id,
+                    eventId: event.id,
+                  });
+                  toast.success("Expense deleted");
+                  setDeleteEntry(null);
+                } catch {
+                  /* hook toast */
+                }
+              }}
+            >
+              {deleteMut.isPending ? "Deleting…" : "Delete"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </div>
   );
 }

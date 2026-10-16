@@ -27,6 +27,7 @@ import {
   listStaffRegistry,
 } from "@/lib/data-store";
 import { resolveOperatorStaffIdFromPin } from "@/components/auth/pin-verify";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import {
   tryGetGps,
   writeToLedgerOrThrow,
@@ -122,13 +123,7 @@ export function VerbalConsultationDialog({
     queryKey: ["staff-registry", "coordinators"],
     queryFn: async () => {
       const all = await listStaffRegistry();
-      return all.filter(
-        (s) =>
-          s.active &&
-          (s.role === "coordinator" ||
-            s.role?.toLowerCase().includes("manager") ||
-            s.role?.toLowerCase().includes("coordinator")),
-      );
+      return all.filter((s) => s.active && isManagerOrAssistantAccess(s.personnelType));
     },
     staleTime: 120_000,
     enabled: open,
@@ -437,7 +432,7 @@ export function VerbalConsultationDialog({
           ) : (
             <div className="rounded-lg border border-border bg-muted/20 p-3">
               <p className="mb-2 text-xs text-muted-foreground">
-                Your 4-digit operator PIN
+                Your sign-in PIN (4 digits, or all 6)
               </p>
               <PinPad
                 value={pinDraft}
@@ -514,6 +509,7 @@ export function VerbalConsultationDialog({
         onOpenChange={(next) => {
           if (!next) handleClose();
         }}
+        hideTicket
         title={
           <span className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />
@@ -536,7 +532,7 @@ export function VerbalConsultationDialog({
         if (!next) handleClose();
       }}
     >
-      <DialogContent className="flex max-h-[92dvh] max-w-lg flex-col gap-0 overflow-hidden p-0">
+      <DialogContent hideTicket className="flex max-h-[92dvh] max-w-lg flex-col gap-0 overflow-hidden p-0">
         <DialogHeader className="shrink-0 border-b px-5 py-4">
           <DialogTitle className="flex items-center gap-2">
             <PhoneCall className="h-5 w-5 text-amber-600" />

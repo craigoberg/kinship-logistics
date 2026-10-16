@@ -20,15 +20,12 @@ import {
   useCouncilEmailTo,
 } from "@/hooks/use-system-parameters";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { isManagerProfile } from "@/lib/governance/is-manager";
 import {
   COUNCIL_EMAIL_PARAM_KEYS,
   DEFAULT_COUNCIL_EMAIL_TEMPLATE,
   isCouncilEmailAddress,
 } from "@/lib/governance/council-email";
-
-function isManagerRole(staffRole: string | null | undefined): boolean {
-  return (staffRole ?? "").toLowerCase().includes("manager");
-}
 
 /**
  * Admin → System Parameters — Council escalate mailto To / From / template.
@@ -42,7 +39,7 @@ export function CouncilEmailAdminPanel() {
     queryFn: () => canManageSystemParameters(profile?.staffId),
     staleTime: 60_000,
   });
-  const canEdit = isManagerRole(profile?.staffRole) || permissionQ.data === true;
+  const canEdit = isManagerProfile() || permissionQ.data === true;
 
   const savedTo = useCouncilEmailTo();
   const savedFrom = useCouncilEmailFrom();

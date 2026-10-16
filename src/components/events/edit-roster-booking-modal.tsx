@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Save, AlertTriangle, TrendingDown, MapPin, RefreshCw, HeartPulse } from "lucide-react";
 import {
@@ -33,7 +33,12 @@ import {
 import type { EventRosterBooking } from "@/lib/data-store";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { updateBookingTransportModes, updateBookingTransportMed, type TransportMedBagRequired } from "@/lib/api/event-outing";
-import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
+import {
+  StopAddressChoices,
+  choiceFromOverrideText,
+} from "@/components/address/stop-address-picker";
+import { personAddressQueryKey } from "@/components/address/person-address-list";
+import { listPersonAddresses, loadHomeAddress } from "@/lib/api/person-addresses";
 import { eventBusRunOptions } from "@/lib/event-bus-runs";
 
 interface Props {
@@ -44,6 +49,8 @@ interface Props {
   eventTicketPrice?: number;
   /** §12.3.1 — show outbound/return transport mode pickers for outing events. */
   eventKind?: string;
+  /** When false (Closed / billing_locked), money fields are read-only. */
+  financeWritable?: boolean;
 }
 
 const STATUS_OPTIONS = ["Confirmed", "Waitlisted", "Cancelled"] as const;
@@ -66,6 +73,7 @@ export function EditRosterBookingModal({
   eventTitle,
   eventTicketPrice = 0,
   eventKind = "legacy",
+  financeWritable = true,
 }: Props) {
   const isOuting = eventKind === "single_day_outing" || eventKind === "multi_day_tour";
   const [bookingStatus, setBookingStatus] = useState<string>("Confirmed");
@@ -145,6 +153,20 @@ export function EditRosterBookingModal({
   const overpaymentDelta = Math.max(0, collected - parsedAmended);
   const isCaseB = !showRefundPanel && priceChanged && parsedAmended < collected;
 
+  const addressOwner = {
+    kind: "participant" as const,
+    id: booking?.participantId ?? "",
+  };
+  const placesQ = useQuery({
+    queryKey: personAddressQueryKey(addressOwner),
+    queryFn: () => listPersonAddresses(addressOwner),
+    enabled: !!booking?.participantId,
+  });
+  const homeQ = useQuery({
+    queryKey: ["home-address", "participant", booking?.participantId ?? ""],
+    queryFn: () => loadHomeAddress(addressOwner),
+    enabled: !!booking?.participantId,
+  });
   const profileRegularPickup = (booking?.participantRegularPickupAddress ?? "").trim();
   const profileStreetAddress = (booking?.participantStreetAddress ?? "").trim();
   const effectiveProfilePickup = profileRegularPickup || profileStreetAddress || null;
@@ -175,7 +197,8 @@ export function EditRosterBookingModal({
   const submit = async () => {
     if (!canSubmit) return;
     try {
-      const willRefund = showRefundPanel && issueRefund && parsedRefund > 0;
+      const willRefund =
+        financeWritable && showRefundPanel && issueRefund && parsedRefund > 0;
 
       const newOverride = tripPickupOverride.trim();
       const originalOverride = (booking.tripPickupAddressOverride ?? "").trim();
@@ -185,7 +208,7 @@ export function EditRosterBookingModal({
         bookingId: booking.id,
         bookingStatus,
         notes: notes.trim() ? notes.trim() : null,
-        amendedPrice: priceChanged ? parsedAmended : null,
+        amendedPrice: financeWritable && priceChanged ? parsedAmended : null,
         currentAmountPaid: collected,
         eventId: booking.eventId,
         eventTitle: eventTitle ?? "Event",
@@ -252,7 +275,7 @@ export function EditRosterBookingModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-full max-w-md flex-col overflow-hidden border-border bg-card">
+      <DialogContent className="flex max-h-[calc(100svh-1.5rem)] w-full max-w-md flex-col overflow-hidden border-border bg-card">
         <DialogHeader className="shrink-0">
           <DialogTitle>Edit booking</DialogTitle>
           <DialogDescription>
@@ -260,8 +283,14 @@ export function EditRosterBookingModal({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+        <div className="-mx-6 min-h-0 flex-1 overflow-y-auto overscroll-contain px-6">
           <div className="space-y-3 pt-1">
+          {!financeWritable && (
+            <div className="rounded-lg border border-muted bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+              Billing locked — price amendments and refunds are disabled. Status and logistics can
+              still be updated.
+            </div>
+          )}
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
               Booking status
@@ -301,6 +330,7 @@ export function EditRosterBookingModal({
               step="0.01"
               min="0"
               value={amendedPrice}
+              disabled={!financeWritable}
               onChange={(e) => {
                 setAmendedPrice(e.target.value);
                 setDirty(true);
@@ -358,7 +388,8 @@ export function EditRosterBookingModal({
                   </div>
                 </div>
                 <Switch
-                  checked={issueRefund}
+                  checked={issueRefund && financeWritable}
+                  disabled={!financeWritable}
                   onCheckedChange={(v) => {
                     setIssueRefund(v);
                     setDirty(true);
@@ -366,7 +397,7 @@ export function EditRosterBookingModal({
                 />
               </div>
 
-              {issueRefund && (
+              {issueRefund && financeWritable && (
                 <div className="grid grid-cols-2 gap-2">
                   <div className="space-y-1">
                     <Label className="text-[10px] font-semibold uppercase tracking-wide text-destructive">
@@ -437,7 +468,7 @@ export function EditRosterBookingModal({
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Outbound</Label>
+                  <Label className="text-xs font-semibold">To meeting point</Label>
                   <Select
                     value={outboundMode}
                     onValueChange={(v) => {
@@ -456,10 +487,10 @@ export function EditRosterBookingModal({
                       <SelectItem value="self">Self-transport</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-muted-foreground">Self = first-day inbound only.</p>
+                  <p className="text-[10px] text-muted-foreground">Bus picks them up at home.</p>
                 </div>
                 <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Return</Label>
+                  <Label className="text-xs font-semibold">Departure to home</Label>
                   <Select
                     value={returnMode}
                     onValueChange={(v) => {
@@ -478,47 +509,9 @@ export function EditRosterBookingModal({
                       <SelectItem value="self">Self-transport</SelectItem>
                     </SelectContent>
                   </Select>
-                  <p className="text-[10px] text-muted-foreground">Self = last-day outbound only.</p>
+                  <p className="text-[10px] text-muted-foreground">Bus takes them home from the departure point.</p>
                 </div>
               </div>
-              {outboundMode === "bus" && busRunOpts.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Outbound bus run</Label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {busRunOpts.map((opt) => (
-                      <MobileFieldButton
-                        key={`out-${opt.code}`}
-                        title={opt.shortLabel}
-                        subtitle={opt.displayName}
-                        active={(outboundBusRunCode ?? defaultRunCode) === opt.code}
-                        onClick={() => {
-                          setOutboundBusRunCode(opt.code);
-                          setDirty(true);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-              {returnMode === "bus" && busRunOpts.length > 0 && (
-                <div className="space-y-1.5">
-                  <Label className="text-xs font-semibold">Return bus run</Label>
-                  <div className="grid gap-2 sm:grid-cols-2">
-                    {busRunOpts.map((opt) => (
-                      <MobileFieldButton
-                        key={`ret-${opt.code}`}
-                        title={opt.shortLabel}
-                        subtitle={opt.displayName}
-                        active={(returnBusRunCode ?? defaultRunCode) === opt.code}
-                        onClick={() => {
-                          setReturnBusRunCode(opt.code);
-                          setDirty(true);
-                        }}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
             </div>
           )}
 
@@ -685,11 +678,8 @@ export function EditRosterBookingModal({
               <MapPin className="h-3.5 w-3.5" /> Event pickup address
             </div>
             <p className="text-[11px] leading-relaxed text-muted-foreground">
-              <strong className="text-foreground">Event outings</strong> use the client&apos;s{" "}
-              <em>regular pickup address</em> from their profile (or home address if pickup is blank).
-              <strong className="text-foreground"> Day Centre bus runs</strong> use the weekly schedule
-              instead — edit those under Client profile → Schedules &amp; Attendance.
-              Permanent address changes belong in Client profile → Contact Information.
+              Pick Home or a saved place. That choice is stored on this event only and does
+              not change the Day Centre weekday plan. Add lasting places under Contact Information.
             </p>
 
             <div className="space-y-1">
@@ -710,23 +700,33 @@ export function EditRosterBookingModal({
               </p>
             </div>
 
-            <div className="space-y-1">
-              <Label htmlFor="override-addr" className="text-[11px] font-medium text-muted-foreground">
-                One-off override (this event only)
-              </Label>
-              <Input
-                id="override-addr"
-                value={tripPickupOverride}
-                placeholder="Leave blank to use the profile address above"
-                onChange={(e) => {
-                  setTripPickupOverride(e.target.value);
+            {booking?.participantId && (
+              <StopAddressChoices
+                owner={addressOwner}
+                activeChoice={choiceFromOverrideText({
+                  override: tripPickupOverride,
+                  home: homeQ.data ?? profileStreetAddress ?? null,
+                  places: placesQ.data ?? [],
+                })}
+                allowCustom
+                customText={tripPickupOverride}
+                onCustomText={(value) => {
+                  setTripPickupOverride(value);
                   setDirty(true);
                 }}
+                onChoose={(choice) => {
+                  setDirty(true);
+                  if (choice.mode === "home") {
+                    setTripPickupOverride((homeQ.data ?? profileStreetAddress ?? "").trim());
+                  } else if (choice.mode === "saved") {
+                    const place = (placesQ.data ?? []).find((p) => p.id === choice.addressId);
+                    setTripPickupOverride(place?.address ?? "");
+                  } else {
+                    setTripPickupOverride(choice.text);
+                  }
+                }}
               />
-              <p className="text-[10px] text-muted-foreground">
-                Overrides the profile for this event&apos;s manifest only — does not change the client record.
-              </p>
-            </div>
+            )}
 
             <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2 text-[11px]">
               <span className="font-semibold text-muted-foreground">Driver manifest will use: </span>

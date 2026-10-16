@@ -138,6 +138,15 @@ export function getSydneyDayIndex(date?: Date): number {
   return WEEKDAY_INDEX[WEEKDAY_FORMATTER.format(d)] ?? d.getDay();
 }
 
+/**
+ * A YYYY-MM-DD civil date as an instant whose Sydney calendar day is that date.
+ * 02:00 UTC is midday in Sydney in both AEST and AEDT.
+ */
+export function dateAtSydneyMidday(isoDate: string): Date {
+  const [y, m, d] = isoDate.split("-").map(Number);
+  return new Date(Date.UTC(y, (m ?? 1) - 1, d ?? 1, 2, 0, 0));
+}
+
 // Map Sydney-local weekday → the canonical DAY-XXX code stored in
 // public.participant_attendance_schedules.day_of_week.
 const SYDNEY_DAY_CODES = [

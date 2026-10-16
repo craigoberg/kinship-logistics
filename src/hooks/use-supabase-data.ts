@@ -1,7 +1,9 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useMemo } from "react";
 import { toast } from "sonner";
-import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { useAuthReady } from "@/hooks/use-auth-ready";
+import { getOperationalTodayIso, useOperationalTodayIso } from "@/lib/operational-clock";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
 import {
   listTransportRequests,
   upsertTransportRequest,
@@ -16,14 +18,18 @@ import {
   type FleetAssetPatch,
 } from "@/lib/api/fleet";
 import { createVendor, listVendors, type Vendor } from "@/lib/api/vendors";
+import { archiveGuestFromCareProfile } from "@/lib/api/event-guest";
 import { listTransportAssets } from "@/lib/data-store";
+import { busRunEffectiveColor } from "@/lib/bus-run-palette";
 
 import {
   listParticipants,
+  listParticipantDirectory,
   listSyncLogs,
   listStaffRegistry,
   insertStaffMember,
   updateStaffMember,
+  patchStaffMember,
   listCarersRegistry,
   listCarersForParticipant,
   getPrimaryCarer,
@@ -36,6 +42,7 @@ import {
   unlinkCarer,
 
   type StaffPayload,
+  type StaffFieldPatch,
   type CarerPayload,
   listSchedulesForParticipant,
   listAllActiveSchedules,
@@ -158,16 +165,6 @@ export function useLookupParameters(category: string | null | undefined) {
   });
 }
 
-/** Palette applied to bus runs without a configured badge_color — same order as the admin workspace. */
-const BUS_RUN_PALETTE = [
-  "#7c3aed", // violet  — run 1
-  "#d97706", // amber   — run 2
-  "#0891b2", // cyan    — run 3
-  "#e11d48", // rose    — run 4
-  "#059669", // emerald — run 5
-  "#7c2d12", // deep-orange — run 6
-];
-
 export interface BusRunBadge {
   label: string;
   color: string;
@@ -175,25 +172,53 @@ export interface BusRunBadge {
 
 /**
  * Returns a stable Map<code, {label, color}> for all configured Day Centre
- * bus runs. Runs without a badge_color get a palette color based on
- * alphabetical position (same logic as the indicator hook and admin workspace).
- * Use this wherever run badges need to match the Participants Directory colours.
+ * bus runs. Default colours follow creation order (not the current code/name)
+ * so a rename does not swap colours with another run.
  */
 export function useBusRunMap(): Map<string, BusRunBadge> {
   const { data: runs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
   return useMemo(() => {
-    const sorted = [...runs].sort((a, b) => a.code.localeCompare(b.code));
     const map = new Map<string, BusRunBadge>();
-    sorted.forEach((r, idx) => {
+    for (const r of runs) {
       map.set(r.code, {
         label: r.displayName,
-        color: r.badgeColor ?? BUS_RUN_PALETTE[idx % BUS_RUN_PALETTE.length],
+        color: busRunEffectiveColor(runs, r),
       });
-    });
+    }
     return map;
   }, [runs]);
 }
 
+
+async function propagateTodayRunExemption(input: NewAttendanceLog) {
+  if (!NON_CHARGEABLE_STATUSES.includes(input.actualStatus)) return;
+  if (input.rosterDate !== getOperationalTodayIso()) return;
+  await skipActiveTripPickupsForExemption({
+    participantId: input.participantId,
+    participantName: "",
+    rosterDate: input.rosterDate,
+    status: input.actualStatus,
+    notes: input.driverNotes?.trim() || "Planned absence / suspension",
+  });
+}
+
+function invalidateAfterAttendanceExemption(
+  qc: ReturnType<typeof useQueryClient>,
+  participantId?: string,
+) {
+  if (participantId) {
+    void qc.invalidateQueries({ queryKey: ["attendance_logs", participantId] });
+    void qc.invalidateQueries({ queryKey: ["participant_financial_ledger", participantId] });
+  }
+  void qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+  void qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+  void qc.invalidateQueries({ queryKey: ["participants"] });
+  void qc.invalidateQueries({ queryKey: ["run-live-status"] });
+  void qc.invalidateQueries({ queryKey: ["today-bus-run-summaries"] });
+  void qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+  void qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+  void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+}
 
 export function useInsertAttendanceLog() {
   const qc = useQueryClient();
@@ -203,14 +228,11 @@ export function useInsertAttendanceLog() {
       if (NON_CHARGEABLE_STATUSES.includes(input.actualStatus)) {
         await cancelChargesForDate(input.participantId, input.rosterDate);
       }
+      await propagateTodayRunExemption(input);
       return log;
     },
     onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["attendance_logs", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+      invalidateAfterAttendanceExemption(qc, vars.participantId);
     },
   });
 }
@@ -226,17 +248,14 @@ export function useInsertAttendanceLogsBulk() {
       await Promise.all(
         sweepable.map((i) => cancelChargesForDate(i.participantId, i.rosterDate)),
       );
+      const today = getOperationalTodayIso();
+      const todayRow = sweepable.find((i) => i.rosterDate === today);
+      if (todayRow) await propagateTodayRunExemption(todayRow);
       return logs;
     },
     onSuccess: (_, vars) => {
       const ids = new Set(vars.map((v) => v.participantId));
-      ids.forEach((id) => {
-        qc.invalidateQueries({ queryKey: ["attendance_logs", id] });
-        qc.invalidateQueries({ queryKey: ["participant_financial_ledger", id] });
-      });
-      qc.invalidateQueries({ queryKey: ["attendance_logs"] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
+      ids.forEach((id) => invalidateAfterAttendanceExemption(qc, id));
     },
     onError: (err: Error) => {
       console.error("[useInsertAttendanceLogsBulk] insert failed", err);
@@ -276,6 +295,8 @@ export function useInsertAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       console.error("[useInsertAttendanceSchedule] insert failed", err);
@@ -298,6 +319,8 @@ export function useUpdateAttendanceSchedule() {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: ["attendance_logs"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not update schedule", { description: err.message });
@@ -312,6 +335,8 @@ export function useArchiveAttendanceSchedule() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not archive schedule", { description: err.message });
@@ -326,6 +351,8 @@ export function useRemoveAttendanceSchedule() {
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["attendance_schedules"] });
       qc.invalidateQueries({ queryKey: DIRECTORY_INDICATORS_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_PEOPLE_KEY });
+      qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
     },
     onError: (err: Error) => {
       toast.error("Could not remove schedule", { description: err.message });
@@ -469,10 +496,12 @@ export function useGiveDose() {
 
 
 export function useStaffRegistry() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["staff_registry"],
     queryFn: listStaffRegistry,
     staleTime: 60_000,
+    enabled: isReady && !!user,
   });
 }
 
@@ -497,11 +526,26 @@ export function useUpdateStaffMember() {
   });
 }
 
+export function usePatchStaffMember() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: ({ id, patch }: { id: string; patch: StaffFieldPatch }) =>
+      patchStaffMember(id, patch),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["staff_registry"] });
+    },
+  });
+}
+
 export function useCarersRegistry() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["carers_registry"],
     queryFn: listCarersRegistry,
     staleTime: 30_000,
+    // carers_registry is authenticated-only after day-login RLS. Same first-paint
+    // gate as useSystemParameters — otherwise Staff / care profile 401s.
+    enabled: isReady && !!user,
   });
 }
 
@@ -529,19 +573,21 @@ export function useUpdateCarer() {
 }
 
 export function useCarersForParticipant(participantId: string | null | undefined) {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["carers_for_participant", participantId],
     queryFn: () => listCarersForParticipant(participantId as string),
-    enabled: !!participantId,
+    enabled: isReady && !!user && !!participantId,
     staleTime: 30_000,
   });
 }
 
 export function usePrimaryCarer(participantId: string | null | undefined) {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["primary_carer", participantId],
     queryFn: () => getPrimaryCarer(participantId as string),
-    enabled: !!participantId,
+    enabled: isReady && !!user && !!participantId,
     staleTime: 30_000,
   });
 }
@@ -570,6 +616,8 @@ function invalidateCarerCaches(qc: ReturnType<typeof useQueryClient>, participan
   qc.invalidateQueries({ queryKey: ["carers_for_participant"] });
   qc.invalidateQueries({ queryKey: ["primary_carer"] });
   qc.invalidateQueries({ queryKey: ["participants"] });
+  qc.invalidateQueries({ queryKey: ["carer-client-terms"] });
+  qc.invalidateQueries({ queryKey: ["primary-contact-gaps"] });
   if (participantId) {
     qc.invalidateQueries({ queryKey: ["carers_for_participant", participantId] });
     qc.invalidateQueries({ queryKey: ["primary_carer", participantId] });
@@ -613,10 +661,22 @@ export function useUnlinkCarer() {
 
 
 export function useParticipants() {
+  const { user, isReady } = useAuthReady();
   return useQuery({
     queryKey: ["participants"],
     queryFn: listParticipants,
     staleTime: 30_000,
+    enabled: isReady && !!user,
+  });
+}
+
+export function useParticipantDirectory() {
+  const { user, isReady } = useAuthReady();
+  return useQuery({
+    queryKey: ["participants", "directory"],
+    queryFn: listParticipantDirectory,
+    staleTime: 30_000,
+    enabled: isReady && !!user,
   });
 }
 
@@ -646,6 +706,18 @@ export function useInsertParticipant() {
     mutationFn: (input: NewParticipant) => insertParticipant(input),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateTransportCaches(qc);
+    },
+  });
+}
+
+export function useArchiveGuestParticipant() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (participantId: string) => archiveGuestFromCareProfile(participantId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ["participants"] });
+      qc.invalidateQueries({ queryKey: ["guest-participants"] });
       invalidateTransportCaches(qc);
     },
   });
@@ -705,15 +777,24 @@ import {
   insertEventBooking,
   updateEventBooking,
   recordEventPaymentMilestone,
+  recordEventRefundMilestone,
+  updateEventPaymentMilestone,
+  deleteEventPaymentMilestone,
   listEventLedger,
   listEventPaymentLedger,
   listEventPaymentLedgerForEvent,
   insertEventLedger,
+  updateEventLedger,
+  deleteEventLedger,
   type NewEvent,
   type UpdateEventInput,
   type NewEventBooking,
   type NewEventLedger,
+  type UpdateEventLedgerInput,
   type PaymentMilestoneInput,
+  type EventRefundMilestoneInput,
+  type UpdateEventPaymentMilestoneInput,
+  type DeleteEventPaymentMilestoneInput,
   type UpdateBookingInput,
 } from "@/lib/data-store";
 import { enqueue } from "@/lib/sync-queue";
@@ -803,15 +884,110 @@ export function useReorderEventRosterPickupOrder() {
   return useMutation({
     mutationFn: ({
       eventId,
-      orderedBookingIds,
+      ordered,
     }: {
       eventId: string;
-      orderedBookingIds: string[];
-    }) => reorderEventRosterPickupOrder(eventId, orderedBookingIds),
+      ordered: Array<{ kind: "participant" | "support" | "carer"; id: string; order?: number }>;
+    }) => reorderEventTravelOrder(eventId, ordered),
     onSuccess: (_data, { eventId }) => {
       void qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+      void qc.invalidateQueries({ queryKey: ["event-support-bookings", eventId] });
     },
     onError: (err: Error) => showRedToast("Could not save pickup order", err),
+  });
+}
+
+export function useBusRunRouteRoster(
+  busRunCode: string,
+  direction: BusRunRouteDirection,
+  addressDayCode?: string,
+) {
+  useOperationalTodayIso();
+  const todayDayCode = todaysSydneyDayCode();
+  return useQuery({
+    queryKey: [
+      ...busRunRouteQueryKey(busRunCode, direction, todayDayCode),
+      addressDayCode ?? "",
+    ],
+    queryFn: () =>
+      listBusRunRouteRoster(busRunCode, direction, todayDayCode, addressDayCode),
+    enabled: busRunCode.length > 0,
+    staleTime: 15_000,
+  });
+}
+
+export function useReorderBusRunDefaultRoute() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async ({
+      busRunCode,
+      direction,
+      participantIds,
+    }: {
+      busRunCode: string;
+      direction: BusRunRouteDirection;
+      participantIds: string[];
+    }) => {
+      const staffId = await resolveStaffIdWithFallback();
+      return reorderBusRunDefaultRoute({
+        busRunCode,
+        direction,
+        participantIds,
+        staffId,
+      });
+    },
+    onSuccess: (_data, { busRunCode, direction }) => {
+      void qc.invalidateQueries({ queryKey: busRunRouteQueryKey(busRunCode, direction) });
+      void qc.invalidateQueries({ queryKey: RUN_PLANNING_CHANGE_LOG_KEY });
+    },
+    onError: (err: Error) => showRedToast("Could not save run route", err),
+  });
+}
+
+export function useTodaysRunLiveStatus() {
+  const today = useOperationalTodayIso();
+  return useQuery({
+    queryKey: ["run-live-status", today],
+    queryFn: () => listTodaysRunLiveStatus(today),
+    staleTime: 5_000,
+    refetchInterval: 15_000,
+  });
+}
+
+export function useApplyOfficeRunExemption() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: OfficeRunExemptionInput) => applyOfficeRunExemption(input),
+    onSuccess: (_data, vars) => {
+      void qc.invalidateQueries({ queryKey: ["attendance_logs", vars.schedule.participantId] });
+      void qc.invalidateQueries({ queryKey: ["attendance_logs"] });
+      void qc.invalidateQueries({ queryKey: ["run-live-status"] });
+      void qc.invalidateQueries({ queryKey: ["bus-run-default-routes"] });
+      void qc.invalidateQueries({ queryKey: ["today-bus-run-summaries"] });
+      void qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
+      void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+    },
+    onError: (err: Error) => showRedToast("Could not mark Off today", err),
+  });
+}
+
+export function useOpenTripRunNotices(tripId: string | null | undefined) {
+  return useQuery({
+    queryKey: ["trip-run-notices", tripId],
+    queryFn: () => listOpenTripRunNotices(tripId as string),
+    enabled: !!tripId,
+    staleTime: 5_000,
+    refetchInterval: 10_000,
+  });
+}
+
+export function useAcknowledgeTripRunNotice() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (noticeId: string) => acknowledgeTripRunNotice(noticeId),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["trip-run-notices"] });
+    },
   });
 }
 
@@ -919,6 +1095,14 @@ export function useInsertEventBooking() {
   });
 }
 
+function invalidateEventFinance(qc: ReturnType<typeof useQueryClient>, eventId: string) {
+  qc.invalidateQueries({ queryKey: ["event_financial_ledger", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_roster_bookings", eventId] });
+  qc.invalidateQueries({ queryKey: ["event_manifest"] });
+  qc.invalidateQueries({ queryKey: ["events"] });
+}
+
 export function useInsertEventLedger() {
   const qc = useQueryClient();
   const online = useOnlineStatus();
@@ -931,10 +1115,36 @@ export function useInsertEventLedger() {
       return insertEventLedger(input);
     },
     onSuccess: (_, vars) => {
-      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+      invalidateEventFinance(qc, vars.eventId);
     },
     onError: (err: Error) => {
       toast.error("Could not log event expense", { description: err.message });
+    },
+  });
+}
+
+export function useUpdateEventLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateEventLedgerInput) => updateEventLedger(input),
+    onSuccess: (_, vars) => {
+      invalidateEventFinance(qc, vars.eventId);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update expense", { description: err.message });
+    },
+  });
+}
+
+export function useDeleteEventLedger() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: { id: string; eventId: string }) => deleteEventLedger(input),
+    onSuccess: (_, vars) => {
+      invalidateEventFinance(qc, vars.eventId);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not delete expense", { description: err.message });
     },
   });
 }
@@ -948,27 +1158,84 @@ export function useEventBookingsForParticipant(participantId: string | null | un
   });
 }
 
+function invalidateBookingMoney(
+  qc: ReturnType<typeof useQueryClient>,
+  vars: { eventId: string; participantId: string },
+) {
+  qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
+  qc.invalidateQueries({
+    queryKey: ["event_roster_bookings", "by-participant", vars.participantId],
+  });
+  qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
+  qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
+  qc.invalidateQueries({
+    queryKey: ["event_payment_ledger", vars.participantId, vars.eventId],
+  });
+  qc.invalidateQueries({
+    queryKey: ["participant_financial_ledger", vars.participantId],
+  });
+  qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
+  qc.invalidateQueries({ queryKey: ["event_manifest"] });
+  qc.invalidateQueries({ queryKey: ["events"] });
+  qc.invalidateQueries({ queryKey: ["participants"] });
+}
+
 export function useRecordEventPaymentMilestone() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (input: PaymentMilestoneInput) => recordEventPaymentMilestone(input),
     onSuccess: (_data, vars) => {
-      qc.invalidateQueries({ queryKey: ["event_roster_bookings", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_roster_bookings", "by-participant", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["event_financial_ledger", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", "by-event", vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["event_payment_ledger", vars.participantId, vars.eventId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger", vars.participantId] });
-      qc.invalidateQueries({ queryKey: ["participant_financial_ledger"] });
-      qc.invalidateQueries({ queryKey: ["event_manifest"] });
-      qc.invalidateQueries({ queryKey: ["events"] });
-      qc.invalidateQueries({ queryKey: ["participants"] });
+      invalidateBookingMoney(qc, vars);
     },
     onError: (err: Error) => {
       toast.error("Could not record payment milestone", {
         description: err.message,
         className: "border-red-500 bg-red-600 text-white font-medium",
       });
+    },
+  });
+}
+
+export function useRecordEventRefundMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: EventRefundMilestoneInput) => recordEventRefundMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not record refund", {
+        description: err.message,
+        className: "border-red-500 bg-red-600 text-white font-medium",
+      });
+    },
+  });
+}
+
+export function useUpdateEventPaymentMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: UpdateEventPaymentMilestoneInput) =>
+      updateEventPaymentMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not update payment", { description: err.message });
+    },
+  });
+}
+
+export function useDeleteEventPaymentMilestone() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (input: DeleteEventPaymentMilestoneInput) =>
+      deleteEventPaymentMilestone(input),
+    onSuccess: (_data, vars) => {
+      invalidateBookingMoney(qc, vars);
+    },
+    onError: (err: Error) => {
+      toast.error("Could not delete payment", { description: err.message });
     },
   });
 }
@@ -1036,10 +1303,12 @@ import {
   completeTrip as completeTripFn,
   cancelTrip as cancelTripFn,
   getStaffId,
+  resolveStaffIdWithFallback,
   getLastEndOdometer,
   getAssetCurrentOdometer,
   listBusRunRosterForDay,
   reorderTripPickupLegs,
+  type ActiveTripBundle,
   type StartTripInput,
   type StartDayCentreRunInput,
   type BusRunSummary,
@@ -1047,10 +1316,35 @@ import {
   type LegPatch,
 } from "@/lib/data-store";
 import { cancelTripPickupLeg } from "@/lib/api/transport-pickup";
-import { reorderEventRosterPickupOrder } from "@/lib/api/event-outing";
+import { reorderEventTravelOrder } from "@/lib/api/event-outing";
+import {
+  busRunRouteQueryKey,
+  listBusRunRouteRoster,
+  reorderBusRunDefaultRoute,
+  type BusRunRouteDirection,
+} from "@/lib/api/bus-run-routes";
+import { RUN_PLANNING_PEOPLE_KEY } from "@/lib/api/run-planning";
+import { RUN_PLANNING_CHANGE_LOG_KEY } from "@/lib/api/run-planning-changelog";
+import { listTodaysRunLiveStatus } from "@/lib/api/run-live-status";
+import {
+  acknowledgeTripRunNotice,
+  applyOfficeRunExemption,
+  listOpenTripRunNotices,
+  skipActiveTripPickupsForExemption,
+  type OfficeRunExemptionInput,
+} from "@/lib/api/office-run-exemption";
 import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches, invalidateTransportRequestCaches } from "@/lib/query/invalidation";
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;
+
+/** Set when this browser just opened the run, so a later sign-in can tell a resume apart. */
+export const MANIFEST_JUST_STARTED_KEY = "yada.manifestJustStarted";
+
+function markManifestJustStarted(result: unknown) {
+  const id = (result as { trip?: { id?: string } } | null)?.trip?.id;
+  if (!id || typeof sessionStorage === "undefined") return;
+  sessionStorage.setItem(MANIFEST_JUST_STARTED_KEY, id);
+}
 
 export function useActiveTrip() {
   const driverId = getStaffId();
@@ -1099,7 +1393,8 @@ export function useStartTrip() {
   return useMutation({
     mutationFn: (input: Omit<StartTripInput, "driverStaffId">) =>
       startTripFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
@@ -1158,7 +1453,8 @@ export function useStartEventVenueHop() {
       assetId?: string | null;
       varianceReason?: string | null;
     }) => startEventVenueHop({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
@@ -1171,7 +1467,8 @@ export function useStartDayCentreRun() {
   return useMutation({
     mutationFn: (input: Omit<StartDayCentreRunInput, "driverStaffId">) =>
       startDayCentreRunFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
     },
     onError: (err: Error) => showRedToast("Could not start Day Centre run", err),
@@ -1185,6 +1482,27 @@ export function useTodaysBusRunSummaries(dayCode: string, runLabels: Record<stri
     staleTime: 60_000,
     enabled: dayCode.length > 0,
   });
+}
+
+/** Run codes Run Planning assigned for the operational weekday (morning vs afternoon). */
+export function useTodaysPlannedBusRunCodes() {
+  const today = useOperationalTodayIso();
+  const dayCode = useMemo(() => todaysSydneyDayCode(), [today]);
+  const { data: busRunDefs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const runLabels = useMemo(
+    () => Object.fromEntries(busRunDefs.map((r) => [r.code, r.displayName])),
+    [busRunDefs],
+  );
+  const q = useTodaysBusRunSummaries(dayCode, runLabels);
+  const morningCodes = useMemo(
+    () => new Set((q.data ?? []).filter((r) => r.direction === "morning").map((r) => r.runCode)),
+    [q.data],
+  );
+  const afternoonCodes = useMemo(
+    () => new Set((q.data ?? []).filter((r) => r.direction === "afternoon").map((r) => r.runCode)),
+    [q.data],
+  );
+  return { morningCodes, afternoonCodes, ready: q.isSuccess };
 }
 
 export function usePatchTripLeg() {
@@ -1260,8 +1578,20 @@ export function useReorderTripPickupLegs() {
       tripId: string;
       orderedLegIds: string[];
     }) => reorderTripPickupLegs(tripId, orderedLegIds),
-    onSuccess: () => {
-      invalidateTransportCaches(qc);
+    onSuccess: (legs, { tripId }) => {
+      void (async () => {
+        // Drop a refetch that started during the stop-number rewrite. That read
+        // can still carry the previous order and would paint it over this save.
+        await qc.cancelQueries({ queryKey: ACTIVE_TRIP_KEY });
+        qc.setQueriesData(
+          { queryKey: ACTIVE_TRIP_KEY },
+          (old: ActiveTripBundle | null | undefined) => {
+            if (!old?.trip || old.trip.id !== tripId) return old;
+            return { ...old, legs };
+          },
+        );
+        invalidateTransportCaches(qc);
+      })();
     },
     onError: (err: Error) => showRedToast("Could not reorder pickups", err),
   });

@@ -1,8 +1,8 @@
 /**
- * BL-076 — compact Allergy / Diet chips; tap opens short detail sheet.
+ * Compact Allergy / Diet / Comms chips; tap opens short detail sheet.
  */
 import { useState } from "react";
-import { AlertTriangle, Utensils } from "lucide-react";
+import { AlertTriangle, MessageSquare, Utensils } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { cn } from "@/lib/utils";
@@ -13,6 +13,24 @@ type Props = {
   personName: string;
   className?: string;
 };
+
+function chipClass(kind: ClinicalFlagChip["kind"]): string {
+  if (kind === "allergy") return "border border-amber-600/50 bg-amber-500/15 text-amber-900";
+  if (kind === "diet") return "border border-sky-600/50 bg-sky-500/15 text-sky-900";
+  return "border border-violet-600/50 bg-violet-500/15 text-violet-900";
+}
+
+function chipHeading(kind: ClinicalFlagChip["kind"]): string {
+  if (kind === "allergy") return "Allergy / alerts";
+  if (kind === "diet") return "Diet / IDDSI";
+  return "Communication";
+}
+
+function ChipIcon({ kind }: { kind: ClinicalFlagChip["kind"] }) {
+  if (kind === "allergy") return <AlertTriangle className="mr-0.5 inline h-2.5 w-2.5" />;
+  if (kind === "diet") return <Utensils className="mr-0.5 inline h-2.5 w-2.5" />;
+  return <MessageSquare className="mr-0.5 inline h-2.5 w-2.5" />;
+}
 
 export function ClinicalFlagChips({ chips, personName, className }: Props) {
   const [open, setOpen] = useState(false);
@@ -35,18 +53,9 @@ export function ClinicalFlagChips({ chips, personName, className }: Props) {
         {chips.map((c) => (
           <Badge
             key={c.kind}
-            className={cn(
-              "text-[10px] font-semibold uppercase",
-              c.kind === "allergy"
-                ? "border border-amber-600/50 bg-amber-500/15 text-amber-900"
-                : "border border-sky-600/50 bg-sky-500/15 text-sky-900",
-            )}
+            className={cn("text-[10px] font-semibold uppercase", chipClass(c.kind))}
           >
-            {c.kind === "allergy" ? (
-              <AlertTriangle className="mr-0.5 inline h-2.5 w-2.5" />
-            ) : (
-              <Utensils className="mr-0.5 inline h-2.5 w-2.5" />
-            )}
+            <ChipIcon kind={c.kind} />
             {c.label}
           </Badge>
         ))}
@@ -65,7 +74,7 @@ export function ClinicalFlagChips({ chips, personName, className }: Props) {
               className="rounded-lg border bg-card px-3 py-2.5 text-sm"
             >
               <div className="text-xs font-semibold uppercase text-muted-foreground">
-                {c.kind === "allergy" ? "Allergy / alerts" : "Diet / IDDSI"}
+                {chipHeading(c.kind)}
               </div>
               <p className="mt-1 whitespace-pre-wrap text-foreground">
                 {c.detail.length > 280

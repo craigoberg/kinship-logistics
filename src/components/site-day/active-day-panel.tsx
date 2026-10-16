@@ -49,7 +49,7 @@ import {
 } from "./attendance-roll-panel";
 import { DayCentreActivitiesPanel } from "./day-centre-activities-panel";
 import { DayCentreClosureModal } from "./day-centre-closure-modal";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
+import { FloorLeaderBar } from "./floor-leader-bar";
 import { ManagerOpsChip } from "@/components/ui/manager-ops-chip";
 import { FieldActionButton } from "@/components/ui/field-action-button";
 import { useQuery } from "@tanstack/react-query";
@@ -92,11 +92,24 @@ export function ActiveDayPanel({ session }: Props) {
       queryClient.setQueryData(SITE_SESSION_QUERY_KEY, next);
       queryClient.invalidateQueries({ queryKey: SITE_SESSION_QUERY_KEY });
       queryClient.invalidateQueries({
-        predicate: (q) => q.queryKey?.[0] === "site-day-activities",
+        predicate: (q) => {
+          const key = String(q.queryKey?.[0] ?? "");
+          return (
+            key === "site-day-activities" ||
+            key === "client-attendance-roll" ||
+            key === "support-attendance-roll" ||
+            key === "site-day-visitors" ||
+            key === "site-issues" ||
+            key === "site-issues-active" ||
+            key === "compliance_audit_logs" ||
+            key === "bus-run-roster" ||
+            key === "transport_trips"
+          );
+        },
       });
       toast.success("Session reset to Start of Day", {
         description:
-          "Activities delivery rewound. Issues, escalations, attendance and billing are preserved.",
+          "Check-ins, check-outs, and today's centre floor are cleared. The roll is seeded again from the weekly plan.",
       });
     },
     onError: (e: Error) => {
@@ -150,7 +163,7 @@ export function ActiveDayPanel({ session }: Props) {
   return (
     <section className="space-y-5">
       <AttendanceOverdueSweepHost sessionId={session.id} />
-      <EmergencyOpsBanner siteDaySessionId={session.id} />
+      <FloorLeaderBar session={session} />
       {lockdownQ.data?.active ? (
         <div className="rounded-lg border border-amber-600/50 bg-amber-500/15 px-3 py-2 text-sm text-amber-950 dark:text-amber-100">
           <p className="font-bold uppercase tracking-wide text-[11px]">
@@ -205,6 +218,19 @@ export function ActiveDayPanel({ session }: Props) {
           <ManagerOpsChip tone="neutral" onClick={() => setAnomalyOpen(true)}>
             <PlusCircle className="h-4 w-4" /> Log anomaly
           </ManagerOpsChip>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11"
+            onClick={() => {
+              document
+                .getElementById("day-centre-end-of-day-report")
+                ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            }}
+          >
+            End of Day Report
+          </Button>
           <FieldActionButton
             variant="primary"
             size="sm"
@@ -221,7 +247,7 @@ export function ActiveDayPanel({ session }: Props) {
               className="gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
               onClick={() => resetMut.mutate()}
               disabled={resetMut.isPending}
-              title="TEST ONLY — rewind today's session to Start of Day. Issues, attendance and billing are preserved."
+              title="TEST ONLY — rewind today to Start of Day. Clears check-ins, check-outs, and today's centre floor."
             >
               {resetMut.isPending ? (
                 <Loader2 className="h-4 w-4 animate-spin" />

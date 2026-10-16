@@ -13,8 +13,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Button } from "@/components/ui/button";
 import { cn, formatDate } from "@/lib/utils";
 
+import { StartingKmConfirm } from "@/components/manifest/starting-km-confirm";
+import { VehicleKnownIssues } from "@/components/manifest/vehicle-known-issues";
 import { LogAnomalyModal } from "@/components/site-day/log-anomaly-modal";
-import { ActiveIssuesRegister } from "@/components/issue-engine/active-issues-register";
 import {
   VerbalConsultationDialog,
   formatVerbalWorkaroundDescription,
@@ -59,6 +60,8 @@ interface DraftIssue {
   incidentId?: string;
   severity: DraftIssueSeverity;
   text: string;
+  /** Logged in this sitting. Rehydrated rows are not mirrored again. */
+  fresh?: boolean;
 }
 
 function freshId(): string {
@@ -94,24 +97,27 @@ const SEVERITY_DISPLAY: Record<DraftIssueSeverity, { label: string; cls: string;
 
 interface Props {
   asset: TransportAsset;
-  startOdometer: number;
   dateStr: string;
   checkpoints: AssetCheckpoint[];
   driverName: string;
-  onCleared: () => void;
+  /** Vehicle was already cleared today. This sitting is an extra finding from a later driver. */
+  alreadyCleared?: boolean;
+  /** Confirmed dash reading for this run. */
+  onCleared: (startKm: number) => void;
   onBack: () => void;
 }
 
 export function IssueAccumulatorPanel({
   asset,
-  startOdometer,
   dateStr,
   checkpoints,
   driverName,
+  alreadyCleared = false,
   onCleared,
   onBack,
 }: Props) {
   const queryClient = useQueryClient();
+  const [startKm, setStartKm] = useState<number | null>(null);
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
@@ -128,7 +134,6 @@ export function IssueAccumulatorPanel({
     occurredAt: string;
   } | null>(null);
 
-  const vehicleInfo = `${asset.name} · ${asset.regoPlate}`;
   const hasRed = useMemo(() => issues.some((i) => i.severity === "red"), [issues]);
 
   // Rehydrate Green/Yellow drafts from operational_incidents so a refresh
@@ -216,6 +221,10 @@ export function IssueAccumulatorPanel({
       toast.error("Please tick the comfort declaration to continue.");
       return;
     }
+    if (startKm == null) {
+      toast.error("Confirm the starting kilometres on the dash.");
+      return;
+    }
     if (!driverPinVerified || !verifiedDriverPinRef.current) {
       setPinError("Driver PIN required.");
       toast.error("Driver PIN required.");
@@ -256,7 +265,7 @@ export function IssueAccumulatorPanel({
           assetId: asset.id,
           clearanceDate: dateStr,
           driverStaffId,
-          startOdometer: Math.round(startOdometer),
+          startOdometer: Math.round(startKm),
           items,
           accumulatedIssues: buildAccumulatedBlob(issues),
           driverComfortDeclared: comfortDeclared,
@@ -298,13 +307,15 @@ export function IssueAccumulatorPanel({
 
       // ALL bus/vehicle pre-trip issues land in Maintenance & Repairs (§14.2).
       // GREEN = low-priority note (dented panel, dirty windows); still needs follow-up.
-      if (issues.length > 0 && !reusedExisting) {
+      // A later driver on Fast Pass only mirrors issues logged in this sitting.
+      const issuesToMirror = reusedExisting ? issues.filter((i) => i.fresh) : issues;
+      if (issuesToMirror.length > 0) {
         (async () => {
           try {
             const staffId = driverStaffId || (await resolveStaffIdWithFallback());
             const reporterName = resolveStaffDisplayName(staffId);
             const locationLabel = `${asset.name} (${asset.regoPlate}) — Pre-trip ${formatDate(dateStr)}`;
-            for (const issue of issues) {
+            for (const issue of issuesToMirror) {
               const sev =
                 issue.severity === "red-verbal-cleared"
                   ? "red"
@@ -328,7 +339,7 @@ export function IssueAccumulatorPanel({
       void queryClient.invalidateQueries({
         queryKey: ["asset-clearance", asset.id, dateStr],
       });
-      onCleared();
+      onCleared(startKm);
     } catch (err) {
       const msg = (err as Error).message;
       if (/pin/i.test(msg)) {
@@ -346,8 +357,7 @@ export function IssueAccumulatorPanel({
 
   return (
     <div className="space-y-3">
-      {/* Section 9 — inherited unresolved exceptions for this vehicle */}
-      <ActiveIssuesRegister vehicleInfo={vehicleInfo} />
+      <VehicleKnownIssues asset={asset} />
 
       <Card className="p-5">
         <div className="flex items-center gap-2">
@@ -357,9 +367,14 @@ export function IssueAccumulatorPanel({
           </h2>
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          {asset.regoPlate} · Log every fault or workaround you noticed on your
-          walkaround. Tag each one Green, Yellow, or RED.
+          {alreadyCleared
+            ? `${asset.regoPlate} · Already cleared today. Known issues are listed above. Confirm the kilometres, and log only something new.`
+            : `${asset.regoPlate} · Known issues are listed above. Confirm the kilometres, then log only a new fault. Tag it Green, Yellow, or RED.`}
         </p>
+
+        <div className="mt-5">
+          <StartingKmConfirm assetId={asset.id} onReading={setStartKm} />
+        </div>
 
         {/* ---------------- Accumulated issues stack ---------------- */}
         <div className="mt-5 space-y-2">
@@ -411,7 +426,7 @@ export function IssueAccumulatorPanel({
           onClick={() => setLogOpen(true)}
           className="mt-3 flex h-12 w-full items-center justify-center gap-2 rounded-lg border-2 border-dashed border-blue-600/50 bg-blue-600/5 text-sm font-bold text-blue-700 transition hover:bg-blue-600/10 dark:text-blue-300"
         >
-          <Plus className="h-4 w-4" /> Add An Issue
+          <Plus className="h-4 w-4" /> Log a New Issue
         </button>
 
         {/* Comfort declaration & PIN — always required (the dual-PIN handshake
@@ -459,14 +474,31 @@ export function IssueAccumulatorPanel({
           </div>
         )}
 
+        {(() => {
+          const missing: string[] = [];
+          if (startKm == null) missing.push("confirm the starting kilometres");
+          if (hasRed) missing.push("clear the RED issue");
+          else {
+            if (!comfortDeclared) missing.push("comfort declaration");
+            if (!driverPinVerified) missing.push("driver PIN");
+          }
+          if (missing.length === 0) return null;
+          return (
+            <div className="mt-5 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+              Still needed: {missing.join(" · ")}
+            </div>
+          );
+        })()}
+
         <button
           type="button"
-          disabled={submitting || hasRed}
+          disabled={submitting || hasRed || startKm == null || !comfortDeclared || !driverPinVerified}
           onClick={submit}
           className={cn(
             "mt-5 h-14 w-full rounded-xl font-bold text-white shadow transition",
             "bg-blue-600 hover:bg-blue-700",
-            (submitting || hasRed) && "opacity-60 cursor-not-allowed",
+            (submitting || hasRed || startKm == null || !comfortDeclared || !driverPinVerified) &&
+              "opacity-60 cursor-not-allowed",
           )}
         >
           {submitting ? "Saving…" : "Lock In Declaration & Roll"}
@@ -476,7 +508,7 @@ export function IssueAccumulatorPanel({
           onClick={onBack}
           className="mt-2 h-10 w-full rounded-xl text-sm font-semibold text-muted-foreground transition hover:text-foreground"
         >
-          ← Change vehicle
+          {alreadyCleared ? "← Back to fast-pass" : "← Change vehicle"}
         </button>
       </Card>
 
@@ -502,7 +534,7 @@ export function IssueAccumulatorPanel({
             const localId = freshId();
             setIssues((prev) => [
               ...prev,
-              { id: localId, severity, text },
+              { id: localId, severity, text, fresh: true },
             ]);
             const incidentSev = sevToIncident(severity);
             if (!incidentSev) return;
@@ -571,7 +603,7 @@ export function IssueAccumulatorPanel({
           // unblocks immediately" after verbal consultation is on record).
           setIssues((prev) => [
             ...prev,
-            { id: localId, severity: "red-verbal-cleared", text: prefixed },
+            { id: localId, severity: "red-verbal-cleared", text: prefixed, fresh: true },
           ]);
           try {
             const { data, error } = await supabase

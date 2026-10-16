@@ -21,6 +21,8 @@ import {
   type TripLeg,
 } from "@/lib/data-store";
 import { finalizeEventVenueHop } from "@/lib/api/event-hop-transport";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
+import { tripDistanceKm } from "@/lib/manifest-odometer";
 
 export type RunCloseKind =
   | "event_outbound"
@@ -35,7 +37,6 @@ export interface RunCloseSummary {
   attestationLine: string;
   totalLegs: number;
   completedLegs: number;
-  totalKm: number;
   cancelledPickups: Array<{ legId: string; label: string }>;
   noShowLegs: Array<{ legId: string; label: string }>;
   unexpectedMedLegs: number;
@@ -86,17 +87,12 @@ export function buildRunCloseSummary(trip: TransportTrip, legs: TripLeg[]): RunC
     .filter((l) => l.noShowTriggeredAt != null)
     .map((l) => ({ legId: l.id, label: l.toLabel }));
   const unexpectedMedLegs = completed.filter((l) => l.unexpectedMedicationLogged).length;
-  const totalKm = completed.reduce(
-    (sum, l) => sum + (l.loggedDistanceKm ?? l.gpsDistanceKm ?? 0),
-    0,
-  );
 
   return {
     kind,
     attestationLine: ATTESTATION[kind],
     totalLegs: legs.length,
     completedLegs: completed.length,
-    totalKm,
     cancelledPickups,
     noShowLegs,
     unexpectedMedLegs,
@@ -194,7 +190,9 @@ export interface CloseTransportRunInput {
 export async function closeTransportRun(input: CloseTransportRunInput): Promise<TransportTrip> {
   const operatorStaffId =
     getActiveUserProfile()?.staffId ?? getStaffId() ?? DEFAULT_STAFF_UUID;
-  if (!/^\d{4}$/.test(input.operatorPin)) {
+  // Sign-in PINs are 6 digits after the one-time upgrade. A 4-digit-only
+  // check accepts the open-run PIN and then rejects Close.
+  if (!/^\d{4}$|^\d{6}$/.test(input.operatorPin)) {
     throw new Error("Incorrect operator PIN. Please try again.");
   }
   const pinOk = await verifyStaffPin(operatorStaffId, input.operatorPin);
@@ -248,6 +246,37 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
 
   const staffId = await resolveStaffIdWithFallback();
   const gps = await tryGetGps();
+  const passengerNames = legs
+    .filter((l) => isPassengerPickupLeg(l) && l.passengerPresent !== false)
+    .map((l) => (l.toLabel ?? "").trim())
+    .filter(Boolean);
+  const kindLabel =
+    summary.kind === "day_centre_morning"
+      ? "Day Centre morning"
+      : summary.kind === "day_centre_afternoon"
+        ? "Day Centre afternoon"
+        : summary.kind === "event_outbound"
+          ? "trip outbound"
+          : summary.kind === "event_return"
+            ? "trip return home"
+            : summary.kind === "event_venue_hop"
+              ? "venue hop"
+              : "transport";
+  const dropOff =
+    summary.kind === "day_centre_afternoon" || summary.kind === "event_return";
+  const peopleBit =
+    passengerNames.length > 0
+      ? `${dropOff ? "dropped off" : "picked up"} ${passengerNames.join(", ")}`
+      : `${summary.completedLegs} stop${summary.completedLegs === 1 ? "" : "s"} complete`;
+  const skipped = summary.cancelledPickups.map((c) => c.label).filter(Boolean);
+  const runCode = trip.busRunCode ? ` ${trip.busRunCode}` : "";
+  const travelledKm = tripDistanceKm(trip.startOdometerKm, input.endOdometerKm);
+  const closeSummary =
+    `Closed ${kindLabel}${runCode} — ${peopleBit}` +
+    (skipped.length ? ` (not travelling: ${skipped.join(", ")})` : "") +
+    ` (odo ${trip.startOdometerKm} → ${input.endOdometerKm}` +
+    (travelledKm != null && travelledKm > 0 ? `, ${travelledKm} km` : "") +
+    ")";
 
   await writeToLedgerOrThrow({
     staff_id: staffId,
@@ -256,15 +285,16 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
     action_type: "TRANSPORT_RUN_CLOSED",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       trip_id: input.tripId,
       event_id: trip.eventId,
       bus_run_code: trip.busRunCode,
       run_kind: summary.kind,
+      start_odometer_km: trip.startOdometerKm,
       end_odometer_km: input.endOdometerKm,
       legs_total: summary.totalLegs,
       legs_completed: summary.completedLegs,
-      total_km: summary.totalKm,
+      total_km: travelledKm ?? 0,
       cancelled_pickups: summary.cancelledPickups,
       no_show_count: summary.noShowLegs.length,
       unexpected_med_legs: summary.unexpectedMedLegs,
@@ -272,7 +302,10 @@ export async function closeTransportRun(input: CloseTransportRunInput): Promise<
       cancellations_acknowledged: input.cancellationsAcknowledged,
       closed_by: staffId,
       operator_staff_id: operatorStaffId,
-    },
+      passenger_names: passengerNames,
+      location: kindLabel,
+      summary: closeSummary,
+    }),
   });
 
   const closed = await completeTrip(input.tripId, input.endOdometerKm);
