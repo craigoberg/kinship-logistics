@@ -34,11 +34,19 @@ const MEAL_SLOT_LABELS: Record<EventMealSlot, string> = {
 
 export type StatusStepState = "complete" | "current" | "upcoming";
 
+/** When a group-status step opened, closed, left, or arrived. ISO instants. */
+export interface StatusStamp {
+  label: string;
+  at: string;
+}
+
 export interface EventDeliverStatusStep {
   id: string;
   label: string;
   detail?: string;
   state: StatusStepState;
+  /** Open / close / left / arrived clocks already stored on the floor tables. */
+  stamps?: StatusStamp[];
 }
 
 export type EventDeliverSuggestedTab =
@@ -124,6 +132,10 @@ export interface AccountabilityProgress {
   absent: number;
   /** All roll rows resolved (accounted/absent). Empty roll is not complete unless vacuous. */
   complete: boolean;
+  /** First person marked on this roll. */
+  openedAt: string | null;
+  /** Last person marked — set only once the roll is complete. */
+  closedAt: string | null;
 }
 
 type VenueStopRow = EventVenueStop & {
@@ -400,13 +412,63 @@ function rollProgress(rows: EventAccountabilityRow[]): AccountabilityProgress {
   const pending = rows.filter((r) => r.status === "expected").length;
   const absent = rows.filter((r) => r.status === "absent").length;
   const resolved = rows.length - pending;
+  const complete = rows.length > 0 && pending === 0;
+  const times = rows
+    .map((r) => r.accounted_at)
+    .filter((t): t is string => !!t)
+    .sort();
   return {
     total: rows.length,
     resolved,
     pending,
     absent,
-    complete: rows.length > 0 && pending === 0,
+    complete,
+    openedAt: times[0] ?? null,
+    closedAt: complete ? (times[times.length - 1] ?? null) : null,
   };
+}
+
+const VACUOUS_ROLL: AccountabilityProgress = {
+  total: 0,
+  resolved: 0,
+  pending: 0,
+  absent: 0,
+  complete: true,
+  openedAt: null,
+  closedAt: null,
+};
+
+function latestIso(values: Array<string | null | undefined>): string | null {
+  let best: string | null = null;
+  for (const value of values) {
+    if (!value) continue;
+    if (!best || value > best) best = value;
+  }
+  return best;
+}
+
+function stampsFrom(
+  pairs: Array<[label: string, at: string | null | undefined]>,
+): StatusStamp[] | undefined {
+  const stamps = pairs
+    .filter((pair): pair is [string, string] => !!pair[1])
+    .map(([label, at]) => ({ label, at }));
+  return stamps.length > 0 ? stamps : undefined;
+}
+
+function activityStamps(stop: VenueStopRow): StatusStamp[] | undefined {
+  const phase = stop.phase ?? "pending";
+  return stampsFrom([
+    ["Opened", phase === "active" || phase === "completed" ? stop.opened_at : null],
+    ["Closed", phase === "completed" ? stop.closed_at : null],
+  ]);
+}
+
+function rollStamps(progress: AccountabilityProgress): StatusStamp[] | undefined {
+  return stampsFrom([
+    ["Opened", progress.openedAt],
+    ["Closed", progress.closedAt],
+  ]);
 }
 
 /** Group Status step label — never “all accounted” when anyone is Absent. */
@@ -486,20 +548,119 @@ export async function assertMorningRollCompleteBeforeProgramme(opts: {
   );
 }
 
+type HopTripRow = {
+  id: string;
+  hop_index: number | null;
+  status: string;
+  venue_stop_from_id: string | null;
+  venue_stop_to_id: string | null;
+  completed_at: string | null;
+};
+
+type HopMoveClock = { leftAt: string | null; arrivedAt: string | null };
+
+const NO_MOVE: HopMoveClock = { leftAt: null, arrivedAt: null };
+
 async function fetchHopTrips(sessionId: string) {
   const { data, error } = await supabase
     .from("transport_trips")
-    .select("id, hop_index, status, venue_stop_from_id, venue_stop_to_id")
+    .select("id, hop_index, status, venue_stop_from_id, venue_stop_to_id, completed_at")
     .eq("event_day_session_id", sessionId)
     .order("hop_index", { ascending: true });
   if (error) throw error;
-  return (data ?? []) as Array<{
-    id: string;
-    hop_index: number | null;
-    status: string;
-    venue_stop_from_id: string | null;
-    venue_stop_to_id: string | null;
-  }>;
+  return (data ?? []) as HopTripRow[];
+}
+
+/**
+ * Depart / arrive for a venue hop.
+ * `trip_legs.start_at` is the Manifest "All aboard — Depart" tap.
+ * `end_at` is Arrive. Trip `started_at` is row creation, not departure.
+ */
+async function fetchHopMoveClocks(trips: HopTripRow[]): Promise<Map<string, HopMoveClock>> {
+  const clocks = new Map<string, HopMoveClock>();
+  if (trips.length === 0) return clocks;
+  const { data, error } = await supabase
+    .from("trip_legs")
+    .select("trip_id, status, start_at, end_at, completed_at")
+    .in(
+      "trip_id",
+      trips.map((t) => t.id),
+    );
+  if (error) throw error;
+
+  const byTrip = new Map<string, Array<{ status: string; start_at: string | null; end_at: string | null; completed_at: string | null }>>();
+  for (const leg of data ?? []) {
+    const tripId = leg.trip_id as string;
+    const list = byTrip.get(tripId) ?? [];
+    list.push({
+      status: leg.status as string,
+      start_at: (leg.start_at as string | null) ?? null,
+      end_at: (leg.end_at as string | null) ?? null,
+      completed_at: (leg.completed_at as string | null) ?? null,
+    });
+    byTrip.set(tripId, list);
+  }
+
+  for (const trip of trips) {
+    const legs = byTrip.get(trip.id) ?? [];
+    const leftAt = legs
+      .filter((l) => l.start_at && l.status !== "pending")
+      .map((l) => l.start_at as string)
+      .sort()[0] ?? null;
+    const legArrivals = legs
+      .filter((l) => l.status === "arrived" || l.status === "completed")
+      .map((l) => l.end_at || l.completed_at)
+      .filter((t): t is string => !!t)
+      .sort();
+    const arrivedAt =
+      legArrivals[legArrivals.length - 1] ??
+      (trip.status === "completed" ? trip.completed_at : null);
+    clocks.set(trip.id, { leftAt, arrivedAt });
+  }
+  return clocks;
+}
+
+function hopClockFor(
+  trips: HopTripRow[],
+  clocks: Map<string, HopMoveClock>,
+  hopIndex: number,
+  fromId: string,
+  toId: string,
+): HopMoveClock {
+  const trip =
+    trips.find((t) => t.hop_index === hopIndex) ??
+    trips.find((t) => t.venue_stop_from_id === fromId && t.venue_stop_to_id === toId);
+  if (!trip) return NO_MOVE;
+  return clocks.get(trip.id) ?? NO_MOVE;
+}
+
+/**
+ * Bus left/arrived come from the Manifest leg.
+ * Walk / other / on-site leave and arrive are one confirmation, stamped on the
+ * origin `closed_at` (destination `opened_at` can be an earlier "ready" tap).
+ */
+function hopStamps(opts: {
+  movement: string | null;
+  toPhase: string;
+  fromClosedAt: string | null | undefined;
+  clock: HopMoveClock;
+}): { leave?: StatusStamp[]; arrive?: StatusStamp[] } {
+  if (opts.movement == null) return {};
+  if (opts.movement === "bus") {
+    return {
+      leave: stampsFrom([["Left", opts.clock.leftAt]]),
+      // While still moving, the current "in transit" row carries the depart time.
+      arrive: stampsFrom([
+        ["Left", opts.clock.arrivedAt ? null : opts.clock.leftAt],
+        ["Arrived", opts.clock.arrivedAt],
+      ]),
+    };
+  }
+  const atDest = opts.toPhase === "active" || opts.toPhase === "completed";
+  const when = atDest ? opts.fromClosedAt ?? null : null;
+  return {
+    arrive: when ? [{ label: "Left and arrived", at: when }] : undefined,
+  };
 }
 
 async function fetchActiveTripLegSummary(tripId: string) {
@@ -554,7 +715,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
   ] = await Promise.all([
     supabase
       .from("event_day_sessions")
-      .select("phase, curfew_time, morning_roll_time")
+      .select("phase, curfew_time, morning_roll_time, open_declared_at")
       .eq("id", opts.sessionId)
       .single(),
     listEventAttendanceRoll(opts.sessionId),
@@ -569,6 +730,8 @@ export async function fetchEventDeliverGroupStatus(opts: {
   const phase = (sessionRow?.phase ?? "planning") as EventDayPhase;
   const curfewClock = formatClock(sessionRow?.curfew_time as string | null);
   const morningClock = formatClock(sessionRow?.morning_roll_time as string | null);
+  const openDeclaredAt =
+    (sessionRow as { open_declared_at?: string | null } | null)?.open_declared_at ?? null;
 
   const todayStops = (allStops as VenueStopRow[])
     .filter((s) => s.session_date === opts.sessionDate)
@@ -604,25 +767,29 @@ export async function fetchEventDeliverGroupStatus(opts: {
     support.filter((r) => r.status === "expected").length;
   const allCheckedIn = totalOnTrip > 0 && pendingArrival === 0;
 
-  const [morning, evening] = await Promise.all([
+  const [morning, evening, hopClocks] = await Promise.all([
     showMorningRoll
       ? getAccountabilityProgress("event_morning_log", opts.sessionId)
-      : Promise.resolve({
-          total: 0,
-          resolved: 0,
-          pending: 0,
-          absent: 0,
-          complete: true,
-        } satisfies AccountabilityProgress),
+      : Promise.resolve(VACUOUS_ROLL),
     showEveningRoll
       ? getAccountabilityProgress("event_curfew_log", opts.sessionId)
-      : Promise.resolve({
-          total: 0,
-          resolved: 0,
-          pending: 0,
-          absent: 0,
-          complete: true,
-        } satisfies AccountabilityProgress),
+      : Promise.resolve(VACUOUS_ROLL),
+    fetchHopMoveClocks(hopTrips),
+  ]);
+
+  const checkInClosedAt = allCheckedIn
+    ? latestIso([
+        ...attendance.map((r) =>
+          r.status === "checked_in" || r.status === "checked_out" ? r.checkedInAt : null,
+        ),
+        ...support.map((r) =>
+          r.status === "checked_in" || r.status === "checked_out" ? r.checkedInAt : null,
+        ),
+      ])
+    : null;
+  const arrivalStamps = stampsFrom([
+    ["Opened", openDeclaredAt],
+    ["Closed", checkInClosedAt],
   ]);
 
   const programmeUnlocked = morningUnlocked(
@@ -646,6 +813,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
         ? `All checked in at ${baseName}`
         : `Check in at ${baseName}`,
     detail: totalOnTrip > 0 ? `${checkedInOrOut} of ${totalOnTrip} checked in` : undefined,
+    stamps: arrivalStamps,
     state: "upcoming",
   });
 
@@ -666,6 +834,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
       steps.push({
         id: "morning-roll",
         label: rollCompleteLabel("Morning", morning),
+        stamps: rollStamps(morning),
         state: morning.complete ? "complete" : "upcoming",
       });
     }
@@ -676,6 +845,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
           id: `onsite-${item.stop.id}`,
           label: onSiteStepLabel(item.stop, item.atVenue),
           detail: "Complete",
+          stamps: activityStamps(item.stop),
           state: "complete",
         });
         continue;
@@ -684,17 +854,25 @@ export async function fetchEventDeliverGroupStatus(opts: {
       const toName = stopLabel(item.to);
       const movement = item.to.movement_method ?? "bus";
       const isBus = movement === "bus";
+      const closedHop = hopStamps({
+        movement,
+        toPhase: "completed",
+        fromClosedAt: item.from.closed_at,
+        clock: hopClockFor(hopTrips, hopClocks, item.hopIndex, item.from.id, item.to.id),
+      });
       if (isBus) {
         steps.push({
           id: `hop-${item.hopIndex}-depart`,
           label: `Board bus — depart ${fromName} for ${toName}`,
           detail: "Delivered · hop complete",
+          stamps: closedHop.leave,
           state: "complete",
         });
       }
       steps.push({
         id: `hop-${item.hopIndex}-at`,
         label: isBus ? `At ${toName}` : `Activity at ${toName}`,
+        stamps: closedHop.arrive,
         state: "complete",
       });
     }
@@ -703,6 +881,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
         id: "evening-roll",
         label: rollCompleteLabel("Evening", evening),
         detail: `Overnight at ${overnightEndName}`,
+        stamps: rollStamps(evening),
         state: evening.complete ? "complete" : "upcoming",
       });
     } else {
@@ -767,6 +946,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
           : morningClock
             ? `Deadline ${morningClock} · use Morning Roll tab`
             : "Use Morning Roll tab",
+      stamps: rollStamps(morning),
       state: morningComplete ? "complete" : "current",
     });
 
@@ -800,6 +980,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
         id: stepId,
         label: onSiteStepLabel(item.stop, item.atVenue),
         detail: onSiteStepDetail(item.stop, phase),
+        stamps: activityStamps(item.stop),
         state: "upcoming",
       });
       if (phase === "completed") {
@@ -861,6 +1042,12 @@ export async function fetchEventDeliverGroupStatus(opts: {
     const leaveStepId = `hop-${item.hopIndex}-leave`;
     const departStepId = `hop-${item.hopIndex}-depart`;
     const atStepId = `hop-${item.hopIndex}-at`;
+    const moveStamps = hopStamps({
+      movement,
+      toPhase,
+      fromClosedAt: item.from.closed_at,
+      clock: trip ? (hopClocks.get(trip.id) ?? NO_MOVE) : NO_MOVE,
+    });
 
     if (methodUnset) {
       steps.push({
@@ -876,6 +1063,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
         detail: manifestNote
           ? `${manifestNote} · driver uses Manifest (§11)`
           : "Driver boards passengers via Manifest",
+        stamps: moveStamps.leave,
         state: "upcoming",
       });
     }
@@ -891,6 +1079,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
             : movement === "other"
               ? "Other transport — individual activity check-in"
               : undefined,
+      stamps: moveStamps.arrive,
       state: "upcoming",
     });
 
@@ -983,6 +1172,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
           : curfewClock
             ? `At ${eveningBaseName} · deadline ${curfewClock}`
             : `At ${eveningBaseName} — evening accountability`,
+      stamps: rollStamps(evening),
       state: "upcoming",
     });
   } else {

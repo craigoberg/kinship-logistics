@@ -14,11 +14,13 @@ import {
   Users,
   Utensils,
 } from "lucide-react";
+import { ClientTime } from "@/components/ui/client-time";
 import { cn } from "@/lib/utils";
 import {
   eventDeliverStatusKey,
   fetchEventDeliverGroupStatus,
   type EventDeliverStatusStep,
+  type StatusStamp,
 } from "@/lib/api/event-deliver-status";
 import { useRealtimeInvalidateMany } from "@/hooks/use-realtime-invalidate";
 
@@ -174,7 +176,22 @@ function StatusStepRow({ step }: { step: EventDeliverStatusStep }) {
             {step.detail}
           </div>
         )}
+        {step.stamps && step.stamps.length > 0 && <StepStamps stamps={step.stamps} />}
       </div>
     </li>
+  );
+}
+
+function StepStamps({ stamps }: { stamps: StatusStamp[] }) {
+  return (
+    <div className="mt-0.5 text-[11px] tabular-nums leading-snug text-muted-foreground">
+      {stamps.map((stamp, i) => (
+        <span key={`${stamp.label}-${stamp.at}`}>
+          {i > 0 ? " · " : null}
+          {stamp.label}{" "}
+          <ClientTime iso={stamp.at} options={{ hour: "2-digit", minute: "2-digit" }} />
+        </span>
+      ))}
+    </div>
   );
 }
