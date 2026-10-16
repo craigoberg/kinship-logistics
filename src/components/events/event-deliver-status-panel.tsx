@@ -33,6 +33,7 @@ const GROUP_STATUS_TABLES = [
   "event_day_sessions",
   "event_morning_log",
   "event_curfew_log",
+  "asset_daily_clearance",
 ] as const;
 
 interface Props {
@@ -138,11 +139,13 @@ function StatusStepRow({ step }: { step: EventDeliverStatusStep }) {
               ? step.label.toLowerCase().includes("medication")
                 ? Pill
                 : Utensils
-              : step.id.includes("-at")
-                ? MapPin
-                : step.id.includes("depart")
-                  ? Bus
-                  : MapPin
+              : step.id.includes("collect")
+                ? Users
+                : step.id.includes("-at")
+                  ? MapPin
+                  : step.id.includes("depart")
+                    ? Bus
+                    : MapPin
         : Circle;
 
   return (

@@ -63,6 +63,8 @@ export interface EventTransportRunCard {
   busRunCode?: string | null;
   /** Event short label R1/R2 when multi-bus. */
   busRunShortLabel?: string | null;
+  /** People the bus collects or drops between the two venues. */
+  via?: string | null;
 }
 
 export const eventTransportRunsKey = (
@@ -78,6 +80,50 @@ function stopLabel(stop: EventVenueStop | undefined): string {
 
 function stopAddress(stop: EventVenueStop | undefined): string | null {
   return stop?.venue_street_address?.trim() || null;
+}
+
+/** People between two venues, in itinerary order. Matches the Manifest chain. */
+function viaNamesBetween(
+  from: EventVenueStop,
+  to: EventVenueStop,
+  dayStops: EventVenueStop[],
+  assignments: PassengerAssignment[],
+): string[] {
+  const between = dayStops
+    .filter(
+      (stop) =>
+        isPassengerStop(stop) &&
+        stop.stop_order > from.stop_order &&
+        stop.stop_order < to.stop_order,
+    )
+    .sort((a, b) => a.stop_order - b.stop_order);
+  const rank = (order: number) => (order > 0 ? order : Number.MAX_SAFE_INTEGER);
+  const names: string[] = [];
+  for (const stop of between) {
+    const pickup = stop.activity_kind === "passenger_pickup";
+    const people = assignments
+      .filter(
+        (person) =>
+          addressKey(pickup ? person.pickupAddress : person.dropoffAddress) ===
+          addressKey(stop.street_address),
+      )
+      .sort(
+        (a, b) => rank(a.pickupOrder) - rank(b.pickupOrder) || a.name.localeCompare(b.name),
+      );
+    if (people.length) {
+      names.push(...people.map((person) => person.name));
+    } else {
+      const label = stop.label_override?.trim();
+      if (label) names.push(label);
+    }
+  }
+  return names;
+}
+
+function viaLine(names: string[]): string | null {
+  const unique = names.map((name) => name.trim()).filter(Boolean);
+  if (!unique.length) return null;
+  return `Via: ${unique.join(", ")}`;
 }
 
 /** First stop of the first day — where bus and self meet, including a meal. */
@@ -254,6 +300,9 @@ export async function listEventTransportRuns(opts: {
     ? resolveOvernightWakeBase(stopsRaw, opts.sessionDate, dayVenues)
     : null;
   const programmeHops = buildProgrammeHops(dayStops, overnightWake);
+  const passengerAssignments = dayStops.some((stop) => isPassengerStop(stop))
+    ? await listPassengerAssignments(opts.eventId)
+    : [];
 
   const cards: EventTransportRunCard[] = [];
   const hopTrips = tripsRaw.filter(isHopTrip);
@@ -394,6 +443,7 @@ export async function listEventTransportRuns(opts: {
       kind: "venue_hop",
       hopIndex: i,
       label: `${fromName} → ${toName}`,
+      via: viaLine(viaNamesBetween(from, to, dayStops, passengerAssignments)),
       detail: hopDetail,
       status: hopStatus,
       tripId: (hopTrip?.id as string | undefined) ?? null,
@@ -428,6 +478,10 @@ export async function listEventTransportRuns(opts: {
       kind: "venue_hop",
       hopIndex: Number.isFinite(hopIndex) ? hopIndex : undefined,
       label: `${stopLabel(from)} → ${stopLabel(to)}`,
+      via:
+        from && to
+          ? viaLine(viaNamesBetween(from, to, dayStops, passengerAssignments))
+          : null,
       detail: "Travel from where the group is now",
       status: hopStatus,
       tripId: (trip.id as string | undefined) ?? null,

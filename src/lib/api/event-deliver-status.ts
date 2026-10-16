@@ -18,11 +18,14 @@ import {
   listEventDaySessions,
   isMealStop,
   isMedicationStop,
+  isPassengerStop,
   isVenueTransportStop,
   type EventDayPhase,
   type EventMealSlot,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
+import { listPassengerAssignments, type PassengerAssignment } from "@/lib/api/passenger-stops";
+import { addressKey } from "@/lib/passenger-stops";
 import type { StopPhase } from "@/lib/api/event-activity-roll";
 
 const MEAL_SLOT_LABELS: Record<EventMealSlot, string> = {
@@ -471,6 +474,199 @@ function rollStamps(progress: AccountabilityProgress): StatusStamp[] | undefined
   ]);
 }
 
+type BusCheckState = "none" | "passed" | "held";
+
+/** Today's vehicle walkaround — passed, held for a manager, or not done. */
+async function fetchBusCheckState(sessionDate: string): Promise<BusCheckState> {
+  const { data, error } = await supabase
+    .from("asset_daily_clearance")
+    .select("status")
+    .eq("clearance_date", sessionDate);
+  if (error || !data?.length) return "none";
+  const statuses = data.map((row) => String((row as { status?: string }).status ?? ""));
+  if (statuses.some((s) => s === "passed" || s === "authorized_override")) return "passed";
+  if (statuses.some((s) => s === "awaiting_manager_review" || s === "failed")) return "held";
+  return "none";
+}
+
+/**
+ * Office wording for the live "Board bus" row.
+ * Release seeds the list (status planned). The driver opens the run after bus checks.
+ */
+function busStageDetail(opts: {
+  tripStatus: string | null;
+  onBoard: number;
+  busTotal: number;
+  inTransit: boolean;
+  busCheck: BusCheckState;
+}): string {
+  const count =
+    opts.busTotal > 0 ? `${opts.onBoard} of ${opts.busTotal}` : null;
+  if (opts.inTransit) {
+    return count ? `In transit · ${count} on the bus` : "In transit";
+  }
+  const runOpen = opts.tripStatus === "active";
+  if (!runOpen) {
+    if (!opts.tripStatus) return "Waiting for Release on Programme";
+    if (opts.busCheck === "held") {
+      return count
+        ? `Bus checks waiting on a manager · ${count} on the bus`
+        : "Bus checks waiting on a manager";
+    }
+    if (opts.busCheck === "passed") {
+      return count
+        ? `Bus checks done · waiting for the driver to open this run · ${count} on the bus`
+        : "Bus checks done · waiting for the driver to open this run";
+    }
+    return count
+      ? `Waiting for bus checks · ${count} on the bus`
+      : "Waiting for bus checks";
+  }
+  if (!count) return "Run open · boarding list not ready";
+  if (opts.onBoard <= 0) return `Run open · boarding ${count}`;
+  if (opts.onBoard < opts.busTotal) return `Boarding ${count}`;
+  return `All aboard · waiting to depart · ${count}`;
+}
+
+/** Someone the bus collects or drops between two venues. */
+type HopWaypoint = {
+  name: string;
+  kind: "pickup" | "dropoff";
+  status: string;
+  present: boolean | null;
+  leftAt: string | null;
+  doneAt: string | null;
+};
+
+function joinNames(names: string[]): string {
+  if (names.length <= 1) return names[0] ?? "";
+  if (names.length === 2) return `${names[0]} and ${names[1]}`;
+  return `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
+function waypointLabel(w: HopWaypoint): string {
+  return w.kind === "pickup" ? `Collect ${w.name}` : `Drop off ${w.name}`;
+}
+
+function waypointDetail(w: HopWaypoint, next: boolean, runOpen: boolean): string | undefined {
+  if (w.status === "completed") {
+    if (w.present === false) return "Not travelling";
+    return undefined;
+  }
+  if (w.status === "en_route") {
+    return w.kind === "pickup" ? "On the way to collect" : "On the way to drop off";
+  }
+  if (w.status === "arrived") {
+    return w.kind === "pickup" ? "At the pickup" : "At the drop-off";
+  }
+  if (!runOpen) return w.kind === "pickup" ? "Collect on this run" : "Drop off on this run";
+  if (next) {
+    return w.kind === "pickup" ? "Next stop — not collected yet" : "Next stop — not dropped off yet";
+  }
+  return "Later on this run";
+}
+
+function waypointStamps(w: HopWaypoint): StatusStamp[] | undefined {
+  if (w.status === "completed" && w.present === false) return undefined;
+  const doneLabel = w.kind === "pickup" ? "Collected" : "Dropped off";
+  return stampsFrom([
+    ["Left", w.status === "en_route" || w.status === "arrived" ? w.leftAt : null],
+    [doneLabel, w.status === "completed" ? w.doneAt : null],
+  ]);
+}
+
+function dropoffAddresses(stops: VenueStopRow[]): Set<string> {
+  return new Set(
+    stops
+      .filter((stop) => stop.activity_kind === "passenger_dropoff")
+      .map((stop) => addressKey(stop.street_address)),
+  );
+}
+
+/** Person stops already on the Manifest for this hop. */
+async function fetchHopWaypoints(tripId: string, stops: VenueStopRow[]): Promise<HopWaypoint[]> {
+  const { data, error } = await supabase
+    .from("trip_legs")
+    .select(
+      "leg_index, leg_kind, status, to_label, to_participant_id, to_staff_id, to_carer_id, passenger_present, target_address, start_at, end_at, completed_at",
+    )
+    .eq("trip_id", tripId)
+    .order("leg_index", { ascending: true });
+  if (error) throw error;
+  const drops = dropoffAddresses(stops);
+  const rows = (data ?? []) as Array<{
+    leg_kind?: string | null;
+    status?: string | null;
+    to_label?: string | null;
+    to_participant_id?: string | null;
+    to_staff_id?: string | null;
+    to_carer_id?: string | null;
+    passenger_present?: boolean | null;
+    target_address?: string | null;
+    start_at?: string | null;
+    completed_at?: string | null;
+  }>;
+  return rows
+    .filter((leg) => {
+      const person = leg.to_participant_id || leg.to_staff_id || leg.to_carer_id;
+      return (
+        !!person &&
+        (leg.leg_kind === "client_to_client" || leg.leg_kind === "depot_to_client")
+      );
+    })
+    .map((leg) => ({
+      name: (leg.to_label ?? "").trim() || "Passenger",
+      kind: drops.has(addressKey(leg.target_address)) ? "dropoff" : "pickup",
+      status: leg.status ?? "pending",
+      present: leg.passenger_present ?? null,
+      leftAt: leg.start_at ?? null,
+      doneAt: leg.completed_at ?? null,
+    }));
+}
+
+/** Planned collects and drop-offs before the driver has opened the run. */
+function plannedHopWaypoints(
+  from: VenueStopRow,
+  to: VenueStopRow,
+  todayStops: VenueStopRow[],
+  assignments: PassengerAssignment[],
+): HopWaypoint[] {
+  const between = todayStops
+    .filter(
+      (stop) =>
+        isPassengerStop(stop) &&
+        stop.stop_order > from.stop_order &&
+        stop.stop_order < to.stop_order,
+    )
+    .sort((a, b) => a.stop_order - b.stop_order);
+  const rank = (order: number) => (order > 0 ? order : Number.MAX_SAFE_INTEGER);
+  const out: HopWaypoint[] = [];
+  for (const stop of between) {
+    const pickup = stop.activity_kind === "passenger_pickup";
+    const people = assignments
+      .filter(
+        (person) =>
+          addressKey(pickup ? person.pickupAddress : person.dropoffAddress) ===
+          addressKey(stop.street_address),
+      )
+      .sort((a, b) => rank(a.pickupOrder) - rank(b.pickupOrder) || a.name.localeCompare(b.name));
+    const names = people.length
+      ? people.map((person) => person.name)
+      : [(stop.label_override ?? "").trim() || "Passenger"];
+    for (const name of names) {
+      out.push({
+        name,
+        kind: pickup ? "pickup" : "dropoff",
+        status: "pending",
+        present: null,
+        leftAt: null,
+        doneAt: null,
+      });
+    }
+  }
+  return out;
+}
+
 /** Group Status step label — never “all accounted” when anyone is Absent. */
 function rollCompleteLabel(
   kind: "Morning" | "Evening",
@@ -578,36 +774,67 @@ async function fetchHopTrips(sessionId: string) {
  */
 async function fetchHopMoveClocks(trips: HopTripRow[]): Promise<Map<string, HopMoveClock>> {
   const clocks = new Map<string, HopMoveClock>();
-  if (trips.length === 0) return clocks;
+  const liveTrips = trips.filter((trip) => trip.status !== "cancelled");
+  if (liveTrips.length === 0) return clocks;
   const { data, error } = await supabase
     .from("trip_legs")
-    .select("trip_id, status, start_at, end_at, completed_at")
+    .select(
+      "trip_id, status, start_at, end_at, completed_at, leg_kind, to_participant_id, to_staff_id, to_carer_id",
+    )
     .in(
       "trip_id",
-      trips.map((t) => t.id),
+      liveTrips.map((t) => t.id),
     );
   if (error) throw error;
 
-  const byTrip = new Map<string, Array<{ status: string; start_at: string | null; end_at: string | null; completed_at: string | null }>>();
+  const byTrip = new Map<
+    string,
+    Array<{
+      status: string;
+      start_at: string | null;
+      end_at: string | null;
+      completed_at: string | null;
+      person: boolean;
+    }>
+  >();
   for (const leg of data ?? []) {
-    const tripId = leg.trip_id as string;
-    const list = byTrip.get(tripId) ?? [];
+    const row = leg as {
+      trip_id: string;
+      status?: string | null;
+      start_at?: string | null;
+      end_at?: string | null;
+      completed_at?: string | null;
+      leg_kind?: string | null;
+      to_participant_id?: string | null;
+      to_staff_id?: string | null;
+      to_carer_id?: string | null;
+    };
+    const list = byTrip.get(row.trip_id) ?? [];
+    const person =
+      !!row.to_participant_id ||
+      !!row.to_staff_id ||
+      !!row.to_carer_id ||
+      row.leg_kind === "client_to_client" ||
+      row.leg_kind === "depot_to_client";
     list.push({
-      status: leg.status as string,
-      start_at: (leg.start_at as string | null) ?? null,
-      end_at: (leg.end_at as string | null) ?? null,
-      completed_at: (leg.completed_at as string | null) ?? null,
+      status: row.status ?? "",
+      start_at: row.start_at ?? null,
+      end_at: row.end_at ?? null,
+      completed_at: row.completed_at ?? null,
+      person,
     });
-    byTrip.set(tripId, list);
+    byTrip.set(row.trip_id, list);
   }
 
-  for (const trip of trips) {
+  for (const trip of liveTrips) {
     const legs = byTrip.get(trip.id) ?? [];
     const leftAt = legs
       .filter((l) => l.start_at && l.status !== "pending")
       .map((l) => l.start_at as string)
       .sort()[0] ?? null;
-    const legArrivals = legs
+    // A person collected on the way is not arrival at the venue.
+    const venueLegs = legs.filter((l) => !l.person);
+    const legArrivals = venueLegs
       .filter((l) => l.status === "arrived" || l.status === "completed")
       .map((l) => l.end_at || l.completed_at)
       .filter((t): t is string => !!t)
@@ -767,7 +994,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
     support.filter((r) => r.status === "expected").length;
   const allCheckedIn = totalOnTrip > 0 && pendingArrival === 0;
 
-  const [morning, evening, hopClocks] = await Promise.all([
+  const [morning, evening, hopClocks, busCheck] = await Promise.all([
     showMorningRoll
       ? getAccountabilityProgress("event_morning_log", opts.sessionId)
       : Promise.resolve(VACUOUS_ROLL),
@@ -775,6 +1002,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
       ? getAccountabilityProgress("event_curfew_log", opts.sessionId)
       : Promise.resolve(VACUOUS_ROLL),
     fetchHopMoveClocks(hopTrips),
+    fetchBusCheckState(opts.sessionDate),
   ]);
 
   const checkInClosedAt = allCheckedIn
@@ -965,6 +1193,9 @@ export async function fetchEventDeliverGroupStatus(opts: {
   }
 
   // ── 3. Programme: on-site meals/meds at venue, then venue→venue hops ──
+  const passengerAssignments = todayStops.some((stop) => isPassengerStop(stop))
+    ? await listPassengerAssignments(opts.eventId)
+    : [];
   const timeline = buildProgrammeTimeline(todayStops, overnightWake);
   const hops = timeline
     .filter((item): item is Extract<ProgrammeTimelineItem, { kind: "hop" }> => item.kind === "hop")
@@ -1005,39 +1236,60 @@ export async function fetchEventDeliverGroupStatus(opts: {
     const methodUnset = movement == null;
     const isBus = movement === "bus";
 
-    const trip =
+    const matchedTrip =
       hopTrips.find((t) => t.hop_index === item.hopIndex) ??
       hopTrips.find(
         (t) =>
           t.venue_stop_from_id === item.from.id && t.venue_stop_to_id === item.to.id,
       );
+    // A cancelled run is not progress. The collect stays on the itinerary.
+    const trip = matchedTrip?.status === "cancelled" ? undefined : matchedTrip;
 
     let onBoard = 0;
     let busTotal = 0;
-    let manifestNote: string | undefined;
     let inTransit = false;
+    let waypoints: HopWaypoint[] = [];
 
     if (isBus && trip) {
       const manifest = await listBusManifest(trip.id);
       onBoard = manifest.filter((r) => r.status === "on_bus").length;
       busTotal = manifest.filter((r) => r.status !== "not_travelling").length;
+      waypoints = await fetchHopWaypoints(trip.id, todayStops);
 
-      if (busTotal > 0) {
-        manifestNote = `${onBoard} / ${busTotal} on bus`;
-      } else {
+      if (busTotal === 0) {
         const legSummary = await fetchActiveTripLegSummary(trip.id);
         if (legSummary.pickupTotal > 0) {
           onBoard = legSummary.onBoard;
           busTotal = legSummary.pickupTotal;
-          manifestNote = `${onBoard} / ${busTotal} boarded (Manifest)`;
         }
       }
 
       if (trip.status === "active") {
         const legSummary = await fetchActiveTripLegSummary(trip.id);
-        inTransit = legSummary.activeLeg?.status === "en_route";
+        const personMoving = waypoints.some(
+          (w) => w.status === "en_route" || w.status === "arrived",
+        );
+        inTransit = !personMoving && legSummary.activeLeg?.status === "en_route";
       }
+    } else if (isBus) {
+      waypoints = plannedHopWaypoints(item.from, item.to, todayStops, passengerAssignments);
     }
+
+    if (isBus && trip && waypoints.length === 0) {
+      waypoints = plannedHopWaypoints(item.from, item.to, todayStops, passengerAssignments);
+    }
+
+    const stageNote = !isBus
+      ? undefined
+      : matchedTrip?.status === "cancelled"
+        ? "This run was cancelled · open it again on Manifest"
+        : busStageDetail({
+            tripStatus: trip?.status ?? null,
+            onBoard,
+            busTotal,
+            inTransit,
+            busCheck,
+          });
 
     const leaveStepId = `hop-${item.hopIndex}-leave`;
     const departStepId = `hop-${item.hopIndex}-depart`;
@@ -1057,14 +1309,29 @@ export async function fetchEventDeliverGroupStatus(opts: {
         state: "upcoming",
       });
     } else if (isBus) {
+      const pendingCollects = waypoints.filter(
+        (w) => w.kind === "pickup" && w.status !== "completed",
+      );
+      const thenCollect = pendingCollects.length
+        ? `Then collect ${joinNames(pendingCollects.map((w) => w.name))}`
+        : null;
       steps.push({
         id: departStepId,
         label: `Board bus — depart ${fromName} for ${toName}`,
-        detail: manifestNote
-          ? `${manifestNote} · driver uses Manifest (§11)`
-          : "Driver boards passengers via Manifest",
+        detail: thenCollect && stageNote ? `${stageNote} · ${thenCollect}` : stageNote ?? thenCollect ?? undefined,
         stamps: moveStamps.leave,
         state: "upcoming",
+      });
+      const runOpen = trip?.status === "active";
+      waypoints.forEach((w, index) => {
+        const next = waypoints.find((row) => row.status !== "completed") === w;
+        steps.push({
+          id: `hop-${item.hopIndex}-collect-${index}`,
+          label: waypointLabel(w),
+          detail: waypointDetail(w, next, runOpen),
+          stamps: waypointStamps(w),
+          state: "upcoming",
+        });
       });
     }
 
@@ -1097,6 +1364,12 @@ export async function fetchEventDeliverGroupStatus(opts: {
           // Don't keep stale "4/4 on bus" after the venue is closed out.
           departStep.detail = "Delivered · hop complete";
         }
+        waypoints.forEach((w, index) => {
+          const step = steps.find((s) => s.id === `hop-${item.hopIndex}-collect-${index}`);
+          if (!step) return;
+          step.state = "complete";
+          step.detail = waypointDetail(w, false, true);
+        });
       }
       const leaveStep = steps.find((s) => s.id === leaveStepId);
       if (leaveStep) leaveStep.state = "complete";
@@ -1115,17 +1388,60 @@ export async function fetchEventDeliverGroupStatus(opts: {
     } else if (isBus) {
       const departStep = steps.find((s) => s.id === departStepId)!;
       const atStep = steps.find((s) => s.id === atStepId)!;
+      const runOpen = trip?.status === "active";
+      const nextWp = waypoints.find((w) => w.status !== "completed");
+      const stillBoarding =
+        runOpen &&
+        busTotal > 0 &&
+        onBoard < busTotal &&
+        waypoints.every((w) => w.status === "pending");
+      const markWaypoint = (w: HopWaypoint, index: number, state: StatusStepState) => {
+        const step = steps.find((s) => s.id === `hop-${item.hopIndex}-collect-${index}`);
+        if (!step) return;
+        step.state = state;
+        step.detail = waypointDetail(w, w === nextWp, runOpen);
+        step.stamps = waypointStamps(w);
+      };
       if (arrivedAtDest || (tripDone && hopActive)) {
         departStep.state = "complete";
+        departStep.detail = "Boarded · hop arrived";
+        waypoints.forEach((w, index) => markWaypoint(w, index, "complete"));
         atStep.state = "current";
         atStep.label = `At ${toName}`;
+        atStep.detail = "Hop arrived";
+      } else if (nextWp && runOpen && !stillBoarding) {
+        departStep.state = "complete";
+        departStep.detail =
+          nextWp.status === "pending"
+            ? `Boarded · collect on the way before ${toName}`
+            : "On the way";
+        waypoints.forEach((w, index) =>
+          markWaypoint(w, index, w === nextWp ? "current" : w.status === "completed" ? "complete" : "upcoming"),
+        );
       } else if (inTransit) {
         departStep.state = "complete";
+        departStep.detail = stageNote ?? "In transit";
+        waypoints.forEach((w, index) => markWaypoint(w, index, "complete"));
         atStep.state = "current";
         atStep.label = `In transit to ${toName}`;
+        atStep.detail = "On the way — arrival time shows when the driver taps Arrive";
+      } else if (runOpen && !nextWp) {
+        departStep.state = "complete";
+        departStep.detail = "Boarded";
+        waypoints.forEach((w, index) => markWaypoint(w, index, "complete"));
+        const collected = waypoints.filter((w) => w.kind === "pickup" && w.present !== false);
+        atStep.state = "current";
+        atStep.label = `In transit to ${toName}`;
+        atStep.stamps = undefined;
+        atStep.detail = collected.length
+          ? `Collected ${joinNames(collected.map((w) => w.name))} · waiting to depart for ${toName}`
+          : `Waiting to depart for ${toName}`;
       } else {
-        // Not released, boarding, or active at origin — stay on Board bus.
+        // Not released, or still boarding the group at the origin.
         departStep.state = "current";
+        waypoints.forEach((w, index) =>
+          markWaypoint(w, index, w.status === "completed" ? "complete" : "upcoming"),
+        );
       }
     } else {
       const atStep = steps.find((s) => s.id === atStepId)!;
@@ -1261,7 +1577,9 @@ export async function fetchEventDeliverGroupStatus(opts: {
       headline: current?.label ?? `All checked in at ${baseName}`,
       subline: current?.detail,
       tone:
-        current?.id.includes("depart") || current?.label.includes("transit")
+        current?.id.includes("depart") ||
+        current?.id.includes("collect") ||
+        current?.label.includes("transit")
           ? "transit"
           : "activity",
       steps,
@@ -1326,7 +1644,9 @@ export async function fetchEventDeliverGroupStatus(opts: {
         ? "Morning roll complete — open the next activity in Programme"
         : "Ready for programme — open the next activity when ready"),
     tone:
-      current?.id.includes("depart") || current?.label.includes("transit")
+      current?.id.includes("depart") ||
+      current?.id.includes("collect") ||
+      current?.label.includes("transit")
         ? "transit"
         : "activity",
     steps,

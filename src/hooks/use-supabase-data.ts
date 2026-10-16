@@ -1337,6 +1337,15 @@ import { invalidateIssueCaches, invalidateTransportCaches, invalidateFleetCaches
 
 const ACTIVE_TRIP_KEY = ["transport_trips", "active"] as const;
 
+/** Set when this browser just opened the run, so a later sign-in can tell a resume apart. */
+export const MANIFEST_JUST_STARTED_KEY = "yada.manifestJustStarted";
+
+function markManifestJustStarted(result: unknown) {
+  const id = (result as { trip?: { id?: string } } | null)?.trip?.id;
+  if (!id || typeof sessionStorage === "undefined") return;
+  sessionStorage.setItem(MANIFEST_JUST_STARTED_KEY, id);
+}
+
 export function useActiveTrip() {
   const driverId = getStaffId();
   return useQuery({
@@ -1384,7 +1393,8 @@ export function useStartTrip() {
   return useMutation({
     mutationFn: (input: Omit<StartTripInput, "driverStaffId">) =>
       startTripFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
@@ -1443,7 +1453,8 @@ export function useStartEventVenueHop() {
       assetId?: string | null;
       varianceReason?: string | null;
     }) => startEventVenueHop({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
@@ -1456,7 +1467,8 @@ export function useStartDayCentreRun() {
   return useMutation({
     mutationFn: (input: Omit<StartDayCentreRunInput, "driverStaffId">) =>
       startDayCentreRunFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: () => {
+    onSuccess: (result) => {
+      markManifestJustStarted(result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
     },
     onError: (err: Error) => showRedToast("Could not start Day Centre run", err),

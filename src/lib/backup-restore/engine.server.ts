@@ -301,17 +301,11 @@ export async function restoreFullBackup(
     catalog,
     service,
   );
-  const { error: truncateErr } = await service.rpc("truncate_backup_tables", {
-    p_tables: orderedTruncate,
-  });
-  if (truncateErr) {
-    throw new Error(
-      `Truncate failed. Ensure SUPABASE_SERVICE_ROLE_KEY is set and docs/sql/2026-07-11_backup_restore_rpcs.sql is applied — ${truncateErr.message}`,
-    );
-  }
 
-  // Hard gate: drop ALL public FKs before inserts (one RPC). Without this, child
-  // tables fail when parents sort wrong or session rows load after attendance.
+  // Drop FKs BEFORE truncate. TRUNCATE … CASCADE follows foreign keys even when
+  // the child is on the preserve list. staff_registry.person_id → people(id)
+  // was wiping every staff row on a data-only restore, then the preserve list
+  // refused to load them back.
   const { data: droppedFkCount, error: dropFkErr } = await service.rpc(
     "backup_drop_all_public_fks",
   );
@@ -321,8 +315,17 @@ export async function restoreFullBackup(
     );
   }
   warnings.push(
-    `FK load window: dropped ${Number(droppedFkCount ?? 0)} foreign key(s) before data insert.`,
+    `FK load window: dropped ${Number(droppedFkCount ?? 0)} foreign key(s) before truncate.`,
   );
+
+  const { error: truncateErr } = await service.rpc("truncate_backup_tables", {
+    p_tables: orderedTruncate,
+  });
+  if (truncateErr) {
+    throw new Error(
+      `Truncate failed. Ensure SUPABASE_SERVICE_ROLE_KEY is set and docs/sql/2026-07-11_backup_restore_rpcs.sql is applied — ${truncateErr.message}`,
+    );
+  }
 
   const restoreTargets = tablesToRestore.filter((t) => !preservedTables.includes(t));
   const orderedRestore = await orderTablesForDataRestore(

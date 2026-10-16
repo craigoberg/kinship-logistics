@@ -32,6 +32,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
+import { revealInManifestScroll } from "@/lib/ui/manifest-scroll";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,6 +48,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  MANIFEST_JUST_STARTED_KEY,
   useActiveTrip,
   useStartTrip,
   useStartDayCentreRun,
@@ -361,6 +363,7 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   return (
     <div
       ref={bindChromeScroll}
+      data-manifest-scroll
       className="min-h-0 flex-1 overflow-y-auto overscroll-y-none [overflow-anchor:none] p-4"
     >
       {step === "vehicle" && (
@@ -1616,6 +1619,15 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   const bindChromeScroll = useHideChromeOnScrollRef<HTMLElement>();
   const { chromeHidden } = useChromeVisibility();
   const { trip, legs: serverLegs, eventTitle } = bundle;
+  const [continuing] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const just = sessionStorage.getItem(MANIFEST_JUST_STARTED_KEY);
+    if (just === trip.id) {
+      sessionStorage.removeItem(MANIFEST_JUST_STARTED_KEY);
+      return false;
+    }
+    return true;
+  });
   const [driverPickupOrder, setDriverPickupOrder] = useState<string[]>([]);
   useEffect(() => {
     setDriverPickupOrder([]);
@@ -1886,9 +1898,12 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
   const activeRef = useRef<HTMLDivElement | null>(null);
   const closeRunRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (preDepartureOpen) return;
-    if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    const reveal = () => revealInManifestScroll(activeRef.current);
+    reveal();
+    const later = window.setTimeout(reveal, 300);
+    return () => window.clearTimeout(later);
   }, [activeLeg?.id, preDepartureOpen]);
 
   // The reconcile card is taller than a phone once SIM, incident, and the trip
@@ -2005,6 +2020,11 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
               {eventTitle ?? "Daily Run"}
               {isVenueHop ? " · Venue hop" : ""}
             </div>
+            {continuing && (
+              <div className="truncate text-[11px] font-semibold text-emerald-300">
+                Continuing this run
+              </div>
+            )}
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
               {formatDate(trip.tripDate)}
               {preDepartureOpen

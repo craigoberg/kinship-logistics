@@ -196,6 +196,12 @@ function stopLabel(stop: EventVenueStop): string {
     return MEAL_SLOT_LABELS[stop.meal_slot] ?? "Meal";
   }
   if (isMedicationStop(stop)) return "Medication round";
+  if (stop.activity_kind === "passenger_pickup") {
+    return `Collect ${stop.label_override?.trim() || "passenger"}`;
+  }
+  if (stop.activity_kind === "passenger_dropoff") {
+    return `Drop off ${stop.label_override?.trim() || "passenger"}`;
+  }
   return stop.label_override?.trim() || stop.venue_name?.trim() || "Venue";
 }
 

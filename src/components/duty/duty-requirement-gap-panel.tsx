@@ -111,7 +111,7 @@ export function DutyRequirementGapPanel({
         }
         verified={!!managerPin}
         verifiedLabel="Approved — continue"
-        length={4}
+        length={6}
         title={`Manager ${title} approval`}
         description="Approve proceeding when required certificates or orientations are missing or expired."
         disabled={
