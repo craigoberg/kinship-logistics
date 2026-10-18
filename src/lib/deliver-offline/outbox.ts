@@ -9,6 +9,7 @@ import {
   confirmBusLeave,
   confirmNonBusLeave,
   skipVenueStop,
+  undoOpenVenueStop,
   undoSkipVenueStop,
   declareProgrammeStopOpen,
   leaveVenueForNext,
@@ -227,6 +228,14 @@ export type DeliverOutboxOp =
     }
   | {
       kind: "undo_skip_venue";
+      sessionId: string;
+      eventId: string;
+      stopId: string;
+      venueName: string | null;
+      occurredAt: string;
+    }
+  | {
+      kind: "undo_open_venue";
       sessionId: string;
       eventId: string;
       stopId: string;
@@ -1641,6 +1650,53 @@ export async function undoSkipVenueStopOfflineAware(stop: {
   }
 }
 
+/** Active or Done goes back to waiting, on this tablet first. */
+export async function undoOpenVenueStopOfflineAware(stop: {
+  id: string;
+  eventId: string;
+  venueName: string | null;
+  sessionId: string;
+}): Promise<void> {
+  const remember = async () => {
+    await patchStops(stop.eventId, (row) =>
+      row.id === stop.id
+        ? {
+            ...row,
+            phase: "pending",
+            opened_at: null,
+            closed_at: null,
+            movement_method: null,
+          }
+        : row,
+    );
+    await rememberActivityRoll(stop.id, stop.sessionId, []);
+  };
+  const queue = async () => {
+    await remember();
+    await enqueue(stop.sessionId, {
+      kind: "undo_open_venue",
+      sessionId: stop.sessionId,
+      eventId: stop.eventId,
+      stopId: stop.id,
+      venueName: stop.venueName,
+      occurredAt: operationalNowIso(),
+    });
+  };
+  if (!isAppOnline()) {
+    await queue();
+    return;
+  }
+  try {
+    await withFieldTimeout(undoOpenVenueStop(stop));
+    await remember();
+  } catch (err) {
+    if (!isNetworkError(err)) throw err;
+    latchFieldLinkDown();
+    confirmLinkAfterFailure();
+    await queue();
+  }
+}
+
 export async function toggleActivityCheckInOfflineAware(
   row: ActivityRollRow,
 ): Promise<ActivityRollRow> {
@@ -1873,6 +1929,16 @@ async function replay(item: DeliverOutboxItem): Promise<void> {
       eventId: op.eventId,
       venueName: op.venueName,
     });
+    return;
+  }
+  if (op.kind === "undo_open_venue") {
+    await undoOpenVenueStop({
+      id: op.stopId,
+      eventId: op.eventId,
+      venueName: op.venueName,
+    });
+    const empty = await loadActivity(op.stopId);
+    if (empty) await rememberActivityRoll(op.stopId, op.sessionId, []);
     return;
   }
   if (op.kind === "close_day") {

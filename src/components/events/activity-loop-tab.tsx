@@ -64,6 +64,7 @@ import {
   leaveVenueForNextOfflineAware,
   markNotCollectedOfflineAware,
   skipVenueStopOfflineAware,
+  undoOpenVenueStopOfflineAware,
   undoSkipVenueStopOfflineAware,
   markSupportNotCollectedOfflineAware,
   openVenueStopOfflineAware,
@@ -1308,6 +1309,36 @@ function StopCard({
     },
     onError: (e: Error) => toast.error(e.message),
   });
+  const undoOpenMut = useMutation({
+    networkMode: "always",
+    mutationFn: () =>
+      undoOpenVenueStopOfflineAware({
+        id: stop.id,
+        eventId,
+        venueName: stop.label_override ?? stop.venue_name ?? null,
+        sessionId: eventDaySessionId,
+      }),
+    onSuccess: () => {
+      qc.setQueryData<EventVenueStop[]>(stopsKey(eventId), (prev) =>
+        prev?.map((row) =>
+          row.id === stop.id
+            ? {
+                ...row,
+                phase: "pending",
+                opened_at: null,
+                closed_at: null,
+                movement_method: null,
+              }
+            : row,
+        ),
+      );
+      void qc.invalidateQueries({ queryKey: activityRollKey(stop.id) });
+      toast.success("Back to waiting. Open it again when you are ready.");
+      setExpanded(false);
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
 
   const stopName = stopDisplayName(
     stop,
@@ -1458,7 +1489,8 @@ function StopCard({
     openMealMut.isPending ||
     closeMut.isPending ||
     leaveMut.isPending ||
-    declareMut.isPending;
+    declareMut.isPending ||
+    undoOpenMut.isPending;
 
   useEffect(() => {
     if (phase === "active" || readyToTravel) setExpanded(true);
@@ -1772,6 +1804,21 @@ function StopCard({
             </>
           )}
         </Button>
+        )}
+        {(phase === "active" || (phase === "completed" && !skipped)) && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11 shrink-0"
+            disabled={undoOpenMut.isPending}
+            onClick={(event) => {
+              event.stopPropagation();
+              undoOpenMut.mutate();
+            }}
+          >
+            Undo
+          </Button>
         )}
         {canSkip && venue && phase === "pending" && !isHere && !skipped && (
           <Button

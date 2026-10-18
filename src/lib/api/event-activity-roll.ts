@@ -1020,6 +1020,70 @@ export async function skipVenueStop(stop: {
   }
 }
 
+/**
+ * Take an Active or Done activity back to waiting.
+ * Check-in ticks for this visit are cleared so Open can run it again.
+ * Meals already served and doses already given stay on the record.
+ */
+export async function undoOpenVenueStop(stop: {
+  id: string;
+  eventId: string;
+  venueName: string | null;
+}): Promise<void> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("phase, notes")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("That activity is not on the programme.");
+  const row = data as { phase?: string | null; notes?: string | null };
+  if (isSkippedStop(row)) {
+    throw new Error("This was skipped. Undo the skip.");
+  }
+  const phase = row.phase ?? "pending";
+  if (phase !== "active" && phase !== "completed") return;
+
+  const { error: updErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "pending",
+      opened_at: null,
+      opened_by_id: null,
+      closed_at: null,
+      movement_method: null,
+    })
+    .eq("id", stop.id);
+  if (updErr) throw updErr;
+
+  const { error: rollErr } = await supabase
+    .from("event_activity_rolls")
+    .delete()
+    .eq("venue_stop_id", stop.id);
+  if (rollErr) throw rollErr;
+
+  const staffId = await resolveStaffIdWithFallback();
+  const name = stop.venueName?.trim() || "activity";
+  try {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "TRIP",
+      severity: "INFO",
+      action_type: "ACTIVITY_OPEN_UNDONE",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: await withAuditActorMeta({
+        venue_stop_id: stop.id,
+        event_id: stop.eventId,
+        location: name,
+        summary: `Undid opening ${name} — back to waiting`,
+      }),
+    });
+  } catch (err) {
+    console.warn("[undoOpenVenueStop] receipt failed:", err);
+  }
+}
+
 /** Put a skipped place back on the programme. A place that was run stays done. */
 export async function undoSkipVenueStop(stop: {
   id: string;
