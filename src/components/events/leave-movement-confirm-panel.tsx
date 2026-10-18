@@ -10,7 +10,6 @@ import { Bus, Footprints, Loader2, MapPin, RotateCcw, TrainFront } from "lucide-
 import { Link } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import { FieldActionButton } from "@/components/ui/field-action-button";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
@@ -19,10 +18,7 @@ import {
   clearPlannedVenueMovement,
   type MovementMethod,
 } from "@/lib/api/event-activity-roll";
-import {
-  confirmNonBusLeaveOfflineAware,
-  leaveVenueForNextOfflineAware,
-} from "@/lib/deliver-offline/outbox";
+import { leaveVenueForNextOfflineAware } from "@/lib/deliver-offline/outbox";
 import {
   eventTransportRunsKey,
   listEventTransportRuns,
@@ -143,32 +139,7 @@ export function LeaveMovementConfirmPanel({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const leaveMut = useMutation({
-    mutationFn: () =>
-      confirmNonBusLeaveOfflineAware({
-        fromStop: {
-          id: fromStopId,
-          eventId,
-          sessionDate,
-          venueName: fromVenueName,
-        },
-        toStop: {
-          id: toStopId,
-          eventId,
-          sessionDate,
-          venueName: toVenueName,
-        },
-        eventDaySessionId: sessionId,
-      }),
-    onSuccess: (result) => {
-      toast.success(`At ${toLabel} — check everyone in.`);
-      onNonBusConfirmed?.(result.openedStopId);
-      onChanged();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
-  const busy = undoMut.isPending || replanMut.isPending || leaveMut.isPending;
+  const busy = undoMut.isPending || replanMut.isPending;
 
   const onBoard = manifest.filter((r) => r.status === "on_bus").length;
   const total = manifest.filter((r) => r.status !== "not_travelling").length;
@@ -261,8 +232,8 @@ export function LeaveMovementConfirmPanel({
           </div>
           <p className="text-xs text-amber-100/70">
             {method === "bus"
-              ? "First bus today asks who is driving. Then mark who is on the bus. Not travelling stays on the trip."
-              : "Confirm leave to open the next stop for activity check-in. Closes this activity."}
+              ? "First bus today asks who is driving. Then mark who is moving, including staff and carers. Not travelling stays on the trip."
+              : "Mark who is moving with the group, including staff and carers. Then the next place opens."}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">
@@ -314,6 +285,7 @@ export function LeaveMovementConfirmPanel({
             toLabel={toLabel}
             fromVenueName={fromVenueName}
             toVenueName={toVenueName}
+            method="bus"
             busy={busy}
             onLeft={(id) => {
               onNonBusConfirmed?.(id);
@@ -322,18 +294,23 @@ export function LeaveMovementConfirmPanel({
           />
         </BusDayClearance>
       ) : (
-        <FieldActionButton
-          variant="success"
-          disabled={busy}
-          onClick={() => leaveMut.mutate()}
-        >
-          {leaveMut.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <MethodIcon className="h-4 w-4" />
-          )}
-          Leave for {toLabel}
-        </FieldActionButton>
+        <BusHopHeadcount
+          eventId={eventId}
+          sessionId={sessionId}
+          sessionDate={sessionDate}
+          fromStopId={fromStopId}
+          toStopId={toStopId}
+          fromLabel={fromLabel}
+          toLabel={toLabel}
+          fromVenueName={fromVenueName}
+          toVenueName={toVenueName}
+          method={method}
+          busy={busy}
+          onLeft={(id) => {
+            onNonBusConfirmed?.(id);
+            onChanged();
+          }}
+        />
       )}
 
       <BottomSheet
@@ -354,19 +331,19 @@ export function LeaveMovementConfirmPanel({
               {
                 method: "walk" as const,
                 label: "Walking",
-                sub: "Opens next stop with individual check-in roll",
+                sub: "Who is walking with the group, including staff and carers.",
                 icon: <Footprints className="h-5 w-5" />,
               },
               {
                 method: "other" as const,
                 label: "Other (train / tram / public…)",
-                sub: "Not the trip bus — individual check-in at the next stop",
+                sub: "Who is travelling with the group, including staff and carers.",
                 icon: <TrainFront className="h-5 w-5" />,
               },
               {
                 method: "on_site" as const,
                 label: "On-site / Already there",
-                sub: "Next activity is at the same place — check-in roll",
+                sub: "Who is here with the group, including staff and carers.",
                 icon: <MapPin className="h-5 w-5" />,
               },
             ] as const

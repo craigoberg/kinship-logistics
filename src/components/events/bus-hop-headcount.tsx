@@ -1,37 +1,61 @@
 /**
- * Leader bus hop — who is on this bus, on this tablet.
- * Not travelling stays on the trip. No Manifest and no kilometres.
+ * Who is moving with the group from this place to the next.
+ * Bus, walk, other, and on-site use the same list. Not with the group stays on the trip.
  */
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Bus, Loader2 } from "lucide-react";
+import { Bus, Footprints, Loader2, MapPin, TrainFront } from "lucide-react";
 import { toast } from "sonner";
 import { PersonKindBadge } from "@/components/people/person-kind-badge";
 import { Button } from "@/components/ui/button";
 import { FieldActionButton } from "@/components/ui/field-action-button";
-import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
-import { listEventSupportAttendance } from "@/lib/api/event-support";
-import type { HopHeadcountMark } from "@/lib/api/event-activity-roll";
+import {
+  listMovingParty,
+  type HopHeadcountMark,
+  type MovementMethod,
+} from "@/lib/api/event-activity-roll";
 import {
   confirmBusLeaveOfflineAware,
-  resolveEventAttendanceRoll,
-  resolveEventSupportRoll,
+  confirmNonBusLeaveOfflineAware,
 } from "@/lib/deliver-offline/outbox";
 import {
   clearHopHeadcount,
   loadHopHeadcount,
+  loadMovingPartyCache,
   saveHopHeadcount,
+  saveMovingPartyCache,
   type HopMark,
 } from "@/lib/deliver-offline/hop-headcount";
+import { isAppOnline } from "@/lib/simulated-offline";
 import { cn } from "@/lib/utils";
-import type { PersonKindChip } from "@/lib/ui/person-kind-chip";
 
-type Person = {
-  key: string;
-  name: string;
-  kind: PersonKindChip;
-  participantId: string | null;
-  staffId: string | null;
-  carerId: string | null;
+const MOVE_COPY: Record<
+  MovementMethod,
+  { title: string; withGroup: string; tap: string; not: string }
+> = {
+  bus: {
+    title: "Who is moving",
+    withGroup: "On the bus",
+    tap: "Tap for on the bus",
+    not: "Not travelling",
+  },
+  walk: {
+    title: "Who is walking",
+    withGroup: "Walking",
+    tap: "Tap if walking with the group",
+    not: "Not with the group",
+  },
+  other: {
+    title: "Who is travelling",
+    withGroup: "With the group",
+    tap: "Tap if travelling with the group",
+    not: "Not with the group",
+  },
+  on_site: {
+    title: "Who is here",
+    withGroup: "With the group",
+    tap: "Tap if with the group",
+    not: "Not with the group",
+  },
 };
 
 interface Props {
@@ -44,6 +68,7 @@ interface Props {
   toLabel: string;
   fromVenueName: string | null;
   toVenueName: string | null;
+  method?: MovementMethod;
   busy?: boolean;
   onLeft: (openedStopId: string) => void;
 }
@@ -62,24 +87,23 @@ export function BusHopHeadcount({
   toLabel,
   fromVenueName,
   toVenueName,
+  method = "bus",
   busy = false,
   onLeft,
 }: Props) {
   const qc = useQueryClient();
+  const copy = MOVE_COPY[method];
 
-  const { data: attendance = [], isLoading: attendanceLoading } = useQuery({
-    queryKey: ["event-attendance-log", sessionId],
-    queryFn: () =>
-      resolveEventAttendanceRoll(sessionId, () => listEventAttendanceRoll(sessionId)),
+  const { data: named = [], isLoading: partyLoading } = useQuery({
+    queryKey: ["moving-party", eventId, sessionId],
+    queryFn: async () => {
+      if (!isAppOnline()) return (await loadMovingPartyCache(sessionId)) ?? [];
+      const people = await listMovingParty(eventId, sessionId);
+      if (people.length > 0) await saveMovingPartyCache(sessionId, people);
+      return people;
+    },
     staleTime: 15_000,
-    networkMode: "offlineFirst",
-  });
-  const { data: support = [], isLoading: supportLoading } = useQuery({
-    queryKey: ["event-support-attendance", sessionId],
-    queryFn: () =>
-      resolveEventSupportRoll(sessionId, () => listEventSupportAttendance(sessionId)),
-    staleTime: 15_000,
-    networkMode: "offlineFirst",
+    networkMode: "always",
   });
   const { data: marks = {}, isLoading: marksLoading } = useQuery({
     queryKey: headcountQueryKey(fromStopId, toStopId),
@@ -87,51 +111,6 @@ export function BusHopHeadcount({
     staleTime: Infinity,
     networkMode: "always",
   });
-
-  const people: Person[] = [
-    ...attendance
-      .filter((row) => row.status === "checked_in")
-      .map((row) => ({
-        key: `p:${row.participantId}`,
-        name: "Participant",
-        kind: "participant" as const,
-        participantId: row.participantId,
-        staffId: null,
-        carerId: null,
-      })),
-    ...support
-      .filter((row) => row.status === "checked_in")
-      .map((row) => ({
-        key: row.staffId ? `s:${row.staffId}` : `c:${row.carerId ?? row.id}`,
-        name: row.displayName,
-        kind: row.personKind,
-        participantId: null,
-        staffId: row.staffId,
-        carerId: row.carerId,
-      })),
-  ];
-
-  const { data: nameRows = [], isLoading: namesLoading } = useQuery({
-    queryKey: ["participants", "bus-hop-names"],
-    queryFn: async () => {
-      const { listParticipants } = await import("@/lib/data-store");
-      return listParticipants();
-    },
-    staleTime: 120_000,
-  });
-  const nameById = new Map(
-    nameRows.map((person) => [
-      person.id,
-      `${person.firstName ?? ""} ${person.lastName ?? ""}`.trim() || person.fullName || "Participant",
-    ]),
-  );
-  const named = people
-    .map((person) =>
-      person.participantId
-        ? { ...person, name: nameById.get(person.participantId) ?? "Participant" }
-        : person,
-    )
-    .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
 
   const unmarked = named.filter((person) => !marks[person.key]);
 
@@ -167,7 +146,7 @@ export function BusHopHeadcount({
           mark,
         };
       });
-      return confirmBusLeaveOfflineAware({
+      const leave = {
         fromStop: {
           id: fromStopId,
           eventId,
@@ -182,7 +161,9 @@ export function BusHopHeadcount({
         },
         eventDaySessionId: sessionId,
         marks: payload,
-      });
+      };
+      if (method === "bus") return confirmBusLeaveOfflineAware(leave);
+      return confirmNonBusLeaveOfflineAware(leave);
     },
     onSuccess: async (result) => {
       await clearHopHeadcount(fromStopId, toStopId);
@@ -199,7 +180,7 @@ export function BusHopHeadcount({
     saveMut.mutate(next);
   };
 
-  const loading = attendanceLoading || supportLoading || marksLoading || namesLoading;
+  const loading = partyLoading || marksLoading;
   const working = busy || saveMut.isPending || leaveMut.isPending;
 
   if (loading) {
@@ -213,10 +194,12 @@ export function BusHopHeadcount({
   return (
     <div className="space-y-2">
       <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-        Who is on the bus
+        {copy.title}
       </p>
       {named.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No one is checked in yet.</p>
+        <p className="text-sm text-muted-foreground">
+          No one is with the group on this tablet yet.
+        </p>
       ) : (
         named.map((person) => {
           const mark = marks[person.key];
@@ -242,10 +225,10 @@ export function BusHopHeadcount({
                 )}
                 aria-label={
                   onBus
-                    ? `${person.name} is on the bus`
+                    ? `${person.name} is ${copy.withGroup.toLowerCase()}`
                     : staying
-                      ? `${person.name} is not travelling`
-                      : `Mark ${person.name} on the bus`
+                      ? `${person.name} is ${copy.not.toLowerCase()}`
+                      : `${copy.tap} — ${person.name}`
                 }
               >
                 <span className="flex flex-wrap items-center gap-1">
@@ -254,10 +237,10 @@ export function BusHopHeadcount({
                 </span>
                 <span className="mt-0.5 block text-[11px] leading-snug opacity-80">
                   {onBus
-                    ? "On the bus"
+                    ? copy.withGroup
                     : staying
-                      ? "Not travelling — still on the trip"
-                      : "Tap for on the bus"}
+                      ? `${copy.not} — still on the trip`
+                      : copy.tap}
                 </span>
               </button>
               {!mark ? (
@@ -269,7 +252,7 @@ export function BusHopHeadcount({
                   disabled={working}
                   onClick={() => setMark(person.key, "not_travelling")}
                 >
-                  Not travelling
+                  {copy.not}
                 </Button>
               ) : (
                 <button
@@ -298,6 +281,12 @@ export function BusHopHeadcount({
       >
         {leaveMut.isPending ? (
           <Loader2 className="h-4 w-4 animate-spin" />
+        ) : method === "walk" ? (
+          <Footprints className="h-4 w-4" />
+        ) : method === "other" ? (
+          <TrainFront className="h-4 w-4" />
+        ) : method === "on_site" ? (
+          <MapPin className="h-4 w-4" />
         ) : (
           <Bus className="h-4 w-4" />
         )}

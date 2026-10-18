@@ -176,6 +176,7 @@ export type DeliverOutboxOp =
       fromVenueName: string | null;
       toStopId: string;
       toVenueName: string | null;
+      marks?: HopHeadcountMark[];
       occurredAt: string;
     }
   | {
@@ -1202,6 +1203,7 @@ export async function confirmNonBusLeaveOfflineAware(opts: {
   fromStop: { id: string; eventId: string; sessionDate: string; venueName: string | null };
   toStop: { id: string; eventId: string; sessionDate: string; venueName: string | null };
   eventDaySessionId: string;
+  marks?: HopHeadcountMark[];
 }): Promise<{ openedStopId: string }> {
   const remember = async () => {
     const occurredAt = operationalNowIso();
@@ -1246,6 +1248,7 @@ export async function confirmNonBusLeaveOfflineAware(opts: {
       fromVenueName: opts.fromStop.venueName,
       toStopId: opts.toStop.id,
       toVenueName: opts.toStop.venueName,
+      marks: opts.marks,
       occurredAt: operationalNowIso(),
     });
   };
@@ -1879,6 +1882,7 @@ async function replay(item: DeliverOutboxItem): Promise<void> {
         venueName: op.toVenueName,
       },
       eventDaySessionId: op.sessionId,
+      marks: op.marks,
     });
     return;
   }

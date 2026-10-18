@@ -781,19 +781,19 @@ function LeaveMethodButtons({
           {
             method: "walk" as const,
             label: "Walking",
-            sub: "Opens next stop with individual check-in roll",
+            sub: "Who is walking with the group, including staff and carers.",
             icon: <Footprints className="h-5 w-5" />,
           },
           {
             method: "other" as const,
             label: "Other (train / tram / public…)",
-            sub: "Not the trip bus — individual check-in at the next stop",
+            sub: "Who is travelling with the group, including staff and carers.",
             icon: <TrainFront className="h-5 w-5" />,
           },
           {
             method: "on_site" as const,
             label: "On-site / Already there",
-            sub: "Next activity is at the same place — check-in roll",
+            sub: "Who is here with the group, including staff and carers.",
             icon: <MapPin className="h-5 w-5" />,
           },
         ] as const

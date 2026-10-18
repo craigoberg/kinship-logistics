@@ -67,6 +67,7 @@ import {
 import { reconcileOvernightAttendanceContinuity } from "@/lib/api/event-day-continuity";
 import { resolveEventDaySessions } from "@/lib/deliver-offline/outbox";
 import { rememberTripFleet } from "@/lib/deliver-offline/fleet-cache";
+import { cacheMovingParty } from "@/lib/deliver-offline/hop-headcount";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { listManifestPickerEvents, type EventManifest, type StaffMember } from "@/lib/data-store";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
@@ -456,7 +457,8 @@ function TripDayView({
 
   useEffect(() => {
     void rememberTripFleet(session.session_date);
-  }, [session.session_date]);
+    void cacheMovingParty(event.id, session.id);
+  }, [session.session_date, session.id, event.id]);
   const sortedSessions = [...sessions].sort((a, b) =>
     a.session_date.localeCompare(b.session_date),
   );

@@ -762,6 +762,8 @@ export async function confirmNonBusLeave(opts: {
     venueName: string | null;
   };
   eventDaySessionId: string;
+  /** Who walked, travelled, or stayed with the group. Omitted only for an older queued leave. */
+  marks?: HopHeadcountMark[];
 }): Promise<{ openedStopId: string }> {
   await assertActivityRollClearToLeave(opts.fromStop.id);
 
@@ -780,6 +782,16 @@ export async function confirmNonBusLeave(opts: {
   }
   if (!method || method === "bus") {
     throw new Error("Choose Walk, Other, or On-site before confirming leave.");
+  }
+  if (opts.marks) {
+    await recordMovingParty({
+      eventId: opts.fromStop.eventId,
+      sessionId: opts.eventDaySessionId,
+      from: opts.fromStop.venueName?.trim() || "here",
+      to: opts.toStop.venueName?.trim() || "the next place",
+      method,
+      marks: opts.marks,
+    });
   }
 
   await openVenueStop(
@@ -801,14 +813,220 @@ export async function confirmNonBusLeave(opts: {
   return { openedStopId: opts.toStop.id };
 }
 
-export type HopHeadcountMark = {
+export type MovingPerson = {
   key: string;
   name: string;
+  kind: "participant" | "staff" | "volunteer" | "carer";
   participantId: string | null;
   staffId: string | null;
   carerId: string | null;
+};
+
+export type HopHeadcountMark = MovingPerson & {
   mark: "on_bus" | "not_travelling";
 };
+
+/**
+ * Who can move with the group from this place to the next.
+ * Checked-in participants, checked-in staff and volunteers, and a carer
+ * who came with a checked-in participant (even without their own support row).
+ */
+export async function listMovingParty(
+  eventId: string,
+  sessionId: string,
+): Promise<MovingPerson[]> {
+  const { data: attendance, error: attErr } = await supabase
+    .from("event_attendance_log")
+    .select("participant_id")
+    .eq("event_day_session_id", sessionId)
+    .eq("status", "checked_in");
+  if (attErr) throw attErr;
+  const participantIds = [
+    ...new Set(
+      (attendance ?? [])
+        .map((row) => (row as { participant_id?: string | null }).participant_id)
+        .filter((id): id is string => !!id),
+    ),
+  ];
+
+  const nameById = new Map<string, string>();
+  if (participantIds.length > 0) {
+    const { data: people, error } = await supabase
+      .from("participants")
+      .select("id, first_name, last_name")
+      .in("id", participantIds);
+    if (error) throw error;
+    for (const person of people ?? []) {
+      const row = person as { id: string; first_name?: string | null; last_name?: string | null };
+      nameById.set(
+        row.id,
+        `${row.first_name ?? ""} ${row.last_name ?? ""}`.trim() || "Participant",
+      );
+    }
+  }
+
+  const { listEventSupportAttendance } = await import("@/lib/api/event-support");
+  const support = await listEventSupportAttendance(sessionId);
+  const people: MovingPerson[] = [
+    ...participantIds.map((id) => ({
+      key: `p:${id}`,
+      name: nameById.get(id) ?? "Participant",
+      kind: "participant" as const,
+      participantId: id,
+      staffId: null,
+      carerId: null,
+    })),
+    ...support
+      .filter((row) => row.status === "checked_in")
+      .map((row) => ({
+        key: row.staffId ? `s:${row.staffId}` : `c:${row.carerId ?? row.id}`,
+        name: row.displayName,
+        kind: row.personKind,
+        participantId: null,
+        staffId: row.staffId,
+        carerId: row.carerId,
+      })),
+  ];
+
+  const present = new Set(participantIds);
+  const have = new Set(people.map((person) => person.key));
+  const { data: bookings, error: bookErr } = await supabase
+    .from("event_roster_bookings")
+    .select("participant_id, carer_id, brings_carer")
+    .eq("event_id", eventId)
+    .neq("booking_status", "Cancelled")
+    .eq("brings_carer", true);
+  if (bookErr) {
+    if (!/column|schema|does not exist/i.test(bookErr.message)) throw bookErr;
+  } else {
+    const carerIds = [
+      ...new Set(
+        (bookings ?? [])
+          .map((row) => row as { participant_id?: string | null; carer_id?: string | null; brings_carer?: boolean })
+          .filter(
+            (row) =>
+              row.brings_carer &&
+              row.carer_id &&
+              row.participant_id &&
+              present.has(row.participant_id) &&
+              !have.has(`c:${row.carer_id}`),
+          )
+          .map((row) => row.carer_id as string),
+      ),
+    ];
+    if (carerIds.length > 0) {
+      const { data: carers, error: carerErr } = await supabase
+        .from("carers_registry")
+        .select("id, full_name")
+        .in("id", carerIds);
+      if (carerErr) throw carerErr;
+      const carerName = new Map(
+        (carers ?? []).map((row) => {
+          const carer = row as { id: string; full_name?: string | null };
+          return [carer.id, carer.full_name?.trim() || "Carer"] as const;
+        }),
+      );
+      for (const id of carerIds) {
+        people.push({
+          key: `c:${id}`,
+          name: carerName.get(id) ?? "Carer",
+          kind: "carer",
+          participantId: null,
+          staffId: null,
+          carerId: id,
+        });
+      }
+    }
+  }
+
+  return people.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: "base" }));
+}
+
+function moveSummary(
+  method: MovementMethod,
+  mark: HopHeadcountMark,
+  from: string,
+  to: string,
+): { action: string; summary: string } {
+  if (mark.mark === "not_travelling") {
+    return {
+      action: "EVENT_HOP_NOT_TRAVELLING",
+      summary: `${mark.name} not with the group from ${from} to ${to} — still on the trip`,
+    };
+  }
+  if (method === "bus") {
+    return {
+      action: "EVENT_HOP_ON_BUS",
+      summary: `${mark.name} on the bus from ${from} to ${to}`,
+    };
+  }
+  if (method === "walk") {
+    return {
+      action: "EVENT_HOP_WITH_GROUP",
+      summary: `${mark.name} walked with the group from ${from} to ${to}`,
+    };
+  }
+  if (method === "on_site") {
+    return {
+      action: "EVENT_HOP_WITH_GROUP",
+      summary: `${mark.name} with the group at ${to}`,
+    };
+  }
+  return {
+    action: "EVENT_HOP_WITH_GROUP",
+    summary: `${mark.name} travelled with the group from ${from} to ${to}`,
+  };
+}
+
+async function recordMovingParty(opts: {
+  eventId: string;
+  sessionId: string;
+  from: string;
+  to: string;
+  method: MovementMethod;
+  marks: HopHeadcountMark[];
+}): Promise<void> {
+  const party = await listMovingParty(opts.eventId, opts.sessionId);
+  if (party.length === 0) {
+    throw new Error("No one is with the group yet.");
+  }
+  const marked = new Map(opts.marks.map((mark) => [mark.key, mark]));
+  const missing = party.filter((person) => {
+    const mark = marked.get(person.key)?.mark;
+    return mark !== "on_bus" && mark !== "not_travelling";
+  });
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.length} still to mark as with the group or not with the group.`,
+    );
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  for (const person of party) {
+    const mark = marked.get(person.key)!;
+    const written = moveSummary(opts.method, mark, opts.from, opts.to);
+    try {
+      await writeToLedger({
+        staff_id: staffId,
+        category: "TRIP",
+        severity: "GREEN",
+        action_type: written.action,
+        gps_lat: null,
+        gps_lng: null,
+        metadata: await withAuditActorMeta({
+          person_name: mark.name,
+          participant_id: mark.participantId,
+          staff_id: mark.staffId,
+          carer_id: mark.carerId,
+          location: `${opts.from} to ${opts.to}`,
+          movement_method: opts.method,
+          summary: written.summary,
+        }),
+      });
+    } catch (err) {
+      console.warn("[recordMovingParty] receipt failed:", err);
+    }
+  }
+}
 
 /** Open the next place after the leader's bus headcount. No Manifest hop and no kilometres. */
 async function openArrivedByBus(
@@ -881,49 +1099,14 @@ export async function confirmBusLeave(opts: {
   marks: HopHeadcountMark[];
 }): Promise<{ openedStopId: string }> {
   await assertActivityRollClearToLeave(opts.fromStop.id);
-
-  const { data: attendance, error: attErr } = await supabase
-    .from("event_attendance_log")
-    .select("participant_id")
-    .eq("event_day_session_id", opts.eventDaySessionId)
-    .eq("status", "checked_in");
-  if (attErr) throw attErr;
-
-  const supportResult = await supabase
-    .from("event_support_attendance_log")
-    .select("staff_id, carer_id")
-    .eq("event_day_session_id", opts.eventDaySessionId)
-    .eq("status", "checked_in");
-  if (supportResult.error && !/schema|column|relation/i.test(supportResult.error.message)) {
-    throw supportResult.error;
-  }
-
-  const needed = new Set<string>();
-  for (const row of attendance ?? []) {
-    const id = (row as { participant_id: string }).participant_id;
-    if (id) needed.add(`p:${id}`);
-  }
-  for (const row of supportResult.data ?? []) {
-    const staffId = (row as { staff_id?: string | null }).staff_id;
-    const carerId = (row as { carer_id?: string | null }).carer_id;
-    if (staffId) needed.add(`s:${staffId}`);
-    else if (carerId) needed.add(`c:${carerId}`);
-  }
-
-  const marked = new Map(opts.marks.map((mark) => [mark.key, mark]));
-  const missing = [...needed].filter((key) => {
-    const mark = marked.get(key)?.mark;
-    return mark !== "on_bus" && mark !== "not_travelling";
+  await recordMovingParty({
+    eventId: opts.fromStop.eventId,
+    sessionId: opts.eventDaySessionId,
+    from: opts.fromStop.venueName?.trim() || "here",
+    to: opts.toStop.venueName?.trim() || "the next place",
+    method: "bus",
+    marks: opts.marks,
   });
-  if (needed.size === 0) {
-    throw new Error("No one is checked in yet.");
-  }
-  if (missing.length > 0) {
-    throw new Error(
-      `${missing.length} still to mark on the bus or not travelling.`,
-    );
-  }
-
   await openArrivedByBus(opts.toStop, opts.eventDaySessionId);
   await closeVenueStop({
     id: opts.fromStop.id,
@@ -931,37 +1114,6 @@ export async function confirmBusLeave(opts: {
     venueName: opts.fromStop.venueName,
     sessionDate: opts.fromStop.sessionDate,
   });
-
-  const staffId = await resolveStaffIdWithFallback();
-  const from = opts.fromStop.venueName?.trim() || "here";
-  const to = opts.toStop.venueName?.trim() || "the next place";
-  for (const key of needed) {
-    const mark = marked.get(key)!;
-    const onBus = mark.mark === "on_bus";
-    try {
-      await writeToLedger({
-        staff_id: staffId,
-        category: "TRIP",
-        severity: "GREEN",
-        action_type: onBus ? "EVENT_HOP_ON_BUS" : "EVENT_HOP_NOT_TRAVELLING",
-        gps_lat: null,
-        gps_lng: null,
-        metadata: await withAuditActorMeta({
-          person_name: mark.name,
-          participant_id: mark.participantId,
-          staff_id: mark.staffId,
-          carer_id: mark.carerId,
-          location: `${from} to ${to}`,
-          summary: onBus
-            ? `${mark.name} on the bus from ${from} to ${to}`
-            : `${mark.name} not travelling from ${from} to ${to} — still on the trip`,
-        }),
-      });
-    } catch (err) {
-      console.warn("[confirmBusLeave] headcount receipt failed:", err);
-    }
-  }
-
   return { openedStopId: opts.toStop.id };
 }
 
