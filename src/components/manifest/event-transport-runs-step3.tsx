@@ -6,7 +6,7 @@
  * Transport IN (outbound) still uses the parent's StartPointPicker via children.
  * BL-069: multiple Transport IN / HOME cards when roster uses R1/R2/….
  */
-import { useEffect, useLayoutEffect, useMemo, useRef } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { AlertTriangle, CheckCircle2, Circle, Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
@@ -25,6 +25,9 @@ import {
   CAUTION_CALLOUT_ICON_CLASS,
 } from "@/lib/ui/caution-callout";
 import { revealInManifestScroll } from "@/lib/ui/manifest-scroll";
+import { ForceUnreleasedHop } from "@/components/manifest/force-unreleased-hop";
+import { loadExpectedHops, rememberExpectedHops } from "@/lib/manifest-offline";
+import { isAppOnline } from "@/lib/simulated-offline";
 
 export type SelectedTransportRun =
   | { kind: "outbound"; busRunCode: string | null; card: EventTransportRunCard }
@@ -91,6 +94,12 @@ function hopHoldMessage(card: EventTransportRunCard): { title: string; body: str
       body: `Open the location on Event Deliver before ${leg} can start.`,
     };
   }
+  if (detail.includes("not a driver run") || detail.includes("Leader marks")) {
+    return {
+      title: "The trip leader has this hop",
+      body: `${leg} is marked on Event Deliver. This Manifest is the run to the meeting point, or the run home.`,
+    };
+  }
   if (card.status === "ready" || detail.includes("Release") || detail.includes("By Bus")) {
     return {
       title: "Not released to the bus yet",
@@ -122,7 +131,33 @@ export function EventTransportRunsStep3({
   children,
   dutyGate,
 }: Props) {
-  const { data: runs = [], isLoading } = useEventTransportRuns(eventId, sessionId, sessionDate);
+  const runsQuery = useEventTransportRuns(eventId, sessionId, sessionDate);
+  const { isLoading } = runsQuery;
+  const [savedHops, setSavedHops] = useState<EventTransportRunCard[]>([]);
+
+  useEffect(() => {
+    if (!eventId || !sessionId || !sessionDate) return;
+    void loadExpectedHops({ eventId, sessionId, sessionDate }).then((hops) => {
+      setSavedHops(
+        hops.map((hop) => ({
+          key: `hop-${hop.hopIndex}`,
+          kind: "venue_hop" as const,
+          hopIndex: hop.hopIndex,
+          label: hop.label,
+          detail: "Saved on this tablet",
+          status: "ready" as const,
+          tripId: null,
+          fromStopId: hop.fromStopId,
+          toStopId: hop.toStopId,
+          originLabel: hop.originLabel,
+          originAddress: hop.originAddress,
+        })),
+      );
+    });
+  }, [eventId, sessionId, sessionDate]);
+
+  const usingSavedList = runsQuery.data == null && !isLoading && savedHops.length > 0;
+  const runs = runsQuery.data ?? (usingSavedList ? savedHops : []);
   const startHop = useStartEventVenueHop();
   const startTrip = useStartTrip();
   const focusRef = useRef<HTMLDivElement | null>(null);
@@ -192,7 +227,12 @@ export function EventTransportRunsStep3({
       return;
     }
     if (selected?.kind === "outbound" || selected?.kind === "return") return;
-    const heldHop = hopRuns.find((r) => r.status !== "completed" && r.hopIndex != null);
+    const heldHop = hopRuns.find(
+      (r) =>
+        r.status !== "completed" &&
+        r.hopIndex != null &&
+        (!!r.tripId || r.status === "ready"),
+    );
     if (heldHop) {
       const sameHop =
         selected?.kind === "venue_hop" && selected.hopIndex === heldHop.hopIndex;
@@ -220,6 +260,15 @@ export function EventTransportRunsStep3({
       ? `hop:${selected.hopIndex}:${selected.card.status}:${hopHold?.title ?? ""}`
       : `${selected.kind}:${selected.busRunCode ?? ""}:${selected.card.status}`
     : "";
+
+  useEffect(() => {
+    if (!isAppOnline() || !eventId || !sessionId || !sessionDate) return;
+    const hops = hopRuns.filter((hop) => hop.status !== "completed");
+    if (!hops.length) return;
+    void rememberExpectedHops({ eventId, sessionId, sessionDate, hops }).catch(() => {
+      /* keep the last downloaded list */
+    });
+  }, [eventId, sessionId, sessionDate, hopRuns]);
 
   useLayoutEffect(() => {
     if (!focusKey || isLoading) return;
@@ -324,6 +373,11 @@ export function EventTransportRunsStep3({
     <div className="space-y-4">
       <div className="grid gap-2">
         <Label>Today&apos;s Transport Legs</Label>
+        {usingSavedList && (
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            Showing the last list saved on this tablet.
+          </p>
+        )}
         <div className="space-y-2">
           {runs.map((run) => {
             const isHop = run.kind === "venue_hop";
@@ -403,11 +457,25 @@ export function EventTransportRunsStep3({
                 {hopHeld && hopHold && (
                   <div className={cn("flex items-start gap-2 px-4 py-3", CAUTION_CALLOUT_CLASS)}>
                     <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-                    <div>
+                    <div className="min-w-0 flex-1">
                       <p className="text-sm font-semibold">{hopHold.title}</p>
                       <p className={cn("mt-0.5 text-xs leading-relaxed", CAUTION_CALLOUT_BODY_CLASS)}>
                         {hopHold.body}
                       </p>
+                      {hopHold.title === "Not released to the bus yet" &&
+                        selected?.kind === "venue_hop" &&
+                        selected.card.status === "ready" && (
+                        <ForceUnreleasedHop
+                          eventId={eventId}
+                          sessionId={sessionId}
+                          sessionDate={sessionDate}
+                          card={selected.card}
+                          startOdometerKm={startOdometer}
+                          assetId={assetId}
+                          dutyGate={dutyGate}
+                          onStarted={onHopStarted}
+                        />
+                      )}
                     </div>
                   </div>
                 )}

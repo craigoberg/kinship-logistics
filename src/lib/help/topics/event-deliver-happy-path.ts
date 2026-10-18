@@ -16,6 +16,9 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
     "morning roll",
     "evening roll",
     "close day",
+    "offline",
+    "no signal",
+    "check-out",
   ],
   menus: ["event-deliver", "manifest", "events"],
   roles: ["support_worker", "manager", "assistant_manager", "driver"],
@@ -43,6 +46,10 @@ export const eventDeliverHappyPathTopic: HelpTopic = {
     {
       heading: "Morning roll (Day 2+)",
       body: "On overnight trips, complete morning roll before releasing the next hop or programme block when the gate requires it.",
+    },
+    {
+      heading: "No signal at a venue",
+      body: "If a read fails or does not answer, the tablet stays offline until a health check succeeds. It will not quietly load the server over taps already saved here. Check-in, check-out, venue open, activity check-in, morning or evening roll, and Close day save on this tablet and upload when the link returns. Meals and medication are still being moved onto the same path.",
     },
     {
       heading: "Programme and bus hops",

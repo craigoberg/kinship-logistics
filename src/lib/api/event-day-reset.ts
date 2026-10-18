@@ -9,6 +9,7 @@
  * the overnight base (first stop active) so Morning Roll is available.
  */
 import { supabase } from "@/integrations/supabase/client";
+import { clearDeliverDayOnTablet } from "@/lib/deliver-offline/outbox";
 import { seedEventAttendanceRoll } from "@/lib/api/event-attendance";
 import { applyOvernightDayStartContinuity } from "@/lib/api/event-day-continuity";
 import { writeToLedger } from "@/lib/api/ledger";
@@ -85,6 +86,41 @@ async function deleteOrThrow(
 ): Promise<void> {
   const { error } = await run();
   if (error) throw new Error(`${label}: ${error.message}`);
+}
+
+async function resetVenueStopsToWaiting(eventId: string, sessionDate: string): Promise<void> {
+  const { error: stopErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "pending",
+      opened_at: null,
+      closed_at: null,
+      opened_by_id: null,
+    })
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate);
+  if (stopErr) throw new Error(`event_venue_stops reset: ${stopErr.message}`);
+
+  const { error: clearMoveErr } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: null })
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .or("activity_kind.eq.venue,activity_kind.is.null");
+  if (clearMoveErr) {
+    throw new Error(
+      `event_venue_stops clear movement: ${clearMoveErr.message}. Run docs/sql/2026-08-07_venue_stop_movement_ask_other.sql`,
+    );
+  }
+  const { error: onSiteErr } = await supabase
+    .from("event_venue_stops")
+    .update({ movement_method: "on_site" })
+    .eq("event_id", eventId)
+    .eq("session_date", sessionDate)
+    .in("activity_kind", ["meal", "medication_round"]);
+  if (onSiteErr) {
+    throw new Error(`event_venue_stops meal/med reset: ${onSiteErr.message}`);
+  }
 }
 
 async function isNonFirstTripDay(eventId: string, sessionDate: string): Promise<boolean> {
@@ -190,6 +226,8 @@ export async function resetEventDayToStartOfDay(
   const actor = await resolveStaffIdWithFallback();
   const overnightDay = await isNonFirstTripDay(eventId, sessionDate);
 
+  await clearDeliverDayOnTablet(eventId, sessionId);
+
   const escalationIds = await collectEscalationIssueIds(sessionId);
 
   if (escalationIds.length > 0) {
@@ -254,6 +292,12 @@ export async function resetEventDayToStartOfDay(
       .delete()
       .eq("event_day_session_id", sessionId),
   );
+  await deleteOrThrow("event_support_attendance_log", () =>
+    supabase
+      .from("event_support_attendance_log")
+      .delete()
+      .eq("event_day_session_id", sessionId),
+  );
   await deleteOrThrow("event_morning_log", () =>
     supabase
       .from("event_morning_log")
@@ -270,38 +314,7 @@ export async function resetEventDayToStartOfDay(
   // Clear runtime; unset movement so Programme asks Bus/Walk/On-site/Other each leave.
   // Meals/meds → on_site. Requires docs/sql/2026-08-07_venue_stop_movement_ask_other.sql
   // (NULL allowed on movement_method).
-  const { error: stopErr } = await supabase
-    .from("event_venue_stops")
-    .update({
-      phase: "pending",
-      opened_at: null,
-      closed_at: null,
-      opened_by_id: null,
-    })
-    .eq("event_id", eventId)
-    .eq("session_date", sessionDate);
-  if (stopErr) throw new Error(`event_venue_stops reset: ${stopErr.message}`);
-
-  const { error: clearMoveErr } = await supabase
-    .from("event_venue_stops")
-    .update({ movement_method: null })
-    .eq("event_id", eventId)
-    .eq("session_date", sessionDate)
-    .or("activity_kind.eq.venue,activity_kind.is.null");
-  if (clearMoveErr) {
-    throw new Error(
-      `event_venue_stops clear movement: ${clearMoveErr.message}. Run docs/sql/2026-08-07_venue_stop_movement_ask_other.sql`,
-    );
-  }
-  const { error: onSiteErr } = await supabase
-    .from("event_venue_stops")
-    .update({ movement_method: "on_site" })
-    .eq("event_id", eventId)
-    .eq("session_date", sessionDate)
-    .in("activity_kind", ["meal", "medication_round"]);
-  if (onSiteErr) {
-    throw new Error(`event_venue_stops meal/med reset: ${onSiteErr.message}`);
-  }
+  await resetVenueStopsToWaiting(eventId, sessionDate);
 
   // SIM clock first so overnight open / check-in stamps match trip-day morning.
   setOperationalClockOverride({ date: sessionDate, time: START_OF_DAY_CLOCK });
@@ -327,6 +340,11 @@ export async function resetEventDayToStartOfDay(
       expected_arrival_by: null,
       updated_at: operationalNowIso(),
     });
+  }
+
+  await clearDeliverDayOnTablet(eventId, sessionId);
+  if (!overnightDay) {
+    await resetVenueStopsToWaiting(eventId, sessionDate);
   }
 
   await writeToLedger({

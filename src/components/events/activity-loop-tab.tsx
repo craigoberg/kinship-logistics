@@ -3,7 +3,7 @@
  *
  * Future activities stay closed until Open. Open stamps the time (safe to go)
  * and then asks how the group travels there from where they are now.
- *   • Open → method → confirm (Method + Undo). Bus confirm = Release.
+ *   • Open → method → confirm (Method + Undo). Bus confirm = who is on the bus.
  *   • Walk / Other / On-site confirm opens the activity. Meals then set up food.
  *   • Final stop of day: plain Complete (evening / check-out)
  */
@@ -15,6 +15,7 @@ import {
   Bus,
   CheckCircle2,
   ChevronDown,
+  ChevronRight,
   ChevronUp,
   Clock,
   BedDouble,
@@ -42,17 +43,38 @@ import {
   TripReinstateDialog,
   type ProgrammeAbsentResult,
 } from "@/components/events/trip-absent-disposition-dialog";
-import { cn, formatTime } from "@/lib/utils";
+import { operationalNowIso } from "@/lib/operational-clock";
+import { cn, formatDateWithWeekday, formatTime } from "@/lib/utils";
 import { sortByParticipantSurname } from "@/lib/ui/sort-participants";
 import {
   isAccommodationVenueType,
   isMealStop,
   isPassengerStop,
   isMedicationStop,
+  isSkippedStop,
   isVenueTransportStop,
+  listEventDaySessions,
   listEventVenueStops,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
+import {
+  closeVenueStopOfflineAware,
+  withFieldTimeout,
+  declareProgrammeStopOpenOfflineAware,
+  leaveVenueForNextOfflineAware,
+  markNotCollectedOfflineAware,
+  skipVenueStopOfflineAware,
+  undoSkipVenueStopOfflineAware,
+  markSupportNotCollectedOfflineAware,
+  openVenueStopOfflineAware,
+  recordEventArrivalOfflineAware,
+  recordEventSupportArrivalOfflineAware,
+  reopenProgrammeStopOnTablet,
+  resolveActivityRoll,
+  resolveVenueStops,
+  toggleActivityCheckInOfflineAware,
+} from "@/lib/deliver-offline/outbox";
+import { isNetworkError } from "@/lib/manifest-offline";
 import { MealServiceRoll } from "@/components/events/meal-service-roll";
 import { MealServiceSummary } from "@/components/meals/meal-service-summary";
 import { OpenMealSheet } from "@/components/meals/open-meal-sheet";
@@ -73,13 +95,8 @@ import { useMedicationRound } from "@/hooks/use-medication-round";
 import { assertMedicationRoundManaged } from "@/lib/medication/todays-medication-round";
 import {
   listActivityRoll,
-  openVenueStop,
-  declareProgrammeStopOpen,
-  leaveVenueForNext,
-  closeVenueStop,
   reopenVenueActivityCheckIn,
   countOutstandingActivityExpected,
-  toggleActivityCheckIn,
   markActivitySkip,
   clearActivityAbsent,
   activityRollKey,
@@ -104,9 +121,19 @@ import {
   reinstateLeftTripEverywhere,
 } from "@/lib/api/event-attendance";
 import {
+  EVENT_SUPPORT_KEY,
   EVENT_SUPPORT_ROLL_KEY,
   listEventSupportAttendance,
+  listEventSupportBookings,
+  type EventSupportAttendanceRow,
+  type EventSupportBooking,
 } from "@/lib/api/event-support";
+import {
+  listPassengerAssignments,
+  type PassengerAssignment,
+} from "@/lib/api/passenger-stops";
+import { addressKey, joinsOnTheWay } from "@/lib/passenger-stops";
+import type { EventAttendanceRow } from "@/lib/api/event-attendance";
 import {
   PERSON_KIND_CHIP_CLASS,
   type PersonKindChip,
@@ -211,6 +238,90 @@ function ProgrammePartyBar({
   );
 }
 
+function OtherDayGroup({
+  date,
+  dayNumber,
+  stops,
+  hereStop,
+  eventId,
+  eventDaySessionId,
+  participantMap,
+  programmeBlocked,
+  focusStopId,
+  onChanged,
+  onWalkOpened,
+  onLogIssue,
+}: {
+  date: string;
+  dayNumber: number | null;
+  stops: EventVenueStop[];
+  hereStop: EventVenueStop | null;
+  eventId: string;
+  eventDaySessionId: string;
+  participantMap: Map<string, Participant>;
+  programmeBlocked: boolean;
+  focusStopId: string | null;
+  onChanged: () => void;
+  onWalkOpened: (stopId: string) => void;
+  onLogIssue: (activityLabel: string) => void;
+}) {
+  const stamp =
+    dayNumber != null
+      ? `Day ${dayNumber} · ${formatDateWithWeekday(date)}`
+      : formatDateWithWeekday(date);
+  const keepOpen = stops.some(
+    (stop) => (stop.phase ?? "pending") === "active" || stop.id === focusStopId,
+  );
+  const [expanded, setExpanded] = useState(keepOpen);
+  useEffect(() => {
+    if (keepOpen) setExpanded(true);
+  }, [keepOpen]);
+
+  return (
+    <div className="rounded-lg border">
+      <button
+        type="button"
+        className="flex min-h-11 w-full items-center gap-2 bg-muted/30 px-3 py-2 text-left"
+        aria-expanded={expanded}
+        aria-label={expanded ? `Collapse ${stamp}` : `Expand ${stamp}`}
+        onClick={() => setExpanded((open) => !open)}
+      >
+        {expanded ? (
+          <ChevronDown className="h-4 w-4 shrink-0 text-muted-foreground" />
+        ) : (
+          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+        )}
+        <span className="font-semibold text-sm">{stamp}</span>
+        <Badge variant="outline" className="text-[10px]">
+          {stops.length} {stops.length === 1 ? "place" : "places"}
+        </Badge>
+      </button>
+      {expanded ? (
+        <div className="space-y-2 border-t px-2 py-2">
+          {stops.map((stop, idx) => (
+            <StopCard
+              key={stop.id}
+              stop={stop}
+              stopIndex={idx}
+              isOrigin={false}
+              hereStop={hereStop}
+              eventId={eventId}
+              eventDaySessionId={eventDaySessionId}
+              participantMap={participantMap}
+              programmeBlocked={programmeBlocked}
+              forceExpanded={focusStopId === stop.id}
+              onChanged={onChanged}
+              onWalkOpened={onWalkOpened}
+              onLogIssue={onLogIssue}
+              canSkip
+            />
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── Main component ───────────────────────────────────────────────────────────
 
 export function ActivityLoopTab({
@@ -234,8 +345,9 @@ export function ActivityLoopTab({
 
   const { data: allStops = [], isLoading: stopsLoading } = useQuery({
     queryKey: stopsKey(eventId),
-    queryFn: () => listEventVenueStops(eventId),
+    queryFn: () => resolveVenueStops(eventId, () => listEventVenueStops(eventId)),
     staleTime: 20_000,
+    networkMode: "offlineFirst",
   });
 
   const { data: participants = [] } = useQuery({
@@ -259,6 +371,16 @@ export function ActivityLoopTab({
     queryFn: () => listEventSupportAttendance(eventDaySessionId),
     staleTime: 20_000,
   });
+  const { data: pickupAssignments = [] } = useQuery({
+    queryKey: ["passenger-assignments", eventId],
+    queryFn: () => listPassengerAssignments(eventId),
+    staleTime: 60_000,
+  });
+  const { data: supportBookings = [] } = useQuery({
+    queryKey: EVENT_SUPPORT_KEY(eventId),
+    queryFn: () => listEventSupportBookings(eventId),
+    staleTime: 60_000,
+  });
   const partyCounts = useMemo(() => {
     const onSite = supportRoll.filter((r) => r.status === "checked_in");
     return {
@@ -281,11 +403,19 @@ export function ActivityLoopTab({
   });
   const morningRollBlocksProgramme = groupStatus?.morningRollBlocksProgramme ?? false;
 
-  // Only today's stops, in order
-  const todayStops = useMemo(
-    () => allStops.filter((s) => s.session_date === sessionDate).sort((a, b) => a.stop_order - b.stop_order),
-    [allStops, sessionDate],
-  );
+  // Only today's stops, in order. One medication round per day — a second row is a seed duplicate.
+  const todayStops = useMemo(() => {
+    const day = allStops
+      .filter((s) => s.session_date === sessionDate)
+      .sort((a, b) => a.stop_order - b.stop_order);
+    let keptMed = false;
+    return day.filter((stop) => {
+      if (!isMedicationStop(stop)) return true;
+      if (keptMed) return false;
+      keptMed = true;
+      return true;
+    });
+  }, [allStops, sessionDate]);
 
   const overnightWake = useMemo(
     () => resolveOvernightWakeBase(allStops, sessionDate, todayStops),
@@ -307,12 +437,15 @@ export function ActivityLoopTab({
     return place.label_override?.trim() || place.venue_name?.trim() || "Meeting point";
   }, [hotelOmitted, wakeOriginStop, todayStops, overnightWake.label]);
 
-  /** Where the group is: the open activity, else the latest one they finished. */
+  /** Where the group is, on any day: the open place, else the last one they finished. */
   const hereStop = useMemo(() => {
-    const active = todayStops.find((s) => (s.phase ?? "pending") === "active");
+    const places = allStops.filter(
+      (stop) => !isPassengerStop(stop) && !isSkippedStop(stop),
+    );
+    const active = places.find((stop) => (stop.phase ?? "pending") === "active");
     if (active) return active;
-    const completed = todayStops
-      .filter((s) => (s.phase ?? "pending") === "completed")
+    const completed = places
+      .filter((stop) => (stop.phase ?? "pending") === "completed")
       .sort((a, b) => {
         const byClose = (b.closed_at ?? "").localeCompare(a.closed_at ?? "");
         if (byClose !== 0) return byClose;
@@ -321,7 +454,57 @@ export function ActivityLoopTab({
     if (completed[0]) return completed[0];
     if (hotelOmitted && wakeOriginStop) return wakeOriginStop;
     return todayStops.find((stop) => !isPassengerStop(stop)) ?? null;
-  }, [todayStops, hotelOmitted, wakeOriginStop]);
+  }, [allStops, todayStops, hotelOmitted, wakeOriginStop]);
+  const tonightStopId = useMemo(() => {
+    const venues = todayStops.filter((stop) => isVenueTransportStop(stop));
+    return venues[venues.length - 1]?.id ?? null;
+  }, [todayStops]);
+  const { data: daySessions = [] } = useQuery({
+    queryKey: ["event-day-sessions", eventId],
+    queryFn: () => listEventDaySessions(eventId),
+    staleTime: 60_000,
+  });
+  const otherDayStops = useMemo(() => {
+    const today = sessionDate.slice(0, 10);
+    return allStops
+      .filter((stop) => {
+        const date = stop.session_date.slice(0, 10);
+        if (date === today) return false;
+        if (isPassengerStop(stop) || isMealStop(stop) || isMedicationStop(stop)) return false;
+        // A finished earlier day stays on the list, collapsed, so a skipped place can still be run.
+        if (date < today) return true;
+        const phase = stop.phase ?? "pending";
+        return phase !== "completed" || isSkippedStop(stop);
+      })
+      .sort((a, b) => {
+        const byDate = a.session_date.localeCompare(b.session_date);
+        if (byDate !== 0) return byDate;
+        return a.stop_order - b.stop_order;
+      });
+  }, [allStops, sessionDate]);
+  const otherDayGroups = useMemo(() => {
+    const ordered = [...daySessions].sort((a, b) =>
+      a.session_date.localeCompare(b.session_date),
+    );
+    const dayNumber = new Map(
+      ordered.map((session, index) => [session.session_date.slice(0, 10), index + 1]),
+    );
+    const groups = new Map<string, EventVenueStop[]>();
+    for (const stop of otherDayStops) {
+      const date = stop.session_date.slice(0, 10);
+      const list = groups.get(date) ?? [];
+      list.push(stop);
+      groups.set(date, list);
+    }
+    return [...groups.entries()].map(([date, stops]) => ({
+      date,
+      dayNumber: dayNumber.get(date) ?? null,
+      stops,
+    }));
+  }, [daySessions, otherDayStops]);
+  const todayKey = sessionDate.slice(0, 10);
+  const earlierDayGroups = otherDayGroups.filter((group) => group.date < todayKey);
+  const laterDayGroups = otherDayGroups.filter((group) => group.date > todayKey);
 
   const invalidateStops = () => {
     void qc.invalidateQueries({ queryKey: stopsKey(eventId) });
@@ -333,9 +516,13 @@ export function ActivityLoopTab({
 
   // BL-077 — ensure Programme always has a Medication round row (Day Centre parity).
   useEffect(() => {
-    void ensureEventDayMedicationRound(eventId, sessionDate).then((created) => {
-      if (created) void qc.invalidateQueries({ queryKey: stopsKey(eventId) });
-    });
+    void ensureEventDayMedicationRound(eventId, sessionDate)
+      .then((created) => {
+        if (created) void qc.invalidateQueries({ queryKey: stopsKey(eventId) });
+      })
+      .catch(() => {
+        /* no signal — the day already on this tablet stays as it is */
+      });
   }, [eventId, sessionDate, qc]);
 
   if (stopsLoading) {
@@ -435,8 +622,39 @@ export function ActivityLoopTab({
         />
       )}
 
+      {earlierDayGroups.map((group) => (
+        <OtherDayGroup
+          key={group.date}
+          date={group.date}
+          dayNumber={group.dayNumber}
+          stops={group.stops}
+          hereStop={hereStop}
+          eventId={eventId}
+          eventDaySessionId={eventDaySessionId}
+          participantMap={participantMap}
+          programmeBlocked={morningRollBlocksProgramme}
+          focusStopId={focusStopId}
+          onChanged={invalidateStops}
+          onWalkOpened={(id) => setFocusStopId(id)}
+          onLogIssue={openActivityIssue}
+        />
+      ))}
+
       {todayStops.map((stop, idx) => {
-        if (isPassengerStop(stop)) return null;
+        if (isPassengerStop(stop)) {
+          if (stop.activity_kind !== "passenger_pickup") return null;
+          return (
+            <PickupCollectCard
+              key={stop.id}
+              stop={stop}
+              assignments={pickupAssignments}
+              supportBookings={supportBookings}
+              attendance={attendanceRoll}
+              support={supportRoll}
+              sessionId={eventDaySessionId}
+            />
+          );
+        }
         const meal = isMealStop(stop);
         const med = isMedicationStop(stop);
         const hopOut = programmeHops.find((h) => h.from.id === stop.id);
@@ -478,9 +696,35 @@ export function ActivityLoopTab({
             onChanged={invalidateStops}
             onWalkOpened={(id) => setFocusStopId(id)}
             onLogIssue={openActivityIssue}
+            canSkip={stop.id !== tonightStopId}
           />
         );
       })}
+
+      {laterDayGroups.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+            Other days
+          </p>
+          {laterDayGroups.map((group) => (
+            <OtherDayGroup
+              key={group.date}
+              date={group.date}
+              dayNumber={group.dayNumber}
+              stops={group.stops}
+              hereStop={hereStop}
+              eventId={eventId}
+              eventDaySessionId={eventDaySessionId}
+              participantMap={participantMap}
+              programmeBlocked={morningRollBlocksProgramme}
+              focusStopId={focusStopId}
+              onChanged={invalidateStops}
+              onWalkOpened={(id) => setFocusStopId(id)}
+              onLogIssue={openActivityIssue}
+            />
+          ))}
+        </div>
+      )}
 
       <EventDayVerbalAnomalyFlow
         eventId={eventId}
@@ -530,7 +774,7 @@ function LeaveMethodButtons({
           {
             method: "bus" as const,
             label: "By Bus",
-            sub: "Release here → driver boards via Manifest (§11)",
+            sub: "Who is on the bus, on this tablet. Then the next place opens.",
             icon: <Bus className="h-5 w-5" />,
           },
           {
@@ -629,6 +873,236 @@ function WakeLeaveCard({
   );
 }
 
+function PickupCollectCard({
+  stop,
+  assignments,
+  supportBookings,
+  attendance,
+  support,
+  sessionId,
+}: {
+  stop: EventVenueStop;
+  assignments: PassengerAssignment[];
+  supportBookings: EventSupportBooking[];
+  attendance: EventAttendanceRow[];
+  support: EventSupportAttendanceRow[];
+  sessionId: string;
+}) {
+  const qc = useQueryClient();
+  const [busyId, setBusyId] = useState<string | null>(null);
+  const place = (stop.street_address ?? stop.label_override ?? "this pickup").trim();
+  const key = addressKey(stop.street_address);
+  const byAddress = assignments.filter(
+    (row) => row.pickupAddress && key && addressKey(row.pickupAddress) === key,
+  );
+  const people = byAddress.length
+    ? byAddress
+    : assignments.filter(
+        (row) =>
+          row.pickupAddress &&
+          addressKey(stop.label_override) === addressKey(row.name),
+      );
+  const supportHere = supportBookings.filter((booking) => {
+    if (!joinsOnTheWay(booking.pickupJoin)) return false;
+    const addr = booking.tripPickupAddressOverride || booking.profileAddress;
+    return !!key && addressKey(addr) === key;
+  });
+
+  const refresh = () => {
+    void qc.invalidateQueries({ queryKey: ["event-attendance-log", sessionId] });
+    void qc.invalidateQueries({ queryKey: EVENT_SUPPORT_ROLL_KEY(sessionId) });
+    void qc.invalidateQueries({ queryKey: eventDeliverStatusKey(sessionId) });
+    void qc.invalidateQueries({ queryKey: ["event-unreconciled-checkins", sessionId] });
+    void qc.invalidateQueries({
+      predicate: (query) => query.queryKey?.[0] === "event-accountability-roll",
+    });
+  };
+
+  const collectParticipant = async (row: EventAttendanceRow, name: string) => {
+    setBusyId(row.id);
+    try {
+      await recordEventArrivalOfflineAware(row, {
+        arrival: "self",
+        alsoCheckIn: true,
+        notes: `Collected at ${place}`,
+      });
+      toast.success(`${name} collected — on the trip`);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not collect");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const missParticipant = async (row: EventAttendanceRow, name: string) => {
+    setBusyId(row.id);
+    try {
+      await markNotCollectedOfflineAware(row, place);
+      toast.success(`${name} was not collected`);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not mark not collected");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const collectSupport = async (row: EventSupportAttendanceRow) => {
+    setBusyId(row.id);
+    try {
+      await recordEventSupportArrivalOfflineAware({
+        row,
+        arrivalMethod: "other",
+        notes: `Collected at ${place}`,
+      });
+      toast.success(`${row.displayName} collected — on the trip`);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not collect");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const missSupport = async (row: EventSupportAttendanceRow) => {
+    setBusyId(row.id);
+    try {
+      await markSupportNotCollectedOfflineAware(row, place);
+      toast.success(`${row.displayName} was not collected`);
+      refresh();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not mark not collected");
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  return (
+    <div className="space-y-2 rounded-lg border border-sky-500/50 bg-sky-500/10 px-3 py-3">
+      <div className="flex items-center gap-2 text-sm font-semibold text-foreground">
+        <Bus className="h-4 w-4 shrink-0" />
+        Pickup
+        {stop.label_override ? <span>{stop.label_override}</span> : null}
+      </div>
+      {stop.street_address ? (
+        <p className="text-sm text-muted-foreground">{stop.street_address}</p>
+      ) : null}
+      {people.length === 0 && supportHere.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No one is assigned to this pickup.</p>
+      ) : null}
+      {people.map((person) => {
+        const row = person.participantId
+          ? attendance.find((item) => item.participantId === person.participantId)
+          : undefined;
+        const supportRow =
+          !row && (person.staffId || person.carerId)
+            ? support.find(
+                (item) =>
+                  (person.staffId && item.staffId === person.staffId) ||
+                  (person.carerId && item.carerId === person.carerId),
+              )
+            : undefined;
+        return (
+          <PickupPersonRow
+            key={person.key}
+            name={person.name}
+            attendance={row}
+            supportRow={supportRow}
+            busy={busyId === (row?.id ?? supportRow?.id)}
+            onCollect={() => {
+              if (row) void collectParticipant(row, person.name);
+              else if (supportRow) void collectSupport(supportRow);
+            }}
+            onMiss={() => {
+              if (row) void missParticipant(row, person.name);
+              else if (supportRow) void missSupport(supportRow);
+            }}
+          />
+        );
+      })}
+      {supportHere.map((booking) => {
+        const already = people.some(
+          (person) =>
+            (booking.staffId && person.staffId === booking.staffId) ||
+            (booking.carerId && person.carerId === booking.carerId),
+        );
+        if (already) return null;
+        const row = support.find(
+          (item) =>
+            (booking.staffId && item.staffId === booking.staffId) ||
+            (booking.carerId && item.carerId === booking.carerId),
+        );
+        return (
+          <PickupPersonRow
+            key={booking.id}
+            name={booking.displayName}
+            supportRow={row}
+            busy={busyId === row?.id}
+            onCollect={() => {
+              if (row) void collectSupport(row);
+            }}
+            onMiss={() => {
+              if (row) void missSupport(row);
+            }}
+          />
+        );
+      })}
+    </div>
+  );
+}
+
+function PickupPersonRow({
+  name,
+  attendance,
+  supportRow,
+  busy,
+  onCollect,
+  onMiss,
+}: {
+  name: string;
+  attendance?: EventAttendanceRow;
+  supportRow?: EventSupportAttendanceRow;
+  busy: boolean;
+  onCollect: () => void;
+  onMiss: () => void;
+}) {
+  const status = attendance?.status ?? supportRow?.status;
+  const notes = attendance?.notes ?? supportRow?.notes ?? "";
+  const notCollected = status === "absent" && notes.startsWith("Not collected");
+  const onTrip = status === "checked_in" || status === "checked_out";
+  const canAct = status === "expected";
+
+  return (
+    <div className="flex flex-wrap items-center justify-between gap-2 rounded-md bg-background/70 px-2 py-2">
+      <div>
+        <p className="text-sm font-medium">{name}</p>
+        <p className="text-xs text-muted-foreground">
+          {onTrip
+            ? "On the trip"
+            : notCollected
+              ? "Not collected"
+              : status === "absent"
+                ? "Absent"
+                : canAct
+                  ? "Waiting at this stop"
+                  : "Not on this day's roll yet"}
+        </p>
+      </div>
+      {canAct ? (
+        <div className="flex gap-2">
+          <Button size="sm" disabled={busy} onClick={onCollect}>
+            {busy ? <Loader2 className="h-4 w-4 animate-spin" /> : "Collect"}
+          </Button>
+          <Button size="sm" variant="outline" disabled={busy} onClick={onMiss}>
+            Not collected
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
 // ─── Stop card ────────────────────────────────────────────────────────────────
 
 interface StopCardProps {
@@ -651,6 +1125,10 @@ interface StopCardProps {
   onChanged: () => void;
   onWalkOpened?: (stopId: string) => void;
   onLogIssue?: (activityLabel: string) => void;
+  /** Tonight’s accommodation cannot be skipped. */
+  canSkip?: boolean;
+  /** Plan day, when this card is borrowed onto today. */
+  dayLabel?: string | null;
 }
 
 function StopCard({
@@ -670,6 +1148,8 @@ function StopCard({
   onChanged,
   onWalkOpened,
   onLogIssue,
+  canSkip = false,
+  dayLabel = null,
 }: StopCardProps) {
   const phase = (stop.phase ?? "pending") as StopPhase;
   const [expanded, setExpanded] = useState(phase === "active");
@@ -701,8 +1181,9 @@ function StopCard({
   );
 
   const openMut = useMutation({
+    networkMode: "always",
     mutationFn: (method: Exclude<MovementMethod, "bus">) =>
-      openVenueStop(
+      openVenueStopOfflineAware(
         {
           id: stop.id,
           eventId,
@@ -740,41 +1221,89 @@ function StopCard({
   });
 
   const closeMut = useMutation({
+    networkMode: "always",
     mutationFn: async () => {
-      if (isMealStop(stop)) {
-        const outstanding = await countOutstandingMealServes(stop.id);
-        if (outstanding > 0) {
-          throw new Error(
-            `${outstanding} person${outstanding === 1 ? "" : "s"} still expected on the meal roll. Mark Served / Modified / Own order / Declined / N/A before completing.`,
-          );
-        }
+      try {
+        await withFieldTimeout(
+          (async () => {
+            if (isMealStop(stop)) {
+              const outstanding = await countOutstandingMealServes(stop.id);
+              if (outstanding > 0) {
+                throw new Error(
+                  `${outstanding} person${outstanding === 1 ? "" : "s"} still expected on the meal roll. Mark Served / Modified / Own order / Declined / N/A before completing.`,
+                );
+              }
+            }
+            if (isMedicationStop(stop)) {
+              const [schedules, logs, presence] = await Promise.all([
+                listAllActiveSchedules(),
+                listTodaysComplianceLogs(),
+                listTripMedicationPresenceIds(eventDaySessionId),
+              ]);
+              assertMedicationRoundManaged({
+                schedules,
+                logs,
+                checkedInIds: presence,
+              });
+            }
+          })(),
+        );
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
       }
-      if (isMedicationStop(stop)) {
-        const [schedules, logs, presence] = await Promise.all([
-          listAllActiveSchedules(),
-          listTodaysComplianceLogs(),
-          listTripMedicationPresenceIds(eventDaySessionId),
-        ]);
-        assertMedicationRoundManaged({
-          schedules,
-          logs,
-          checkedInIds: presence,
-        });
-      }
-      return closeVenueStop({
+      return closeVenueStopOfflineAware({
         id: stop.id,
         eventId,
         venueName: stop.label_override ?? stop.venue_name ?? null,
         sessionDate: stop.session_date,
+        sessionId: eventDaySessionId,
       });
     },
     onSuccess: () => {
+      const closedAt = operationalNowIso();
+      qc.setQueryData<EventVenueStop[]>(stopsKey(eventId), (prev) =>
+        prev?.map((row) =>
+          row.id === stop.id ? { ...row, phase: "completed", closed_at: closedAt } : row,
+        ),
+      );
       toast.success(
         med
           ? "Medication round completed."
           : "Activity completed — group assumed done.",
       );
       setExpanded(false);
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const skipped = isSkippedStop(stop);
+  const skipMut = useMutation({
+    mutationFn: () =>
+      skipVenueStopOfflineAware({
+        id: stop.id,
+        eventId,
+        venueName: stop.label_override ?? stop.venue_name ?? null,
+        sessionId: eventDaySessionId,
+      }),
+    onSuccess: () => {
+      toast.success(
+        `${stop.label_override ?? stop.venue_name ?? "Activity"} skipped — not running`,
+      );
+      onChanged();
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+  const undoSkipMut = useMutation({
+    mutationFn: () =>
+      undoSkipVenueStopOfflineAware({
+        id: stop.id,
+        eventId,
+        venueName: stop.label_override ?? stop.venue_name ?? null,
+        sessionId: eventDaySessionId,
+      }),
+    onSuccess: () => {
+      toast.success("Back on the programme");
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -848,13 +1377,14 @@ function StopCard({
 
   const declareMut = useMutation({
     mutationFn: () =>
-      declareProgrammeStopOpen({
+      declareProgrammeStopOpenOfflineAware({
         stopId: stop.id,
         eventId,
         sessionDate: stop.session_date,
         venueName: stop.label_override ?? stop.venue_name ?? stopName,
         eventDaySessionId,
       }),
+    networkMode: "always",
     onSuccess: () => {
       setExpanded(true);
       toast.success(
@@ -870,7 +1400,7 @@ function StopCard({
   const leaveMut = useMutation({
     mutationFn: (method: MovementMethod) => {
       if (!hereStop) throw new Error("Where the group is now is not known.");
-      return leaveVenueForNext({
+      return leaveVenueForNextOfflineAware({
         fromStop: {
           id: hereStop.id,
           eventId,
@@ -1006,6 +1536,7 @@ function StopCard({
   };
 
   const ctaLabel = (() => {
+    if (skipped) return "Skipped";
     if (phase === "completed") return "Done";
     if (phase === "pending") return "Open";
     if (meal && !stop.meal_source) return "Set up meal";
@@ -1054,7 +1585,9 @@ function StopCard({
                   : "bg-muted text-muted-foreground",
             )}
           >
-            {phase === "completed" ? (
+            {skipped ? (
+              <span className="text-[10px]">Skip</span>
+            ) : phase === "completed" ? (
               <CheckCircle2 className="h-4 w-4" />
             ) : (
               stopIndex + 1
@@ -1064,7 +1597,16 @@ function StopCard({
           <div className="min-w-0 flex-1">
             <div className="flex flex-wrap items-center gap-2">
               <span className="truncate font-semibold text-sm">{cardTitle}</span>
-              {readyToTravel ? (
+              {dayLabel ? (
+                <Badge variant="outline" className="text-[10px]">
+                  {dayLabel}
+                </Badge>
+              ) : null}
+              {skipped ? (
+                <Badge variant="outline" className="text-[10px]">
+                  Skipped
+                </Badge>
+              ) : readyToTravel ? (
                 <Badge className="bg-primary text-[10px] text-primary-foreground">
                   Open
                 </Badge>
@@ -1187,7 +1729,7 @@ function StopCard({
           )}
         </div>
 
-        {!hideSideButton && (
+        {!hideSideButton && !skipped && (
         <Button
           type="button"
           size="sm"
@@ -1230,6 +1772,36 @@ function StopCard({
             </>
           )}
         </Button>
+        )}
+        {canSkip && venue && phase === "pending" && !isHere && !skipped && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11 shrink-0"
+            disabled={skipMut.isPending}
+            onClick={(event) => {
+              event.stopPropagation();
+              skipMut.mutate();
+            }}
+          >
+            Skip
+          </Button>
+        )}
+        {skipped && (
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            className="h-11 shrink-0"
+            disabled={undoSkipMut.isPending}
+            onClick={(event) => {
+              event.stopPropagation();
+              undoSkipMut.mutate();
+            }}
+          >
+            Undo
+          </Button>
         )}
       </div>
 
@@ -1489,25 +2061,38 @@ function CompletedActivityDetail({
   const { data: roll = [], isLoading: rollLoading } = useQuery({
     queryKey: activityRollKey(stop.id),
     queryFn: () =>
-      listActivityRoll(stop.id, { eventDaySessionId }),
+      resolveActivityRoll(stop.id, eventDaySessionId, () =>
+        listActivityRoll(stop.id, { eventDaySessionId }),
+      ),
     staleTime: 60_000,
+    networkMode: "offlineFirst",
     enabled: !isBus,
   });
 
   const resumeMut = useMutation({
-    mutationFn: () =>
-      reopenVenueActivityCheckIn({
-        stopId: stop.id,
-        eventId,
-        sessionDate: stop.session_date,
-        nextStopId: nextStop?.id ?? null,
-      }),
+    mutationFn: async () => {
+      await reopenProgrammeStopOnTablet(eventId, stop.id);
+      try {
+        await reopenVenueActivityCheckIn({
+          stopId: stop.id,
+          eventId,
+          sessionDate: stop.session_date,
+          nextStopId: nextStop?.id ?? null,
+        });
+      } catch (err) {
+        if (!isNetworkError(err)) throw err;
+      }
+    },
     onSuccess: () => {
       void qc.invalidateQueries({ queryKey: activityRollKey(stop.id) });
       if (nextStop) {
         void qc.invalidateQueries({ queryKey: activityRollKey(nextStop.id) });
       }
-      toast.success(`Resumed check-in at ${stopName}.`);
+      toast.success(
+        isMedicationStop(stop)
+          ? "Medication round reopened."
+          : `Resumed check-in at ${stopName}.`,
+      );
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -1610,10 +2195,15 @@ function CompletedActivityDetail({
               ) : (
                 <RotateCcw className="h-4 w-4" />
               )}
-              Resume activity check-in
+              {isMedicationStop(stop) ? "Resume medication round" : "Resume activity check-in"}
             </FieldActionButton>
           )}
-          {rollLoading ? (
+          {isMedicationStop(stop) ? (
+            <p className="text-xs text-muted-foreground">
+              Doses are recorded on the medication round. Resume opens that list.
+              These names are not the check-in holding the upload.
+            </p>
+          ) : rollLoading ? (
             <div className="flex justify-center py-3">
               <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
             </div>
@@ -1764,9 +2354,12 @@ function ActivityRollPanel({
   const { data: rows = [], isLoading } = useQuery({
     queryKey: activityRollKey(venueStopId),
     queryFn: () =>
-      listActivityRoll(venueStopId, { eventDaySessionId }),
+      resolveActivityRoll(venueStopId, eventDaySessionId, () =>
+        listActivityRoll(venueStopId, { eventDaySessionId }),
+      ),
     staleTime: 15_000,
     refetchInterval: 30_000,
+    networkMode: "offlineFirst",
   });
 
   const { data: floorAbsentNotes = {} } = useQuery({
@@ -1785,7 +2378,7 @@ function ActivityRollPanel({
   };
 
   const toggleMut = useMutation({
-    mutationFn: (row: ActivityRollRow) => toggleActivityCheckIn(row),
+    mutationFn: (row: ActivityRollRow) => toggleActivityCheckInOfflineAware(row),
     onSuccess: () => qc.invalidateQueries({ queryKey: activityRollKey(venueStopId) }),
     onError: (e: Error) => toast.error(e.message),
   });

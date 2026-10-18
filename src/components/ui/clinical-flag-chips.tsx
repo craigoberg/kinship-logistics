@@ -12,12 +12,23 @@ type Props = {
   chips: ClinicalFlagChip[];
   personName: string;
   className?: string;
+  /** `light` when the row is a solid or pale fill, even in dark mode. */
+  surface?: "theme" | "light";
 };
 
-function chipClass(kind: ClinicalFlagChip["kind"]): string {
-  if (kind === "allergy") return "border border-amber-600/50 bg-amber-500/15 text-amber-900";
-  if (kind === "diet") return "border border-sky-600/50 bg-sky-500/15 text-sky-900";
-  return "border border-violet-600/50 bg-violet-500/15 text-violet-900";
+function chipClass(kind: ClinicalFlagChip["kind"], surface: "theme" | "light"): string {
+  if (surface === "light") {
+    if (kind === "allergy") return "border-amber-700/60 bg-amber-100 text-amber-950";
+    if (kind === "diet") return "border-sky-700/60 bg-sky-100 text-sky-950";
+    return "border-violet-700/60 bg-violet-100 text-violet-950";
+  }
+  if (kind === "allergy") {
+    return "border-amber-600/60 bg-amber-500/15 text-amber-950 dark:border-amber-300/80 dark:bg-amber-400/25 dark:text-amber-50";
+  }
+  if (kind === "diet") {
+    return "border-sky-600/60 bg-sky-500/15 text-sky-950 dark:border-sky-300/80 dark:bg-sky-400/25 dark:text-sky-50";
+  }
+  return "border-violet-600/60 bg-violet-500/15 text-violet-950 dark:border-violet-300/80 dark:bg-violet-400/25 dark:text-violet-50";
 }
 
 function chipHeading(kind: ClinicalFlagChip["kind"]): string {
@@ -27,12 +38,17 @@ function chipHeading(kind: ClinicalFlagChip["kind"]): string {
 }
 
 function ChipIcon({ kind }: { kind: ClinicalFlagChip["kind"] }) {
-  if (kind === "allergy") return <AlertTriangle className="mr-0.5 inline h-2.5 w-2.5" />;
-  if (kind === "diet") return <Utensils className="mr-0.5 inline h-2.5 w-2.5" />;
-  return <MessageSquare className="mr-0.5 inline h-2.5 w-2.5" />;
+  if (kind === "allergy") return <AlertTriangle className="mr-0.5 inline h-3 w-3" />;
+  if (kind === "diet") return <Utensils className="mr-0.5 inline h-3 w-3" />;
+  return <MessageSquare className="mr-0.5 inline h-3 w-3" />;
 }
 
-export function ClinicalFlagChips({ chips, personName, className }: Props) {
+export function ClinicalFlagChips({
+  chips,
+  personName,
+  className,
+  surface = "theme",
+}: Props) {
   const [open, setOpen] = useState(false);
   if (chips.length === 0) return null;
 
@@ -53,7 +69,11 @@ export function ClinicalFlagChips({ chips, personName, className }: Props) {
         {chips.map((c) => (
           <Badge
             key={c.kind}
-            className={cn("text-[10px] font-semibold uppercase", chipClass(c.kind))}
+            variant="outline"
+            className={cn(
+              "text-[11px] font-semibold uppercase tracking-wide",
+              chipClass(c.kind, surface),
+            )}
           >
             <ChipIcon kind={c.kind} />
             {c.label}

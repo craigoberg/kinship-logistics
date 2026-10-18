@@ -174,13 +174,42 @@ export async function closeEventLocation(input: {
 
   await assertTripLeaderPin(tripLeaderId, input.managerPin);
 
+  return applyEventLocationClose({
+    sessionId: input.sessionId,
+    eventId: session.event_id,
+    outcome: input.outcome,
+    notes: input.notes,
+    tripLeaderId,
+  });
+}
+
+/** Write the close. The trip leader PIN was already accepted. */
+export async function applyEventLocationClose(input: {
+  sessionId: string;
+  eventId: string;
+  outcome: "closed_orderly" | "closed_incident";
+  notes?: string;
+  tripLeaderId: string;
+  occurredAt?: string;
+}): Promise<EventDaySession> {
+  const nowIso = input.occurredAt ?? operationalNowIso();
+  const { data: existing, error: readErr } = await supabase
+    .from("event_day_sessions")
+    .select("phase")
+    .eq("id", input.sessionId)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (isEventLocationClosed((existing as { phase?: string } | null)?.phase ?? "")) {
+    const session = await getSession(input.sessionId);
+    return session;
+  }
+
   const actorStaffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({
       phase: input.outcome,
-      closed_by_id: tripLeaderId,
+      closed_by_id: input.tripLeaderId,
       close_declared_at: nowIso,
       close_leader_notes: input.notes?.trim() || null,
     })
@@ -190,7 +219,7 @@ export async function closeEventLocation(input: {
   if (error) throw error;
 
   const gps = await tryGetGps();
-  const title = await eventTitle(session.event_id);
+  const title = await eventTitle(input.eventId);
   const closedHow =
     input.outcome === "closed_incident"
       ? "Closed trip location after incident"
@@ -207,7 +236,7 @@ export async function closeEventLocation(input: {
     gps_lng: gps?.lng ?? null,
     metadata: await withAuditActorMeta({
       event_day_session_id: input.sessionId,
-      event_id: session.event_id,
+      event_id: input.eventId,
       notes: input.notes ?? null,
       location: title,
       summary: `${closedHow} for ${title}`,

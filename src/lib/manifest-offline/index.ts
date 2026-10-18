@@ -1,7 +1,11 @@
 export {
+  appendLocalBoarder,
+  beginForcedHopOffline,
   clearSnapshotForTrip,
   countPendingOutbox,
+  discardManifestOutboxItem,
   flushManifestOutbox,
+  isLocalHopTripId,
   isNetworkError,
   listAllOutbox,
   listOutboxForTrip,
@@ -17,6 +21,15 @@ export {
   saveBusManifestSnapshot,
   subscribeManifestOffline,
 } from "./outbox";
+
+export {
+  isPaperHeadcountTrip,
+  loadExpectedHop,
+  loadExpectedHops,
+  markPaperHeadcountTrip,
+  rememberExpectedHops,
+  refreshExpectedHop,
+} from "./expected-hops";
 
 export type {
   ManifestOfflineSnapshot,

@@ -44,6 +44,24 @@ type PersonPick = {
   profileAddress: string;
 };
 
+/** People collected at an itinerary pickup, not at the meeting point. */
+export function laterPickupIds(assignments: PassengerAssignment[]): {
+  participantIds: Set<string>;
+  staffIds: Set<string>;
+  carerIds: Set<string>;
+} {
+  const participantIds = new Set<string>();
+  const staffIds = new Set<string>();
+  const carerIds = new Set<string>();
+  for (const row of assignments) {
+    if (!row.pickupAddress) continue;
+    if (row.participantId) participantIds.add(row.participantId);
+    if (row.staffId) staffIds.add(row.staffId);
+    if (row.carerId) carerIds.add(row.carerId);
+  }
+  return { participantIds, staffIds, carerIds };
+}
+
 export type PassengerAssignment = {
   key: string;
   name: string;

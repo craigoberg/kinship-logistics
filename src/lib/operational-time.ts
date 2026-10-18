@@ -225,3 +225,9 @@ export function formatDateTimeStandard(input: string | Date | null | undefined):
   const d = toSafeDate(input);
   return d ? dfFormat(d, "dd-MMM-yy / HH:mm") : "—";
 }
+
+/** Fri 16-Oct-26 / 07:00 */
+export function formatDateTimeWithWeekday(input: string | Date | null | undefined): string {
+  const d = toSafeDate(input);
+  return d ? dfFormat(d, "EEE dd-MMM-yy / HH:mm") : "—";
+}

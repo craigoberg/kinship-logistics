@@ -80,8 +80,8 @@ import type {
   TodayManifestSummary,
   StartPointChoice,
 } from "@/lib/data-store";
+import { resolveTransportAssets } from "@/lib/deliver-offline/fleet-cache";
 import {
-  listTransportAssets,
   getClearanceForAssetOnDate,
   listCheckpointsForAsset,
   insertAssetClearanceWithItems,
@@ -188,8 +188,9 @@ function ManifestPage() {
 
   const assetsQ = useQuery({
     queryKey: ["transport-assets"],
-    queryFn: () => listTransportAssets(),
+    queryFn: () => resolveTransportAssets(),
     staleTime: 5 * 60_000,
+    networkMode: "always",
   });
 
   const userRole = typeof window !== "undefined" ? getActiveUserRole() : "driver";

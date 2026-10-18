@@ -238,7 +238,6 @@ export function VerbalConsultationDialog({
       setOperatorPinVerified(true);
       setPinDraft("");
       setOperatorPinOpen(false);
-      toast.success("Operator PIN verified");
     } catch (e) {
       setPinError(e instanceof Error ? e.message : "Incorrect operator PIN.");
       setPinDraft("");

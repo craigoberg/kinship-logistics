@@ -7,7 +7,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
-import { listEventSupportAttendance } from "@/lib/api/event-support";
+import { listEventSupportAttendance, listEventSupportBookings } from "@/lib/api/event-support";
 import {
   listAccountabilityRoll,
   listBusManifest,
@@ -24,8 +24,8 @@ import {
   type EventMealSlot,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
-import { listPassengerAssignments, type PassengerAssignment } from "@/lib/api/passenger-stops";
-import { addressKey } from "@/lib/passenger-stops";
+import { laterPickupIds, listPassengerAssignments, type PassengerAssignment } from "@/lib/api/passenger-stops";
+import { addressKey, joinsOnTheWay } from "@/lib/passenger-stops";
 import type { StopPhase } from "@/lib/api/event-activity-roll";
 
 const MEAL_SLOT_LABELS: Record<EventMealSlot, string> = {
@@ -363,6 +363,16 @@ export function buildProgrammeTimeline(
   const items: ProgrammeTimelineItem[] = [];
   const firstVenue = venues[0] ?? null;
   const nextAfterFirst = venues[1] ?? null;
+  // Day 2+ can wake at last night's hotel while the office list starts somewhere else.
+  // That first place is its own step, before "Leave for" the place after it.
+  const wakeStop = overnightWake?.todayStop ?? overnightWake?.priorLastStop ?? null;
+  const opensAwayFromWake =
+    !!overnightWake &&
+    !overnightWake.hotelOmitted &&
+    !!firstVenue &&
+    !!wakeStop &&
+    wakeStop.id !== firstVenue.id &&
+    placesDiffer(wakeStop, firstVenue);
 
   if (overnightWake?.hotelOmitted && overnightWake.priorLastStop && firstVenue) {
     for (const act of onSiteBeforeFirstVenue(todayStops, firstVenue)) {
@@ -380,8 +390,10 @@ export function buildProgrammeTimeline(
         atVenue: placesDiffer(act, firstVenue) ? act : firstVenue,
       });
     }
-    for (const act of onSiteActivitiesAtVenue(todayStops, firstVenue, nextAfterFirst)) {
-      items.push({ kind: "onsite", stop: act, atVenue: firstVenue });
+    if (!opensAwayFromWake) {
+      for (const act of onSiteActivitiesAtVenue(todayStops, firstVenue, nextAfterFirst)) {
+        items.push({ kind: "onsite", stop: act, atVenue: firstVenue });
+      }
     }
   } else {
     for (const act of todayStops.filter((s) => isOnSiteProgrammeStop(s))) {
@@ -389,7 +401,12 @@ export function buildProgrammeTimeline(
     }
   }
 
-  for (const hop of hops) {
+  const displayHops = [...hops];
+  if (opensAwayFromWake && wakeStop && firstVenue) {
+    displayHops.unshift({ from: wakeStop, to: firstVenue, hopIndex: -1 });
+  }
+
+  for (const hop of displayHops) {
     items.push({
       kind: "hop",
       from: hop.from,
@@ -507,7 +524,7 @@ function busStageDetail(opts: {
   }
   const runOpen = opts.tripStatus === "active";
   if (!runOpen) {
-    if (!opts.tripStatus) return "Waiting for Release on Programme";
+    if (!opts.tripStatus) return "Mark who is on the bus";
     if (opts.busCheck === "held") {
       return count
         ? `Bus checks waiting on a manager · ${count} on the bus`
@@ -927,6 +944,117 @@ function morningUnlocked(
   return false;
 }
 
+/**
+ * The rest of today's office list, still ahead.
+ * Used while check-in or Morning Roll is the current step, including when that
+ * status was saved before the link dropped and the day's places are already on the tablet.
+ */
+export function plannedDayStatusSteps(
+  allStops: EventVenueStop[],
+  sessionDate: string,
+): EventDeliverStatusStep[] {
+  const todayKey = sessionDate.slice(0, 10);
+  const day = (allStops as VenueStopRow[])
+    .filter((stop) => stop.session_date.slice(0, 10) === todayKey)
+    .sort((a, b) => a.stop_order - b.stop_order);
+  let keptMed = false;
+  const todayStops = day.filter((stop) => {
+    if (!isMedicationStop(stop)) return true;
+    if (keptMed) return false;
+    keptMed = true;
+    return true;
+  });
+  if (todayStops.length === 0) return [];
+
+  const hasPriorDay = allStops.some((stop) => stop.session_date.slice(0, 10) < todayKey);
+  const hasLaterDay = allStops.some((stop) => stop.session_date.slice(0, 10) > todayKey);
+  const overnightWake = hasPriorDay
+    ? resolveOvernightWakeBase(allStops as VenueStopRow[], sessionDate, todayStops)
+    : null;
+  const todayVenues = todayStops.filter((stop) => isVenueTransportStop(stop));
+  const overnightEndName = stopLabel(todayVenues[todayVenues.length - 1], "Venue");
+  const timeline = buildProgrammeTimeline(todayStops, overnightWake);
+  const steps: EventDeliverStatusStep[] = [];
+
+  for (const item of timeline) {
+    if (item.kind === "onsite") {
+      const phase = (item.stop.phase ?? "pending") as StopPhase;
+      steps.push({
+        id: `onsite-${item.stop.id}`,
+        label: onSiteStepLabel(item.stop, item.atVenue),
+        detail: onSiteStepDetail(item.stop, phase),
+        state: "upcoming",
+      });
+      continue;
+    }
+    const toName = stopLabel(item.to);
+    const fromName = stopLabel(item.from);
+    const movement = item.to.movement_method ?? null;
+    if (movement == null) {
+      steps.push({
+        id: `hop-${item.hopIndex}-leave`,
+        label: `Leave for ${toName}`,
+        detail: "Choose Bus / Walk / Other / On-site on Programme",
+        state: "upcoming",
+      });
+    } else if (movement === "bus") {
+      steps.push({
+        id: `hop-${item.hopIndex}-depart`,
+        label: `Board bus — depart ${fromName} for ${toName}`,
+        detail: "Mark who is on the bus",
+        state: "upcoming",
+      });
+    }
+    steps.push({
+      id: `hop-${item.hopIndex}-at`,
+      label: movement === "bus" || movement == null ? `At ${toName}` : `Activity at ${toName}`,
+      detail:
+        movement === "walk"
+          ? "Individual activity check-in"
+          : movement === "on_site"
+            ? "On-site activity check-in"
+            : movement === "other"
+              ? "Other transport — individual activity check-in"
+              : undefined,
+      state: "upcoming",
+    });
+  }
+
+  if (hasLaterDay) {
+    steps.push({
+      id: "evening-roll",
+      label: "Evening roll call",
+      detail: `At ${overnightEndName} — evening accountability`,
+      state: "upcoming",
+    });
+  } else if (todayVenues.length > 0) {
+    steps.push({
+      id: "base-end",
+      label: `At ${overnightEndName} — end of programme`,
+      detail: "Ready for check-out when the day is done",
+      state: "upcoming",
+    });
+  }
+
+  return steps;
+}
+
+function withPlannedDay(
+  steps: EventDeliverStatusStep[],
+  allStops: EventVenueStop[],
+  sessionDate: string,
+): EventDeliverStatusStep[] {
+  const hasProgramme = steps.some(
+    (step) =>
+      step.id.startsWith("hop-") ||
+      step.id.startsWith("onsite-") ||
+      step.id === "evening-roll" ||
+      step.id === "base-end",
+  );
+  if (hasProgramme) return steps;
+  return [...steps, ...plannedDayStatusSteps(allStops, sessionDate)];
+}
+
 export async function fetchEventDeliverGroupStatus(opts: {
   eventId: string;
   sessionId: string;
@@ -982,16 +1110,35 @@ export async function fetchEventDeliverGroupStatus(opts: {
   const overnightEndName = stopLabel(overnightEndStop, baseName);
 
   const support = await listEventSupportAttendance(opts.sessionId).catch(() => []);
-  const totalOnTrip = attendance.length + support.length;
+  const [pickupAssignments, supportBookings] = await Promise.all([
+    listPassengerAssignments(opts.eventId).catch(() => []),
+    listEventSupportBookings(opts.eventId).catch(() => []),
+  ]);
+  const later = laterPickupIds(pickupAssignments);
+  for (const booking of supportBookings) {
+    if (!joinsOnTheWay(booking.pickupJoin)) continue;
+    if (booking.staffId) later.staffIds.add(booking.staffId);
+    if (booking.carerId) later.carerIds.add(booking.carerId);
+  }
+  const joinsHere = attendance.filter((row) => !later.participantIds.has(row.participantId));
+  const supportHere = support.filter((row) => {
+    if (row.staffId && later.staffIds.has(row.staffId)) return false;
+    if (row.carerId && later.carerIds.has(row.carerId)) return false;
+    return true;
+  });
+  // Day 2+ arrival is the participants who woke at the hotel. Staff, volunteers,
+  // and carers joined at the meeting point and are not checked in again.
+  const supportOnArrival = showMorningRoll ? [] : supportHere;
+  const totalOnTrip = joinsHere.length + supportOnArrival.length;
   const checkedInCount =
-    attendance.filter((r) => r.status === "checked_in").length +
-    support.filter((r) => r.status === "checked_in").length;
+    joinsHere.filter((r) => r.status === "checked_in").length +
+    supportOnArrival.filter((r) => r.status === "checked_in").length;
   const checkedInOrOut =
-    attendance.filter((r) => r.status === "checked_in" || r.status === "checked_out").length +
-    support.filter((r) => r.status === "checked_in" || r.status === "checked_out").length;
+    joinsHere.filter((r) => r.status === "checked_in" || r.status === "checked_out").length +
+    supportOnArrival.filter((r) => r.status === "checked_in" || r.status === "checked_out").length;
   const pendingArrival =
-    attendance.filter((r) => r.status === "expected").length +
-    support.filter((r) => r.status === "expected").length;
+    joinsHere.filter((r) => r.status === "expected").length +
+    supportOnArrival.filter((r) => r.status === "expected").length;
   const allCheckedIn = totalOnTrip > 0 && pendingArrival === 0;
 
   const [morning, evening, hopClocks, busCheck] = await Promise.all([
@@ -1007,10 +1154,10 @@ export async function fetchEventDeliverGroupStatus(opts: {
 
   const checkInClosedAt = allCheckedIn
     ? latestIso([
-        ...attendance.map((r) =>
+        ...joinsHere.map((r) =>
           r.status === "checked_in" || r.status === "checked_out" ? r.checkedInAt : null,
         ),
-        ...support.map((r) =>
+        ...supportOnArrival.map((r) =>
           r.status === "checked_in" || r.status === "checked_out" ? r.checkedInAt : null,
         ),
       ])
@@ -1051,7 +1198,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
       headline: "Open location to begin check-in",
       subline: baseName,
       tone: "planning",
-      steps,
+      steps: withPlannedDay(steps, allStops, opts.sessionDate),
       morningRollBlocksProgramme: false,
     };
   }
@@ -1148,7 +1295,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
           ? `${pendingArrival} still expected — use the Check-In tab`
           : undefined,
       tone: showMorningRoll ? "roll" : "arrival",
-      steps,
+      steps: withPlannedDay(steps, allStops, opts.sessionDate),
       morningRollBlocksProgramme: false,
     };
   }
@@ -1186,7 +1333,7 @@ export async function fetchEventDeliverGroupStatus(opts: {
             ? `${morning.pending} still to account — complete before programme`
             : "Account for everyone before the first activity",
         tone: "roll",
-        steps,
+        steps: withPlannedDay(steps, allStops, opts.sessionDate),
         morningRollBlocksProgramme: true,
       };
     }
@@ -1353,8 +1500,9 @@ export async function fetchEventDeliverGroupStatus(opts: {
     const hopComplete = toPhase === "completed";
     const hopActive = toPhase === "active";
     const tripDone = trip?.status === "completed";
-    // Destination `active` alone must not skip boarding — only hop arrive does.
-    const arrivedAtDest = isBus ? tripDone : hopActive;
+    // A driver Manifest hop arrives only when that run is completed.
+    // A leader headcount opens the destination with no trip.
+    const arrivedAtDest = isBus ? tripDone || (hopActive && !trip) : hopActive;
 
     if (hopComplete) {
       if (isBus) {
@@ -1404,8 +1552,14 @@ export async function fetchEventDeliverGroupStatus(opts: {
       };
       if (arrivedAtDest || (tripDone && hopActive)) {
         departStep.state = "complete";
-        departStep.detail = "Boarded · hop arrived";
-        waypoints.forEach((w, index) => markWaypoint(w, index, "complete"));
+        departStep.detail = trip ? "Boarded · hop arrived" : "On the bus";
+        waypoints.forEach((w, index) =>
+          markWaypoint(
+            w,
+            index,
+            tripDone || w.status === "completed" ? "complete" : "upcoming",
+          ),
+        );
         atStep.state = "current";
         atStep.label = `At ${toName}`;
         atStep.detail = "Hop arrived";
@@ -1452,20 +1606,30 @@ export async function fetchEventDeliverGroupStatus(opts: {
   // ── 4. Evening roll (multi-day non-final) OR base-until note ──────────────
   // Destinations = hop targets (includes first venue when hotel omitted today).
   const destinations = hops.map((h) => h.to);
-  const nonFinalDests = destinations.slice(0, -1);
   const finalDest = destinations[destinations.length - 1];
   const allDestinationsDone =
     hops.length === 0 ||
     destinations.every((s) => (s.phase ?? "pending") === "completed");
-  /** Back at overnight base (final stop active/completed) — evening roll is next. */
+  const finalOpen =
+    finalDest != null &&
+    ((finalDest.phase ?? "pending") === "active" ||
+      (finalDest.phase ?? "pending") === "completed");
+  const stillOpenToday = destinations.some(
+    (stop) => stop.id !== finalDest?.id && (stop.phase ?? "pending") === "active",
+  );
+  const activeOffDay = (allStops as VenueStopRow[]).some(
+    (stop) =>
+      stop.session_date !== opts.sessionDate &&
+      (stop.phase ?? "pending") === "active" &&
+      !isPassengerStop(stop),
+  );
+  /** Tonight's accommodation. Unrun suggestions do not hold the roll. */
   const readyForEvening =
-    phase === "at_base" ||
-    (hops.length === 0 && !overnightWake?.hotelOmitted) ||
-    (destinations.length > 0 &&
-      nonFinalDests.every((s) => (s.phase ?? "pending") === "completed") &&
-      finalDest != null &&
-      ((finalDest.phase ?? "pending") === "active" ||
-        (finalDest.phase ?? "pending") === "completed"));
+    !activeOffDay &&
+    !stillOpenToday &&
+    (phase === "at_base" ||
+      (hops.length === 0 && !overnightWake?.hotelOmitted) ||
+      finalOpen);
 
   // Overnight / evening base = last stop today (Hotel), not Day 1 arrival (Mounties).
   const eveningBaseName =

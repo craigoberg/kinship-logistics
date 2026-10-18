@@ -26,6 +26,7 @@ import { TicketSurfaceProvider } from "../lib/app-tickets/ticket-surface";
 import { Toaster } from "../components/ui/sonner";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
+import { bootFieldLinkWatch } from "@/integrations/supabase/client";
 import { IdleLockGate } from "../components/auth/idle-lock-gate";
 import { ChromeVisibilityProvider } from "@/hooks/chrome-visibility";
 import {
@@ -198,33 +199,47 @@ function RootComponent() {
     return () => window.clearTimeout(id);
   }, []);
 
+  useEffect(() => {
+    bootFieldLinkWatch();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Root provider so global overlays (Big Red Incident) work outside AppShell. */}
       <TooltipProvider delayDuration={300}>
         <TicketSurfaceProvider>
         <AuthGate />
-        {isAuthRoute || isPublicRoute ? (
-          // Bare shell — auth login or public yada.org.au pages (BL-110).
+        {isPublicRoute ? (
           <Outlet />
         ) : (
           <ChromeVisibilityProvider>
-            <div
-              className={
-                lockViewport
-                  ? "flex h-dvh flex-col overflow-hidden overscroll-none"
-                  : undefined
-              }
-            >
-              <DevOperationalClockBar />
-              {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-              <AppShell viewportLock={lockViewport}>
+            {isAuthRoute ? (
+              <>
+                <DevOperationalClockBar />
                 <Outlet />
-              </AppShell>
-            </div>
-            <IdleLockGate />
-            <NotificationSimulator />
-            <RoleAwareGuardians />
+              </>
+            ) : (
+              <div
+                className={
+                  lockViewport
+                    ? "flex h-dvh flex-col overflow-hidden overscroll-none"
+                    : undefined
+                }
+              >
+                <DevOperationalClockBar />
+                {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+                <AppShell viewportLock={lockViewport}>
+                  <Outlet />
+                </AppShell>
+              </div>
+            )}
+            {isAuthRoute ? null : (
+              <>
+                <IdleLockGate />
+                <NotificationSimulator />
+                <RoleAwareGuardians />
+              </>
+            )}
           </ChromeVisibilityProvider>
         )}
         <Toaster />

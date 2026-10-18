@@ -1,6 +1,7 @@
 /**
  * EventDeliverStatusPanel — group journey status banner (GUARDRAILS §12.13.8)
  */
+import { useMemo } from "react";
 import { useQuery, type QueryKey } from "@tanstack/react-query";
 import {
   Bus,
@@ -19,9 +20,12 @@ import { cn } from "@/lib/utils";
 import {
   eventDeliverStatusKey,
   fetchEventDeliverGroupStatus,
+  plannedDayStatusSteps,
   type EventDeliverStatusStep,
   type StatusStamp,
 } from "@/lib/api/event-deliver-status";
+import { listEventVenueStops } from "@/lib/api/event-outing";
+import { resolveVenueStops } from "@/lib/deliver-offline/outbox";
 import { useRealtimeInvalidateMany } from "@/hooks/use-realtime-invalidate";
 
 const GROUP_STATUS_TABLES = [
@@ -72,6 +76,24 @@ export function EventDeliverStatusPanel({
     staleTime: 10_000,
     refetchInterval: 30_000,
   });
+  const { data: stops = [] } = useQuery({
+    queryKey: ["event-venue-stops", eventId],
+    queryFn: () => resolveVenueStops(eventId, () => listEventVenueStops(eventId)),
+    staleTime: 20_000,
+    networkMode: "always",
+  });
+  const steps = useMemo(() => {
+    if (!data) return [];
+    const hasProgramme = data.steps.some(
+      (step) =>
+        step.id.startsWith("hop-") ||
+        step.id.startsWith("onsite-") ||
+        step.id === "evening-roll" ||
+        step.id === "base-end",
+    );
+    if (hasProgramme || stops.length === 0) return data.steps;
+    return [...data.steps, ...plannedDayStatusSteps(stops, sessionDate)];
+  }, [data, stops, sessionDate]);
 
   if (isLoading || !data) {
     return (
@@ -117,7 +139,7 @@ export function EventDeliverStatusPanel({
           Group status
         </div>
         <ol className="space-y-1">
-          {data.steps.map((step) => (
+          {steps.map((step) => (
             <StatusStepRow key={step.id} step={step} />
           ))}
         </ol>

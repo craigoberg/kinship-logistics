@@ -20,13 +20,16 @@ import { cn } from "@/lib/utils";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { TripReinstateDialog } from "@/components/events/trip-absent-disposition-dialog";
 import {
-  checkoutEventParticipant,
   listEventAttendanceRoll,
   reinstateLeftTripEverywhere,
-  undoCheckoutEventParticipant,
   type EventAttendanceRow,
   type ReturnTransport,
 } from "@/lib/api/event-attendance";
+import {
+  checkoutEventParticipantOfflineAware,
+  resolveEventAttendanceRoll,
+  undoCheckoutEventParticipantOfflineAware,
+} from "@/lib/deliver-offline/outbox";
 import { busHomeHandoverGapsKey } from "@/lib/api/event-transport";
 import { type EventDaySession } from "@/lib/api/event-outing";
 import { EventTransportBadge } from "@/components/events/event-transport-badge";
@@ -59,7 +62,9 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
 
   const { data: rows = [], isLoading, isFetching } = useQuery({
     queryKey: rollKey(session.id),
-    queryFn: () => listEventAttendanceRoll(session.id),
+    queryFn: () =>
+      resolveEventAttendanceRoll(session.id, () => listEventAttendanceRoll(session.id)),
+    networkMode: "offlineFirst",
     staleTime: 20_000,
     refetchInterval: 30_000,
   });
@@ -100,7 +105,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
       row: EventAttendanceRow;
       transport: ReturnTransport;
       busRunCode?: string | null;
-    }) => checkoutEventParticipant(row, transport, busRunCode),
+    }) => checkoutEventParticipantOfflineAware(row, transport, busRunCode),
     onSuccess: () => {
       toast.success("Departure recorded.");
       invalidate();
@@ -109,7 +114,7 @@ export function EventCheckOutPanel({ session, onTripClosed }: Props) {
   });
 
   const undoMut = useMutation({
-    mutationFn: (row: EventAttendanceRow) => undoCheckoutEventParticipant(row),
+    mutationFn: (row: EventAttendanceRow) => undoCheckoutEventParticipantOfflineAware(row),
     onSuccess: () => {
       toast.success("Assignment cleared — pick return transport again.");
       invalidate();

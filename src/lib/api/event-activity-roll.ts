@@ -2,7 +2,9 @@
  * Event Deliver Phase B — Activity loop API (GUARDRAILS §12.13 / BL-068)
  *
  * Manages per-stop activity state (open/close) and per-person check-in rolls
- * for non-bus activities (walk, on-site). Bus hops are tracked via §11 Manifest.
+ * for walk, other, and on-site. A bus hop between venues is the leader's
+ * headcount on this tablet, then the next place opens. Manifest stays the
+ * door runs: to the meeting point, and home from the departure point.
  *
  * Tables:
  *   event_venue_stops   — phase / movement_method / opened_at / closed_at
@@ -13,6 +15,14 @@ import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger } from "@/lib/api/ledger";
 import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { assertMorningRollCompleteBeforeProgramme } from "@/lib/api/event-deliver-status";
+import {
+  isMealStop,
+  isMedicationStop,
+  isPassengerStop,
+  isSkippedStop,
+  withoutSkippedStopNotes,
+  withSkippedStopNotes,
+} from "@/lib/api/event-outing";
 import { operationalNowIso } from "@/lib/operational-clock";
 import {
   encodeActivitySkipNotes,
@@ -146,17 +156,20 @@ export async function ensureActivityRollLeftTripPlaceholders(
 ): Promise<void> {
   const { data: leftTrip, error: attErr } = await supabase
     .from("event_attendance_log")
-    .select("participant_id")
+    .select("participant_id, notes")
     .eq("event_day_session_id", eventDaySessionId)
     .eq("status", "absent");
   if (attErr) {
     console.warn("[ensureActivityRollLeftTripPlaceholders] attendance read failed:", attErr.message);
     return;
   }
-  if (!leftTrip?.length) return;
+  const leftOnly = (leftTrip ?? []).filter(
+    (row) => !String((row as { notes?: string | null }).notes ?? "").startsWith("Not collected"),
+  );
+  if (!leftOnly.length) return;
 
   const now = operationalNowIso();
-  const rows = leftTrip.map((r) => ({
+  const rows = leftOnly.map((r) => ({
     venue_stop_id: venueStopId,
     event_day_session_id: eventDaySessionId,
     participant_id: (r as { participant_id: string }).participant_id,
@@ -173,7 +186,7 @@ export async function ensureActivityRollLeftTripPlaceholders(
   }
 
   // Promote expected → absent for anyone already on the roll who left the trip.
-  const pids = leftTrip.map((r) => (r as { participant_id: string }).participant_id);
+  const pids = leftOnly.map((r) => (r as { participant_id: string }).participant_id);
   const { error: updErr } = await supabase
     .from("event_activity_rolls")
     .update({ status: "absent", marked_absent_at: now })
@@ -264,7 +277,10 @@ export async function planVenueMovement(
   if (!row) throw new Error("Venue stop not found.");
   const phase = (row as { phase?: string | null }).phase ?? "pending";
   if (phase !== "pending") {
-    throw new Error("Movement is already underway or this stop is open.");
+    const where = stop.venueName?.trim() || "This stop";
+    throw new Error(
+      `Not a connection problem. ${where} is already open or finished, so choosing how to travel there is no longer needed.`,
+    );
   }
   const current = (row as { movement_method?: string | null }).movement_method;
   if (current === method) return;
@@ -319,6 +335,8 @@ export async function declareProgrammeStopOpen(opts: {
   sessionDate: string;
   venueName: string | null;
   eventDaySessionId: string;
+  /** Tap time when this Open was queued offline. */
+  occurredAt?: string;
 }): Promise<void> {
   await assertMorningRollCompleteBeforeProgramme({
     eventId: opts.eventId,
@@ -372,7 +390,7 @@ export async function declareProgrammeStopOpen(opts: {
   if (clearErr) throw clearErr;
 
   const staffId = await resolveStaffIdWithFallback();
-  const now = operationalNowIso();
+  const now = opts.occurredAt ?? operationalNowIso();
   const { error } = await supabase
     .from("event_venue_stops")
     .update({
@@ -566,12 +584,16 @@ export async function openVenueStop(
   // 2. Walk/on-site: seed checked-in as expected + left-trip Absent as placeholders
   const { data: floor, error: attErr } = await supabase
     .from("event_attendance_log")
-    .select("participant_id, status")
+    .select("participant_id, status, notes")
     .eq("event_day_session_id", eventDaySessionId)
     .in("status", ["checked_in", "absent"]);
   if (attErr) throw attErr;
 
-  const participants = (floor ?? []).map((r) => {
+  const onThisStop = (floor ?? []).filter((r) => {
+    const row = r as { status: string; notes?: string | null };
+    return !(row.status === "absent" && String(row.notes ?? "").startsWith("Not collected"));
+  });
+  const participants = onThisStop.map((r) => {
     const status = (r as { status: string }).status;
     const isAbsent = status === "absent";
     return {
@@ -660,13 +682,15 @@ export async function countOutstandingActivityExpected(
 export async function assertActivityRollClearToLeave(venueStopId: string): Promise<void> {
   const { data, error } = await supabase
     .from("event_venue_stops")
-    .select("phase, activity_kind")
+    .select("phase, activity_kind, label_override, venues(name)")
     .eq("id", venueStopId)
     .maybeSingle();
   if (error) throw error;
   const row = data as {
     phase?: string | null;
     activity_kind?: string | null;
+    label_override?: string | null;
+    venues?: { name?: string | null } | null;
   } | null;
   const kind = row?.activity_kind ?? "venue";
   const phase = row?.phase ?? "pending";
@@ -674,8 +698,14 @@ export async function assertActivityRollClearToLeave(venueStopId: string): Promi
 
   const outstanding = await countOutstandingActivityExpected(venueStopId);
   if (outstanding <= 0) return;
+  const label =
+    row?.label_override?.trim() ||
+    row?.venues?.name?.trim() ||
+    "this activity";
+  const people =
+    outstanding === 1 ? "1 person is" : `${outstanding} people are`;
   throw new Error(
-    `${outstanding} person${outstanding === 1 ? "" : "s"} still outstanding on the activity check-in. Confirm or mark Not at activity before leaving.`,
+    `Not a connection problem. Leaving ${label} is held because the server still has that activity open, and ${people} still expected on the ${label} check-in. The list on screen can show a later activity already confirmed. Open ${label} and confirm each person, or mark Not at activity.`,
   );
 }
 
@@ -716,7 +746,7 @@ export async function leaveVenueForNext(opts: {
 
 /**
  * Confirm walk / other / on_site leave: open next activity + complete current.
- * Bus confirm is Release → Manifest.
+ * A bus hop uses `confirmBusLeave` (headcount on this tablet, then the same open).
  */
 export async function confirmNonBusLeave(opts: {
   fromStop: {
@@ -769,6 +799,274 @@ export async function confirmNonBusLeave(opts: {
     sessionDate: opts.fromStop.sessionDate,
   });
   return { openedStopId: opts.toStop.id };
+}
+
+export type HopHeadcountMark = {
+  key: string;
+  name: string;
+  participantId: string | null;
+  staffId: string | null;
+  carerId: string | null;
+  mark: "on_bus" | "not_travelling";
+};
+
+/** Open the next place after the leader's bus headcount. No Manifest hop and no kilometres. */
+async function openArrivedByBus(
+  stop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  },
+  eventDaySessionId: string,
+): Promise<void> {
+  await assertMorningRollCompleteBeforeProgramme({
+    eventId: stop.eventId,
+    sessionId: eventDaySessionId,
+    sessionDate: stop.sessionDate,
+  });
+  const { getProgrammeSuspend } = await import("@/lib/api/operational-emergency");
+  const suspended = await getProgrammeSuspend(eventDaySessionId);
+  if (suspended?.active) {
+    throw new Error(
+      `Programme suspended${suspended.reason ? `: ${suspended.reason}` : ""}. Manager must clear before opening activities.`,
+    );
+  }
+
+  const { data: existing, error } = await supabase
+    .from("event_venue_stops")
+    .select("id, phase, opened_at, opened_by_id")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!existing) throw new Error("Destination stop not found.");
+  const phase = (existing as { phase?: string | null }).phase ?? "pending";
+  if (phase !== "pending") {
+    throw new Error("Destination is already open or completed.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const now = operationalNowIso();
+  const openedAt = (existing as { opened_at?: string | null }).opened_at ?? now;
+  const openedBy = (existing as { opened_by_id?: string | null }).opened_by_id ?? staffId ?? null;
+  const { error: updErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "active",
+      movement_method: "bus",
+      opened_at: openedAt,
+      opened_by_id: openedBy,
+    })
+    .eq("id", stop.id);
+  if (updErr) throw updErr;
+}
+
+/**
+ * Leader bus hop: everyone still with the group is on the bus or not travelling.
+ * Not travelling does not take them off the trip. Then the next place opens.
+ */
+export async function confirmBusLeave(opts: {
+  fromStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  toStop: {
+    id: string;
+    eventId: string;
+    sessionDate: string;
+    venueName: string | null;
+  };
+  eventDaySessionId: string;
+  marks: HopHeadcountMark[];
+}): Promise<{ openedStopId: string }> {
+  await assertActivityRollClearToLeave(opts.fromStop.id);
+
+  const { data: attendance, error: attErr } = await supabase
+    .from("event_attendance_log")
+    .select("participant_id")
+    .eq("event_day_session_id", opts.eventDaySessionId)
+    .eq("status", "checked_in");
+  if (attErr) throw attErr;
+
+  const supportResult = await supabase
+    .from("event_support_attendance_log")
+    .select("staff_id, carer_id")
+    .eq("event_day_session_id", opts.eventDaySessionId)
+    .eq("status", "checked_in");
+  if (supportResult.error && !/schema|column|relation/i.test(supportResult.error.message)) {
+    throw supportResult.error;
+  }
+
+  const needed = new Set<string>();
+  for (const row of attendance ?? []) {
+    const id = (row as { participant_id: string }).participant_id;
+    if (id) needed.add(`p:${id}`);
+  }
+  for (const row of supportResult.data ?? []) {
+    const staffId = (row as { staff_id?: string | null }).staff_id;
+    const carerId = (row as { carer_id?: string | null }).carer_id;
+    if (staffId) needed.add(`s:${staffId}`);
+    else if (carerId) needed.add(`c:${carerId}`);
+  }
+
+  const marked = new Map(opts.marks.map((mark) => [mark.key, mark]));
+  const missing = [...needed].filter((key) => {
+    const mark = marked.get(key)?.mark;
+    return mark !== "on_bus" && mark !== "not_travelling";
+  });
+  if (needed.size === 0) {
+    throw new Error("No one is checked in yet.");
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `${missing.length} still to mark on the bus or not travelling.`,
+    );
+  }
+
+  await openArrivedByBus(opts.toStop, opts.eventDaySessionId);
+  await closeVenueStop({
+    id: opts.fromStop.id,
+    eventId: opts.fromStop.eventId,
+    venueName: opts.fromStop.venueName,
+    sessionDate: opts.fromStop.sessionDate,
+  });
+
+  const staffId = await resolveStaffIdWithFallback();
+  const from = opts.fromStop.venueName?.trim() || "here";
+  const to = opts.toStop.venueName?.trim() || "the next place";
+  for (const key of needed) {
+    const mark = marked.get(key)!;
+    const onBus = mark.mark === "on_bus";
+    try {
+      await writeToLedger({
+        staff_id: staffId,
+        category: "TRIP",
+        severity: "GREEN",
+        action_type: onBus ? "EVENT_HOP_ON_BUS" : "EVENT_HOP_NOT_TRAVELLING",
+        gps_lat: null,
+        gps_lng: null,
+        metadata: await withAuditActorMeta({
+          person_name: mark.name,
+          participant_id: mark.participantId,
+          staff_id: mark.staffId,
+          carer_id: mark.carerId,
+          location: `${from} to ${to}`,
+          summary: onBus
+            ? `${mark.name} on the bus from ${from} to ${to}`
+            : `${mark.name} not travelling from ${from} to ${to} — still on the trip`,
+        }),
+      });
+    } catch (err) {
+      console.warn("[confirmBusLeave] headcount receipt failed:", err);
+    }
+  }
+
+  return { openedStopId: opts.toStop.id };
+}
+
+/** Leave this place unrun. It drops off the available list and does not block Evening Roll. */
+export async function skipVenueStop(stop: {
+  id: string;
+  eventId: string;
+  venueName: string | null;
+}): Promise<void> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("phase, activity_kind, notes")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error("That activity is not on the programme.");
+  const row = data as { phase?: string | null; activity_kind?: string | null; notes?: string | null };
+  if (isMealStop(row) || isMedicationStop(row) || isPassengerStop(row)) {
+    throw new Error("Skip a place. Meals, medication, and pickups stay on their day.");
+  }
+  if ((row.phase ?? "pending") === "active") {
+    throw new Error("Close this activity before skipping it.");
+  }
+  if ((row.phase ?? "pending") === "completed" && !isSkippedStop(row)) {
+    throw new Error("This activity is already done.");
+  }
+  const now = operationalNowIso();
+  const { error: updErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "completed",
+      closed_at: now,
+      notes: withSkippedStopNotes(row.notes),
+    })
+    .eq("id", stop.id);
+  if (updErr) throw updErr;
+  const staffId = await resolveStaffIdWithFallback();
+  const name = stop.venueName?.trim() || "activity";
+  try {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "TRIP",
+      severity: "INFO",
+      action_type: "ACTIVITY_SKIPPED",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: await withAuditActorMeta({
+        venue_stop_id: stop.id,
+        event_id: stop.eventId,
+        location: name,
+        summary: `Skipped ${name} — not running`,
+      }),
+    });
+  } catch (err) {
+    console.warn("[skipVenueStop] receipt failed:", err);
+  }
+}
+
+/** Put a skipped place back on the programme. A place that was run stays done. */
+export async function undoSkipVenueStop(stop: {
+  id: string;
+  eventId: string;
+  venueName: string | null;
+}): Promise<void> {
+  const { data, error } = await supabase
+    .from("event_venue_stops")
+    .select("notes")
+    .eq("id", stop.id)
+    .maybeSingle();
+  if (error) throw error;
+  const notes = (data as { notes?: string | null } | null)?.notes;
+  if (!isSkippedStop({ notes })) {
+    throw new Error("This activity was run. It is not a skip.");
+  }
+  const { error: updErr } = await supabase
+    .from("event_venue_stops")
+    .update({
+      phase: "pending",
+      closed_at: null,
+      opened_at: null,
+      movement_method: null,
+      notes: withoutSkippedStopNotes(notes),
+    })
+    .eq("id", stop.id);
+  if (updErr) throw updErr;
+  const staffId = await resolveStaffIdWithFallback();
+  const name = stop.venueName?.trim() || "activity";
+  try {
+    await writeToLedger({
+      staff_id: staffId,
+      category: "TRIP",
+      severity: "INFO",
+      action_type: "ACTIVITY_SKIP_UNDONE",
+      gps_lat: null,
+      gps_lng: null,
+      metadata: await withAuditActorMeta({
+        venue_stop_id: stop.id,
+        event_id: stop.eventId,
+        location: name,
+        summary: `Put ${name} back on the programme`,
+      }),
+    });
+  } catch (err) {
+    console.warn("[undoSkipVenueStop] receipt failed:", err);
+  }
 }
 
 // ─── Close a stop (complete activity) ────────────────────────────────────────
@@ -919,9 +1217,12 @@ export async function countTodayVenueStops(
 
 // ─── Toggle individual check-in in activity roll ──────────────────────────────
 
-export async function toggleActivityCheckIn(row: ActivityRollRow): Promise<ActivityRollRow> {
+export async function toggleActivityCheckIn(
+  row: ActivityRollRow,
+  occurredAt?: string,
+): Promise<ActivityRollRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = operationalNowIso();
+  const now = occurredAt ?? operationalNowIso();
   const isIn = row.status === "checked_in";
 
   const patch = isIn

@@ -173,8 +173,8 @@ export function GiveDoseModal({
         if (!adminPin || !witnessPin) {
           throw new Error("Both staff must enter their PIN.");
         }
-        await verifyNamedStaffPin(administeredById, adminPin);
-        await verifyNamedStaffPin(witnessedById, witnessPin);
+        await verifyNamedStaffPin(administeredById, adminPin, { announce: false });
+        await verifyNamedStaffPin(witnessedById, witnessPin, { announce: false });
         const administeredBy = activeStaff.find((s) => s.id === administeredById);
         const witnessedBy = activeStaff.find((s) => s.id === witnessedById);
         if (!administeredBy || !witnessedBy) throw new Error("Staff not found.");
@@ -202,7 +202,7 @@ export function GiveDoseModal({
       if (soleNote.trim().length < 10) {
         throw new Error("Sole-carer justification needs at least 10 characters.");
       }
-      await verifyNamedStaffPin(administeredById, solePin);
+      await verifyNamedStaffPin(administeredById, solePin, { announce: false });
       const administeredBy = activeStaff.find((s) => s.id === administeredById);
       if (!administeredBy) throw new Error("Staff not found.");
       await insertSoleCarerAdministrationLog({

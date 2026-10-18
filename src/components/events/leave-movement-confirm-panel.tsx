@@ -1,7 +1,8 @@
 /**
  * Leave movement confirm — after Bus | Walk | Other | On-site is planned.
- * Embedded Method + Undo chips (Check-In parity). Confirm creates Manifest
- * (bus) or opens next activity (walk/other/on_site).
+ * Bus opens the on-bus headcount on this tablet, then the next place.
+ * Walk, other, and on-site open the next activity check-in.
+ * A hop already released to Manifest stays on that driver run.
  */
 import { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -16,16 +17,19 @@ import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { cn } from "@/lib/utils";
 import {
   clearPlannedVenueMovement,
-  confirmNonBusLeave,
-  leaveVenueForNext,
   type MovementMethod,
 } from "@/lib/api/event-activity-roll";
 import {
+  confirmNonBusLeaveOfflineAware,
+  leaveVenueForNextOfflineAware,
+} from "@/lib/deliver-offline/outbox";
+import {
   eventTransportRunsKey,
   listEventTransportRuns,
-  prepareEventHopManifest,
 } from "@/lib/api/event-hop-transport";
 import { listBusManifest } from "@/lib/api/event-day-ops";
+import { BusHopHeadcount } from "@/components/events/bus-hop-headcount";
+import { BusDayClearance } from "@/components/events/bus-day-clearance";
 import { invalidateTransportCaches } from "@/lib/query/invalidation";
 
 const METHOD_CHIP: Record<MovementMethod, string> = {
@@ -113,7 +117,7 @@ export function LeaveMovementConfirmPanel({
 
   const replanMut = useMutation({
     mutationFn: (next: MovementMethod) =>
-      leaveVenueForNext({
+      leaveVenueForNextOfflineAware({
         fromStop: {
           id: fromStopId,
           eventId,
@@ -139,31 +143,9 @@ export function LeaveMovementConfirmPanel({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const releaseMut = useMutation({
-    mutationFn: () =>
-      prepareEventHopManifest({
-        eventId,
-        eventDaySessionId: sessionId,
-        sessionDate,
-        hopIndex: hopCard?.hopIndex ?? hopIndex,
-        fromStopId,
-        toStopId,
-      }),
-    onSuccess: (id) => {
-      toast.success("Group released to bus", {
-        description: "This stop is closed. Driver boards on Manifest.",
-      });
-      qc.invalidateQueries({ queryKey: runsKey });
-      qc.invalidateQueries({ queryKey: ["event-bus-manifest", id] });
-      invalidateTransportCaches(qc);
-      onChanged();
-    },
-    onError: (e: Error) => toast.error(e.message),
-  });
-
   const leaveMut = useMutation({
     mutationFn: () =>
-      confirmNonBusLeave({
+      confirmNonBusLeaveOfflineAware({
         fromStop: {
           id: fromStopId,
           eventId,
@@ -186,11 +168,7 @@ export function LeaveMovementConfirmPanel({
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const busy =
-    undoMut.isPending ||
-    replanMut.isPending ||
-    releaseMut.isPending ||
-    leaveMut.isPending;
+  const busy = undoMut.isPending || replanMut.isPending || leaveMut.isPending;
 
   const onBoard = manifest.filter((r) => r.status === "on_bus").length;
   const total = manifest.filter((r) => r.status !== "not_travelling").length;
@@ -283,7 +261,7 @@ export function LeaveMovementConfirmPanel({
           </div>
           <p className="text-xs text-amber-100/70">
             {method === "bus"
-              ? "Confirm Release to create the bus Manifest and hand the group over. Closes this activity."
+              ? "First bus today asks who is driving. Then mark who is on the bus. Not travelling stays on the trip."
               : "Confirm leave to open the next stop for activity check-in. Closes this activity."}
           </p>
         </div>
@@ -320,22 +298,29 @@ export function LeaveMovementConfirmPanel({
       </div>
 
       {method === "bus" ? (
-        <FieldActionButton
-          variant="primary"
-          disabled={
-            busy ||
-            hopCard?.status === "blocked" ||
-            hopCard?.status === "waiting"
-          }
-          onClick={() => releaseMut.mutate()}
+        <BusDayClearance
+          eventId={eventId}
+          sessionDate={sessionDate}
+          fromLabel={fromLabel}
+          toLabel={toLabel}
         >
-          {releaseMut.isPending ? (
-            <Loader2 className="h-4 w-4 animate-spin" />
-          ) : (
-            <Bus className="h-4 w-4" />
-          )}
-          Release group to bus
-        </FieldActionButton>
+          <BusHopHeadcount
+            eventId={eventId}
+            sessionId={sessionId}
+            sessionDate={sessionDate}
+            fromStopId={fromStopId}
+            toStopId={toStopId}
+            fromLabel={fromLabel}
+            toLabel={toLabel}
+            fromVenueName={fromVenueName}
+            toVenueName={toVenueName}
+            busy={busy}
+            onLeft={(id) => {
+              onNonBusConfirmed?.(id);
+              onChanged();
+            }}
+          />
+        </BusDayClearance>
       ) : (
         <FieldActionButton
           variant="success"
@@ -363,7 +348,7 @@ export function LeaveMovementConfirmPanel({
               {
                 method: "bus" as const,
                 label: "By Bus",
-                sub: "Release here → driver boards via Manifest (§11)",
+                sub: "Who is on the bus, on this tablet. Then the next place opens.",
                 icon: <Bus className="h-5 w-5" />,
               },
               {

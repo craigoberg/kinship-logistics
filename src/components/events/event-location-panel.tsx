@@ -33,18 +33,19 @@ import {
 } from "@/components/ui/dialog";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
 import {
-  closeEventLocation,
   isEventLocationClosed,
   isEventLocationOpen,
   openEventLocation,
 } from "@/lib/api/event-location";
+import { closeEventLocationOfflineAware } from "@/lib/deliver-offline/outbox";
+import { operationalNowIso } from "@/lib/operational-clock";
+import type { EventDaySession } from "@/lib/api/event-outing";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import { countTodayVenueStops } from "@/lib/api/event-activity-roll";
 import {
   formatGuestIncompleteMessage,
   listIncompleteGuestBookings,
 } from "@/lib/api/event-guest";
-import type { EventDaySession } from "@/lib/api/event-outing";
 import { getEventDayPhaseDisplay } from "@/lib/event-day-phase-display";
 import { useVenueOpenChecks } from "@/hooks/use-system-parameters";
 import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
@@ -168,6 +169,7 @@ export function EventLocationPanel({
   });
 
   const closeMut = useMutation({
+    networkMode: "always",
     mutationFn: async () => {
       if (!(await closeDuty.ensureApproved())) {
         throw new Error("Manager must approve the duty requirement gap first.");
@@ -175,14 +177,28 @@ export function EventLocationPanel({
       if (!managerPinVerified || !verifiedManagerPin) {
         throw new Error("Manager PIN required.");
       }
-      return closeEventLocation({
-        sessionId: session.id,
+      return closeEventLocationOfflineAware({
+        session,
         managerPin: verifiedManagerPin,
         outcome: closeOutcome,
         notes,
       });
     },
     onSuccess: () => {
+      const closedAt = operationalNowIso();
+      qc.setQueryData<EventDaySession[]>(["event-day-sessions", session.event_id], (prev) =>
+        prev?.map((row) =>
+          row.id === session.id
+            ? {
+                ...row,
+                phase: closeOutcome,
+                close_declared_at: closedAt,
+                closed_by_id: session.manager_staff_id,
+                close_leader_notes: notes.trim() || null,
+              }
+            : row,
+        ),
+      );
       toast.success("Location closed.");
       setCloseDialog(false);
       resetPinState();
@@ -212,7 +228,7 @@ export function EventLocationPanel({
           </div>
           {session.open_declared_at && (
             <span className="text-[11px] text-muted-foreground">
-              Opened <FormattedDateTime value={session.open_declared_at} />
+              Opened: <FormattedDateTime value={session.open_declared_at} withWeekday />
               {session.open_leader_notes && ` · ${session.open_leader_notes}`}
             </span>
           )}

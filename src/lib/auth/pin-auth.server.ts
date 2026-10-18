@@ -859,7 +859,11 @@ export async function verifyNamedPin(args: {
   if (!row) throw new PinAuthError("Incorrect PIN. Please try again.");
   assertActive(row);
   await checkKnownPin(row, args.pin.trim());
-  return { personnelType: row.personnel_type, roleTitle: row.role };
+  return {
+    personnelType: row.personnel_type,
+    roleTitle: row.role,
+    fullName: (row.full_name ?? "").trim(),
+  };
 }
 
 export async function resolvePinHolder(args: {

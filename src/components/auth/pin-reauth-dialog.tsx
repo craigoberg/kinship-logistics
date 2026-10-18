@@ -11,7 +11,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Button } from "@/components/ui/button";
 import { PinPad } from "@/components/auth/pin-pad";
-import { verifyManagerPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
+import { toastPinAccepted, verifyManagerPin, verifyNamedStaffPin } from "@/components/auth/pin-verify";
 import { floorRoleForStaff } from "@/lib/auth/pin-role";
 import { verifyNamedPersonPin } from "@/lib/auth/pin-session";
 import { getActiveUserProfile, persistFloorIdentity } from "@/lib/data-store";
@@ -73,6 +73,7 @@ export function PinReauthDialog({
       }
       if (!requireManager && profile?.personKind === "carer" && profile.carerId) {
         await verifyNamedPersonPin({ personKind: "carer", personId: profile.carerId, pin: value });
+        toastPinAccepted(profile.fullName);
       } else {
         const staffId = requiredStaffId || profile?.staffId || "";
         if (!staffId) throw new Error("Sign in again from the PIN pad.");

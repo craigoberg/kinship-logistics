@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import { Loader2, ShieldCheck } from "lucide-react";
-import { toast } from "sonner";
 
 import {
   Dialog,
@@ -249,7 +248,6 @@ export function PinEntryTrigger({
         onVerify={onVerify}
         onSuccess={(pin) => {
           onSuccess?.(pin);
-          toast.success(verifiedLabel);
         }}
       />
     </>

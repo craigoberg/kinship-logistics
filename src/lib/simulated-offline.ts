@@ -8,6 +8,8 @@ import { canUseDevTools } from "@/lib/dev-tools-access";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 
 const KEY = "yada.simOffline.v1";
+/** Set when a real database read fails or does not answer. Cleared by a successful probe. */
+const LATCH_KEY = "yada.fieldLinkOffline";
 
 type Listener = () => void;
 const listeners = new Set<Listener>();
@@ -43,6 +45,39 @@ export function isSimulatedOffline(): boolean {
   return readFlag();
 }
 
+/** True after a database read failed, until a probe read succeeds. Survives refresh. */
+export function isFieldLinkDown(): boolean {
+  if (typeof sessionStorage === "undefined") return false;
+  try {
+    return sessionStorage.getItem(LATCH_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
+export function latchFieldLinkDown(): void {
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    if (sessionStorage.getItem(LATCH_KEY) === "1") return;
+    sessionStorage.setItem(LATCH_KEY, "1");
+  } catch {
+    return;
+  }
+  notify();
+}
+
+export function clearFieldLinkDown(): void {
+  if (isSimulatedOffline()) return;
+  if (typeof sessionStorage === "undefined") return;
+  try {
+    if (sessionStorage.getItem(LATCH_KEY) !== "1") return;
+    sessionStorage.removeItem(LATCH_KEY);
+  } catch {
+    return;
+  }
+  notify();
+}
+
 export function setSimulatedOffline(forced: boolean): void {
   if (!canSimulate() || !canUseDevTools()) return;
   try {
@@ -61,5 +96,12 @@ export function setSimulatedOffline(forced: boolean): void {
 export function isAppOnline(): boolean {
   if (typeof navigator === "undefined") return true;
   if (isSimulatedOffline()) return false;
-  return navigator.onLine;
+  if (!navigator.onLine) return false;
+  if (isFieldLinkDown()) return false;
+  return true;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("online", () => notify());
+  window.addEventListener("offline", () => notify());
 }

@@ -26,6 +26,8 @@ import {
   Trash2,
   UserCheck,
 } from "lucide-react";
+import { LeaderPackButton } from "@/components/events/leader-pack-print";
+import { PaperPackUsedControl } from "@/components/events/paper-pack-used-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconActionButton } from "@/components/ui/icon-action-button";
@@ -308,6 +310,23 @@ export function ItineraryTab({ event, eventKind }: Props) {
             </>
           )}
         </p>
+        <div className="space-y-2">
+          <LeaderPackButton eventId={event.id} eventTitle={event.title} />
+          <PaperPackUsedControl
+            eventId={event.id}
+            eventTitle={event.title}
+            days={
+              sessions.length > 0
+                ? [...sessions]
+                    .sort((a, b) => a.session_date.localeCompare(b.session_date))
+                    .map((session, index) => ({
+                      date: session.session_date,
+                      dayNumber: index + 1,
+                    }))
+                : days.map((date, index) => ({ date, dayNumber: index + 1 }))
+            }
+          />
+        </div>
         {(!hasMeeting || !hasDeparture) && (
           <div className={cn("flex items-start gap-2 px-3 py-2.5 text-sm", CAUTION_CALLOUT_CLASS)}>
             <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />

@@ -233,6 +233,7 @@ const ACTION_LABELS: Record<string, string> = {
   MORNING_ROLL_YELLOW_RAISED: "Morning roll Yellow",
   EVENT_HOP_PREPARED: "Hop prepared",
   EVENT_HOP_STARTED: "Hop started",
+  EVENT_HOP_FORCE_STARTED: "Hop started before release",
   ACTIVITY_SKIP: "Activity skip",
   MED_BAG_HANDOVER: "Med bag handover",
   UNEXPECTED_MED_BAG_FLAGGED: "Unexpected med bag",
@@ -1172,13 +1173,19 @@ function composeTripFloorSummary(
       "(Yellow)",
     ]);
   }
-  if (a === "EVENT_HOP_PREPARED" || a === "EVENT_HOP_STARTED") {
+  if (a === "EVENT_HOP_PREPARED" || a === "EVENT_HOP_STARTED" || a === "EVENT_HOP_FORCE_STARTED") {
     const from = metaString(meta, "from_label");
     const to = metaString(meta, "to_label");
     const hop =
       from && to ? `${from} → ${to}` : from ? `from ${from}` : to ? `to ${to}` : "venue hop";
-    const verb = a === "EVENT_HOP_STARTED" ? "Started hop" : "Prepared hop";
-    return joinParts([verb, hop, place ? `for ${place}` : null]);
+    const verb =
+      a === "EVENT_HOP_FORCE_STARTED"
+        ? "Started hop before release"
+        : a === "EVENT_HOP_STARTED"
+          ? "Started hop"
+          : "Prepared hop";
+    const paper = meta.paper_roll === true ? "Paper roll is the headcount" : null;
+    return joinParts([verb, hop, place ? `for ${place}` : null, paper]);
   }
   if (a === "ACTIVITY_SKIP") {
     const skipReason = (reason ?? "").replace(/_/g, " ");

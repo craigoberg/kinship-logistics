@@ -13,6 +13,8 @@ import {
   rosterMoneySettled,
 } from "@/lib/data-store";
 import { operationalNowIso } from "@/lib/operational-clock";
+import { joinsOnTheWay } from "@/lib/passenger-stops";
+import { isAppOnline } from "@/lib/simulated-offline";
 import { todayLocalIso } from "@/lib/utils";
 import type { ArrivalMethod } from "@/lib/api/client-attendance";
 import {
@@ -87,6 +89,7 @@ export interface EventSupportAttendanceRow {
   checkedInAt: string | null;
   checkedOutAt: string | null;
   expectedArrivalAt: string | null;
+  notes: string | null;
 }
 
 interface BookingDb {
@@ -128,6 +131,7 @@ interface AttDb {
   checked_in_at: string | null;
   checked_out_at: string | null;
   expected_arrival_at?: string | null;
+  notes?: string | null;
 }
 
 type NameMaps = {
@@ -232,6 +236,7 @@ function toAtt(r: AttDb, names: NameMaps): EventSupportAttendanceRow {
     checkedInAt: r.checked_in_at,
     checkedOutAt: r.checked_out_at,
     expectedArrivalAt: r.expected_arrival_at ?? null,
+    notes: r.notes ?? null,
   };
 }
 
@@ -771,10 +776,28 @@ export async function listEventSupportAttendance(
   return (data ?? []).map((r) => toAtt(r as AttDb, names));
 }
 
-export async function seedEventSupportRoll(
+const supportSeedInflight = new Map<string, Promise<number>>();
+
+export function seedEventSupportRoll(
   sessionId: string,
   eventId: string,
+  opts?: { alreadyOnTrip?: boolean; actorStaffId?: string | null },
 ): Promise<number> {
+  const pending = supportSeedInflight.get(sessionId);
+  if (pending) return pending;
+  const run = seedEventSupportRollOnce(sessionId, eventId, opts).finally(() => {
+    supportSeedInflight.delete(sessionId);
+  });
+  supportSeedInflight.set(sessionId, run);
+  return run;
+}
+
+async function seedEventSupportRollOnce(
+  sessionId: string,
+  eventId: string,
+  opts?: { alreadyOnTrip?: boolean; actorStaffId?: string | null },
+): Promise<number> {
+  if (!isAppOnline()) return 0;
   const bookings = (await listEventSupportBookings(eventId)).filter(
     (b) => b.bookingStatus !== "Cancelled",
   );
@@ -798,9 +821,19 @@ export async function seedEventSupportRoll(
       .map((r) => (r as { carer_id?: string | null }).carer_id)
       .filter((id): id is string => !!id),
   );
+  const seenStaff = new Set(haveStaff);
+  const seenCarer = new Set(haveCarer);
   const missing = bookings.filter((b) => {
-    if (b.staffId) return !haveStaff.has(b.staffId);
-    if (b.carerId) return !haveCarer.has(b.carerId);
+    if (b.staffId) {
+      if (seenStaff.has(b.staffId)) return false;
+      seenStaff.add(b.staffId);
+      return true;
+    }
+    if (b.carerId) {
+      if (seenCarer.has(b.carerId)) return false;
+      seenCarer.add(b.carerId);
+      return true;
+    }
     return false;
   });
   if (!missing.length) return 0;
@@ -813,19 +846,26 @@ export async function seedEventSupportRoll(
   const expectedArrivalAt =
     (session as { expected_arrival_by?: string | null } | null)?.expected_arrival_by ??
     operationalNowIso();
-  const payload = missing.map((b) => ({
-    event_day_session_id: sessionId,
-    person_kind: b.personKind,
-    staff_id: b.staffId,
-    carer_id: b.carerId,
-    linked_participant_id: b.linkedParticipantId,
-    expected_arrival_at: expectedArrivalAt,
-    status: "expected" as const,
-    arrival_method: b.outboundTransportMode === "bus" ? "bus" : "private",
-    arrival_bus_run_code: b.outboundBusRunCode,
-    return_transport: b.returnTransportMode,
-    return_bus_run_code: b.returnBusRunCode,
-  }));
+  const now = operationalNowIso();
+  const payload = missing.map((b) => {
+    const carried = !!opts?.alreadyOnTrip && !joinsOnTheWay(b.pickupJoin);
+    return {
+      event_day_session_id: sessionId,
+      person_kind: b.personKind,
+      staff_id: b.staffId,
+      carer_id: b.carerId,
+      linked_participant_id: b.linkedParticipantId,
+      expected_arrival_at: expectedArrivalAt,
+      status: carried ? ("checked_in" as const) : ("expected" as const),
+      ...(carried
+        ? { checked_in_at: now, checked_in_by: opts?.actorStaffId ?? null }
+        : {}),
+      arrival_method: b.outboundTransportMode === "bus" ? "bus" : "private",
+      arrival_bus_run_code: b.outboundBusRunCode,
+      return_transport: b.returnTransportMode,
+      return_bus_run_code: b.returnBusRunCode,
+    };
+  });
   const { data: inserted, error } = await supabase
     .from("event_support_attendance_log")
     .insert(payload)
@@ -836,13 +876,102 @@ export async function seedEventSupportRoll(
   return inserted?.length ?? 0;
 }
 
+async function isAfterFirstTripDay(eventId: string, sessionId: string): Promise<boolean> {
+  const { data, error } = await supabase
+    .from("event_day_sessions")
+    .select("id, session_date")
+    .eq("event_id", eventId);
+  if (error || !data || data.length <= 1) return false;
+  const rows = data as { id: string; session_date: string }[];
+  const mine = rows.find((row) => row.id === sessionId);
+  if (!mine) return false;
+  const first = [...rows].sort((a, b) => a.session_date.localeCompare(b.session_date))[0];
+  return first?.session_date.slice(0, 10) !== mine.session_date.slice(0, 10);
+}
+
+/**
+ * Day 2+: staff, volunteers, and carers who joined at the meeting point stay
+ * on the trip. They are not asked to check in again. Someone collected later
+ * stays expected until that pickup.
+ */
+export async function carrySupportAlreadyOnTrip(input: {
+  sessionId: string;
+  eventId: string;
+  actorStaffId: string | null;
+}): Promise<number> {
+  if (!(await isAfterFirstTripDay(input.eventId, input.sessionId))) return 0;
+  const bookings = (await listEventSupportBookings(input.eventId)).filter(
+    (booking) => booking.bookingStatus !== "Cancelled",
+  );
+  const laterStaff = new Set<string>();
+  const laterCarer = new Set<string>();
+  for (const booking of bookings) {
+    if (!joinsOnTheWay(booking.pickupJoin)) continue;
+    if (booking.staffId) laterStaff.add(booking.staffId);
+    if (booking.carerId) laterCarer.add(booking.carerId);
+  }
+  await seedEventSupportRoll(input.sessionId, input.eventId, {
+    alreadyOnTrip: true,
+    actorStaffId: input.actorStaffId,
+  });
+  const { data, error } = await supabase
+    .from("event_support_attendance_log")
+    .select("id, staff_id, carer_id")
+    .eq("event_day_session_id", input.sessionId)
+    .eq("status", "expected");
+  if (error) {
+    if (isSchemaMismatchError(error)) return 0;
+    throw new Error(error.message);
+  }
+  const ids = (data ?? [])
+    .filter((row) => {
+      const person = row as { staff_id: string | null; carer_id: string | null };
+      if (person.staff_id && laterStaff.has(person.staff_id)) return false;
+      if (person.carer_id && laterCarer.has(person.carer_id)) return false;
+      return true;
+    })
+    .map((row) => (row as { id: string }).id);
+  if (!ids.length) return 0;
+  const now = operationalNowIso();
+  const { error: updateErr } = await supabase
+    .from("event_support_attendance_log")
+    .update({
+      status: "checked_in",
+      checked_in_at: now,
+      checked_in_by: input.actorStaffId,
+      updated_at: now,
+    })
+    .in("id", ids);
+  if (updateErr) throw new Error(updateErr.message);
+  await writeToLedger({
+    staff_id: input.actorStaffId ?? "",
+    category: "TRIP",
+    severity: "INFO",
+    action_type: "EVENT_OVERNIGHT_CONTINUITY_CHECKIN",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      summary: `${ids.length} staff, volunteers, and carers already on the trip — not asked to check in again`,
+      description: "Day 2+ support stay on the trip from the meeting-point check-in",
+      event_id: input.eventId,
+      event_day_session_id: input.sessionId,
+      support_carried: ids.length,
+      location: "trip",
+    }),
+  });
+  return ids.length;
+}
+
 export async function recordEventSupportArrival(input: {
   rowId: string;
   arrivalMethod: ArrivalMethod;
   arrivalBusRunCode?: string | null;
+  notes?: string | null;
+  occurredAt?: string;
 }): Promise<EventSupportAttendanceRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = operationalNowIso();
+  const now = input.occurredAt ?? operationalNowIso();
+  const collectedPlace = input.notes?.trim().match(/^Collected at (.+)$/)?.[1] ?? null;
   const { data, error } = await supabase
     .from("event_support_attendance_log")
     .update({
@@ -850,6 +979,7 @@ export async function recordEventSupportArrival(input: {
       arrival_method: input.arrivalMethod,
       arrival_bus_run_code:
         input.arrivalMethod === "bus" ? input.arrivalBusRunCode ?? null : null,
+      ...(input.notes?.trim() ? { notes: input.notes.trim() } : {}),
       checked_in_at: now,
       checked_in_by: staffId || null,
       updated_at: now,
@@ -861,6 +991,9 @@ export async function recordEventSupportArrival(input: {
   const names = await resolveNames();
   const logged = toAtt(data as AttDb, names);
   const how = formatTravelHow(input.arrivalMethod, input.arrivalBusRunCode);
+  const collectedSummary = collectedPlace
+    ? `Collected ${logged.displayName} onto the trip at ${collectedPlace}`
+    : null;
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -875,7 +1008,9 @@ export async function recordEventSupportArrival(input: {
       location: "trip",
       arrival_method: input.arrivalMethod,
       arrival_bus_run_code: input.arrivalBusRunCode ?? null,
-      summary: `Checked in ${logged.displayName} (${logged.personKind}) to trip ${how}`.trim(),
+      summary:
+        collectedSummary ??
+        `Checked in ${logged.displayName} (${logged.personKind}) to trip ${how}`.trim(),
     }),
   });
   return logged;
@@ -885,9 +1020,10 @@ export async function checkOutEventSupport(input: {
   rowId: string;
   returnTransport?: "bus" | "self" | null;
   returnBusRunCode?: string | null;
+  occurredAt?: string;
 }): Promise<EventSupportAttendanceRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const now = operationalNowIso();
+  const now = input.occurredAt ?? operationalNowIso();
   const { data, error } = await supabase
     .from("event_support_attendance_log")
     .update({
@@ -947,6 +1083,7 @@ export async function markEventSupportAbsent(
   if (error) throw new Error(error.message);
   const names = await resolveNames();
   const logged = toAtt(data as AttDb, names);
+  const missed = notes?.trim().match(/^Not collected — (.+)$/)?.[1] ?? null;
   await writeToLedger({
     staff_id: staffId,
     category: "CENTRE",
@@ -958,8 +1095,10 @@ export async function markEventSupportAbsent(
       row_id: rowId,
       person_name: logged.displayName,
       person_kind: logged.personKind,
-      location: "trip",
-      summary: `Marked ${logged.displayName} (${logged.personKind}) absent from the trip`,
+      location: missed ?? "trip",
+      summary: missed
+        ? `${logged.displayName} was not collected at ${missed}`
+        : `Marked ${logged.displayName} (${logged.personKind}) absent from the trip`,
     }),
   });
   return logged;

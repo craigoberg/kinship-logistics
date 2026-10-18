@@ -115,7 +115,6 @@ export function VerbalAuthOverrideDialog({
       setManagerPinVerified(true);
       setPinDraft("");
       setActivePinStep(null);
-      toast.success("Manager PIN verified");
     } catch (e) {
       setPinError(e instanceof Error ? e.message : "Incorrect manager PIN.");
       setPinDraft("");
@@ -132,7 +131,6 @@ export function VerbalAuthOverrideDialog({
       setOperatorPinVerified(true);
       setPinDraft("");
       setActivePinStep(null);
-      toast.success("Operator PIN verified");
     } catch (e) {
       setPinError(e instanceof Error ? e.message : "Incorrect operator PIN.");
       setPinDraft("");

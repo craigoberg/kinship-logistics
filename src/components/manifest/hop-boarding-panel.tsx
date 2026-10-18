@@ -1,7 +1,7 @@
 /**
  * HopBoardingPanel — §11 boarding roll for event_venue_hop trips (§12.4.3).
  */
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { Loader2, Users } from "lucide-react";
 import { toast } from "sonner";
@@ -16,7 +16,12 @@ import {
   listBusManifest,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
+import { CharacterCountedInput } from "@/components/ui/character-counted-input";
+import { meetsMinLength } from "@/lib/ui/required-field";
 import {
+  appendLocalBoarder,
+  isLocalHopTripId,
+  isPaperHeadcountTrip,
   markNotTravellingOfflineAware,
   markOnBusOfflineAware,
   resolveBusManifestForUi,
@@ -38,6 +43,9 @@ interface Props {
 
 export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
   const qc = useQueryClient();
+  const [extraName, setExtraName] = useState("");
+  const localHop = isLocalHopTripId(tripId);
+  const paperRoll = isPaperHeadcountTrip(tripId);
 
   useRealtimeInvalidate({
     table: "event_bus_manifest",
@@ -55,7 +63,7 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
   const invalidate = () => qc.invalidateQueries({ queryKey: manifestKey(tripId) });
 
   useEffect(() => {
-    if (!tripId) return;
+    if (!tripId || isLocalHopTripId(tripId)) return;
     let cancelled = false;
     void (async () => {
       const { data } = await supabase
@@ -122,6 +130,16 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
   }
 
   if (!manifest.length) {
+    if (paperRoll) {
+      return (
+        <Card className="rounded-xl border-2 border-amber-500 bg-amber-500/10 p-4 text-sm">
+          <p className="font-semibold">Paper roll is the headcount</p>
+          <p className="mt-1 text-muted-foreground">
+            Write who is on the bus on the paper sheet for this leg. File that sheet in the office trip file. You can depart.
+          </p>
+        </Card>
+      );
+    }
     return (
       <Card className="border-dashed p-4 text-center text-sm text-muted-foreground">
         No one on this hop yet — check in attendees on Event Deliver first.
@@ -162,6 +180,34 @@ export function HopBoardingPanel({ tripId, originLabel, compact }: Props) {
         {onBoard} / {total} on bus
         {complete ? " · ready to depart" : ""}
       </div>
+      {localHop && (
+        <div className="mt-4 space-y-2 border-t border-border pt-3">
+          <CharacterCountedInput
+            label="Someone not on this list"
+            value={extraName}
+            onValueChange={setExtraName}
+            minChars={2}
+            maxChars={80}
+            required
+            hint="The office confirms this name when the leg uploads."
+          />
+          <button
+            type="button"
+            disabled={!meetsMinLength(extraName, 2)}
+            onClick={() => {
+              void appendLocalBoarder(tripId, extraName)
+                .then(() => {
+                  setExtraName("");
+                  invalidate();
+                })
+                .catch((err: Error) => toast.error(err.message));
+            }}
+            className="flex h-11 w-full items-center justify-center rounded-lg border border-border text-sm font-semibold disabled:opacity-50"
+          >
+            Add to this leg
+          </button>
+        </div>
+      )}
     </Card>
   );
 }
@@ -242,5 +288,5 @@ export function useHopBoardingGate(tripId: string) {
     enabled: !!tripId,
     networkMode: "offlineFirst",
   });
-  return hopBoardingComplete(manifest);
+  return hopBoardingComplete(manifest) || isPaperHeadcountTrip(tripId);
 }

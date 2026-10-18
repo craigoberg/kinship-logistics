@@ -127,27 +127,46 @@ export interface EventVenueStop {
 }
 
 export function isMealStop(
-  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+  stop: { activity_kind?: string | null } | null | undefined,
 ): boolean {
   return (stop?.activity_kind ?? "venue") === "meal";
 }
 
 export function isMedicationStop(
-  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+  stop: { activity_kind?: string | null } | null | undefined,
 ): boolean {
   return (stop?.activity_kind ?? "venue") === "medication_round";
 }
 
 export function isPassengerStop(
-  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+  stop: { activity_kind?: string | null } | null | undefined,
 ): boolean {
   const kind = stop?.activity_kind ?? "venue";
   return kind === "passenger_pickup" || kind === "passenger_dropoff";
 }
 
+export const SKIPPED_STOP_PREFIX = "[SKIPPED]";
+
+/** The place will not be run. It stays on its plan day as skipped. */
+export function isSkippedStop(
+  stop: { notes?: string | null } | null | undefined,
+): boolean {
+  return (stop?.notes ?? "").startsWith(SKIPPED_STOP_PREFIX);
+}
+
+export function withSkippedStopNotes(existing: string | null | undefined): string {
+  const rest = (existing ?? "").replace(/^\[SKIPPED\]\s?/, "").trim();
+  return rest ? `${SKIPPED_STOP_PREFIX} ${rest}` : SKIPPED_STOP_PREFIX;
+}
+
+export function withoutSkippedStopNotes(existing: string | null | undefined): string | null {
+  const rest = (existing ?? "").replace(/^\[SKIPPED\]\s?/, "").trim();
+  return rest || null;
+}
+
 /** Venue stops that participate in bus hops / overnight hotel chain. */
 export function isVenueTransportStop(
-  stop: Pick<EventVenueStop, "activity_kind"> | null | undefined,
+  stop: { activity_kind?: string | null } | null | undefined,
 ): boolean {
   return (stop?.activity_kind ?? "venue") === "venue";
 }

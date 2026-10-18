@@ -13,7 +13,11 @@ import {
   markOnBus,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
+import { commitForcedHopStart } from "@/lib/api/event-hop-transport";
+import type { ExpectedHopPerson } from "@/lib/api/event-hop-transport";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { isAppOnline } from "@/lib/simulated-offline";
+import { markPaperHeadcountTrip } from "./expected-hops";
 import {
   idbDelete,
   idbGet,
@@ -32,6 +36,14 @@ import type {
 } from "./types";
 
 const CURRENT_DRIVER_META = "currentDriverStaffId";
+
+export function isLocalHopTripId(tripId: string): boolean {
+  return tripId.startsWith("local-hop:");
+}
+
+export function localHopTripId(sessionId: string, hopIndex: number): string {
+  return `local-hop:${sessionId}:${hopIndex}`;
+}
 const listeners = new Set<ManifestOfflineListener>();
 
 let flushInFlight: Promise<{ ok: number; failed: number }> | null = null;
@@ -48,8 +60,13 @@ function notify() {
 export function isNetworkError(err: unknown): boolean {
   if (!isAppOnline()) return true;
   if (err instanceof TypeError) return true;
-  const msg = err instanceof Error ? err.message : String(err ?? "");
-  return /failed to fetch|networkerror|load failed|network request failed|fetch failed/i.test(
+  const msg =
+    err instanceof Error
+      ? err.message
+      : typeof err === "object" && err !== null && "message" in err
+        ? String((err as { message: unknown }).message)
+        : String(err ?? "");
+  return /failed to fetch|networkerror|load failed|network request failed|fetch failed|timed out|timeout|aborted/i.test(
     msg,
   );
 }
@@ -103,7 +120,8 @@ function applyOpToSnapshot(
     return next;
   }
 
-  // mark_not_travelling
+  if (op.kind === "force_start_hop") return next;
+
   next.busManifest = next.busManifest.map((r) =>
     r.id === op.row.id
       ? { ...r, status: "not_travelling" as const, notes: op.notes }
@@ -183,6 +201,11 @@ export async function clearSnapshotForTrip(tripId: string): Promise<void> {
 export async function listOutboxForTrip(tripId: string): Promise<ManifestOutboxItem[]> {
   const rows = await idbGetAllByIndex<ManifestOutboxItem>(STORE_OUTBOX, "byTrip", tripId);
   return rows.sort((a, b) => a.createdAt.localeCompare(b.createdAt));
+}
+
+export async function discardManifestOutboxItem(id: string): Promise<void> {
+  await idbDelete(STORE_OUTBOX, id);
+  notify();
 }
 
 export async function listAllOutbox(): Promise<ManifestOutboxItem[]> {
@@ -342,8 +365,217 @@ export async function markNotTravellingOfflineAware(
   }
 }
 
+function blankHopLeg(opts: {
+  tripId: string;
+  sessionId: string;
+  hopIndex: number;
+  fromLabel: string;
+  toLabel: string;
+  toAddress: string | null;
+}): TripLeg {
+  return {
+    id: `local-leg:${opts.sessionId}:${opts.hopIndex}`,
+    tripId: opts.tripId,
+    legIndex: 1,
+    legKind: "venue_to_venue",
+    fromLabel: opts.fromLabel,
+    toLabel: opts.toLabel,
+    fromParticipantId: null,
+    toParticipantId: null,
+    fromStaffId: null,
+    toStaffId: null,
+    fromCarerId: null,
+    toCarerId: null,
+    status: "pending",
+    startLat: null,
+    startLng: null,
+    startAt: null,
+    endLat: null,
+    endLng: null,
+    endAt: null,
+    gpsDistanceKm: null,
+    loggedDistanceKm: null,
+    passengerPresent: null,
+    noShowTriggeredAt: null,
+    medicationExpected: false,
+    medicationHandoverConfirmed: false,
+    medicationHandoverStatus: "not_required",
+    unexpectedMedicationLogged: false,
+    unexpectedMedicationNotes: null,
+    completedAt: null,
+    targetAddress: opts.toAddress,
+  };
+}
+
+function personRow(
+  tripId: string,
+  sessionId: string,
+  person: ExpectedHopPerson,
+  now: string,
+): EventBusManifestRow {
+  return {
+    id: `local-row:${person.participantId ?? person.staffId ?? person.carerId ?? person.name}`,
+    event_day_session_id: sessionId,
+    transport_trip_id: tripId,
+    participant_id: person.participantId,
+    staff_id: person.staffId,
+    carer_id: person.carerId,
+    expected_on_bus: true,
+    status: "expected",
+    checked_on_at: null,
+    checked_on_by: null,
+    notes: null,
+    created_at: now,
+    updated_at: now,
+    participant_name: person.name,
+  };
+}
+
+/** Open a venue hop on this tablet before Release has reached the server. */
+export async function beginForcedHopOffline(input: {
+  eventId: string;
+  sessionId: string;
+  sessionDate: string;
+  hopIndex: number;
+  fromStopId: string;
+  toStopId: string;
+  fromLabel: string;
+  toLabel: string;
+  originAddress: string | null;
+  toAddress: string | null;
+  driverStaffId: string;
+  startOdometerKm: number;
+  assetId: string | null;
+  paperRoll: boolean;
+  people: ExpectedHopPerson[];
+}): Promise<ActiveTripBundle> {
+  const tripId = localHopTripId(input.sessionId, input.hopIndex);
+  const now = operationalNowIso();
+  const leg = blankHopLeg({
+    tripId,
+    sessionId: input.sessionId,
+    hopIndex: input.hopIndex,
+    fromLabel: input.fromLabel,
+    toLabel: input.toLabel,
+    toAddress: input.toAddress,
+  });
+  const bundle: ActiveTripBundle = {
+    trip: {
+      id: tripId,
+      driverStaffId: input.driverStaffId,
+      eventId: input.eventId,
+      busRunCode: null,
+      tripDate: input.sessionDate.slice(0, 10),
+      startOdometerKm: input.startOdometerKm,
+      endOdometerKm: null,
+      status: "active",
+      startedAt: now,
+      completedAt: null,
+      tripOrigin: "depot",
+      tripReturn: "none",
+      originAddress: input.originAddress,
+      assetId: input.assetId,
+      tripKind: "event_venue_hop",
+      eventDaySessionId: input.sessionId,
+      hopIndex: input.hopIndex,
+      venueStopFromId: input.fromStopId,
+      venueStopToId: input.toStopId,
+    },
+    legs: [leg],
+    eventTitle: null,
+  };
+  const snap: ManifestOfflineSnapshot = {
+    tripId,
+    driverStaffId: input.driverStaffId,
+    savedAt: now,
+    bundle,
+    busManifest: input.paperRoll
+      ? []
+      : input.people.map((person) => personRow(tripId, input.sessionId, person, now)),
+    paperRoll: input.paperRoll,
+    forcedBeforeRelease: true,
+  };
+  await idbPut(STORE_SNAPSHOTS, snap);
+  await idbPut(STORE_META, { key: CURRENT_DRIVER_META, value: input.driverStaffId });
+  if (input.paperRoll) markPaperHeadcountTrip(tripId);
+  await enqueueOp(tripId, { kind: "force_start_hop", localTripId: tripId });
+  return bundle;
+}
+
+export async function appendLocalBoarder(tripId: string, name: string): Promise<void> {
+  const snap = await loadSnapshotByTripId(tripId);
+  if (!snap) throw new Error("This leg is not saved on this tablet.");
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Enter the person's name.");
+  const already = snap.busManifest.some(
+    (row) => (row.participant_name ?? "").trim().toLowerCase() === trimmed.toLowerCase(),
+  );
+  if (already) throw new Error("That name is already on this leg.");
+  const now = operationalNowIso();
+  const row: EventBusManifestRow = {
+    id: `local-row:x:${trimmed.toLowerCase()}`,
+    event_day_session_id: snap.bundle.trip.eventDaySessionId ?? "",
+    transport_trip_id: tripId,
+    participant_id: null,
+    staff_id: null,
+    carer_id: null,
+    expected_on_bus: true,
+    status: "expected",
+    checked_on_at: null,
+    checked_on_by: null,
+    notes: "Added on the bus — confirm in the office",
+    created_at: now,
+    updated_at: now,
+    participant_name: trimmed,
+  };
+  await idbPut(STORE_SNAPSHOTS, {
+    ...snap,
+    busManifest: [...snap.busManifest, row],
+    savedAt: now,
+  });
+  notify();
+}
+
+async function replayForcedHop(localTripId: string): Promise<void> {
+  const snap = await loadSnapshotByTripId(localTripId);
+  const trip = snap?.bundle.trip;
+  if (!snap?.forcedBeforeRelease || !trip?.eventId || !trip.eventDaySessionId) {
+    throw new Error("The offline leg is no longer on this tablet.");
+  }
+  if (trip.hopIndex == null || !trip.venueStopFromId || !trip.venueStopToId) {
+    throw new Error("The offline leg is missing its stops.");
+  }
+  const bundle = await commitForcedHopStart({
+    eventId: trip.eventId,
+    eventDaySessionId: trip.eventDaySessionId,
+    sessionDate: trip.tripDate.slice(0, 10),
+    hopIndex: trip.hopIndex,
+    fromStopId: trip.venueStopFromId,
+    toStopId: trip.venueStopToId,
+    driverStaffId: trip.driverStaffId || snap.driverStaffId || "",
+    startOdometerKm: trip.startOdometerKm,
+    assetId: trip.assetId,
+    paperRoll: !!snap.paperRoll,
+    people: snap.busManifest.map((row) => ({
+      participantId: row.participant_id,
+      staffId: row.staff_id ?? null,
+      carerId: row.carer_id,
+      name: row.participant_name?.trim() || "Person",
+      status: row.status,
+      notes: row.notes,
+    })),
+    leg: snap.bundle.legs[0] ?? null,
+  });
+  if (snap.paperRoll) markPaperHeadcountTrip(bundle.trip.id);
+  await idbDelete(STORE_SNAPSHOTS, localTripId);
+}
+
 async function replayItem(item: ManifestOutboxItem): Promise<void> {
   const { op } = item;
+  if (op.kind === "force_start_hop") {
+    await replayForcedHop(op.localTripId);
+    return;
+  }
   if (op.kind === "patch_leg") {
     await patchTripLeg(op.legId, op.patch);
     return;
@@ -365,8 +597,13 @@ export async function flushManifestOutbox(
     let ok = 0;
     let failed = 0;
     const items = tripId ? await listOutboxForTrip(tripId) : await listAllOutbox();
+    const consumedLocal = new Set<string>();
     for (const item of items) {
       if (item.status !== "pending" && item.status !== "failed") continue;
+      if (consumedLocal.has(item.tripId) && item.op.kind !== "force_start_hop") {
+        await idbDelete(STORE_OUTBOX, item.id);
+        continue;
+      }
       const next: ManifestOutboxItem = {
         ...item,
         status: "pending",
@@ -375,6 +612,7 @@ export async function flushManifestOutbox(
       await persistOutboxItem(next);
       try {
         await replayItem(next);
+        if (next.op.kind === "force_start_hop") consumedLocal.add(next.op.localTripId);
         await idbDelete(STORE_OUTBOX, next.id);
         ok += 1;
         notify();
@@ -413,7 +651,19 @@ export async function resolveActiveTripBundle(
   fetchLive: () => Promise<ActiveTripBundle | null>,
 ): Promise<ActiveTripBundle | null> {
   if (!isAppOnline()) {
-    return (await loadSnapshotForDriver(driverStaffId))?.bundle ?? null;
+    const snap = await loadSnapshotForDriver(driverStaffId);
+    if (snap) return snap.bundle;
+    // A start can land on the server while this switch is on. Keep that run
+    // on screen instead of sending the driver back to Start.
+    try {
+      const live = await fetchLive();
+      if (!live) return null;
+      await saveActiveTripSnapshot(driverStaffId, live);
+      return live;
+    } catch (err) {
+      if (!isNetworkError(err)) throw err;
+      return null;
+    }
   }
 
   try {
@@ -422,7 +672,8 @@ export async function resolveActiveTripBundle(
       const snap = await loadSnapshotForDriver(driverStaffId);
       if (snap) {
         const pending = await countPendingOutbox(snap.tripId);
-        if (pending === 0) await clearSnapshotForTrip(snap.tripId);
+        if (pending > 0) return snap.bundle;
+        await clearSnapshotForTrip(snap.tripId);
       }
       return null;
     }
@@ -448,7 +699,7 @@ export async function resolveBusManifestForUi(
   tripId: string,
   fetchLive: () => Promise<EventBusManifestRow[]>,
 ): Promise<EventBusManifestRow[]> {
-  if (!isAppOnline()) {
+  if (!isAppOnline() || isLocalHopTripId(tripId)) {
     return (await loadSnapshotByTripId(tripId))?.busManifest ?? [];
   }
 

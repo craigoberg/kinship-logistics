@@ -16,10 +16,12 @@ import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { FieldActionButton } from "@/components/ui/field-action-button";
-import { closeEventLocation, isEventLocationClosed } from "@/lib/api/event-location";
+import { isEventLocationClosed } from "@/lib/api/event-location";
+import { closeEventLocationOfflineAware } from "@/lib/deliver-offline/outbox";
+import { operationalNowIso } from "@/lib/operational-clock";
+import type { EventDaySession } from "@/lib/api/event-outing";
 import { getAccountabilityProgress } from "@/lib/api/event-deliver-status";
 import { listEventAttendanceRoll } from "@/lib/api/event-attendance";
-import type { EventDaySession } from "@/lib/api/event-outing";
 import {
   busHomeHandoverGapsKey,
   listBusHomeHandoverGaps,
@@ -108,19 +110,34 @@ export function EventCloseDayPanel({
   const pendingEvening = eveningProgress?.pending ?? 0;
 
   const closeMut = useMutation({
+    networkMode: "always",
     mutationFn: async () => {
       if (!(await closeDuty.ensureApproved())) {
         throw new Error("Manager must approve the duty requirement gap first.");
       }
       if (!pinVerified || !verifiedPin) throw new Error("Trip leader PIN required.");
-      return closeEventLocation({
-        sessionId: session.id,
+      return closeEventLocationOfflineAware({
+        session,
         managerPin: verifiedPin,
         outcome,
         notes: notes || undefined,
       });
     },
     onSuccess: () => {
+      const closedAt = operationalNowIso();
+      qc.setQueryData<EventDaySession[]>(["event-day-sessions", session.event_id], (prev) =>
+        prev?.map((row) =>
+          row.id === session.id
+            ? {
+                ...row,
+                phase: outcome,
+                close_declared_at: closedAt,
+                closed_by_id: session.manager_staff_id,
+                close_leader_notes: notes.trim() || null,
+              }
+            : row,
+        ),
+      );
       toast.success(
         outcome === "closed_incident"
           ? "Day closed with incident — recorded."

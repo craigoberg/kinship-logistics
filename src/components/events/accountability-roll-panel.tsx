@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import {
   listAccountabilityRoll,
   markAbsent,
-  toggleAccounted,
   countUnreconciledCheckins,
   seedAccountabilityRoll,
   sweepAccountabilityRoll,
@@ -49,6 +48,12 @@ import {
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { reinstateLeftTripEverywhere } from "@/lib/api/event-attendance";
+import {
+  cachedEveningRollGate,
+  resolveAccountabilityRoll,
+  toggleAccountedOfflineAware,
+} from "@/lib/deliver-offline/outbox";
+import { isAppOnline } from "@/lib/simulated-offline";
 import {
   sortByParticipantSurname,
   surnameMapFromParticipants,
@@ -138,9 +143,11 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
 
   const { data: roll = [], isLoading } = useQuery({
     queryKey: rollKey(mode, sessionId),
-    queryFn: () => listAccountabilityRoll(table, sessionId),
+    queryFn: () =>
+      resolveAccountabilityRoll(table, sessionId, () => listAccountabilityRoll(table, sessionId)),
     staleTime: 15_000,
-    refetchInterval: 60_000, // auto sweep cadence
+    refetchInterval: 60_000,
+    networkMode: "offlineFirst",
   });
 
   // Participant name lookup — used for virtual rows that have no DB record yet.
@@ -174,13 +181,24 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
 
   const { data: eveningGate } = useQuery({
     queryKey: ["evening-roll-gate", sessionId],
-    queryFn: () =>
-      isEveningRollMarkingUnlocked({
-        eventId: event.id,
-        sessionId,
-        sessionDate,
-      }),
+    queryFn: async () => {
+      const cached = await cachedEveningRollGate(event.id, sessionDate);
+      if (!isAppOnline() && cached) return cached;
+      try {
+        const live = await isEveningRollMarkingUnlocked({
+          eventId: event.id,
+          sessionId,
+          sessionDate,
+        });
+        if (cached?.unlocked) return cached;
+        return live;
+      } catch (err) {
+        if (cached) return cached;
+        throw err;
+      }
+    },
     enabled: mode === "curfew",
+    networkMode: "offlineFirst",
     staleTime: 10_000,
     refetchInterval: 20_000,
   });
@@ -238,6 +256,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       if (r.participant_name) names[r.participant_id] = r.participant_name;
     });
     const kind = mode === "curfew" ? "evening" : "morning";
+    if (!isAppOnline()) return;
     void loadRollAlertThresholds(kind)
       .then((t) =>
         sweepAccountabilityRoll(table, sessionId, 0, t.redMinsAfter, names),
@@ -435,6 +454,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
               row={row}
               table={table}
               nameMap={nameMap}
+              eventId={event.id}
               sessionDate={sessionDate}
               rollTimeClock={rollTimeClock}
               redMinsAfter={redMinsAfter}
@@ -480,6 +500,7 @@ interface AccRowProps {
   row: EventAccountabilityRow;
   table: LogTable;
   nameMap: Record<string, string>;
+  eventId: string;
   sessionDate: string;
   rollTimeClock: string | null;
   redMinsAfter: number;
@@ -492,6 +513,7 @@ function AccountabilityRow({
   row,
   table,
   nameMap,
+  eventId,
   sessionDate,
   rollTimeClock,
   redMinsAfter,
@@ -504,9 +526,20 @@ function AccountabilityRow({
   const name = row.participant_name || nameMap[row.participant_id] || "Participant";
 
   const toggleMut = useMutation({
-    mutationFn: () => toggleAccounted(table, row, ""),
+    mutationFn: () =>
+      toggleAccountedOfflineAware({
+        table,
+        row,
+        eventId,
+        sessionDate,
+      }),
+    networkMode: "always",
     onSuccess: (next) => {
-      toast.success(next.status === "accounted" ? "Accounted" : "Back to awaiting roll");
+      toast.success(
+        next.status === "accounted"
+          ? `${name} accounted`
+          : `${name} back to awaiting roll`,
+      );
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -516,7 +549,7 @@ function AccountabilityRow({
     mutationFn: (params: Parameters<typeof markAbsent>[2]) =>
       markAbsent(table, row, params),
     onSuccess: () => {
-      toast.success("Marked absent — Hub welfare issue raised.");
+      toast.success(`${name} marked absent — Hub welfare issue raised.`);
       setAbsentOpen(false);
       onChanged();
     },
@@ -532,7 +565,7 @@ function AccountabilityRow({
         reason,
       }),
     onSuccess: () => {
-      toast.success("Reinstated — back on active roll.");
+      toast.success(`${name} reinstated — back on active roll.`);
       setReinstateOpen(false);
       onChanged();
     },

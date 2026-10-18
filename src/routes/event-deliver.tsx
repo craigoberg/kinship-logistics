@@ -39,6 +39,7 @@ import {
   getProgrammeSuspend,
 } from "@/lib/api/operational-emergency";
 import { EventLocationPanel } from "@/components/events/event-location-panel";
+import { DeliverOfflineBanner } from "@/components/events/deliver-offline-banner";
 import { EventArrivalRollPanel } from "@/components/events/event-arrival-roll-panel";
 import { EventCheckOutPanel } from "@/components/events/event-checkout-panel";
 import { AccountabilityRollPanel } from "@/components/events/accountability-roll-panel";
@@ -49,6 +50,7 @@ import { EventDeliverRollAlertBanner } from "@/components/events/event-deliver-r
 import { EventDayVerbalAnomalyFlow } from "@/components/events/event-day-verbal-anomaly-flow";
 import { ResetEventDayButton } from "@/components/events/reset-event-day-button";
 import { EventCloseDayPanel } from "@/components/events/event-close-day-panel";
+import { PaperPackUsedControl } from "@/components/events/paper-pack-used-dialog";
 import { supabase } from "@/integrations/supabase/client";
 import {
   listEventDaySessions,
@@ -63,6 +65,8 @@ import {
   type EventDeliverSuggestedTab,
 } from "@/lib/api/event-deliver-status";
 import { reconcileOvernightAttendanceContinuity } from "@/lib/api/event-day-continuity";
+import { resolveEventDaySessions } from "@/lib/deliver-offline/outbox";
+import { rememberTripFleet } from "@/lib/deliver-offline/fleet-cache";
 import { getActiveUserProfile, isActiveUserManager } from "@/lib/data-store";
 import { listManifestPickerEvents, type EventManifest, type StaffMember } from "@/lib/data-store";
 import { useStaffRegistry } from "@/hooks/use-supabase-data";
@@ -74,7 +78,7 @@ import {
   useOperationalTodayIso,
 } from "@/lib/operational-clock";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
-import { cn, formatDate, todayLocalIso } from "@/lib/utils";
+import { cn, formatDateWithWeekday, todayLocalIso } from "@/lib/utils";
 import { getEventDayPhaseDisplay } from "@/lib/event-day-phase-display";
 
 export const Route = createFileRoute("/event-deliver")({
@@ -194,25 +198,28 @@ function EventPicker({ onSelect, preferEventId }: EventPickerProps) {
   const today = useOperationalTodayIso();
   const autoOpenedRef = useRef(false);
 
-  const { data: picker, isLoading: pickerLoading } = useQuery({
+  const { data: picker, isPending: pickerPending, isError: pickerError } = useQuery({
     queryKey: [...pickerKey(), today],
     queryFn: () => listManifestPickerEvents(today),
     staleTime: 30_000,
+    networkMode: "always",
   });
 
   const { data: sessions = [] } = useQuery({
     queryKey: [...todaySessionsKey(), today],
     queryFn: listTodaySessions,
     staleTime: 0, // Always refetch — leader assignment may have changed in Events admin.
+    networkMode: "always",
   });
 
   // Staff registry for client-side leader name resolution (same source as Trip Days tab).
   const { data: staff = [] } = useStaffRegistry();
   const staffById = new Map<string, StaffMember>(staff.map((s) => [s.id, s]));
 
-  // Show loading only until the picker resolves — sessions finishing after that
-  // just hydrates the session map without re-showing the spinner.
-  const isLoading = pickerLoading;
+  // isPending covers the first browser paint, when the fetch has not started yet.
+  // isLoading is false in that moment, so the server spinner and the browser
+  // "no events" card disagree and React logs a hydration error.
+  const isLoading = pickerPending;
 
   // Build a session map: eventId → today's session
   const sessionByEventId = new Map<string, EventDaySession>(
@@ -260,6 +267,16 @@ function EventPicker({ onSelect, preferEventId }: EventPickerProps) {
       {isLoading ? (
         <div className="flex justify-center py-12">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : pickerError ? (
+        <div className="rounded-lg border border-dashed bg-muted/30 py-12 text-center">
+          <CalendarRange className="mx-auto mb-2 h-6 w-6 opacity-40" />
+          <p className="text-sm font-medium text-muted-foreground">
+            Trip list needs a signal
+          </p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Open the trip once while connected. After that, close and check-in stay on this tablet.
+          </p>
         </div>
       ) : openEvents.length === 0 ? (
         <div className="rounded-lg border border-dashed bg-muted/30 py-12 text-center">
@@ -432,10 +449,14 @@ function TripDayView({
   // Keep all session data fresh after location open/close
   const { data: sessions = [] } = useQuery({
     queryKey: ["event-day-sessions", event.id],
-    queryFn: () => listEventDaySessions(event.id),
+    queryFn: () => resolveEventDaySessions(event.id, () => listEventDaySessions(event.id)),
     staleTime: 10_000,
   });
   const session = sessions.find((s) => s.id === initialSession.id) ?? initialSession;
+
+  useEffect(() => {
+    void rememberTripFleet(session.session_date);
+  }, [session.session_date]);
   const sortedSessions = [...sessions].sort((a, b) =>
     a.session_date.localeCompare(b.session_date),
   );
@@ -551,13 +572,15 @@ function TripDayView({
       sessionDate: session.session_date,
       actorStaffId: session.manager_staff_id ?? profile?.staffId ?? null,
     }).then((healed) => {
-      if (healed) {
-        handleChanged();
-        void qc.invalidateQueries({ queryKey: ["event-attendance-log", session.id] });
-        void qc.invalidateQueries({
-          predicate: (q) => q.queryKey?.[0] === "event-accountability-roll",
-        });
-        void qc.invalidateQueries({ queryKey: eventDeliverStatusKey(session.id) });
+      if (!healed.refresh) return;
+      handleChanged();
+      void qc.invalidateQueries({ queryKey: ["event-attendance-log", session.id] });
+      void qc.invalidateQueries({ queryKey: ["event-support-attendance", session.id] });
+      void qc.invalidateQueries({
+        predicate: (q) => q.queryKey?.[0] === "event-accountability-roll",
+      });
+      void qc.invalidateQueries({ queryKey: eventDeliverStatusKey(session.id) });
+      if (healed.openMorningRoll) {
         userPickedTabRef.current = false;
         setTab("morning-roll");
       }
@@ -615,7 +638,7 @@ function TripDayView({
       setOperationalClockOverride({ date: next.session_date, time });
     }
     onSessionChange(next);
-    toast.message(`${formatDate(next.session_date)} · Day ${dayIndex + delta + 1} of ${sortedSessions.length}`, {
+    toast.message(`${formatDateWithWeekday(next.session_date)} · Day ${dayIndex + delta + 1} of ${sortedSessions.length}`, {
       description: IS_TEST_BUILD
         ? "SIM clock date updated to this trip day."
         : "Switched trip day — close prior days before opening a later one.",
@@ -695,9 +718,9 @@ function TripDayView({
                 >
                   <ChevronLeft className="h-5 w-5" />
                 </Button>
-                <div className="min-w-[7.5rem] px-1 text-center">
+                <div className="min-w-[9.5rem] px-1 text-center">
                   <div className="text-sm font-semibold tabular-nums text-foreground">
-                    {formatDate(session.session_date)}
+                    {formatDateWithWeekday(session.session_date)}
                   </div>
                   {dayLabel && (
                     <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
@@ -719,7 +742,7 @@ function TripDayView({
               </div>
             ) : (
               <span className="text-sm font-semibold text-foreground">
-                {formatDate(session.session_date)}
+                {formatDateWithWeekday(session.session_date)}
               </span>
             )}
             <PhaseBadge phase={session.phase} eventStatus={event.status} />
@@ -747,6 +770,8 @@ function TripDayView({
         isFirstDay={firstDay}
         onLogVenueIssue={() => setAnomalyOpen(true)}
       />
+
+      <DeliverOfflineBanner sessionId={session.id} />
 
       <ResetEventDayButton
         sessionId={session.id}
@@ -796,6 +821,20 @@ function TripDayView({
             Log Venue Issue (trip-day)
           </FieldActionButton>
         )}
+        <PaperPackUsedControl
+          floor
+          eventId={event.id}
+          eventTitle={event.title}
+          defaultDate={session.session_date}
+          days={
+            sortedSessions.length > 0
+              ? sortedSessions.map((row, index) => ({
+                  date: row.session_date,
+                  dayNumber: index + 1,
+                }))
+              : [{ date: session.session_date, dayNumber: 1 }]
+          }
+        />
       </div>
 
       {/* ── Tabs ── */}

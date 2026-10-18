@@ -10,6 +10,8 @@ import {
   getOrCreateEventHopTrip,
   insertBusManifestRows,
   listBusManifest,
+  markNotTravelling,
+  markOnBus,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
 import {
@@ -20,12 +22,16 @@ import {
 } from "@/lib/api/event-outing";
 import { listPassengerAssignments, type PassengerAssignment } from "@/lib/api/passenger-stops";
 import { addressKey } from "@/lib/passenger-stops";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import {
   mapTransportTripFromDb,
   mapTripLegFromDb,
+  patchTripLeg,
   resolveStaffIdWithFallback,
   type ActiveTripBundle,
+  type LegPatch,
   type TransportTrip,
+  type TripLeg,
 } from "@/lib/data-store";
 import {
   assertMorningRollCompleteBeforeProgramme,
@@ -429,13 +435,16 @@ export async function listEventTransportRuns(opts: {
       hopDetail = "Waiting — complete the previous hop first";
     } else if (!busPlanned) {
       hopStatus = "waiting";
-      hopDetail =
-        "Waiting — trip leader chooses By Bus and Releases on Programme";
+      hopDetail = "Waiting — trip leader chooses how the group travels on Programme";
     } else {
-      // Destination still pending; Release unlocks Manifest (not Open).
-      hopStatus = "ready";
-      hopDetail =
-        "Ready for trip leader Release on Programme — then start here";
+      const toPhase = ((to as { phase?: string | null }).phase ?? "pending") as string;
+      if (toPhase === "active" || toPhase === "completed") {
+        hopStatus = "completed";
+        hopDetail = "Leader marked the bus on Programme";
+      } else {
+        hopStatus = "waiting";
+        hopDetail = "Leader marks who is on the bus on Programme — not a driver run";
+      }
     }
 
     cards.push({
@@ -561,17 +570,21 @@ function hopManifestPersonKey(row: {
 
 /** People collected later, or already dropped off, are not on this boarding roll. */
 async function hopBoardingExclusions(tripId: string, eventId: string): Promise<Set<string>> {
-  const excluded = new Set<string>();
   const { data: trip, error } = await supabase
     .from("transport_trips")
     .select("venue_stop_from_id")
     .eq("id", tripId)
     .maybeSingle();
-  if (error || !trip) return excluded;
+  if (error || !trip) return new Set();
   const fromId = (trip as { venue_stop_from_id?: string | null }).venue_stop_from_id;
-  if (!fromId) return excluded;
+  if (!fromId) return new Set();
+  return exclusionsForOriginStop(eventId, fromId);
+}
+
+async function exclusionsForOriginStop(eventId: string, fromStopId: string): Promise<Set<string>> {
+  const excluded = new Set<string>();
   const stops = await listEventVenueStops(eventId);
-  const from = stops.find((stop) => stop.id === fromId);
+  const from = stops.find((stop) => stop.id === fromStopId);
   if (!from) return excluded;
   const day = from.session_date.slice(0, 10);
   const dayStops = stops.filter((stop) => stop.session_date.slice(0, 10) === day);
@@ -595,6 +608,151 @@ async function hopBoardingExclusions(tripId: string, eventId: string): Promise<S
     }
   }
   return excluded;
+}
+
+export interface ExpectedHopPerson {
+  participantId: string | null;
+  staffId: string | null;
+  carerId: string | null;
+  name: string;
+}
+
+export function expectedPersonKey(person: {
+  participantId?: string | null;
+  staffId?: string | null;
+  carerId?: string | null;
+  name?: string | null;
+}): string {
+  if (person.participantId) return `p:${person.participantId}`;
+  if (person.staffId) return `s:${person.staffId}`;
+  if (person.carerId) return `c:${person.carerId}`;
+  return `x:${(person.name ?? "").trim().toLowerCase()}`;
+}
+
+async function namesForPeople(
+  participantIds: string[],
+  carerIds: string[],
+  staffIds: string[],
+): Promise<Map<string, string>> {
+  const names = new Map<string, string>();
+  if (participantIds.length) {
+    const { data, error } = await supabase
+      .from("participants")
+      .select("id, first_name, last_name")
+      .in("id", participantIds);
+    if (error) throw error;
+    for (const row of data ?? []) {
+      const r = row as { id: string; first_name?: string | null; last_name?: string | null };
+      names.set(`p:${r.id}`, `${r.first_name ?? ""} ${r.last_name ?? ""}`.trim() || "Participant");
+    }
+  }
+  if (carerIds.length) {
+    const { data } = await supabase
+      .from("carers_registry")
+      .select("id, full_name")
+      .in("id", carerIds);
+    for (const row of data ?? []) {
+      const r = row as { id: string; full_name?: string | null };
+      names.set(`c:${r.id}`, (r.full_name ?? "").trim() || "Carer");
+    }
+  }
+  if (staffIds.length) {
+    const { data } = await supabase
+      .from("staff_registry")
+      .select("id, full_name")
+      .in("id", staffIds);
+    for (const row of data ?? []) {
+      const r = row as { id: string; full_name?: string | null };
+      names.set(`s:${r.id}`, (r.full_name ?? "").trim() || "Staff");
+    }
+  }
+  return names;
+}
+
+/**
+ * Who we expect on a hop before a trip row exists: checked-in clients,
+ * carers travelling with them, and checked-in support. Same set Release seeds.
+ */
+export async function listExpectedPeopleForHop(opts: {
+  eventId: string;
+  eventDaySessionId: string;
+  fromStopId: string;
+}): Promise<ExpectedHopPerson[]> {
+  const { data: attendance, error: attErr } = await supabase
+    .from("event_attendance_log")
+    .select("participant_id")
+    .eq("event_day_session_id", opts.eventDaySessionId)
+    .eq("status", "checked_in");
+  if (attErr) throw attErr;
+
+  const participantIds = (attendance ?? []).map(
+    (r) => (r as { participant_id: string }).participant_id,
+  );
+  const excluded = await exclusionsForOriginStop(opts.eventId, opts.fromStopId).catch(
+    () => new Set<string>(),
+  );
+
+  const people: ExpectedHopPerson[] = [];
+  const seen = new Set<string>();
+  const push = (person: ExpectedHopPerson) => {
+    const key = expectedPersonKey(person);
+    if (!key || key === "x:" || seen.has(key) || excluded.has(key)) return;
+    seen.add(key);
+    people.push(person);
+  };
+
+  for (const pid of participantIds) push({ participantId: pid, staffId: null, carerId: null, name: "" });
+
+  if (participantIds.length) {
+    const { data: bookings } = await supabase
+      .from("event_roster_bookings")
+      .select("participant_id, carer_id, brings_carer")
+      .eq("event_id", opts.eventId)
+      .neq("booking_status", "Cancelled")
+      .in("participant_id", participantIds);
+    for (const bk of bookings ?? []) {
+      const b = bk as { carer_id?: string | null; brings_carer?: boolean };
+      if (b.brings_carer && b.carer_id) {
+        push({ participantId: null, staffId: null, carerId: b.carer_id, name: "" });
+      }
+    }
+  }
+
+  try {
+    const { listEventSupportBookings, listEventSupportAttendance } = await import(
+      "@/lib/api/event-support"
+    );
+    const [support, supportAtt] = await Promise.all([
+      listEventSupportBookings(opts.eventId),
+      listEventSupportAttendance(opts.eventDaySessionId),
+    ]);
+    const attStatus = new Map<string, string>();
+    for (const a of supportAtt) {
+      const key = a.staffId ? `s:${a.staffId}` : a.carerId ? `c:${a.carerId}` : null;
+      if (key) attStatus.set(key, a.status);
+    }
+    for (const s of support.filter((b) => b.bookingStatus !== "Cancelled")) {
+      const key = s.staffId ? `s:${s.staffId}` : s.carerId ? `c:${s.carerId}` : null;
+      if (!key || attStatus.get(key) !== "checked_in") continue;
+      push({
+        participantId: null,
+        staffId: s.staffId,
+        carerId: s.staffId ? null : s.carerId,
+        name: s.displayName,
+      });
+    }
+  } catch {
+    /* support tables may be absent */
+  }
+
+  const names = await namesForPeople(
+    people.map((p) => p.participantId).filter((id): id is string => !!id),
+    people.map((p) => p.carerId).filter((id): id is string => !!id),
+    people.map((p) => p.staffId).filter((id): id is string => !!id),
+  );
+  return people
+    .map((p) => ({ ...p, name: p.name || names.get(expectedPersonKey(p)) || "Person" }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 }
 
 /** Everyone still with the group on this hop — not clients only (§11.10). */
@@ -835,6 +993,8 @@ export interface StartEventVenueHopInput {
   /** Fleet vehicle for Close Run → current_odometer_km (BL-096). */
   assetId?: string | null;
   varianceReason?: string | null;
+  /** Paper-roll start has no downloaded names — do not seed a live headcount. */
+  skipBusSeed?: boolean;
 }
 
 async function resolveHopStopLabels(fromStopId: string, toStopId: string) {
@@ -1125,11 +1285,13 @@ export async function startEventVenueHop(
     throw new Error("You already have an active manifest. Complete or cancel it first.");
   }
 
-  await seedBusManifestForHop({
-    eventId: row.event_id as string,
-    eventDaySessionId: row.event_day_session_id as string,
-    tripId: input.tripId,
-  });
+  if (!input.skipBusSeed) {
+    await seedBusManifestForHop({
+      eventId: row.event_id as string,
+      eventDaySessionId: row.event_day_session_id as string,
+      tripId: input.tripId,
+    });
+  }
 
   // Create leg first so a CHECK failure cannot leave an active trip with 0 legs.
   await ensureVenueHopLeg({
@@ -1209,6 +1371,129 @@ export async function startEventVenueHop(
     legs: (legRowsFixed ?? []).map((l) => mapTripLegFromDb(l)),
     eventTitle: (ev as { title?: string } | null)?.title ?? null,
   };
+}
+
+export interface ForcedHopPersonMark extends ExpectedHopPerson {
+  status: "expected" | "on_bus" | "not_travelling";
+  notes: string | null;
+}
+
+export interface ForcedHopCommit {
+  eventId: string;
+  eventDaySessionId: string;
+  sessionDate: string;
+  hopIndex: number;
+  fromStopId: string;
+  toStopId: string;
+  driverStaffId: string;
+  startOdometerKm: number;
+  assetId: string | null;
+  paperRoll: boolean;
+  people: ForcedHopPersonMark[];
+  leg: TripLeg | null;
+}
+
+function legProgressPatch(leg: TripLeg): LegPatch | null {
+  const patch: LegPatch = {};
+  if (leg.status !== "pending") patch.status = leg.status;
+  if (leg.startAt) patch.startAt = leg.startAt;
+  if (leg.endAt) patch.endAt = leg.endAt;
+  if (leg.startLat != null) patch.startLat = leg.startLat;
+  if (leg.startLng != null) patch.startLng = leg.startLng;
+  if (leg.endLat != null) patch.endLat = leg.endLat;
+  if (leg.endLng != null) patch.endLng = leg.endLng;
+  if (leg.completedAt) patch.completedAt = leg.completedAt;
+  return Object.keys(patch).length ? patch : null;
+}
+
+/**
+ * Create or match the one hop trip, apply the driver's last-known marks,
+ * and record that Manifest started before Release. A later Release joins this trip.
+ */
+export async function commitForcedHopStart(input: ForcedHopCommit): Promise<ActiveTripBundle> {
+  const tripId = await getOrCreateEventHopTrip({
+    eventId: input.eventId,
+    eventDaySessionId: input.eventDaySessionId,
+    sessionDate: input.sessionDate,
+    fromStopId: input.fromStopId,
+    toStopId: input.toStopId,
+    hopIndex: input.hopIndex,
+  });
+
+  const bundle = await startEventVenueHop({
+    tripId,
+    driverStaffId: input.driverStaffId,
+    startOdometerKm: input.startOdometerKm,
+    assetId: input.assetId,
+    skipBusSeed: input.paperRoll,
+  });
+
+  const named = input.people.filter((p) => p.participantId || p.staffId || p.carerId);
+  const added = input.people.filter((p) => !p.participantId && !p.staffId && !p.carerId && p.name.trim());
+
+  if (!input.paperRoll && named.length) {
+    const existing = await listBusManifest(tripId);
+    const have = new Set(
+      existing.map((r) => hopManifestPersonKey(r)).filter((k): k is string => !!k),
+    );
+    const missing = named.filter((p) => !have.has(expectedPersonKey(p)));
+    if (missing.length) {
+      await insertBusManifestRows(
+        missing.map((p) => ({
+          event_day_session_id: input.eventDaySessionId,
+          transport_trip_id: tripId,
+          participant_id: p.participantId,
+          staff_id: p.staffId,
+          carer_id: p.carerId,
+          expected_on_bus: true,
+          status: "expected",
+        })),
+      );
+    }
+    const rows = await listBusManifest(tripId);
+    for (const person of named) {
+      if (person.status === "expected") continue;
+      const row = rows.find((r) => hopManifestPersonKey(r) === expectedPersonKey(person));
+      if (!row) continue;
+      if (person.status === "on_bus" && row.status !== "on_bus") await markOnBus(row);
+      if (person.status === "not_travelling" && row.status !== "not_travelling") {
+        await markNotTravelling(row, person.notes?.trim() || "Not travelling this hop");
+      }
+    }
+  }
+
+  const progress = input.leg ? legProgressPatch(input.leg) : null;
+  if (progress && bundle.legs[0]) {
+    await patchTripLeg(bundle.legs[0].id, progress);
+  }
+
+  const onBus = input.people.filter((p) => p.status === "on_bus").map((p) => p.name);
+  const stayed = input.people.filter((p) => p.status === "not_travelling").map((p) => p.name);
+  const staffId = input.driverStaffId;
+  await writeToLedger({
+    staff_id: staffId,
+    category: "TRIP",
+    severity: "GREEN",
+    action_type: "EVENT_HOP_FORCE_STARTED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      trip_id: tripId,
+      event_id: input.eventId,
+      session_id: input.eventDaySessionId,
+      hop_index: input.hopIndex,
+      from_label: input.leg?.fromLabel ?? null,
+      to_label: input.leg?.toLabel ?? null,
+      forced_before_release: true,
+      paper_roll: input.paperRoll,
+      on_bus_names: onBus,
+      not_travelling_names: stayed,
+      added_names: added.map((p) => `${p.name} (${p.status === "not_travelling" ? "not travelling" : p.status === "on_bus" ? "on bus" : "expected"})`),
+      location: "trip",
+    }),
+  });
+
+  return bundle;
 }
 
 /** After driver closes a hop manifest — restore event floor phase and mark stops. */

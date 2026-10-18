@@ -49,18 +49,22 @@ import {
   type TripAbsentDispositionResult,
 } from "@/components/events/trip-absent-disposition-dialog";
 import {
-  checkoutEventParticipant,
   listEventAttendanceRoll,
   listPriorAbsences,
   markEventAttendanceAbsent,
-  recordEventArrival,
   reinstateFromAbsent,
   seedEventAttendanceRoll,
-  toggleEventCheckIn,
   type EventArrivalChoice,
   type EventAttendanceRow,
   type ReturnTransport,
 } from "@/lib/api/event-attendance";
+import { laterPickupIds, listPassengerAssignments } from "@/lib/api/passenger-stops";
+import {
+  checkoutEventParticipantOfflineAware,
+  recordEventArrivalOfflineAware,
+  resolveEventAttendanceRoll,
+  toggleEventCheckInOfflineAware,
+} from "@/lib/deliver-offline/outbox";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
 import { getExpectedArrivalBy } from "@/lib/api/event-activity-roll";
@@ -145,9 +149,11 @@ export function EventArrivalRollPanel({
 
   const { data: rows = [], isLoading, isFetching } = useQuery({
     queryKey: rollKey(sessionId),
-    queryFn: () => listEventAttendanceRoll(sessionId),
+    queryFn: () =>
+      resolveEventAttendanceRoll(sessionId, () => listEventAttendanceRoll(sessionId)),
     staleTime: 20_000,
     refetchInterval: 30_000,
+    networkMode: "offlineFirst",
   });
 
   const { data: participants = [] } = useQuery({
@@ -222,6 +228,19 @@ export function EventArrivalRollPanel({
       sortByParticipantSurname(rows, (r) => r.participantId, surnameById),
     [rows, surnameById],
   );
+  const { data: pickupAssignments = [] } = useQuery({
+    queryKey: ["passenger-assignments", eventId],
+    queryFn: () => listPassengerAssignments(eventId),
+    staleTime: 60_000,
+  });
+  const laterParticipantIds = useMemo(
+    () => laterPickupIds(pickupAssignments).participantIds,
+    [pickupAssignments],
+  );
+  const meetingRows = useMemo(
+    () => sortedRows.filter((row) => !laterParticipantIds.has(row.participantId)),
+    [sortedRows, laterParticipantIds],
+  );
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: rollKey(sessionId) });
@@ -235,7 +254,7 @@ export function EventArrivalRollPanel({
   };
 
   const toggleMut = useMutation({
-    mutationFn: (row: EventAttendanceRow) => toggleEventCheckIn(row),
+    mutationFn: (row: EventAttendanceRow) => toggleEventCheckInOfflineAware(row),
     onSuccess: () => invalidate(),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -249,7 +268,7 @@ export function EventArrivalRollPanel({
       row: EventAttendanceRow;
       transport: ReturnTransport;
       busRunCode?: string | null;
-    }) => checkoutEventParticipant(row, transport, busRunCode),
+    }) => checkoutEventParticipantOfflineAware(row, transport, busRunCode),
     onSuccess: () => {
       toast.success("Departure handover recorded.");
       invalidate();
@@ -274,7 +293,7 @@ export function EventArrivalRollPanel({
       notes?: string;
       alsoCheckIn?: boolean;
     }) =>
-      recordEventArrival(row, {
+      recordEventArrivalOfflineAware(row, {
         arrival,
         busRunCode,
         notes,
@@ -380,12 +399,12 @@ export function EventArrivalRollPanel({
     onError: (e: Error) => toast.error("Could not reinstate.", { description: e.message }),
   });
 
-  // Progress counter: "absent" rows are resolved — they do not count as pending check-ins
-  const checkedIn = rows.filter((r) => r.status === "checked_in").length;
-  const checkedOut = rows.filter((r) => r.status === "checked_out").length;
-  const absent = rows.filter((r) => r.status === "absent").length;
-  const pending = rows.filter((r) => r.status === "expected").length;
-  const total = rows.length;
+  // Meeting-point roll only. Later pickups are collected on Programme.
+  const checkedIn = meetingRows.filter((r) => r.status === "checked_in").length;
+  const checkedOut = meetingRows.filter((r) => r.status === "checked_out").length;
+  const absent = meetingRows.filter((r) => r.status === "absent").length;
+  const pending = meetingRows.filter((r) => r.status === "expected").length;
+  const total = meetingRows.length;
 
   if (isLoading) {
     return (
@@ -449,14 +468,14 @@ export function EventArrivalRollPanel({
         return null;
       })()}
 
-      {rows.length === 0 ? (
+      {meetingRows.length === 0 ? (
         <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
           <Users className="mx-auto mb-2 h-5 w-5" />
           No roster entries — open the location to seed the arrival roll.
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {sortedRows.map((row) => {
+          {meetingRows.map((row) => {
             const absentPriorSessionId = priorAbsenceMap[row.participantId];
             const absentDayLabel = absentPriorSessionId
               ? priorSessionLabel[absentPriorSessionId]
@@ -530,7 +549,9 @@ export function EventArrivalRollPanel({
         </ul>
       )}
 
-      <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
+      {priorSessions.length === 0 && (
+        <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
+      )}
 
       <WalkOnPersonModal
         open={walkOnOpen}
@@ -654,8 +675,6 @@ function RollCard({
     [pickerBusCode],
   );
   const arrivalLabel = arrivalSel.kind === "self" ? "Self" : "Bus";
-  const plannedLabel = plannedIsBus ? "Bus" : "Self";
-
   // Walk-in state
   const [walkInNote, setWalkInNote] = useState("");
 
@@ -730,9 +749,6 @@ function RollCard({
               <span className="font-medium text-sm leading-tight">{name}</span>
               <PersonKindBadge kind={personKind} surface={kindSurface} />
               {isWalkOn && <WalkOnBadge />}
-              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                Planned {plannedLabel}
-              </Badge>
               {absentDayLabel && (
                 <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
                   Absent {absentDayLabel}
@@ -744,7 +760,11 @@ function RollCard({
             </p>
           </button>
           {clinicalChips.length > 0 && (
-            <ClinicalFlagChips chips={clinicalChips} personName={name} />
+            <ClinicalFlagChips
+              chips={clinicalChips}
+              personName={name}
+              surface={arrivalUrgency === "warning" ? "light" : "theme"}
+            />
           )}
           <EmbeddedMethodButton
             label={arrivalLabel}

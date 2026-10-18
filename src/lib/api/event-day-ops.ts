@@ -16,7 +16,7 @@ import { resolveStaffIdWithFallback, DEFAULT_STAFF_UUID } from "@/lib/data-store
 import { writeToLedger, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { sydneyWallClockToUtcDate } from "@/lib/operational-time";
-import { listEventVenueStops } from "@/lib/api/event-outing";
+import { isPassengerStop, listEventVenueStops } from "@/lib/api/event-outing";
 import { formatDate, formatTime } from "@/lib/utils";
 import { syncFloorAttendanceLeftTrip } from "@/lib/api/event-attendance";
 import { listReturnHomeBusEligibleParticipantIds } from "@/lib/api/event-transport";
@@ -607,8 +607,12 @@ async function ensureLeftTripPlaceholdersOnAccountabilityRoll(
     .eq("event_day_session_id", sessionId)
     .eq("status", "absent");
   if (error || !floorAbsent?.length) return;
+  const leftTrip = floorAbsent.filter(
+    (row) => !String((row as { notes?: string | null }).notes ?? "").startsWith("Not collected"),
+  );
+  if (!leftTrip.length) return;
 
-  const rows = floorAbsent.map((r) => ({
+  const rows = leftTrip.map((r) => ({
     event_day_session_id: sessionId,
     participant_id: (r as { participant_id: string }).participant_id,
     expected_accounted_at: expectedAccountedAt,
@@ -648,8 +652,8 @@ async function ensureLeftTripPlaceholdersOnAccountabilityRoll(
   }
 
   // If they already have expected rows, promote to absent with floor notes.
-  const pids = floorAbsent.map((r) => (r as { participant_id: string }).participant_id);
-  for (const r of floorAbsent) {
+  const pids = leftTrip.map((r) => (r as { participant_id: string }).participant_id);
+  for (const r of leftTrip) {
     const pid = (r as { participant_id: string }).participant_id;
     const notes = (r as { notes: string | null }).notes;
     await supabase
@@ -775,22 +779,67 @@ export async function listAccountabilityRoll(
   });
 }
 
-/** Returns count of check-in roll entries still "expected" (not yet arrived or reconciled). */
+/** Returns count of meeting-point check-ins still expected. Later pickups are not included. */
 export async function countUnreconciledCheckins(sessionId: string): Promise<number> {
-  const { count, error } = await supabase
+  const { data: sessionRow, error: sessionErr } = await supabase
+    .from("event_day_sessions")
+    .select("event_id")
+    .eq("id", sessionId)
+    .maybeSingle();
+  if (sessionErr) throw sessionErr;
+  const eventId = (sessionRow as { event_id?: string } | null)?.event_id ?? "";
+
+  const { data, error } = await supabase
     .from("event_attendance_log")
-    .select("id", { count: "exact", head: true })
+    .select("participant_id, status")
     .eq("event_day_session_id", sessionId)
     .eq("status", "expected");
   if (error) throw error;
+
+  let laterParticipants = new Set<string>();
+  let laterStaff = new Set<string>();
+  let laterCarers = new Set<string>();
+  if (eventId) {
+    try {
+      const { laterPickupIds, listPassengerAssignments } = await import(
+        "@/lib/api/passenger-stops"
+      );
+      const { listEventSupportBookings } = await import("@/lib/api/event-support");
+      const { joinsOnTheWay } = await import("@/lib/passenger-stops");
+      const [assignments, bookings] = await Promise.all([
+        listPassengerAssignments(eventId),
+        listEventSupportBookings(eventId),
+      ]);
+      const later = laterPickupIds(assignments);
+      laterParticipants = later.participantIds;
+      laterStaff = later.staffIds;
+      laterCarers = later.carerIds;
+      for (const booking of bookings) {
+        if (!joinsOnTheWay(booking.pickupJoin)) continue;
+        if (booking.staffId) laterStaff.add(booking.staffId);
+        if (booking.carerId) laterCarers.add(booking.carerId);
+      }
+    } catch {
+      /* columns not migrated — count everyone */
+    }
+  }
+
+  const pending = (data ?? []).filter(
+    (row) => !laterParticipants.has((row as { participant_id: string }).participant_id),
+  ).length;
   let extra = 0;
   try {
     const { listEventSupportAttendance } = await import("@/lib/api/event-support");
-    extra = (await listEventSupportAttendance(sessionId)).filter((s) => s.status === "expected").length;
+    extra = (await listEventSupportAttendance(sessionId)).filter((row) => {
+      if (row.status !== "expected") return false;
+      if (row.staffId && laterStaff.has(row.staffId)) return false;
+      if (row.carerId && laterCarers.has(row.carerId)) return false;
+      return true;
+    }).length;
   } catch {
     /* ignore */
   }
-  return (count ?? 0) + extra;
+  return pending + extra;
 }
 
 /** Seed accountability rows from the event roster for this session. Idempotent. */
@@ -912,10 +961,70 @@ async function materializeVirtualRow(
 }
 
 /**
- * Evening roll may only be marked once the group is back at the overnight base
- * (all non-final destination stops completed; final stop active/completed, or
- * session phase at_base). Prevents morning-time accidental completion.
+ * Evening roll is today's accommodation. Suggested activities can stay unrun
+ * or skipped. An activity that is still open, including one borrowed from
+ * another day, keeps the roll shut until it is closed. The group then needs
+ * to be at tonight's last place.
  */
+export function eveningRollUnlockFromStops(
+  stops: Array<{
+    activity_kind?: string | null;
+    phase?: string | null;
+    stop_order: number;
+    session_date?: string | null;
+    id?: string;
+  }>,
+  sessionDate?: string,
+): { unlocked: boolean; reason?: string } {
+  const phaseOf = (stop: { phase?: string | null }) => stop.phase ?? "pending";
+  if (
+    sessionDate &&
+    stops.some(
+      (stop) =>
+        stop.session_date !== sessionDate &&
+        phaseOf(stop) === "active" &&
+        !isPassengerStop(stop),
+    )
+  ) {
+    return {
+      unlocked: false,
+      reason: "Close the open activity before Evening Roll.",
+    };
+  }
+
+  const today = sessionDate
+    ? stops.filter((stop) => stop.session_date === sessionDate)
+    : stops;
+  const places = today
+    .filter((stop) => !isPassengerStop(stop))
+    .sort((a, b) => a.stop_order - b.stop_order);
+
+  // Hotel day with no outbound hops — evening roll can run after check-in.
+  if (places.length <= 1) return { unlocked: true };
+
+  const destinations = places.slice(1);
+  const finalStop = destinations[destinations.length - 1]!;
+  const stillOpen = places.some(
+    (stop) => stop !== finalStop && phaseOf(stop) === "active",
+  );
+  if (stillOpen) {
+    return {
+      unlocked: false,
+      reason: "Close the open activity before Evening Roll.",
+    };
+  }
+
+  const finalPhase = phaseOf(finalStop);
+  if (finalPhase !== "active" && finalPhase !== "completed") {
+    return {
+      unlocked: false,
+      reason: "Return to tonight's accommodation before Evening Roll.",
+    };
+  }
+
+  return { unlocked: true };
+}
+
 export async function isEveningRollMarkingUnlocked(opts: {
   eventId: string;
   sessionId: string;
@@ -938,39 +1047,8 @@ export async function isEveningRollMarkingUnlocked(opts: {
     return { unlocked: false, reason: "Missing event for evening roll gate." };
   }
 
-  type StopWithPhase = Awaited<ReturnType<typeof listEventVenueStops>>[number] & {
-    phase?: string | null;
-  };
-  const stops = ((await listEventVenueStops(eventId)) as StopWithPhase[])
-    .filter((s) => s.session_date === opts.sessionDate)
-    .sort((a, b) => a.stop_order - b.stop_order);
-
-  // Hotel day with no outbound hops — evening roll can run after check-in.
-  if (stops.length <= 1) return { unlocked: true };
-
-  const destinations = stops.slice(1);
-  const nonFinal = destinations.slice(0, -1);
-  const finalStop = destinations[destinations.length - 1]!;
-  const phaseOf = (s: StopWithPhase) => (s.phase ?? "pending") as string;
-
-  if (nonFinal.some((s) => phaseOf(s) !== "completed")) {
-    return {
-      unlocked: false,
-      reason:
-        "Finish today's programme and return to base before marking Evening Roll.",
-    };
-  }
-
-  const finalPhase = phaseOf(finalStop);
-  if (finalPhase !== "active" && finalPhase !== "completed") {
-    return {
-      unlocked: false,
-      reason:
-        "Return to the overnight venue before marking Evening Roll.",
-    };
-  }
-
-  return { unlocked: true };
+  const stops = await listEventVenueStops(eventId);
+  return eveningRollUnlockFromStops(stops, opts.sessionDate);
 }
 
 async function assertEveningRollMarkingAllowed(

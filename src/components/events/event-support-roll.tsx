@@ -18,19 +18,23 @@ import { cn } from "@/lib/utils";
 import {
   EVENT_SUPPORT_KEY,
   EVENT_SUPPORT_ROLL_KEY,
-  checkOutEventSupport,
   listEventSupportAttendance,
   listEventSupportBookings,
   markEventSupportAbsent,
-  recordEventSupportArrival,
   reinstateEventSupport,
   seedEventSupportRoll,
-  undoEventSupportCheckIn,
-  undoEventSupportCheckOut,
   updateEventSupportArrivalMethod,
   type EventSupportAttendanceRow,
 } from "@/lib/api/event-support";
+import {
+  checkOutEventSupportOfflineAware,
+  recordEventSupportArrivalOfflineAware,
+  resolveEventSupportRoll,
+  undoEventSupportCheckInOfflineAware,
+  undoEventSupportCheckOutOfflineAware,
+} from "@/lib/deliver-offline/outbox";
 import { eventDeliverStatusKey } from "@/lib/api/event-deliver-status";
+import { joinsOnTheWay } from "@/lib/passenger-stops";
 import type { FloorMethodPickerOption, FloorTransportSelection } from "@/lib/ui/floor-transport-method";
 import {
   DutyOnDutyConfirmSheet,
@@ -82,8 +86,10 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
   const [dutyPending, setDutyPending] = useState<DutyOnDutyPending | null>(null);
   const rollQ = useQuery({
     queryKey: EVENT_SUPPORT_ROLL_KEY(sessionId),
-    queryFn: () => listEventSupportAttendance(sessionId),
+    queryFn: () =>
+      resolveEventSupportRoll(sessionId, () => listEventSupportAttendance(sessionId)),
     staleTime: 10_000,
+    networkMode: "offlineFirst",
   });
   const bookingsQ = useQuery({
     queryKey: EVENT_SUPPORT_KEY(eventId),
@@ -106,12 +112,12 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
 
   const arrive = useMutation({
     mutationFn: (row: {
-      id: string;
+      person: EventSupportAttendanceRow;
       arrivalMethod: "bus" | "private";
       arrivalBusRunCode: string | null;
     }) =>
-      recordEventSupportArrival({
-        rowId: row.id,
+      recordEventSupportArrivalOfflineAware({
+        row: row.person,
         arrivalMethod: row.arrivalMethod,
         arrivalBusRunCode: row.arrivalMethod === "bus" ? row.arrivalBusRunCode : null,
       }),
@@ -125,12 +131,12 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
   });
   const leave = useMutation({
     mutationFn: (row: {
-      id: string;
+      person: EventSupportAttendanceRow;
       returnTransport: "bus" | "self";
       returnBusRunCode: string | null;
     }) =>
-      checkOutEventSupport({
-        rowId: row.id,
+      checkOutEventSupportOfflineAware({
+        row: row.person,
         returnTransport: row.returnTransport,
         returnBusRunCode: row.returnTransport === "self" ? null : row.returnBusRunCode,
       }),
@@ -144,12 +150,12 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
     onError: (err: Error) => toast.error(err.message),
   });
   const undoIn = useMutation({
-    mutationFn: undoEventSupportCheckIn,
+    mutationFn: (row: EventSupportAttendanceRow) => undoEventSupportCheckInOfflineAware(row),
     onSuccess: () => refresh(),
     onError: (err: Error) => toast.error(err.message),
   });
   const undoOut = useMutation({
-    mutationFn: undoEventSupportCheckOut,
+    mutationFn: (row: EventSupportAttendanceRow) => undoEventSupportCheckOutOfflineAware(row),
     onSuccess: () => refresh(),
     onError: (err: Error) => toast.error(err.message),
   });
@@ -168,7 +174,13 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
     }
     return (rollQ.data ?? [])
       .filter((r) => {
-        if (mode === "check_in") return r.status !== "checked_out";
+        const booking = (bookingsQ.data ?? []).find(
+          (item) =>
+            (item.staffId && item.staffId === r.staffId) ||
+            (item.carerId && item.carerId === r.carerId),
+        );
+        const later = booking ? joinsOnTheWay(booking.pickupJoin) : false;
+        if (mode === "check_in") return !later && r.status !== "checked_out";
         return r.status === "checked_in" || r.status === "checked_out";
       })
       .slice()
@@ -214,7 +226,7 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
                 displayName: row.displayName,
                 onProceed: () =>
                   arrive.mutate({
-                    id: row.id,
+                    person: row,
                     arrivalMethod: method,
                     arrivalBusRunCode: busRunCode,
                   }),
@@ -229,7 +241,7 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
             }
             onLeave={(transport, busRunCode) =>
               leave.mutate({
-                id: row.id,
+                person: row,
                 returnTransport: transport,
                 returnBusRunCode: busRunCode,
               })
@@ -240,8 +252,8 @@ export function EventSupportRoll({ sessionId, eventId, mode = "check_in" }: Prop
                 notes: `${result.disposition} — ${result.safetyPlan}`,
               })
             }
-            onUndoIn={() => undoIn.mutate(row.id)}
-            onUndoOut={() => undoOut.mutate(row.id)}
+            onUndoIn={() => undoIn.mutate(row)}
+            onUndoOut={() => undoOut.mutate(row)}
             onReinstate={() => reinstate.mutateAsync(row.id)}
           />
         ))}
@@ -356,9 +368,6 @@ function SupportFloorRow({
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{row.displayName}</span>
               <PersonKindBadge kind={row.personKind} />
-              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                Planned {methodLabel(plannedBus ? "bus" : "self")}
-              </Badge>
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
               {arriving ? `Tap to check in via ${label}` : `Tap to check out via ${label}`}

@@ -18,6 +18,8 @@ export const manifestActiveRunTopic: HelpTopic = {
     "return",
     "maps",
     "directions",
+    "offline",
+    "signal",
   ],
   menus: ["manifest"],
   roles: ["driver", "support_worker", "manager", "assistant_manager"],
@@ -38,6 +40,10 @@ export const manifestActiveRunTopic: HelpTopic = {
     {
       heading: "Odometer",
       body: "Record the odometer twice for the whole trip: the reading when the run starts, and the reading when you Close Run. Do not enter a reading at each stop. The number is the dash reading, not the kilometres travelled. Kilometres for the trip are the difference between those two readings.",
+    },
+    {
+      heading: "Weak signal",
+      body: "Depart, arrive, and boarding stay on this tablet when the signal drops, including a hop that was started before the group was released. An amber banner shows how many actions are waiting. They upload in order when the signal returns. Close Run stays blocked until that queue is empty. A paper-roll leg has no names on the tablet — the sheet in the office file is the headcount.",
     },
     {
       heading: "Close Run",

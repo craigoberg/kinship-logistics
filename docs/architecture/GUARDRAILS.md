@@ -702,6 +702,8 @@ SQL: `docs/sql/2026-08-23_transport_run_slot_exclusivity.sql` (cancel leftover a
 
 Code: `isPassengerPickupLeg` / return boarding in `src/routes/manifest.tsx`; hop seed `seedBusManifestForHop` in `src/lib/api/event-hop-transport.ts`; IN/HOME `seedBusManifest` in `src/lib/api/event-day-ops.ts`. Agent rule: `.cursor/rules/bus-no-one-left-behind.mdc`.
 
+> **2026-10-16 — Project owner directive (offline hop start):** A venue hop still waits for trip-leader Release before the normal **Start hop manifest**. If that release has not reached the driver’s tablet, Manifest may **Start this leg anyway** from the last downloaded expected people (clients still with the group, their carers, checked-in support). The driver marks on bus / not travelling and may add a name for the office to confirm. If no list is on the tablet, the headcount is the paper roll for that leg, filed in the office trip file. The upload matches **one** hop trip. A later Release joins that trip. Runbook: `docs/architecture/OFFLINE-BUS-HEADCOUNT.md`. Fold into Policies & Procedures (BL-092) — do not drop.
+
 ### Amendment Process (§11)
 
 > **2026-06-30 — Project owner directive:** Step 3 run/start workflow and in-manifest drag reorder locked as specified in §11. Pre-start pickup lists removed. Drivable-chain label recompute mandatory on reorder. Consistent across Day Centre runs and event trips (including multi-day event contexts per §9 exception carry-over).
@@ -1209,8 +1211,9 @@ Specifically:
 [4] Activity loop (one cycle per venue / activity) — leave-from-current
            ┌─ On the **current** stop card: Leave for {next} / Close & leave…
            │   Ask Bus | Walk | On-site **every hop** (Hotel→Joes bus, Joes→Park walk, …)
-           │   Bus: Release on current card → §11 Manifest → depart → arrive
-           │        (current completes on Release; destination stays Pending until finalize)
+           │   Bus: headcount on the leader tablet (on the bus / not travelling) → next place opens
+           │        Not travelling stays on the trip. No venue-hop Manifest and no kilometres.
+           │        Door runs stay §11 Manifest: to the meeting point, and home from the departure point.
            │   Walk/on-site: opens next + completes current in one step
            ├─ Pending destination: waiting-only (no Release / movement picker there)
            ├─ At destination (bus: after Manifest hop arrive / finalize):
@@ -1300,7 +1303,7 @@ Rules:
 - **Return to base** requires an itinerary hop back to the base stop (consecutive `event_venue_stops` pairs). One-way itineraries (Venue → Ice Cream only) show programme complete but not a return hop until a return stop is added.
 - **Programme hops** = consecutive today’s stops, plus wake→first when hotel omitted (`buildProgrammeHops`).
 - **Default field tab (journey-driven):** open the tab that matches Group Status **current** step — Morning Roll (Day 2+ wake), Check-In (arrival still open), Programme (hops/activity), Evening Roll (back at overnight base), Check-Out (final day / no evening roll when programme done or none). Auto-steers until the operator manually switches tabs; remounts per `session.id`.
-- **Hide Check-In on Day 2+** once arrival is complete (overnight continuity — everyone already checked in). Keep Check-In if anyone is still `expected` (late arrivals).
+- **Hide Check-In on Day 2+** once arrival is complete (overnight continuity — participants already checked in). Keep Check-In if a participant is still `expected` (late arrival). Staff, volunteers, and carers are not asked to check in again after the meeting point. They stay on the bus on/off list. Someone collected later stays off until that pickup.
 - **Overnight continuity on Open location (Day 2+):** `openEventLocation` auto-marks roster `checked_in` at the overnight base — no manual Check-In. Same path as Reset Start of Day (test). Implementation: `event-day-continuity.ts` (`applyOvernightDayStartContinuity`). **Left trip carry (BL-090):** prior calendar day’s floor `absent` with `[LEFT TRIP:…]` notes (except `[Joining Day 2]`) are re-applied as `absent` on today’s session **before** expected→checked_in, so they stay off Morning Roll / Check-Out assign / Transport HOME until Reinstate (`carryPriorDayLeftTripAbsences`).
 - Implementation: `fetchEventDeliverGroupStatus` + `deriveEventDeliverSuggestedTab` (`src/lib/api/event-deliver-status.ts`) + `EventDeliverStatusPanel` + `/event-deliver` `TripDayView`.
 

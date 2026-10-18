@@ -107,14 +107,16 @@ export async function verifyNamedPersonPin(args: {
   personKind: "staff" | "carer";
   personId: string;
   pin: string;
-}): Promise<{ personnelType: string | null; roleTitle: string | null }> {
+}): Promise<{ personnelType: string | null; roleTitle: string | null; fullName: string }> {
   const json = await runVerifyNamedPin({
     data: { ...args, accessToken: await accessToken() },
   });
   return unwrap(json);
 }
 
-export async function resolveStaffIdFromPin(pin: string): Promise<string> {
+export async function resolveStaffFromPin(
+  pin: string,
+): Promise<{ personId: string; fullName: string }> {
   const json = await runResolvePinHolder({
     data: { accessToken: await accessToken(), pin, deviceId: getDeviceUuid() },
   });
@@ -122,7 +124,11 @@ export async function resolveStaffIdFromPin(pin: string): Promise<string> {
   if (result.personKind !== "staff") {
     throw new Error("That PIN belongs to a carer and cannot authorise this action.");
   }
-  return result.personId;
+  return { personId: result.personId, fullName: (result.fullName ?? "").trim() };
+}
+
+export async function resolveStaffIdFromPin(pin: string): Promise<string> {
+  return (await resolveStaffFromPin(pin)).personId;
 }
 
 export async function changeMyPin(currentPin: string, newPin: string, confirmPin: string): Promise<void> {

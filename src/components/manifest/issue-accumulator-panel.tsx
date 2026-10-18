@@ -29,12 +29,15 @@ import type {
   TransportAsset,
 } from "@/lib/data-store";
 import {
+  getActiveUserProfile,
   getClearanceForAssetOnDate,
   insertAssetClearanceWithItems,
   resolveStaffIdWithFallback,
   resolveStaffDisplayName,
   submitDriverAuthorization,
 } from "@/lib/data-store";
+import { queueBusClearance } from "@/lib/deliver-offline/fleet-cache";
+import { isNetworkError } from "@/lib/manifest-offline";
 import { createMaintenanceItem, MAINTENANCE_ITEMS_KEY } from "@/lib/api/maintenance";
 import { useQueryClient } from "@tanstack/react-query";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
@@ -102,6 +105,13 @@ interface Props {
   driverName: string;
   /** Vehicle was already cleared today. This sitting is an extra finding from a later driver. */
   alreadyCleared?: boolean;
+  /**
+   * Manifest door runs confirm the dash reading. Event Deliver bus leave does not
+   * ask for kilometres — the last known reading is stored and the vehicle total is not treated as a new trip start.
+   */
+  askOdometer?: boolean;
+  /** Driver PIN pad length. Manifest keeps 4; Event Deliver uses 6. */
+  pinLength?: 4 | 6;
   /** Confirmed dash reading for this run. */
   onCleared: (startKm: number) => void;
   onBack: () => void;
@@ -113,11 +123,18 @@ export function IssueAccumulatorPanel({
   checkpoints,
   driverName,
   alreadyCleared = false,
+  askOdometer = true,
+  pinLength = 4,
   onCleared,
   onBack,
 }: Props) {
   const queryClient = useQueryClient();
   const [startKm, setStartKm] = useState<number | null>(null);
+  useEffect(() => {
+    if (askOdometer || startKm != null) return;
+    const known = asset.currentOdometerKm;
+    setStartKm(known != null && Number.isFinite(known) ? Math.round(known) : 0);
+  }, [askOdometer, asset.currentOdometerKm, startKm]);
   const [issues, setIssues] = useState<DraftIssue[]>([]);
   const [logOpen, setLogOpen] = useState(false);
   const [comfortDeclared, setComfortDeclared] = useState(false);
@@ -222,7 +239,11 @@ export function IssueAccumulatorPanel({
       return;
     }
     if (startKm == null) {
-      toast.error("Confirm the starting kilometres on the dash.");
+      toast.error(
+        askOdometer
+          ? "Confirm the starting kilometres on the dash."
+          : "Walkaround is not ready yet.",
+      );
       return;
     }
     if (!driverPinVerified || !verifiedDriverPinRef.current) {
@@ -235,9 +256,34 @@ export function IssueAccumulatorPanel({
     setSubmitting(true);
     setPinError(null);
     let insertedClearanceId: string | null = null;
+    let driverStaffId = getActiveUserProfile()?.staffId ?? "";
+    const releaseOffline = async () => {
+      if (!driverStaffId || startKm == null) return false;
+      await queueBusClearance({
+        assetId: asset.id,
+        clearanceDate: dateStr,
+        driverStaffId,
+        startOdometer: Math.round(startKm),
+        items: issues.map((i) => ({
+          checkpointId: null,
+          checkpointLabel: i.text.slice(0, 80),
+          passed: i.severity === "green",
+          isMandatory: false,
+          notes: i.text,
+          severity:
+            i.severity === "yellow" ? "yellow" : i.severity === "green" ? "green" : "red",
+          workaroundText: i.text,
+        })),
+        accumulatedIssues: buildAccumulatedBlob(issues),
+        driverComfortDeclared: comfortDeclared,
+      });
+      toast.success("Offline. Clearance queued on this tablet. Bus released.");
+      onCleared(startKm);
+      return true;
+    };
     try {
       // PIN holder is the driver of record — must match submitDriverAuthorization.
-      const driverStaffId = await resolveOperatorStaffIdFromPin(pin);
+      driverStaffId = await resolveOperatorStaffIdFromPin(pin);
 
       const items: NewClearanceItemInput[] = issues.map((i) => ({
         checkpointId: null,
@@ -341,6 +387,10 @@ export function IssueAccumulatorPanel({
       });
       onCleared(startKm);
     } catch (err) {
+      if (isNetworkError(err)) {
+        const released = await releaseOffline();
+        if (released) return;
+      }
       const msg = (err as Error).message;
       if (/pin/i.test(msg)) {
         setPinError("Incorrect PIN. Please try again.");
@@ -368,13 +418,19 @@ export function IssueAccumulatorPanel({
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
           {alreadyCleared
-            ? `${asset.regoPlate} · Already cleared today. Known issues are listed above. Confirm the kilometres, and log only something new.`
-            : `${asset.regoPlate} · Known issues are listed above. Confirm the kilometres, then log only a new fault. Tag it Green, Yellow, or RED.`}
+            ? askOdometer
+              ? `${asset.regoPlate} · Already cleared today. Known issues are listed above. Confirm the kilometres, and log only something new.`
+              : `${asset.regoPlate} · Already cleared today. Known issues are listed above. Log only something new.`
+            : askOdometer
+              ? `${asset.regoPlate} · Known issues are listed above. Confirm the kilometres, then log only a new fault. Tag it Green, Yellow, or RED.`
+              : `${asset.regoPlate} · Known issues are listed above. Log only a new fault. Tag it Green, Yellow, or RED.`}
         </p>
 
-        <div className="mt-5">
-          <StartingKmConfirm assetId={asset.id} onReading={setStartKm} />
-        </div>
+        {askOdometer ? (
+          <div className="mt-5">
+            <StartingKmConfirm assetId={asset.id} onReading={setStartKm} />
+          </div>
+        ) : null}
 
         {/* ---------------- Accumulated issues stack ---------------- */}
         <div className="mt-5 space-y-2">
@@ -457,7 +513,7 @@ export function IssueAccumulatorPanel({
                 label="Tap to enter driver PIN"
                 verified={driverPinVerified}
                 verifiedLabel="Driver PIN verified"
-                length={4}
+                length={pinLength}
                 title="Driver comfort declaration"
                 description="Confirms you are comfortable operating this vehicle today."
                 onVerify={verifyOperatorPin}
@@ -476,7 +532,7 @@ export function IssueAccumulatorPanel({
 
         {(() => {
           const missing: string[] = [];
-          if (startKm == null) missing.push("confirm the starting kilometres");
+          if (askOdometer && startKm == null) missing.push("confirm the starting kilometres");
           if (hasRed) missing.push("clear the RED issue");
           else {
             if (!comfortDeclared) missing.push("comfort declaration");
@@ -492,16 +548,26 @@ export function IssueAccumulatorPanel({
 
         <button
           type="button"
-          disabled={submitting || hasRed || startKm == null || !comfortDeclared || !driverPinVerified}
+          disabled={
+            submitting ||
+            hasRed ||
+            (askOdometer && startKm == null) ||
+            !comfortDeclared ||
+            !driverPinVerified
+          }
           onClick={submit}
           className={cn(
             "mt-5 h-14 w-full rounded-xl font-bold text-white shadow transition",
             "bg-blue-600 hover:bg-blue-700",
-            (submitting || hasRed || startKm == null || !comfortDeclared || !driverPinVerified) &&
+            (submitting ||
+              hasRed ||
+              (askOdometer && startKm == null) ||
+              !comfortDeclared ||
+              !driverPinVerified) &&
               "opacity-60 cursor-not-allowed",
           )}
         >
-          {submitting ? "Saving…" : "Lock In Declaration & Roll"}
+          {submitting ? "Saving…" : askOdometer ? "Lock In Declaration & Roll" : "Lock in walkaround"}
         </button>
         <button
           type="button"

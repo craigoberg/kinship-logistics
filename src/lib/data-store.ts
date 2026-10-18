@@ -5354,7 +5354,9 @@ function throwPg(prefix: string, error: { message: string; details?: string | nu
     error.hint ? `hint: ${error.hint}` : null,
     error.code ? `code: ${error.code}` : null,
   ].filter(Boolean);
-  console.error(prefix, error);
+  if (!/failed to fetch|networkerror|load failed|timed out|aborted/i.test(error.message ?? "")) {
+    console.error(prefix, error);
+  }
   throw new Error(parts.join(" · "));
 }
 
@@ -8139,8 +8141,7 @@ export async function listClearancesForDate(
   const { data, error } = await supabase
     .from("asset_daily_clearance")
     .select("*")
-    .eq("clearance_date", dateStr)
-    .order("created_at", { ascending: true });
+    .eq("clearance_date", dateStr);
   if (error) {
     console.error("[listClearancesForDate] failed", error);
     return [];
@@ -8529,6 +8530,25 @@ export async function submitDriverAuthorization(
     .single();
   if (error) throwPg("[submitDriverAuthorization]", error);
   return rowToClearance(data as AssetDailyClearanceRow);
+}
+
+/**
+ * Upload path for a walkaround whose PIN was already accepted on the tablet.
+ * The PIN itself is not stored. This only stamps the driver who signed.
+ */
+export async function markQueuedDriverAuthorization(
+  clearanceId: string,
+  driverStaffId: string,
+  verifiedAt: string,
+): Promise<void> {
+  const { error } = await supabase
+    .from("asset_daily_clearance")
+    .update({
+      driver_auth_staff_id: driverStaffId,
+      driver_auth_pin_verified_at: verifiedAt,
+    })
+    .eq("id", clearanceId);
+  if (error) throwPg("[markQueuedDriverAuthorization]", error);
 }
 
 /** Single-row fetch by clearance id — used by the dashboard joint review. */

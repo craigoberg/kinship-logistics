@@ -921,6 +921,11 @@ export function AttendanceRollPanel({ sessionId, mode = "all" }: Props) {
                       <ClinicalFlagChips
                         chips={clinicalChips}
                         personName={displayName}
+                        surface={
+                          hiVisDone || isYellow || isAbsent || (isOut && !departureDone)
+                            ? "light"
+                            : "theme"
+                        }
                       />
                     )}
                   </div>

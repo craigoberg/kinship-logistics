@@ -1293,6 +1293,7 @@ export function useUpdateEventBooking() {
 import {
   patchTripLegOfflineAware,
   resolveActiveTripBundle,
+  saveActiveTripSnapshot,
 } from "@/lib/manifest-offline";
 import { isAppOnline } from "@/lib/simulated-offline";
 import {
@@ -1393,12 +1394,14 @@ export function useStartTrip() {
   return useMutation({
     mutationFn: (input: Omit<StartTripInput, "driverStaffId">) =>
       startTripFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       markManifestJustStarted(result);
+      await saveActiveTripSnapshot(getStaffId(), result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
     onError: (err: Error) => showRedToast("Could not start trip", err),
+    networkMode: "always",
   });
 }
 
@@ -1453,12 +1456,14 @@ export function useStartEventVenueHop() {
       assetId?: string | null;
       varianceReason?: string | null;
     }) => startEventVenueHop({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       markManifestJustStarted(result);
+      await saveActiveTripSnapshot(getStaffId(), result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
       invalidateTransportCaches(qc);
     },
     onError: (err: Error) => showRedToast("Could not start hop", err),
+    networkMode: "always",
   });
 }
 
@@ -1467,11 +1472,13 @@ export function useStartDayCentreRun() {
   return useMutation({
     mutationFn: (input: Omit<StartDayCentreRunInput, "driverStaffId">) =>
       startDayCentreRunFn({ ...input, driverStaffId: getStaffId() }),
-    onSuccess: (result) => {
+    onSuccess: async (result) => {
       markManifestJustStarted(result);
+      await saveActiveTripSnapshot(getStaffId(), result);
       qc.invalidateQueries({ queryKey: ACTIVE_TRIP_KEY });
     },
     onError: (err: Error) => showRedToast("Could not start Day Centre run", err),
+    networkMode: "always",
   });
 }
 

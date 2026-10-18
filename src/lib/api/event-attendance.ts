@@ -297,9 +297,10 @@ export async function syncEventAttendanceFromRoster(
 /** Tap toggle: expected ↔ checked_in (§4.4 fat-finger cards). */
 export async function toggleEventCheckIn(
   row: EventAttendanceRow,
+  occurredAt?: string,
 ): Promise<EventAttendanceRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
+  const nowIso = occurredAt ?? operationalNowIso();
   const isIn = row.status === "checked_in";
   if (!isIn && row.participantId) {
     const { assertNotInfectiousExcluded } = await import(
@@ -372,6 +373,8 @@ export async function recordEventArrival(
     notes?: string;
     /** When true (default for expected), also stamp checked_in. */
     alsoCheckIn?: boolean;
+    /** Tap time when this was queued offline. */
+    occurredAt?: string;
   },
 ): Promise<EventAttendanceRow> {
   if (row.status === "absent") {
@@ -382,8 +385,9 @@ export async function recordEventArrival(
   }
 
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
+  const nowIso = input.occurredAt ?? operationalNowIso();
   const isSelf = input.arrival === "self";
+  const collectedPlace = input.notes?.trim().match(/^Collected at (.+)$/)?.[1] ?? null;
   const runCode = isSelf
     ? null
     : (input.busRunCode ?? "").trim() || null;
@@ -397,7 +401,7 @@ export async function recordEventArrival(
   }
 
   const patch: Record<string, unknown> = {
-    arrival_method: (isSelf ? "walk_in" : "bus") as EventArrivalMethod,
+    arrival_method: (collectedPlace ? "other" : isSelf ? "walk_in" : "bus") as EventArrivalMethod,
     arrival_bus_run_code: runCode,
   };
   if (input.notes && input.notes.trim()) {
@@ -432,7 +436,7 @@ export async function recordEventArrival(
   const checkedInNow = alsoCheckIn && row.status === "expected";
   const personName = await lookupParticipantName(row.participantId);
   const who = personName ?? "client";
-  const arrivalMethod = isSelf ? "walk_in" : "bus";
+  const arrivalMethod = collectedPlace ? "other" : isSelf ? "walk_in" : "bus";
   const how = formatTravelHow(arrivalMethod, runCode);
   await writeToLedger({
     staff_id: staffId,
@@ -452,13 +456,51 @@ export async function recordEventArrival(
       arrival_method: arrivalMethod,
       arrival_bus_run_code: runCode,
       prior_arrival_method: row.arrivalMethod,
-      summary: checkedInNow
-        ? `Checked in ${who} to trip ${how}`.trim()
-        : `Set arrival for ${who} on trip ${how}`.trim(),
+      summary: collectedPlace
+        ? `Collected ${who} onto the trip at ${collectedPlace}`
+        : checkedInNow
+          ? `Checked in ${who} to trip ${how}`.trim()
+          : `Set arrival for ${who} on trip ${how}`.trim(),
     }),
   });
 
   return toRow(data as DbRow);
+}
+
+/** They never joined. Not a left-trip welfare issue. */
+export async function markNotCollected(
+  row: EventAttendanceRow,
+  place: string,
+): Promise<void> {
+  if (row.status === "checked_in" || row.status === "checked_out") {
+    throw new Error("They are already on the trip.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const where = place.trim() || "the pickup";
+  const notes = `Not collected — ${where}`;
+  const { error } = await supabase
+    .from("event_attendance_log")
+    .update({ status: "absent" as EventAttendanceStatus, notes })
+    .eq("id", row.id);
+  if (error) throw error;
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "EVENT_FLOOR_NOT_COLLECTED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      event_day_session_id: row.eventDaySessionId,
+      participant_id: row.participantId,
+      attendance_id: row.id,
+      person_name: who,
+      location: where,
+      summary: `${who} was not collected at ${where}`,
+    }),
+  });
 }
 
 /** Departure handover — assign return transport and check out. */
@@ -466,12 +508,13 @@ export async function checkoutEventParticipant(
   row: EventAttendanceRow,
   returnTransport: ReturnTransport,
   returnBusRunCode?: string | null,
+  occurredAt?: string,
 ): Promise<EventAttendanceRow> {
   if (row.status !== "checked_in") {
     throw new Error("Participant must be checked in before departure handover.");
   }
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
+  const nowIso = occurredAt ?? operationalNowIso();
   const runCode =
     returnTransport === "bus"
       ? await resolveCheckoutReturnBusRun(row, returnBusRunCode)

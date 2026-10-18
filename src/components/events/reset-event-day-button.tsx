@@ -53,6 +53,7 @@ export function ResetEventDayButton({
       void qc.invalidateQueries({ queryKey: ["event-day-sessions", eventId] });
       void qc.invalidateQueries({ queryKey: ["event-deliver-today-sessions"] });
       void qc.invalidateQueries({ queryKey: ["event-attendance-log", sessionId] });
+      void qc.invalidateQueries({ queryKey: ["event-support-attendance", sessionId] });
       void qc.invalidateQueries({ queryKey: ["event-accountability-roll"] });
       const notes = next.open_leader_notes ?? "";
       const overnight = notes.includes("overnight start of day");
@@ -114,6 +115,7 @@ export function ResetEventDayButton({
                 </p>
                 <p>Discarded for this day only:</p>
                 <ul className="list-disc space-y-0.5 pl-5">
+                  <li>Check-in for participants and support (staff, volunteers, carers)</li>
                   <li>Morning &amp; evening roll rows (including Yellow/Red + Hub issues)</li>
                   <li>Activity rolls, bus hops, outbound/return trips</li>
                   <li>Later venue-stop runtime (itinerary kept)</li>

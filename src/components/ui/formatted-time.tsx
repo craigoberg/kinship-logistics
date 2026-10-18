@@ -4,6 +4,7 @@ import { operationalNowMs } from "@/lib/operational-clock";
 import {
   formatDateStandard,
   formatDateTimeStandard,
+  formatDateTimeWithWeekday,
   formatTimeStandard,
 } from "@/lib/operational-time";
 
@@ -26,6 +27,7 @@ interface Props {
   value: Input;
   className?: string;
   placeholder?: string;
+  withWeekday?: boolean;
 }
 
 export function FormattedDate({ value, className, placeholder = "—" }: Props) {
@@ -46,11 +48,17 @@ export function FormattedTime({ value, className, placeholder = "—" }: Props) 
   );
 }
 
-export function FormattedDateTime({ value, className, placeholder = "—" }: Props) {
+export function FormattedDateTime({
+  value,
+  className,
+  placeholder = "—",
+  withWeekday = false,
+}: Props) {
   const mounted = useMounted();
+  const text = withWeekday ? formatDateTimeWithWeekday(value) : formatDateTimeStandard(value);
   return (
     <span className={className} suppressHydrationWarning>
-      {mounted ? formatDateTimeStandard(value) : placeholder}
+      {mounted ? text : placeholder}
     </span>
   );
 }
