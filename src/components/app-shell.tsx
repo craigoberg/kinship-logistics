@@ -1,7 +1,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import { useQueryClient } from "@tanstack/react-query";
-import { LogOut, PanelLeft, PanelLeftClose, ShieldOff, ShieldCheck } from "lucide-react";
+import { KeyRound, LogOut, PanelLeft, PanelLeftClose, ShieldOff, ShieldCheck } from "lucide-react";
 import { AppSidebar } from "./app-sidebar";
 import { BottomNav, NAV_ITEMS } from "./bottom-nav";
 import { useSidebarCollapsed } from "@/hooks/use-sidebar-collapsed";
@@ -13,6 +13,7 @@ import { supabase } from "@/integrations/supabase/client";
 import { useSiteSession } from "@/hooks/use-site-session";
 import { getActiveUserProfile } from "@/lib/data-store";
 import { cn, formatDate } from "@/lib/utils";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
 import { MedicationAdminModal } from "@/components/medication/medication-admin-modal";
 import { FloorAnnouncementStrip } from "@/components/ops/floor-announcement-strip";
 import { MenuGate } from "@/components/auth/menu-gate";
@@ -92,6 +93,9 @@ export function AppShell({
   );
   const title = current?.label ?? "Yada Connect";
   const isDashboard = pathname === "/";
+  // Sydney calendar day. `new Date()` follows the server timezone (UTC on
+  // Vercel) and hydrates as yesterday while Sydney is already the next day.
+  const operationalToday = useOperationalTodayIso();
 
   const [medOpen, setMedOpen] = useState(false);
   const [changePinOpen, setChangePinOpen] = useState(false);
@@ -186,7 +190,7 @@ export function AppShell({
             <h1 className="truncate text-sm font-semibold tracking-tight md:text-base">
               <span>{title}</span>
               {identity && (
-                <span className="ml-2 font-normal text-muted-foreground">
+                <span className="ml-2 hidden font-normal text-muted-foreground md:inline">
                   — {identity.name}
                   {identity.role && (
                     <span className="ml-1 text-xs uppercase tracking-wide">
@@ -197,8 +201,11 @@ export function AppShell({
               )}
             </h1>
             {isDashboard && (
-              <p className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground tabular-nums">
-                {formatDate(new Date())}
+              <p
+                className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground tabular-nums"
+                suppressHydrationWarning
+              >
+                {formatDate(operationalToday)}
               </p>
             )}
             </div>
@@ -222,19 +229,22 @@ export function AppShell({
                 variant="ghost"
                 size="sm"
                 onClick={() => setChangePinOpen(true)}
-                className="text-xs"
+                className="px-2 text-xs sm:px-3"
+                aria-label="Change PIN"
               >
-                Change PIN
+                <KeyRound className="h-4 w-4 sm:mr-1.5" />
+                <span className="hidden sm:inline">Change PIN</span>
               </Button>
             )}
             <Button
               variant="ghost"
               size="sm"
               onClick={handleLogout}
-              className="text-red-500 hover:bg-red-50 hover:text-red-600"
+              className="px-2 text-red-500 hover:bg-red-50 hover:text-red-600 sm:px-3"
+              aria-label="Log out"
             >
-              <LogOut className="mr-1.5 h-4 w-4" />
-              Log Out
+              <LogOut className="h-4 w-4 sm:mr-1.5" />
+              <span className="hidden sm:inline">Log Out</span>
             </Button>
           </div>
         </header>

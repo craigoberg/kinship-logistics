@@ -36,7 +36,6 @@ import { toast } from "sonner";
 import { inferEventKind, listEventDaySessions } from "@/lib/api/event-outing";
 import { resolveEventDaySessionForAnomaly } from "@/lib/api/event-day-anomaly";
 import { useEvents, useLookupParameters } from "@/hooks/use-supabase-data";
-import { useIsMobile } from "@/hooks/use-mobile";
 import type { EventManifest } from "@/lib/data-store";
 import { IncidentIntakeDialog } from "@/components/global/incident-intake-dialog";
 import { RosterTab } from "./roster-tab";
@@ -47,6 +46,23 @@ import { ItineraryTab } from "./itinerary-tab";
 import { EventStatusPanel } from "./event-status-panel";
 import { TripReportTab } from "./trip-report-tab";
 import { EventLiveWatchTab } from "./event-live-watch-tab";
+
+/** Phones and tablets. The wide office dialog stays for a full window. */
+const NARROW_EVENT_QUERY = "(max-width: 1279px)";
+
+function useNarrowEventScreen(): boolean {
+  const [narrow, setNarrow] = useState(() =>
+    typeof window !== "undefined" ? window.matchMedia(NARROW_EVENT_QUERY).matches : false,
+  );
+  useEffect(() => {
+    const mq = window.matchMedia(NARROW_EVENT_QUERY);
+    const apply = () => setNarrow(mq.matches);
+    apply();
+    mq.addEventListener("change", apply);
+    return () => mq.removeEventListener("change", apply);
+  }, []);
+  return narrow;
+}
 
 export type ManageEventTabKey =
   | "roster"
@@ -79,7 +95,7 @@ export function ManageEventModal({
   const [headerExpanded, setHeaderExpanded] = useState(false);
   const { data: events = [] } = useEvents();
   const { data: types = [] } = useLookupParameters("event_types");
-  const isMobile = useIsMobile();
+  const isMobile = useNarrowEventScreen();
   const qc = useQueryClient();
 
   const event = useMemo(() => {
@@ -214,7 +230,7 @@ export function ManageEventModal({
       </div>
 
       {/* Row 2: status chip, incident button, expand toggle */}
-      <div className="mt-2 flex items-center justify-between gap-2">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <EventStatusPanel
           event={event}
           mobileCompact
@@ -416,7 +432,7 @@ export function ManageEventModal({
         <Sheet open={open} onOpenChange={onOpenChange}>
           <SheetContent
             side="bottom"
-            className="flex h-[100svh] max-h-[100svh] flex-col overflow-hidden rounded-t-2xl border-t border-border bg-card p-0 pb-[env(safe-area-inset-bottom)]"
+            className="z-[70] flex h-[100svh] max-h-[100svh] flex-col overflow-hidden rounded-none border-0 bg-card p-0 pb-[env(safe-area-inset-bottom)]"
           >
             <SheetHeader className="sr-only">
               <SheetTitle>{event.title}</SheetTitle>
@@ -453,7 +469,8 @@ export function ManageEventModal({
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
         <DialogContent
-          className="flex h-[min(90dvh,calc(100svh-1.5rem))] max-h-[calc(100svh-1.5rem)] w-[min(94vw,96rem)] max-w-[min(94vw,96rem)] flex-col gap-0 overflow-hidden border-border bg-card p-0"
+          className="flex h-[min(90dvh,calc(100svh-1.5rem))] max-h-[calc(100svh-1.5rem)] w-[min(94vw,96rem)] max-w-[min(94vw,96rem)] translate-none flex-col gap-0 overflow-hidden border-border bg-card p-0"
+          style={{ transform: "translate(-50%, -50%)" }}
           onInteractOutside={(event) => {
             const target = event.target;
             if (target instanceof Element && target.closest("[data-radix-popper-content-wrapper]")) {

@@ -33,7 +33,7 @@ export function SyncIndicator({ className, compact = false }: Props) {
       aria-live="polite"
     >
       {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-      <span>{stateLabel}</span>
+      <span className={cn(compact && "max-sm:sr-only")}>{stateLabel}</span>
       {pending > 0 && (
         <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
           <RefreshCw className="h-3 w-3" />

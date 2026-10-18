@@ -289,8 +289,8 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
             </div>
           </td>,
           <td key="participant" className="px-4 py-2">
-            <div className="flex flex-nowrap items-center gap-1.5 font-medium">
-              <span className="whitespace-nowrap">{b.participantName}</span>
+            <div className="flex flex-wrap items-center gap-1.5 font-medium">
+              <span>{b.participantName}</span>
               <PersonKindBadge
                 kind={b.isGuestBooking ? "guest" : "participant"}
                 className="align-middle"
@@ -317,20 +317,24 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                 “{b.notes}”
               </div>
             )}
+            <p className="mt-1 text-xs tabular-nums text-muted-foreground xl:hidden">
+              Cost ${fmtMoney(baselineCost)} · Paid ${fmtMoney(netLedgerSum)} · Balance $
+              {fmtMoney(b.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
+            </p>
           </td>,
-          <td key="cost" className="px-4 py-2 text-right font-semibold tabular-nums">
+          <td key="cost" className="hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell">
             ${fmtMoney(baselineCost)}
             {b.customPrice != null && b.customPrice !== event.ticketPrice && (
               <span className="ml-1 text-[10px] uppercase tracking-wide text-info">custom</span>
             )}
           </td>,
-          <td key="paid" className="px-4 py-2 text-right font-semibold tabular-nums">
+          <td key="paid" className="hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell">
             ${fmtMoney(netLedgerSum)}
           </td>,
           <td
             key="balance"
             className={cn(
-              "px-4 py-2 text-right font-semibold tabular-nums",
+              "hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell",
               b.bookingStatus === "Cancelled"
                 ? "text-muted-foreground"
                 : trueBalance <= 0
@@ -506,26 +510,30 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
             </div>
           </td>
           <td className="px-4 py-2">
-            <div className="flex flex-nowrap items-center gap-1.5 font-medium">
-              <span className="whitespace-nowrap">{s.displayName}</span>
+            <div className="flex flex-wrap items-center gap-1.5 font-medium">
+              <span>{s.displayName}</span>
               <PersonKindBadge kind={s.personKind} className="align-middle" />
             </div>
             {s.notes ? (
               <div className="mt-0.5 line-clamp-2 text-xs italic text-muted-foreground">“{s.notes}”</div>
             ) : null}
+            <p className="mt-1 text-xs tabular-nums text-muted-foreground xl:hidden">
+              Cost ${fmtMoney(baselineCost)} · Paid ${fmtMoney(netPaid)} · Balance $
+              {fmtMoney(s.bookingStatus === "Cancelled" ? 0 : Math.max(0, trueBalance))}
+            </p>
           </td>
-          <td className="px-4 py-2 text-right font-semibold tabular-nums">
+          <td className="hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell">
             ${fmtMoney(baselineCost)}
             {s.customPrice != null && s.customPrice !== event.ticketPrice && (
               <span className="ml-1 text-[10px] uppercase tracking-wide text-info">custom</span>
             )}
           </td>
-          <td className="px-4 py-2 text-right font-semibold tabular-nums">
+          <td className="hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell">
             ${fmtMoney(netPaid)}
           </td>
           <td
             className={cn(
-              "px-4 py-2 text-right font-semibold tabular-nums",
+              "hidden px-4 py-2 text-right font-semibold tabular-nums xl:table-cell",
               s.bookingStatus === "Cancelled"
                 ? "text-muted-foreground"
                 : trueBalance <= 0
@@ -745,13 +753,13 @@ export function RosterTab({ event, eventKind = "legacy" }: Props) {
                           <tr>
                             <th className="w-14 px-2 py-2" />
                             <th className="px-4 py-2 font-medium">Person</th>
-                            <th className="px-4 py-2 text-right font-medium">
+                            <th className="hidden px-4 py-2 text-right font-medium xl:table-cell">
                               Booking cost
                             </th>
-                            <th className="px-4 py-2 text-right font-medium">
+                            <th className="hidden px-4 py-2 text-right font-medium xl:table-cell">
                               Total paid
                             </th>
-                            <th className="px-4 py-2 text-right font-medium">
+                            <th className="hidden px-4 py-2 text-right font-medium xl:table-cell">
                               Net balance
                             </th>
                             <th className="px-4 py-2 text-right font-medium">
