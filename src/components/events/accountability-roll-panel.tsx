@@ -27,7 +27,6 @@ import { Button } from "@/components/ui/button";
 import {
   listAccountabilityRoll,
   markAbsent,
-  toggleAccounted,
   countUnreconciledCheckins,
   seedAccountabilityRoll,
   sweepAccountabilityRoll,
@@ -49,6 +48,16 @@ import {
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { reinstateLeftTripEverywhere } from "@/lib/api/event-attendance";
+import {
+  cachedEveningRollGate,
+  resolveAccountabilityRoll,
+  toggleAccountedOfflineAware,
+} from "@/lib/deliver-offline/outbox";
+import { isAppOnline } from "@/lib/simulated-offline";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 type Mode = "curfew" | "morning";
 type LogTable = "event_curfew_log" | "event_morning_log";
@@ -134,9 +143,11 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
 
   const { data: roll = [], isLoading } = useQuery({
     queryKey: rollKey(mode, sessionId),
-    queryFn: () => listAccountabilityRoll(table, sessionId),
+    queryFn: () =>
+      resolveAccountabilityRoll(table, sessionId, () => listAccountabilityRoll(table, sessionId)),
     staleTime: 15_000,
-    refetchInterval: 60_000, // auto sweep cadence
+    refetchInterval: 60_000,
+    networkMode: "offlineFirst",
   });
 
   // Participant name lookup — used for virtual rows that have no DB record yet.
@@ -149,6 +160,16 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
     () => Object.fromEntries(participants.map((p) => [p.id, `${p.firstName ?? ""} ${p.lastName ?? ""}`.trim()])),
     [participants],
   );
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  /** Surname A–Z; accounted / left-trip status must not reorder the list. */
+  const sortedRoll = useMemo(
+    () =>
+      sortByParticipantSurname(roll, (r) => r.participant_id, surnameById),
+    [roll, surnameById],
+  );
 
   // How many check-in entries are still "expected" (not yet arrived or reconciled)?
   const { data: unreconciledCount = 0 } = useQuery({
@@ -160,13 +181,24 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
 
   const { data: eveningGate } = useQuery({
     queryKey: ["evening-roll-gate", sessionId],
-    queryFn: () =>
-      isEveningRollMarkingUnlocked({
-        eventId: event.id,
-        sessionId,
-        sessionDate,
-      }),
+    queryFn: async () => {
+      const cached = await cachedEveningRollGate(event.id, sessionDate);
+      if (!isAppOnline() && cached) return cached;
+      try {
+        const live = await isEveningRollMarkingUnlocked({
+          eventId: event.id,
+          sessionId,
+          sessionDate,
+        });
+        if (cached?.unlocked) return cached;
+        return live;
+      } catch (err) {
+        if (cached) return cached;
+        throw err;
+      }
+    },
     enabled: mode === "curfew",
+    networkMode: "offlineFirst",
     staleTime: 10_000,
     refetchInterval: 20_000,
   });
@@ -224,6 +256,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       if (r.participant_name) names[r.participant_id] = r.participant_name;
     });
     const kind = mode === "curfew" ? "evening" : "morning";
+    if (!isAppOnline()) return;
     void loadRollAlertThresholds(kind)
       .then((t) =>
         sweepAccountabilityRoll(table, sessionId, 0, t.redMinsAfter, names),
@@ -243,7 +276,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       toast.error(
         "Set the " +
           (mode === "curfew" ? "evening roll call time" : "morning roll call time") +
-          " in Trip Days → Config first.",
+          " on the Itinerary for this day first.",
       );
       return;
     }
@@ -401,7 +434,7 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
       {!rollTimeClock && (
         <p className="rounded border border-dashed py-3 text-center text-sm text-muted-foreground">
           No {mode === "curfew" ? "evening roll call" : "morning roll call"} time set on this trip day.
-          Set it in Trip Days → expand the row → Config.
+          Set it on the Itinerary for this day.
         </p>
       )}
 
@@ -415,12 +448,13 @@ export function AccountabilityRollPanel({ event, sessionId, sessionDate, rollTim
         </p>
       ) : (
         <ul className="space-y-2">
-          {roll.map((row) => (
+          {sortedRoll.map((row) => (
             <AccountabilityRow
               key={row.id}
               row={row}
               table={table}
               nameMap={nameMap}
+              eventId={event.id}
               sessionDate={sessionDate}
               rollTimeClock={rollTimeClock}
               redMinsAfter={redMinsAfter}
@@ -466,6 +500,7 @@ interface AccRowProps {
   row: EventAccountabilityRow;
   table: LogTable;
   nameMap: Record<string, string>;
+  eventId: string;
   sessionDate: string;
   rollTimeClock: string | null;
   redMinsAfter: number;
@@ -478,6 +513,7 @@ function AccountabilityRow({
   row,
   table,
   nameMap,
+  eventId,
   sessionDate,
   rollTimeClock,
   redMinsAfter,
@@ -490,9 +526,20 @@ function AccountabilityRow({
   const name = row.participant_name || nameMap[row.participant_id] || "Participant";
 
   const toggleMut = useMutation({
-    mutationFn: () => toggleAccounted(table, row, ""),
+    mutationFn: () =>
+      toggleAccountedOfflineAware({
+        table,
+        row,
+        eventId,
+        sessionDate,
+      }),
+    networkMode: "always",
     onSuccess: (next) => {
-      toast.success(next.status === "accounted" ? "Accounted" : "Back to awaiting roll");
+      toast.success(
+        next.status === "accounted"
+          ? `${name} accounted`
+          : `${name} back to awaiting roll`,
+      );
       onChanged();
     },
     onError: (e: Error) => toast.error(e.message),
@@ -502,7 +549,7 @@ function AccountabilityRow({
     mutationFn: (params: Parameters<typeof markAbsent>[2]) =>
       markAbsent(table, row, params),
     onSuccess: () => {
-      toast.success("Marked absent — Hub welfare issue raised.");
+      toast.success(`${name} marked absent — Hub welfare issue raised.`);
       setAbsentOpen(false);
       onChanged();
     },
@@ -518,7 +565,7 @@ function AccountabilityRow({
         reason,
       }),
     onSuccess: () => {
-      toast.success("Reinstated — back on active roll.");
+      toast.success(`${name} reinstated — back on active roll.`);
       setReinstateOpen(false);
       onChanged();
     },

@@ -1,6 +1,8 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { Wifi, WifiOff } from "lucide-react";
+import { FieldQueue } from "@/components/sync/field-queue";
 import { QueueTable } from "@/components/sync/queue-table";
+import { useFieldSyncQueue } from "@/hooks/use-field-sync-queue";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 
@@ -17,10 +19,15 @@ export const Route = createFileRoute("/sync")({
 
 function SyncPage() {
   const items = useSyncQueue();
+  const fieldItems = useFieldSyncQueue();
   const online = useOnlineStatus();
-  const pending = items.filter((i) => i.status === "pending").length;
+  const pending =
+    items.filter((i) => i.status === "pending").length +
+    fieldItems.filter((i) => i.status === "pending").length;
   const retrying = items.filter((i) => i.status === "retrying").length;
-  const failed = items.filter((i) => i.status === "failed").length;
+  const failed =
+    items.filter((i) => i.status === "failed").length +
+    fieldItems.filter((i) => i.status === "failed").length;
 
   return (
     <div className="mx-auto max-w-4xl space-y-5">
@@ -42,7 +49,8 @@ function SyncPage() {
         <Stat label="Failed" value={failed} tone={failed > 0 ? "danger" : undefined} />
       </div>
 
-      <QueueTable items={items} />
+      <FieldQueue items={fieldItems} />
+      {items.length > 0 || fieldItems.length === 0 ? <QueueTable items={items} /> : null}
     </div>
   );
 }

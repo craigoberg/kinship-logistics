@@ -3,11 +3,14 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { createIssue, markResolved } from "@/lib/api/site-issues";
+import { fileBoardReport, siteIssueHubSource } from "@/lib/incident-board-report";
 import { writeToLedger, tryGetGps, writeToLedgerOrThrow } from "@/lib/api/ledger";
 import { listAttendanceRoll } from "@/lib/api/client-attendance";
 import { emitMockSms } from "@/lib/notifications/mock-sms";
 import { setPhase } from "@/lib/api/site-day-sessions";
+import { compareBySurname } from "@/lib/ui/sort-participants";
 
 export type EmergencyMode = "drill" | "live";
 export type EmergencySeverity = "yellow" | "red";
@@ -224,10 +227,43 @@ export async function listMusterLines(emergencyId: string): Promise<MusterLine[]
   const { data, error } = await supabase
     .from("operational_emergency_muster")
     .select("*")
-    .eq("emergency_id", emergencyId)
-    .order("participant_name", { ascending: true });
+    .eq("emergency_id", emergencyId);
   if (error) throw error;
-  return (data ?? []).map((r) => rowToMuster(r as MusterRow));
+  const lines = (data ?? []).map((r) => rowToMuster(r as MusterRow));
+  const ids = [
+    ...new Set(lines.map((l) => l.participantId).filter((id): id is string => !!id)),
+  ];
+  if (!ids.length) return lines;
+
+  const { data: parts } = await supabase
+    .from("participants")
+    .select("id, first_name, last_name")
+    .in("id", ids);
+  const surnameById = new Map<
+    string,
+    { id: string; firstName?: string; lastName?: string }
+  >();
+  for (const p of parts ?? []) {
+    const row = p as { id: string; first_name?: string; last_name?: string };
+    surnameById.set(row.id, {
+      id: row.id,
+      firstName: row.first_name,
+      lastName: row.last_name,
+    });
+  }
+
+  return [...lines].sort((a, b) =>
+    compareBySurname(
+      {
+        ...(a.participantId ? surnameById.get(a.participantId) : undefined),
+        id: a.participantId ?? a.id,
+      },
+      {
+        ...(b.participantId ? surnameById.get(b.participantId) : undefined),
+        id: b.participantId ?? b.id,
+      },
+    ),
+  );
 }
 
 async function seedMusterFromCentreRoll(
@@ -345,6 +381,12 @@ export async function activateEmergency(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: siteIssueHubSource(input.eventId, input.eventDaySessionId),
+    hubRowId: issue.id,
+  });
+
   const { data, error } = await supabase
     .from("operational_emergencies")
     .insert({
@@ -357,6 +399,7 @@ export async function activateEmergency(input: {
       event_day_session_id: input.eventDaySessionId ?? null,
       surface: input.surface,
       activated_by_staff_id: input.managerStaffId,
+      activated_at: operationalNowIso(),
       hub_issue_id: issue.id,
     })
     .select("*")
@@ -396,6 +439,8 @@ export async function activateEmergency(input: {
       severity: input.severity,
       surface: input.surface,
       situation,
+      why: situation,
+      location: input.surface === "trip" ? "trip" : "Day Centre",
       hub_issue_id: issue.id,
     },
   });
@@ -423,7 +468,7 @@ export async function updateMusterState(args: {
     .update({
       state: args.state,
       updated_by_staff_id: args.staffId || null,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     })
     .eq("id", args.musterId)
     .select("*")
@@ -458,9 +503,9 @@ export async function standDownEmergency(input: {
     .update({
       status: "stood_down",
       stood_down_by_staff_id: input.managerStaffId,
-      stood_down_at: new Date().toISOString(),
+      stood_down_at: operationalNowIso(),
       debrief_text: debrief,
-      updated_at: new Date().toISOString(),
+      updated_at: operationalNowIso(),
     })
     .eq("id", input.emergencyId)
     .select("*")
@@ -504,6 +549,9 @@ export async function standDownEmergency(input: {
       emergency_id: current.id,
       mode: current.mode,
       debrief,
+      why: debrief,
+      location: current.surface === "trip" ? "trip" : "Day Centre",
+      surface: current.surface,
       hub_issue_id: current.hubIssueId,
       hub_issue_left_open: true,
     },
@@ -542,6 +590,12 @@ export async function declareDoNotOpenCentre(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "day_centre",
+    hubRowId: issue.id,
+  });
+
   await setPhase(input.siteDaySessionId, "closed_no_go");
 
   const { error } = await supabase
@@ -549,7 +603,7 @@ export async function declareDoNotOpenCentre(input: {
     .update({
       close_leader_notes: reason,
       closed_by_id: null,
-      close_declared_at: new Date().toISOString(),
+      close_declared_at: operationalNowIso(),
       lockdown_hub_issue_id: issue.id,
     })
     .eq("id", input.siteDaySessionId);
@@ -565,6 +619,8 @@ export async function declareDoNotOpenCentre(input: {
     metadata: {
       session_id: input.siteDaySessionId,
       reason,
+      why: reason,
+      location: "Day Centre",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -590,6 +646,12 @@ export async function declareCentreLockdown(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "day_centre",
+    hubRowId: issue.id,
+  });
+
   const { error } = await supabase
     .from("site_day_sessions")
     .update({
@@ -597,7 +659,7 @@ export async function declareCentreLockdown(input: {
       lockdown_reason: reason,
       lockdown_severity: input.severity,
       lockdown_hub_issue_id: issue.id,
-      lockdown_at: new Date().toISOString(),
+      lockdown_at: operationalNowIso(),
       lockdown_by_staff_id: input.managerStaffId,
     })
     .eq("id", input.siteDaySessionId);
@@ -616,6 +678,8 @@ export async function declareCentreLockdown(input: {
     metadata: {
       session_id: input.siteDaySessionId,
       reason,
+      why: reason,
+      location: "Day Centre",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -661,7 +725,7 @@ export async function clearCentreLockdown(input: {
     action_type: "SITE_LOCKDOWN_CLEARED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { session_id: input.siteDaySessionId },
+    metadata: { session_id: input.siteDaySessionId, location: "Day Centre" },
   });
 }
 
@@ -710,6 +774,12 @@ export async function declareProgrammeSuspend(input: {
     issueArea: "health_safety",
   });
 
+  await fileBoardReport({
+    lane: "health_safety",
+    hubSource: "event",
+    hubRowId: issue.id,
+  });
+
   const { error } = await supabase
     .from("event_day_sessions")
     .update({
@@ -717,7 +787,7 @@ export async function declareProgrammeSuspend(input: {
       programme_suspend_reason: reason,
       programme_suspend_severity: input.severity,
       programme_suspend_hub_issue_id: issue.id,
-      programme_suspended_at: new Date().toISOString(),
+      programme_suspended_at: operationalNowIso(),
       programme_suspended_by_staff_id: input.managerStaffId,
     })
     .eq("id", input.eventDaySessionId);
@@ -737,6 +807,9 @@ export async function declareProgrammeSuspend(input: {
       event_id: input.eventId,
       event_day_session_id: input.eventDaySessionId,
       reason,
+      why: reason,
+      location: "trip",
+      surface: "trip",
       severity: input.severity,
       hub_issue_id: issue.id,
     },
@@ -782,7 +855,11 @@ export async function clearProgrammeSuspend(input: {
     action_type: "PROGRAMME_SUSPEND_CLEARED",
     gps_lat: null,
     gps_lng: null,
-    metadata: { event_day_session_id: input.eventDaySessionId },
+    metadata: {
+      event_day_session_id: input.eventDaySessionId,
+      location: "trip",
+      surface: "trip",
+    },
   });
 }
 

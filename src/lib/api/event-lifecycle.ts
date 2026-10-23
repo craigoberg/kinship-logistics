@@ -4,7 +4,8 @@
  * Status ladder: Planning → Confirmed → Open → Closed
  *
  * Guard rules (§12, GUARDRAILS §1.1):
- *   • Planning   → Confirmed: all day sessions must have a manager assigned.
+ *   • Planning   → Confirmed: trip leader on every day, plus a meeting point
+ *     (first stop) and a departure point (last stop).
  *   • Confirmed  → Open:      event start_date ≤ today; all itinerary stops exist.
  *   • Open       → Closed:    all day sessions closed; no open RED; return transport
  *                             complete; final-day departure cleared (BL-088); then
@@ -33,6 +34,7 @@ import {
 } from "@/lib/api/event-lifecycle-gates";
 import {
   assessOvernightHotelItinerary,
+  assessItineraryDayAnchorsForEvent,
   inferEventKind,
   isOutingEventKind,
   seedEventDaySessions,
@@ -40,7 +42,6 @@ import {
   listEventDaySessions,
 } from "@/lib/api/event-outing";
 import { fetchActualTransportForSessions } from "@/lib/api/event-transport";
-import { archiveGuestParticipantsForEvent } from "@/lib/api/event-guest";
 import { operationalNowIso } from "@/lib/operational-clock";
 import { todayLocalIso, formatDate } from "@/lib/utils";
 
@@ -166,8 +167,46 @@ async function guardPlanningToConfirmed(eventId: string): Promise<StatusGuardRes
   }
 
   const hotel = await assessOvernightHotelItinerary(eventId);
-  if (!hotel.ok) {
-    return { ok: false, blockers: hotel.blockers };
+  const anchors = await assessItineraryDayAnchorsForEvent(eventId);
+  const startDay = row.start_date.slice(0, 10);
+  const endDay = (row.end_date ?? row.start_date).slice(0, 10);
+  const { data: stopRows, error: stopErr } = await supabase
+    .from("event_venue_stops")
+    .select("session_date")
+    .eq("event_id", eventId);
+  const pointBlockers: string[] = [];
+  if (stopErr && !isSchemaMismatchError(stopErr)) {
+    pointBlockers.push(`DB error: ${stopErr.message}`);
+  } else if (!stopErr) {
+    const stopDates = new Set(
+      (stopRows ?? []).map((s) => String((s as { session_date: string }).session_date).slice(0, 10)),
+    );
+    if (startDay === endDay && !stopDates.has(startDay)) {
+      pointBlockers.push(
+        "Add a meeting point and a departure point on the Itinerary tab. One venue can be both: people arrive there by bus or self, and leave from there for home.",
+      );
+    } else {
+      if (!stopDates.has(startDay)) {
+        pointBlockers.push(
+          "Add a meeting point on the first day — where people arrive by bus or self. Itinerary tab.",
+        );
+      }
+      if (!stopDates.has(endDay)) {
+        pointBlockers.push(
+          "Add a departure point on the last day — where people leave by bus or self for home. Itinerary tab.",
+        );
+      }
+    }
+  }
+  if (!hotel.ok || !anchors.ok || pointBlockers.length > 0) {
+    return {
+      ok: false,
+      blockers: [
+        ...pointBlockers,
+        ...(hotel.ok ? [] : hotel.blockers),
+        ...(anchors.ok ? [] : anchors.blockers),
+      ],
+    };
   }
 
   // BL-098 — incomplete guest bookings warn on Confirm (Open location hard-blocks).
@@ -245,6 +284,11 @@ async function guardConfirmedToOpen(eventId: string, startDate: string): Promise
   const hotel = await assessOvernightHotelItinerary(eventId);
   if (!hotel.ok) {
     return { ok: false, blockers: hotel.blockers };
+  }
+
+  const anchors = await assessItineraryDayAnchorsForEvent(eventId);
+  if (!anchors.ok) {
+    return { ok: false, blockers: anchors.blockers };
   }
 
   return { ok: true, blockers: [] };
@@ -428,7 +472,7 @@ export async function promoteEventStatus(
       throw new Error(`Billing lock ledger write failed — event NOT closed. Retry. (${(e as Error).message})`);
     }
     patch.billing_locked = true;
-    patch.closed_at = new Date().toISOString();
+    patch.closed_at = operationalNowIso();
     patch.closed_by_id = staffId;
   }
 
@@ -452,22 +496,8 @@ export async function promoteEventStatus(
     return { newStatus: next };
   }
 
-  // BL-098 — archive guests after Close; never roll back billing lock.
-  try {
-    const archive = await archiveGuestParticipantsForEvent(eventId);
-    return {
-      newStatus: next,
-      guestsArchived: archive.archivedIds.length,
-      guestsSkipped: archive.skippedIds.length,
-    };
-  } catch (e) {
-    return {
-      newStatus: next,
-      guestsArchived: 0,
-      guestsSkipped: 0,
-      guestArchiveError: (e as Error).message,
-    };
-  }
+  // Guests stay on file. Office archives them from the care profile after follow-up.
+  return { newStatus: next };
 }
 
 /** Close a specific event_day_session (orderly or incident). Manager-only. */
@@ -602,12 +632,20 @@ export interface TripReport {
   venueStops: TripReportVenueStop[];
   daySessions: TripReportDaySession[];
   roster: TripReportRosterEntry[];
+  support: Array<{
+    displayName: string;
+    roleLabel: string;
+    outboundTransportMode: string;
+    returnTransportMode: string;
+  }>;
   finance: TripReportFinance;
 
   rosterSummary: {
     confirmed: number;
     cancelled: number;
     total: number;
+    nonParticipants: number;
+    attendees: number;
   };
   accountabilitySummary: {
     totalRedIssues: number;
@@ -795,6 +833,18 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
   const status =
     rawStatus === "Closed" && !allSessionsClosed ? "Open" : rawStatus;
 
+  const { listEventSupportBookings } = await import("@/lib/api/event-support");
+  const { supportPersonKindLabel } = await import("@/lib/support-person");
+  const supportBookings = await listEventSupportBookings(eventId);
+  const support = supportBookings
+    .filter((s) => s.bookingStatus !== "Cancelled")
+    .map((s) => ({
+      displayName: s.displayName,
+      roleLabel: supportPersonKindLabel(s.personKind),
+      outboundTransportMode: s.outboundTransportMode,
+      returnTransportMode: s.returnTransportMode,
+    }));
+
   return {
     eventId,
     title: ev.title as string,
@@ -803,16 +853,23 @@ export async function buildTripReport(eventId: string): Promise<TripReport> {
     startDate: ev.start_date as string,
     endDate: (ev.end_date as string | null) ?? null,
     primaryVenueName: vName,
-    generatedAt: new Date().toISOString(),
+    generatedAt: operationalNowIso(),
     venueStops: stops,
     daySessions,
     roster,
+    support,
     finance: {
       ticketRevenue: finance.ticketRevenue,
       vendorExpenses: finance.vendorExpenses,
       netPnl: finance.netPnl,
     },
-    rosterSummary: { confirmed, cancelled, total: roster.length },
+    rosterSummary: {
+      confirmed,
+      cancelled,
+      total: roster.length,
+      nonParticipants: support.length,
+      attendees: confirmed + support.length,
+    },
     accountabilitySummary: { totalRedIssues, totalYellowIssues, totalGreenIssues, allSessionsClosed },
   };
 }

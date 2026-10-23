@@ -1,78 +1,81 @@
+import { toast } from "sonner";
+import { isManagerLevelAccess } from "@/lib/auth/pin-role";
 import {
-  verifyCoordinatorPin,
-  verifyStaffPin,
-  loginWithPin,
-  GuardianPinError,
-} from "@/lib/data-store";
-import { supabase } from "@/integrations/supabase/client";
+  resolveStaffFromPin,
+  verifyNamedPersonPin,
+} from "@/lib/auth/pin-session";
 
-/**
- * Resolve the staff row that owns this 4-digit PIN (terminal login RPC).
- * Returns staff id — does not require a pre-set session staffId in localStorage.
- */
-export async function resolveOperatorStaffIdFromPin(pin: string): Promise<string> {
-  if (!/^\d{4}$/.test(pin)) {
-    throw new Error("Incorrect operator PIN. Please try again.");
-  }
-  const { data, error } = await supabase.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  if (error) {
-    console.error("[resolveOperatorStaffIdFromPin] failed", error);
-    throw new Error("Could not verify PIN. Check your connection and try again.");
-  }
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{ id: string }>;
-  if (rows.length === 0) {
-    throw new Error("Incorrect operator PIN. Please try again.");
-  }
-  return rows[0].id;
+const announcedAt = new Map<string, number>();
+
+/** One confirmation for the person whose PIN just succeeded. */
+export function toastPinAccepted(fullName: string | null | undefined) {
+  const name = fullName?.trim();
+  if (!name) return;
+  const now = Date.now();
+  const prev = announcedAt.get(name) ?? 0;
+  if (now - prev < 1500) return;
+  announcedAt.set(name, now);
+  toast.success(`${name} Pin accepted`);
 }
 
-/** Verify a 4-digit operator PIN (any active staff holder). */
-export async function verifyOperatorPin(pin: string): Promise<void> {
-  await resolveOperatorStaffIdFromPin(pin);
+/**
+ * Staff id for the person who entered this PIN. Does not change the signed-in profile.
+ */
+export async function resolveOperatorStaffIdFromPin(
+  pin: string,
+  opts?: { announce?: boolean },
+): Promise<string> {
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) {
+    throw new Error("Incorrect operator PIN. Please try again.");
+  }
+  const who = await resolveStaffFromPin(pin);
+  if (opts?.announce !== false) toastPinAccepted(who.fullName);
+  return who.personId;
+}
+
+/** Any active staff PIN (action step-up). Does not switch the signed-in person. */
+export async function verifyOperatorPin(
+  pin: string,
+  opts?: { announce?: boolean },
+): Promise<void> {
+  await resolveOperatorStaffIdFromPin(pin, opts);
 }
 
 /** Verify PIN belongs to a specific staff member (e.g. meal preparer attest). */
 export async function verifyNamedStaffPin(
   staffId: string,
   pin: string,
+  opts?: { announce?: boolean },
 ): Promise<void> {
   if (!staffId) throw new Error("Select the staff member first.");
-  if (!/^\d{4,6}$/.test(pin)) {
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) {
     throw new Error("Incorrect PIN. Please try again.");
   }
-  const ok = await verifyStaffPin(staffId, pin);
-  if (!ok) throw new Error("Incorrect PIN. Please try again.");
+  const who = await verifyNamedPersonPin({ personKind: "staff", personId: staffId, pin });
+  if (opts?.announce !== false) toastPinAccepted(who.fullName);
 }
 
-/** Verify a manager/coordinator PIN (4–6 digits). */
-export async function verifyManagerPin(managerStaffId: string, pin: string): Promise<void> {
+/** Verify a manager or assistant manager PIN for a named person. */
+export async function verifyManagerPin(
+  managerStaffId: string,
+  pin: string,
+  opts?: { announce?: boolean },
+): Promise<{ personnelType: string | null; roleTitle: string | null; fullName: string }> {
   if (!managerStaffId) throw new Error("Please select the authorising manager.");
-  if (!/^\d{4,6}$/.test(pin)) {
+  if (!/^\d{4}$|^\d{6}$/.test(pin)) {
     throw new Error("Incorrect manager PIN. Please try again.");
   }
-  try {
-    const ok = await verifyCoordinatorPin(managerStaffId, pin);
-    if (!ok) throw new Error("Incorrect manager PIN. Please try again.");
-  } catch (roleErr: unknown) {
+  const who = await verifyNamedPersonPin({
+    personKind: "staff",
+    personId: managerStaffId,
+    pin,
+  });
+  if (!isManagerLevelAccess(who.personnelType)) {
+    const level = who.personnelType?.trim() || "blank";
     throw new Error(
-      roleErr instanceof Error ? roleErr.message : "Manager role verification failed.",
+      `System access level is ${level}. Only Manager or Assistant Manager can do this.`,
     );
   }
-}
-
-/** Terminal login — 4-digit PIN. Returns profile on success. */
-export async function verifyLoginPin(pin: string) {
-  if (!/^\d{4}$/.test(pin)) {
-    throw new Error("Incorrect PIN. Please try again.");
-  }
-  try {
-    const profile = await loginWithPin(pin);
-    if (!profile) throw new Error("Incorrect PIN. Please try again.");
-    return profile;
-  } catch (e) {
-    if (e instanceof GuardianPinError) throw e;
-    throw new Error("Sign-in failed. Check your connection and retry.");
-  }
+  if (opts?.announce !== false) toastPinAccepted(who.fullName);
+  return who;
 }

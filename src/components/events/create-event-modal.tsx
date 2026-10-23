@@ -188,7 +188,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[90vh] w-full max-w-lg flex-col overflow-hidden border-border bg-card">
+      <DialogContent className="flex max-h-[calc(100svh-1.5rem)] w-full max-w-lg flex-col overflow-hidden border-border bg-card">
         <DialogHeader className="shrink-0">
           <DialogTitle>Create new event</DialogTitle>
           <DialogDescription>
@@ -196,7 +196,7 @@ export function CreateEventModal({ open, onOpenChange }: Props) {
           </DialogDescription>
         </DialogHeader>
 
-        <div className="-mx-6 flex-1 overflow-y-auto px-6">
+        <div className="-mx-6 min-h-0 flex-1 overflow-y-auto overscroll-contain px-6">
           <div className="grid gap-3 pt-1">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">

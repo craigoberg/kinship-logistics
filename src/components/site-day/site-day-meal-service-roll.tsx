@@ -1,7 +1,7 @@
 /**
  * BL-073 — Day Centre meal service roll (checked-in clients).
  */
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
@@ -19,6 +19,10 @@ import {
 } from "@/lib/api/site-day-meal-service";
 import { listParticipants } from "@/lib/data-store";
 import { cn } from "@/lib/utils";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 type Props = {
   activityId: string;
@@ -84,6 +88,21 @@ export function SiteDayMealServiceRoll({
     onError: (e: Error) => toast.error(e.message),
   });
 
+  const byId = useMemo(
+    () => new Map((participantsQ.data ?? []).map((p) => [p.id, p])),
+    [participantsQ.data],
+  );
+  const rows = useMemo(
+    () =>
+      sortByParticipantSurname(
+        rollQ.data ?? [],
+        (r) => r.participantId,
+        surnameMapFromParticipants(participantsQ.data ?? []),
+      ),
+    [rollQ.data, participantsQ.data],
+  );
+  const outstanding = rows.filter((r) => r.status === "expected").length;
+
   if (rollQ.isLoading) {
     return (
       <div className="flex justify-center py-4">
@@ -91,10 +110,6 @@ export function SiteDayMealServiceRoll({
       </div>
     );
   }
-
-  const rows = rollQ.data ?? [];
-  const byId = new Map((participantsQ.data ?? []).map((p) => [p.id, p]));
-  const outstanding = rows.filter((r) => r.status === "expected").length;
 
   return (
     <>

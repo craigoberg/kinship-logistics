@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Wifi, WifiOff, RefreshCw } from "lucide-react";
 import { useOnlineStatus } from "@/hooks/use-online-status";
 import { useSyncQueue } from "@/hooks/use-sync-queue";
+import { useDeliverOffline } from "@/hooks/use-deliver-offline";
 import { useManifestOffline } from "@/hooks/use-manifest-offline";
 import { cn } from "@/lib/utils";
 
@@ -14,11 +15,12 @@ export function SyncIndicator({ className, compact = false }: Props) {
   const online = useOnlineStatus();
   const queue = useSyncQueue();
   const manifestOffline = useManifestOffline();
+  const deliverOffline = useDeliverOffline();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
 
   const legacyPending = queue.filter((q) => q.status !== "synced").length;
-  const pending = legacyPending + manifestOffline.pendingCount;
+  const pending = legacyPending + manifestOffline.pendingCount + deliverOffline.pendingCount;
   const stateLabel = !mounted ? "—" : online ? "Online" : "Offline";
 
   return (
@@ -31,7 +33,7 @@ export function SyncIndicator({ className, compact = false }: Props) {
       aria-live="polite"
     >
       {online ? <Wifi className="h-3.5 w-3.5" /> : <WifiOff className="h-3.5 w-3.5" />}
-      <span>{stateLabel}</span>
+      <span className={cn(compact && "max-sm:sr-only")}>{stateLabel}</span>
       {pending > 0 && (
         <span className="inline-flex items-center gap-1 rounded-full bg-white/20 px-2 py-0.5 text-[10px] font-semibold text-white">
           <RefreshCw className="h-3 w-3" />

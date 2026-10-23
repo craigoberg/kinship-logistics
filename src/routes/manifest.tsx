@@ -1,6 +1,6 @@
 // Force rebuild version 2.4 - Full Integrated Guard
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -20,12 +20,20 @@ import {
   Bus,
 } from "lucide-react";
 
+import { StopAddressSheet } from "@/components/address/stop-address-picker";
+import {
+  changePendingStopAddress,
+  ownerFromLeg,
+  type StopAddressChoice,
+  type StopDirection,
+} from "@/lib/api/person-addresses";
 import { Card } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
+import { revealInManifestScroll } from "@/lib/ui/manifest-scroll";
 import { Label } from "@/components/ui/label";
-import { EmergencyOpsBanner } from "@/components/ops/emergency-ops-banner";
-import { NumericEntryTrigger } from "@/components/ui/numeric-entry-dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
@@ -40,6 +48,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
 import {
+  MANIFEST_JUST_STARTED_KEY,
   useActiveTrip,
   useStartTrip,
   useStartDayCentreRun,
@@ -47,24 +56,18 @@ import {
   usePatchTripLeg,
   useCancelTrip,
   useManifestPickerEvents,
-  useAssetCurrentOdometer,
   useLookupParameters,
   useReorderTripPickupLegs,
+  useStaffRegistry,
 } from "@/hooks/use-supabase-data";
-import {
-  useOdoLegGpsWarnKm,
-  useOdoStartVsLastWarnKm,
-} from "@/hooks/use-system-parameters";
-import { absDiffExceeds } from "@/lib/manifest-odometer";
-import {
-  CAUTION_CALLOUT_BODY_CLASS,
-  CAUTION_CALLOUT_CLASS,
-  CAUTION_CALLOUT_ICON_CLASS,
-} from "@/lib/ui/caution-callout";
+import { DutyRequirementGapPanel } from "@/components/duty/duty-requirement-gap-panel";
+import { useFleetDutyGap } from "@/hooks/use-fleet-duty-gap";
 
 import { NoShowCountdownModal } from "@/components/attendance/no-show-countdown-modal";
-import { haversineKm, getCurrentPosition } from "@/lib/geo";
-import { cn, todayLocalIso, eventSpansDate, formatDate, formatTime } from "@/lib/utils";
+import { cn, eventSpansDate, formatDate, formatDateWithWeekday, formatTime } from "@/lib/utils";
+import { operationalNowIso, useOperationalTodayIso } from "@/lib/operational-clock";
+import { useChromeVisibility, useHideChromeOnScrollRef } from "@/hooks/chrome-visibility";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
 import { triggerInspectionAlert, toSeverity } from "@/hooks/use-notification-router";
 import type {
   TripLeg,
@@ -77,8 +80,8 @@ import type {
   TodayManifestSummary,
   StartPointChoice,
 } from "@/lib/data-store";
+import { resolveTransportAssets } from "@/lib/deliver-offline/fleet-cache";
 import {
-  listTransportAssets,
   getClearanceForAssetOnDate,
   listCheckpointsForAsset,
   insertAssetClearanceWithItems,
@@ -90,10 +93,15 @@ import {
   computePickupChainEndpoints,
   resolveStaffIdWithFallback,
   pruneIneligibleReturnTripPassengers,
+  applyDriverPickupOrder,
+  applyTerminalChainLabels,
 } from "@/lib/data-store";
+import { StartingKmConfirm } from "@/components/manifest/starting-km-confirm";
+import { VehicleKnownIssues } from "@/components/manifest/vehicle-known-issues";
 import { IssueAccumulatorPanel } from "@/components/manifest/issue-accumulator-panel";
 import { CloseRunCard } from "@/components/manifest/close-run-card";
 import { ManifestOfflineBanner } from "@/components/manifest/manifest-offline-banner";
+import { OfficeRunNoticeBanner } from "@/components/manifest/office-run-notice-banner";
 import {
   EventTransportRunsStep3,
   type SelectedTransportRun,
@@ -119,16 +127,22 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { raiseUnexpectedMedBagIssue } from "@/lib/api/unexpected-med-bag";
 import { writeToLedger } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { raiseUnsafeDropHubIssue } from "@/lib/api/transport-unsafe-drop";
 import { VerbalConsultationDialog, formatVerbalWorkaroundDescription } from "@/components/issue-engine/verbal-consultation-dialog";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { LOOKUP_CATEGORIES } from "@/lib/data-store";
-import { dayCodeFromSydneyIndex } from "@/lib/api/centre-hours";
 import { getLastItineraryStopForDate } from "@/lib/api/event-outing";
 import {
   assessEventReturnTransport,
   eventReturnTransportKey,
 } from "@/lib/api/event-transport";
+import {
+  dayCentreRunSlotKey,
+  inspectTransportRunSlot,
+  transportRunSlotClosedMessage,
+  transportRunSlotHeldMessage,
+} from "@/lib/api/transport-run-exclusivity";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import {
   canCancelPickupLeg,
@@ -139,6 +153,11 @@ import {
   usePickupCancelDialog,
   type PickupDragBind,
 } from "@/components/manifest/manage-pickups-panel";
+import {
+  WalkOnCompanionsLine,
+  WalkOnPersonModal,
+  WalkOnStopIconButton,
+} from "@/components/events/walk-on-person-modal";
 
 export const Route = createFileRoute("/manifest")({
   ssr: false,
@@ -158,6 +177,7 @@ function ManifestPage() {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
   const navigate = useNavigate();
   const manifestQueryClient = useQueryClient();
+  const { chromeHidden } = useChromeVisibility();
 
   // Multi-device handshake rehydration removed — RED issues now resolve
   // locally via VerbalConsultationDialog inside IssueAccumulatorPanel. No
@@ -168,8 +188,9 @@ function ManifestPage() {
 
   const assetsQ = useQuery({
     queryKey: ["transport-assets"],
-    queryFn: () => listTransportAssets(),
+    queryFn: () => resolveTransportAssets(),
     staleTime: 5 * 60_000,
+    networkMode: "always",
   });
 
   const userRole = typeof window !== "undefined" ? getActiveUserRole() : "driver";
@@ -203,9 +224,17 @@ function ManifestPage() {
   }, [eventId, eventDaySessionId]);
 
   return (
-    <div className="mx-auto flex h-[100dvh] max-w-md flex-col overflow-x-hidden bg-background">
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-md flex-1 flex-col overflow-hidden bg-background">
       {/* Permanent Session Identity Header */}
-      <div className="flex items-center justify-between border-b border-border bg-slate-900 px-4 py-2.5 text-xs text-white shrink-0 z-30 shadow-md">
+      <div
+        className={cn(
+          "z-30 flex shrink-0 items-center justify-between overflow-hidden border-b border-border bg-slate-900 px-4 text-xs text-white shadow-md",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-2.5 opacity-100",
+        )}
+        aria-hidden={chromeHidden}
+      >
         <div className="flex items-center gap-2 min-w-0">
           <span
             className={cn("h-2 w-2 rounded-full shrink-0", isLoading ? "bg-amber-500 animate-pulse" : "bg-green-500")}
@@ -243,8 +272,6 @@ function ManifestPage() {
         </AlertDialog>
       </div>
 
-      <EmergencyOpsBanner eventDaySessionId={eventDaySessionId} />
-
       {isLoading ? (
         <div className="flex flex-1 flex-col items-center justify-center text-muted-foreground gap-3 bg-slate-950/10">
           <Loader2 className="h-6 w-6 animate-spin text-blue-600" />
@@ -268,10 +295,8 @@ function staffName(staffId: string): string {
 }
 
 function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }) {
-  const today = todayLocalIso();
-  const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
-  const driverName = staffName(driverStaffId);
-  const startVsLastWarnKm = useOdoStartVsLastWarnKm();
+  const bindChromeScroll = useHideChromeOnScrollRef<HTMLDivElement>();
+  const today = useOperationalTodayIso();
 
   // Global escalation/handshake locks removed — RED issues no longer take
   // over the wizard; the verbal-consultation dialog inside
@@ -303,21 +328,6 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
     }
     return false;
   });
-  const [startOdoWarnAck, setStartOdoWarnAck] = useState(false);
-  /** False until driver edits the pad — keep syncing to latest vehicle estimate. */
-  const [odoDirty, setOdoDirty] = useState(false);
-
-  const { data: assetCurrentOdo = null } = useAssetCurrentOdometer(assetId || null);
-
-  // Prefill / re-sync starting odo to this vehicle's current estimate (BL-096).
-  // Re-applies when current KM updates after a Close Run (e.g. 1000 → 1005)
-  // unless the driver has manually edited the field.
-  useEffect(() => {
-    if (!assetId || assetCurrentOdo == null || odoDirty) return;
-    const next = String(Math.round(assetCurrentOdo));
-    setOdo((prev) => (prev === next ? prev : next));
-    setStartOdoWarnAck(false);
-  }, [assetId, assetCurrentOdo, odoDirty]);
 
   useEffect(() => {
     localStorage.setItem("yada_init_step", step);
@@ -336,30 +346,32 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
   const selectedAsset = useMemo(() => activeAssets.find((a) => a.id === assetId) ?? null, [activeAssets, assetId]);
 
   const odoNum = odo === "" ? NaN : Number(odo);
-  const odoReasonable = Number.isFinite(odoNum) && odoNum > 0 && odoNum < 10_000_000;
-  const startDiffersFromLast =
-    assetCurrentOdo != null &&
-    odoReasonable &&
-    absDiffExceeds(odoNum, assetCurrentOdo, startVsLastWarnKm);
-  const startBelowLast =
-    assetCurrentOdo != null && odoReasonable && odoNum < assetCurrentOdo;
 
   const proceedToClearance = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!selectedAsset || !odoReasonable) return;
-    if ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck) return;
+    if (!selectedAsset) return;
     setStep("clearance");
+  };
+
+  const acceptClearance = (km: number) => {
+    setOdo(String(km));
+    setClearanceOk(true);
+    setStep("event");
   };
 
   // Multi-device handshake short-circuit branches removed.
 
   return (
-    <div className="flex-1 overflow-y-auto p-4">
+    <div
+      ref={bindChromeScroll}
+      data-manifest-scroll
+      className="min-h-0 flex-1 overflow-y-auto overscroll-y-none [overflow-anchor:none] p-4"
+    >
       {step === "vehicle" && (
         <Card className="p-5">
           <h1 className="text-xl font-extrabold tracking-tight">Initialize Daily Run</h1>
           <p className="mt-1 text-sm text-muted-foreground">
-            Step 1 of 3 — pick today's vehicle and record the starting odometer.
+            Step 1 of 3 — pick today's vehicle. The starting kilometres are confirmed at clearance.
           </p>
           <form onSubmit={proceedToClearance} className="mt-5 space-y-5">
             <div className="grid gap-2">
@@ -378,108 +390,23 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
                         a.makeModel ? ` · ${a.makeModel}` : ""
                       }`}
                       icon={<Bus className="h-5 w-5" />}
-                      tone="info"
+                      tone={assetId === a.id ? "success" : "neutral"}
                       active={assetId === a.id}
-                      onClick={() => {
-                        setAssetId(a.id);
-                        setOdoDirty(false);
-                        setStartOdoWarnAck(false);
-                        const est =
-                          a.currentOdometerKm != null
-                            ? Math.round(a.currentOdometerKm)
-                            : null;
-                        if (est != null) setOdo(String(est));
-                      }}
+                      onClick={() => setAssetId(a.id)}
                       className="min-h-[4.5rem] py-4"
                     />
                   ))}
                 </div>
               )}
             </div>
-            <div className="grid gap-2">
-              <NumericEntryTrigger
-                id="odo"
-                label="Starting odometer"
-                value={odo}
-                onChange={(v) => {
-                  setOdo(v);
-                  setOdoDirty(true);
-                  setStartOdoWarnAck(false);
-                }}
-                placeholder="Tap to enter starting km"
-                title="Starting odometer"
-                description={
-                  assetCurrentOdo != null
-                    ? `Last known for this vehicle: ${Math.round(assetCurrentOdo)} km. Adjust if the bus was driven (e.g. petrol).`
-                    : "Enter the odometer reading where the bus is parked."
-                }
-                step={1}
-                allowDecimal={false}
-                min={1}
-                unit="km"
-              />
-              {assetCurrentOdo != null && (
-                <p className="text-[11px] text-muted-foreground">
-                  Vehicle current (est.):{" "}
-                  <span className="tabular-nums font-medium">
-                    {Math.round(assetCurrentOdo)} km
-                  </span>
-                  {!odoDirty && odoNum === Math.round(assetCurrentOdo) && " · pre-filled"}
-                </p>
-              )}
-              {(startDiffersFromLast || startBelowLast) && assetCurrentOdo != null && (
-                <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
-                  <div className="flex items-start gap-2">
-                    <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-                    <p className={CAUTION_CALLOUT_BODY_CLASS}>
-                      {startBelowLast
-                        ? `Start (${odoNum} km) is below the last known reading (${Math.round(assetCurrentOdo)} km). Check for a fat-finger — Admin can correct later on Fleet.`
-                        : `Start differs from last known by ${Math.abs(odoNum - assetCurrentOdo)} km (warn at ${startVsLastWarnKm} km). OK if the bus was driven (e.g. petrol).`}
-                    </p>
-                  </div>
-                  <div className="grid gap-2">
-                    <FieldActionButton
-                      variant="primary"
-                      size="sm"
-                      onClick={() => {
-                        setOdo(String(Math.round(assetCurrentOdo)));
-                        setOdoDirty(false);
-                        setStartOdoWarnAck(false);
-                      }}
-                    >
-                      Use {Math.round(assetCurrentOdo)} km (suggested)
-                    </FieldActionButton>
-                    <FieldActionButton
-                      variant={startOdoWarnAck ? "success" : "caution"}
-                      size="sm"
-                      onClick={() => setStartOdoWarnAck(true)}
-                    >
-                      {startOdoWarnAck
-                        ? "Accepted — continue below"
-                        : "Accept this starting reading"}
-                    </FieldActionButton>
-                  </div>
-                </div>
-              )}
-            </div>
-            <button
+            <FieldActionButton
               type="submit"
-              disabled={
-                !assetId ||
-                !odoReasonable ||
-                ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-              }
-              className={cn(
-                "h-14 w-full rounded-xl font-bold text-white shadow transition",
-                !assetId ||
-                  !odoReasonable ||
-                  ((startDiffersFromLast || startBelowLast) && !startOdoWarnAck)
-                  ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                  : "bg-blue-600 hover:bg-blue-700",
-              )}
+              variant={assetId ? "caution" : "secondary"}
+              pulse={!!assetId}
+              disabled={!assetId}
             >
               Continue to Vehicle Clearance →
-            </button>
+            </FieldActionButton>
           </form>
         </Card>
       )}
@@ -487,12 +414,8 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
       {step === "clearance" && selectedAsset && (
         <ClearanceGate
           asset={selectedAsset}
-          startOdometer={odoNum}
           dateStr={today}
-          onCleared={() => {
-            setClearanceOk(true);
-            setStep("event");
-          }}
+          onCleared={acceptClearance}
           onBack={() => setStep("vehicle")}
         />
       )}
@@ -508,19 +431,18 @@ function InitializeTripScreen({ fleetAssets }: { fleetAssets: TransportAsset[] }
 
 interface ClearanceGateProps {
   asset: TransportAsset;
-  startOdometer: number;
   dateStr: string;
-  onCleared: () => void;
+  onCleared: (startKm: number) => void;
   onBack: () => void;
 }
 
 function ClearanceGate({
   asset,
-  startOdometer,
   dateStr,
   onCleared,
   onBack,
 }: ClearanceGateProps) {
+  const [logIssue, setLogIssue] = useState(false);
   const existingQ = useQuery<AssetDailyClearance | null>({
     queryKey: ["asset-clearance", asset.id, dateStr],
     queryFn: () => getClearanceForAssetOnDate(asset.id, dateStr),
@@ -565,12 +487,19 @@ function ClearanceGate({
   }
 
   const existing = existingQ.data ?? null;
+  const alreadyCleared =
+    !!existing && (existing.status === "passed" || existing.status === "authorized_override");
 
-  if (
-    existing &&
-    (existing.status === "passed" || existing.status === "authorized_override")
-  ) {
-    return <FastPassBanner asset={asset} clearance={existing} onConfirm={onCleared} onBack={onBack} />;
+  if (alreadyCleared && existing && !logIssue) {
+    return (
+      <FastPassBanner
+        asset={asset}
+        clearance={existing}
+        onConfirm={onCleared}
+        onLogIssue={() => setLogIssue(true)}
+        onBack={onBack}
+      />
+    );
   }
 
   if (existing && existing.status === "failed") {
@@ -598,25 +527,25 @@ function ClearanceGate({
   return (
     <IssueAccumulatorGate
       asset={asset}
-      startOdometer={startOdometer}
       dateStr={dateStr}
+      alreadyCleared={alreadyCleared}
       onPassed={onCleared}
-      onBack={onBack}
+      onBack={alreadyCleared ? () => setLogIssue(false) : onBack}
     />
   );
 }
 
 function IssueAccumulatorGate({
   asset,
-  startOdometer,
   dateStr,
+  alreadyCleared,
   onPassed,
   onBack,
 }: {
   asset: TransportAsset;
-  startOdometer: number;
   dateStr: string;
-  onPassed: () => void;
+  alreadyCleared: boolean;
+  onPassed: (startKm: number) => void;
   onBack: () => void;
 }) {
   const driverStaffId = getStaffId() || DEFAULT_STAFF_UUID;
@@ -625,10 +554,10 @@ function IssueAccumulatorGate({
   return (
     <IssueAccumulatorPanel
       asset={asset}
-      startOdometer={startOdometer}
       dateStr={dateStr}
       checkpoints={[]}
       driverName={driverName}
+      alreadyCleared={alreadyCleared}
       onCleared={onPassed}
       onBack={onBack}
     />
@@ -640,13 +569,16 @@ function FastPassBanner({
   asset,
   clearance,
   onConfirm,
+  onLogIssue,
   onBack,
 }: {
   asset: TransportAsset;
   clearance: AssetDailyClearance;
-  onConfirm: () => void;
+  onConfirm: (startKm: number) => void;
+  onLogIssue: () => void;
   onBack: () => void;
 }) {
+  const [startKm, setStartKm] = useState<number | null>(null);
   const parsed = clearance.createdAt ? new Date(clearance.createdAt) : null;
   const time =
     parsed && !isNaN(parsed.getTime())
@@ -664,16 +596,35 @@ function FastPassBanner({
         <span className="font-semibold">{asset.name}</span> ({asset.regoPlate}) was cleared for service at{" "}
         <span className="font-mono font-semibold">{time}</span> by <span className="font-semibold">{driver}</span>.
       </p>
-      <p className="mt-2 text-sm font-medium text-amber-700 dark:text-amber-300">
-        Please inspect for obvious new damage before departing.
+      <div className="mt-4">
+        <VehicleKnownIssues asset={asset} />
+      </div>
+      <FieldActionButton className="mt-3" variant="primary" onClick={onLogIssue}>
+        Log a New Issue
+      </FieldActionButton>
+      <p className="mt-4 text-sm font-medium text-amber-700 dark:text-amber-300">
+        Please inspect for obvious new damage before departing and log any new issues.
       </p>
-      <button
-        type="button"
-        onClick={onConfirm}
-        className="mt-5 h-14 w-full rounded-xl bg-green-600 text-base font-bold text-white shadow transition hover:bg-green-700"
+      <div className="mt-5">
+        <StartingKmConfirm assetId={asset.id} onReading={setStartKm} />
+      </div>
+      {startKm == null && (
+        <div className="mt-4 rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+          Still needed: confirm the starting kilometres
+        </div>
+      )}
+      <FieldActionButton
+        className="mt-4"
+        variant={startKm != null ? "caution" : "secondary"}
+        pulse={startKm != null}
+        disabled={startKm == null}
+        onClick={() => {
+          if (startKm == null) return;
+          onConfirm(startKm);
+        }}
       >
-        ✓ Confirm &amp; Roll
-      </button>
+        Confirm &amp; Roll
+      </FieldActionButton>
       <button
         type="button"
         onClick={onBack}
@@ -955,7 +906,7 @@ function EventPickAndStart({
   startOdometer: number;
   onBack: () => void;
 }) {
-  const today = todayLocalIso();
+  const today = useOperationalTodayIso();
   const { data: picker = { events: [], todaySessionEventIds: [] } } = useManifestPickerEvents(today);
   const events = picker.events;
   const todaySessionEventIds = useMemo(
@@ -964,15 +915,11 @@ function EventPickAndStart({
   );
   const startTrip = useStartTrip();
   const startDayCentreRun = useStartDayCentreRun();
+  const fleetDuty = useFleetDutyGap(asset);
 
-  // Derive today's day-of-week code (DAY-MON … DAY-SUN) from Sydney local time.
-  const todayDayCode = useMemo(() => {
-    const sydneyOffset = 10; // AEST (+10), DST not considered here — offset handles display
-    const nowUtc = new Date();
-    const sydneyMs = nowUtc.getTime() + sydneyOffset * 60 * 60 * 1000;
-    const sydneyDate = new Date(sydneyMs);
-    return dayCodeFromSydneyIndex(sydneyDate.getUTCDay());
-  }, []);
+  // SIM-aware weekday (DAY-MON … DAY-SUN). Do not use wall-clock Date — TEST
+  // SIM TIME must drive which attendance schedules load.
+  const todayDayCode = useMemo(() => todaysSydneyDayCode(), [today]);
 
   // Load bus run definitions so we can map codes → labels.
   const { data: busRunDefs = [] } = useLookupParameters(LOOKUP_CATEGORIES.busRun);
@@ -1002,6 +949,14 @@ function EventPickAndStart({
     table: "participant_attendance_schedules",
     queryKeys: [["today-bus-run-summaries", todayDayCode]],
   });
+  useRealtimeInvalidate({
+    table: "support_attendance_schedules",
+    queryKeys: [["today-bus-run-summaries", todayDayCode]],
+  });
+  useRealtimeInvalidate({
+    table: "transport_trips",
+    queryKeys: [["transport-run-slot"]],
+  });
 
   const todaysEvents = useMemo(
     () =>
@@ -1019,6 +974,26 @@ function EventPickAndStart({
   const [selectedRun, setSelectedRun] = useState("");
   const [selectedDirection, setSelectedDirection] = useState<"morning" | "afternoon">("morning");
   const dcInFlightRef = useRef(false);
+
+  const { data: dayCentreSlot } = useQuery({
+    queryKey: dayCentreRunSlotKey(today, selectedRun, selectedDirection),
+    queryFn: () =>
+      inspectTransportRunSlot({
+        kind: "day_centre",
+        tripDate: today,
+        busRunCode: selectedRun,
+        direction: selectedDirection,
+      }),
+    enabled: tab === "daycentre" && !!selectedRun,
+    staleTime: 10_000,
+  });
+  const dayCentreActorId = getStaffId();
+  const dayCentreClosed = !!dayCentreSlot?.completed;
+  const dayCentreHeldByOther =
+    !!dayCentreSlot?.active &&
+    !!dayCentreSlot.active.driverStaffId &&
+    dayCentreSlot.active.driverStaffId !== dayCentreActorId;
+  const dayCentreStartBlocked = dayCentreClosed || dayCentreHeldByOther;
 
   // Event state.
   const [eventId, setEventId] = useState("");
@@ -1110,8 +1085,17 @@ function EventPickAndStart({
   };
 
   // ── Day Centre Run submit ──────────────────────────────────────────────────
-  const submitDayCentreRun = () => {
+  const submitDayCentreRun = async () => {
     if (!selectedRun || startDayCentreRun.isPending || dcInFlightRef.current) return;
+    if (!(await fleetDuty.ensureApproved())) return;
+    if (dayCentreClosed && dayCentreSlot) {
+      toast.error(transportRunSlotClosedMessage(dayCentreSlot));
+      return;
+    }
+    if (dayCentreHeldByOther && dayCentreSlot) {
+      toast.error(transportRunSlotHeldMessage(dayCentreSlot));
+      return;
+    }
     if (runStartChoice === "alternate" && !runAlternateAddress.trim()) {
       toast.error("Enter an alternate starting address first.");
       return;
@@ -1165,7 +1149,8 @@ function EventPickAndStart({
   const showOutingOutboundStart =
     isOuting &&
     !!tripDaySession &&
-    selectedTransportRun?.kind === "outbound";
+    selectedTransportRun?.kind === "outbound" &&
+    selectedTransportRun.card.status !== "completed";
   const showDirectionPicker =
     !!selectedEvent && !(isOuting && tripDaySession);
   const eventTransportBlocked =
@@ -1173,9 +1158,10 @@ function EventPickAndStart({
     (selectedEvent?.status === "Closed" && !closedReturnOnly);
 
   // ── Event submit ───────────────────────────────────────────────────────────
-  const submitEvent = (e: React.FormEvent) => {
+  const submitEvent = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventId || startTrip.isPending || eventInFlightRef.current) return;
+    if (!(await fleetDuty.ensureApproved())) return;
     if (selectedEvent?.status === "Planning") {
       toast.error("Event is still Planning — promote to Confirmed in Events first.");
       return;
@@ -1255,6 +1241,22 @@ function EventPickAndStart({
       <p className="mt-1 text-sm text-muted-foreground">
         Step 3 of 3 — choose your starting point, then open the manifest to run the route.
       </p>
+      {fleetDuty.needsGap && (
+        <div className="mt-4">
+          <DutyRequirementGapPanel
+            actorName={fleetDuty.driver?.fullName ?? "This driver"}
+            evalResult={fleetDuty.evalResult}
+            note={fleetDuty.note}
+            onNoteChange={fleetDuty.setNote}
+            managerId={fleetDuty.managerId}
+            onManagerIdChange={fleetDuty.setManagerId}
+            managerPin={fleetDuty.managerPin}
+            onManagerPin={fleetDuty.setManagerPin}
+            managers={fleetDuty.managers}
+            title="Driver"
+          />
+        </div>
+      )}
 
       {/* Tab switcher */}
       <div className="mt-4 flex rounded-lg border border-border overflow-hidden">
@@ -1303,6 +1305,9 @@ function EventPickAndStart({
           ) : todaysRuns.length > 1 ? (
             <div className="grid gap-2">
               <Label htmlFor="bus-run">Which run?</Label>
+              <p className="text-xs text-muted-foreground">
+                Only runs assigned to today in Run Planning.
+              </p>
               <Select
                 value={selectedRun && selectedDirection ? `${selectedRun}:${selectedDirection}` : ""}
                 onValueChange={(v) => {
@@ -1343,19 +1348,31 @@ function EventPickAndStart({
             onAlternateAddressChange={setRunAlternateAddress}
           />
 
-          <button
-            type="button"
-            disabled={!selectedRun || startDayCentreRun.isPending}
+          {dayCentreStartBlocked && dayCentreSlot && (
+            <p className="rounded-lg border border-dashed bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+              {dayCentreClosed
+                ? transportRunSlotClosedMessage(dayCentreSlot)
+                : transportRunSlotHeldMessage(dayCentreSlot)}
+            </p>
+          )}
+
+          <FieldActionButton
+            variant={
+              selectedRun && !startDayCentreRun.isPending && !dayCentreStartBlocked
+                ? "caution"
+                : "secondary"
+            }
+            pulse={!!(selectedRun && !startDayCentreRun.isPending && !dayCentreStartBlocked)}
+            disabled={
+              !selectedRun ||
+              startDayCentreRun.isPending ||
+              dayCentreStartBlocked ||
+              (fleetDuty.needsGap && !fleetDuty.approved)
+            }
             onClick={submitDayCentreRun}
-            className={cn(
-              "h-14 w-full rounded-xl font-bold text-white shadow transition",
-              !selectedRun || startDayCentreRun.isPending
-                ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700",
-            )}
           >
             {startDayCentreRun.isPending ? "Opening…" : "Start Day Centre Run & Open Manifest"}
-          </button>
+          </FieldActionButton>
         </div>
       )}
 
@@ -1374,8 +1391,8 @@ function EventPickAndStart({
                     {e.title} ·{" "}
                     {todaySessionEventIds.has(e.id) ||
                     eventSpansDate(e.startDate, e.endDate, today)
-                      ? formatDate(today)
-                      : formatDate(e.startDate)}
+                      ? formatDateWithWeekday(today)
+                      : formatDateWithWeekday(e.startDate)}
                     {e.status === "Planning" ? " (Planning — confirm first)" : ""}
                     {e.status === "Closed" ? " (Closed — return transport pending)" : ""}
                   </SelectItem>
@@ -1432,6 +1449,11 @@ function EventPickAndStart({
               selected={selectedTransportRun}
               onSelect={setSelectedTransportRun}
               onHopStarted={clearLocalStorage}
+              dutyGate={{
+                needsGap: fleetDuty.needsGap,
+                approved: fleetDuty.approved,
+                ensureApproved: fleetDuty.ensureApproved,
+              }}
             >
               {showOutingOutboundStart ? (
                 <div className="space-y-4 mt-4">
@@ -1445,17 +1467,19 @@ function EventPickAndStart({
                     onAlternateAddressChange={setEventAlternateAddress}
                     heading="Starting from"
                   />
-                  <button
+                  <FieldActionButton
                     type="submit"
-                    disabled={!eventId || startTrip.isPending}
+                    variant={!eventId || startTrip.isPending ? "secondary" : "caution"}
+                    pulse={!!(eventId && !startTrip.isPending)}
+                    disabled={
+                      !eventId ||
+                      startTrip.isPending ||
+                      (fleetDuty.needsGap && !fleetDuty.approved)
+                    }
                     onClick={() => setEventRunDirection("outbound")}
-                    className={cn(
-                      "h-14 w-full rounded-xl font-bold text-white shadow transition bg-blue-600",
-                      (!eventId || startTrip.isPending) && "opacity-60 cursor-not-allowed",
-                    )}
                   >
                     {startTrip.isPending ? "Opening…" : "Start Outbound Run & Open Manifest"}
-                  </button>
+                  </FieldActionButton>
                 </div>
               ) : null}
             </EventTransportRunsStep3>
@@ -1474,8 +1498,8 @@ function EventPickAndStart({
                     "rounded-lg border px-3 py-3 text-sm font-semibold transition text-left",
                     closedReturnOnly && "cursor-not-allowed opacity-50",
                     eventRunDirection === "outbound"
-                      ? "border-blue-500 bg-blue-500/10 text-blue-700 dark:text-blue-300"
-                      : "border-border text-muted-foreground hover:border-blue-400",
+                      ? "border-green-500 bg-green-500/10 text-green-700 dark:text-green-300"
+                      : "border-border text-muted-foreground hover:border-green-400",
                   )}
                 >
                   <div className="font-bold">Outbound</div>
@@ -1545,15 +1569,20 @@ function EventPickAndStart({
           )}
 
           {!(isOuting && tripDaySession) && (
-          <button
+          <FieldActionButton
             type="submit"
-            disabled={!eventId || startTrip.isPending || eventTransportBlocked}
-            className={cn(
-              "h-14 w-full rounded-xl font-bold text-white shadow transition",
+            variant={
               !eventId || startTrip.isPending || eventTransportBlocked
-                ? "bg-blue-600 opacity-60 cursor-not-allowed"
-                : "bg-blue-600 hover:bg-blue-700",
-            )}
+                ? "secondary"
+                : "caution"
+            }
+            pulse={!!(eventId && !startTrip.isPending && !eventTransportBlocked)}
+            disabled={
+              !eventId ||
+              startTrip.isPending ||
+              eventTransportBlocked ||
+              (fleetDuty.needsGap && !fleetDuty.approved)
+            }
           >
             {eventTransportBlocked
               ? "Confirm event in Events first"
@@ -1563,7 +1592,7 @@ function EventPickAndStart({
                   ? "Start Return Run & Open Manifest"
                   : "Start Outbound Run & Open Manifest"
             }
-          </button>
+          </FieldActionButton>
           )}
         </form>
       )}
@@ -1588,14 +1617,76 @@ interface ActiveTripScreenProps {
 const ACTIVE_TRIP_QUERY_KEY = ["transport_trips", "active"] as const;
 
 function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
-  const { trip, legs, eventTitle } = bundle;
+  const bindChromeScroll = useHideChromeOnScrollRef<HTMLElement>();
+  const { chromeHidden } = useChromeVisibility();
+  const { trip, legs: serverLegs, eventTitle } = bundle;
+  const [continuing] = useState(() => {
+    if (typeof window === "undefined") return false;
+    const just = sessionStorage.getItem(MANIFEST_JUST_STARTED_KEY);
+    if (just === trip.id) {
+      sessionStorage.removeItem(MANIFEST_JUST_STARTED_KEY);
+      return false;
+    }
+    return true;
+  });
+  const [driverPickupOrder, setDriverPickupOrder] = useState<string[]>([]);
+  useEffect(() => {
+    setDriverPickupOrder([]);
+  }, [trip.id]);
+  const legs = useMemo(
+    () => applyTerminalChainLabels(trip, applyDriverPickupOrder(serverLegs, driverPickupOrder)),
+    [trip, serverLegs, driverPickupOrder],
+  );
   const qc = useQueryClient();
   const reorderPickups = useReorderTripPickupLegs();
   const activeLeg = legs.find((l) => l.status !== "completed") ?? null;
   const completedCount = legs.filter((l) => l.status === "completed").length;
+  const [walkOnOpen, setWalkOnOpen] = useState(false);
+  const [addressLeg, setAddressLeg] = useState<TripLeg | null>(null);
+  const stopDirection: StopDirection = trip.eventId
+    ? trip.tripReturn === "none"
+      ? "outbound"
+      : "return"
+    : trip.tripReturn === "none"
+      ? "morning"
+      : "afternoon";
+  const changeAddress = useMutation({
+    mutationFn: async (choice: StopAddressChoice) => {
+      const leg = addressLeg;
+      if (!leg) throw new Error("No stop selected.");
+      const owner = ownerFromLeg({
+        participantId: leg.toParticipantId,
+        staffId: leg.toStaffId,
+        carerId: leg.toCarerId,
+      });
+      if (!owner) throw new Error("This stop has no passenger.");
+      await changePendingStopAddress({
+        tripId: trip.id,
+        legId: leg.id,
+        serviceDate: trip.tripDate.slice(0, 10),
+        direction: stopDirection,
+        owner,
+        personName: leg.toLabel,
+        choice,
+        location: trip.eventId
+          ? eventTitle || "Trip"
+          : `Day Centre${trip.busRunCode ? ` ${trip.busRunCode}` : ""}`,
+      });
+    },
+    onSuccess: async () => {
+      setAddressLeg(null);
+      toast.success("Today’s stop updated");
+      await qc.invalidateQueries({ queryKey: ACTIVE_TRIP_QUERY_KEY });
+    },
+    onError: (err: Error) => toast.error(err.message),
+  });
 
   const isVenueHop = trip.tripKind === "event_venue_hop";
+  /** Pickups to the meeting point, and the run home, are stops. Place-to-place hops are legs. */
+  const movementWord = isVenueHop ? "Leg" : "Stop";
   const hopBoardingReady = useHopBoardingGate(isVenueHop ? trip.id : "");
+  const showWalkOn =
+    !!trip.eventId && !isVenueHop && activeLeg != null && activeLeg.status !== "en_route";
 
   // Return-run context ──────────────────────────────────────────────────────
   const isReturnRun = !isVenueHop && trip.tripReturn !== "none";
@@ -1624,14 +1715,23 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     };
   }, [isReturnRun, trip.id, trip.eventId, trip.tripDate, trip.eventDaySessionId, qc]);
 
-  // Derive return passengers from the drop-off legs (exclude venue_to_depot).
+  // Derive return boarding from drop-off legs — every person on the run
+  // (participant, staff, volunteer, carer). No one left behind.
   const returnPassengers: ReturnPassenger[] = useMemo(() => {
     if (!isReturnRun) return [];
     return legs
-      .filter((l) => l.toParticipantId != null && l.legKind !== "venue_to_depot")
+      .filter((l) => isPassengerPickupLeg(l))
       .filter((l) => !(l.status === "completed" && l.passengerPresent === false))
       .sort((a, b) => a.legIndex - b.legIndex)
-      .map((l) => ({ id: l.toParticipantId!, name: l.toLabel }));
+      .map((l) => ({
+        id: l.toParticipantId ?? l.toStaffId ?? l.toCarerId ?? l.id,
+        name: l.toLabel,
+        address: l.targetAddress,
+        legId: l.id,
+        participantId: l.toParticipantId,
+        staffId: l.toStaffId,
+        carerId: l.toCarerId,
+      }));
   }, [isReturnRun, legs]);
 
   const boardingKey = `return_boarding_confirmed_${trip.id}`;
@@ -1639,13 +1739,57 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     () => localStorage.getItem(boardingKey) === "true" || returnPassengers.length === 0,
   );
 
+  useEffect(() => {
+    if (isReturnRun && returnPassengers.length === 0) setBoardingConfirmed(true);
+  }, [isReturnRun, returnPassengers.length]);
+
+  useEffect(() => {
+    if (!isReturnRun || returnPassengers.length === 0) return;
+    try {
+      const tappedRaw = localStorage.getItem(`return_boarding_${trip.id}`);
+      const tapped = new Set(
+        tappedRaw ? (JSON.parse(tappedRaw) as string[]) : [],
+      );
+      // Empty tap list is normal after All Aboard on older builds, and after
+      // a hard refresh. Do not treat that as "someone new" or the roll comes
+      // back when the first drop-off is confirmed (legs refetch).
+      if (tapped.size === 0) return;
+      const missing = returnPassengers.some((p) => !tapped.has(p.id));
+      if (missing) {
+        localStorage.removeItem(boardingKey);
+        setBoardingConfirmed(false);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [isReturnRun, returnPassengers, trip.id, boardingKey]);
+
+  const preDepartureOpen =
+    (isReturnRun && !boardingConfirmed && returnPassengers.length > 0) ||
+    (isVenueHop && !hopBoardingReady && activeLeg?.status === "pending");
+
   const handleAllBoarded = () => {
     localStorage.setItem(boardingKey, "true");
+    const tapKey = `return_boarding_${trip.id}`;
+    try {
+      const existing = localStorage.getItem(tapKey);
+      const tapped = existing ? (JSON.parse(existing) as string[]) : [];
+      if (tapped.length === 0) {
+        localStorage.setItem(
+          tapKey,
+          JSON.stringify(returnPassengers.map((p) => p.id)),
+        );
+      }
+    } catch {
+      localStorage.setItem(
+        tapKey,
+        JSON.stringify(returnPassengers.map((p) => p.id)),
+      );
+    }
     setBoardingConfirmed(true);
   };
   // Empty legs (failed hop seed) must not look "complete".
   const allLegsComplete = legs.length > 0 && activeLeg == null;
-  const totalKm = legs.reduce((sum, l) => sum + (l.loggedDistanceKm ?? l.gpsDistanceKm ?? 0), 0);
   const { requestCancel, dialog: pickupCancelDialog, isCancelling } = usePickupCancelDialog(
     trip.id,
     { eventId: trip.eventId ?? null },
@@ -1686,29 +1830,59 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
     );
   }, [activeLeg, legs, pendingPickupIds]);
 
-  const [localPickupOrder, setLocalPickupOrder] = useState<string[]>([]);
+  const pendingPickupKey = pendingPickupIds.join("|");
+  const serverPendingKey = useMemo(
+    () =>
+      serverLegs
+        .filter((l) => isPassengerPickupLeg(l) && l.status === "pending")
+        .sort((a, b) => a.legIndex - b.legIndex)
+        .map((l) => l.id)
+        .join("|"),
+    [serverLegs],
+  );
+  const pendingIdsRef = useRef(pendingPickupIds);
+  pendingIdsRef.current = pendingPickupIds;
+  const lastPersistKey = useRef("");
+  // Drop-off used to clear the drag and redraw from the stored stop numbers,
+  // so a person who had been moved up returned to the bottom. Keep that order
+  // and write the remaining stops back when the stored order is behind it.
   useEffect(() => {
-    setLocalPickupOrder([]);
-  }, [pendingPickupIds.join("|")]);
-
-  const sortablePickupIds =
-    localPickupOrder.length === pendingPickupIds.length ? localPickupOrder : pendingPickupIds;
+    if (driverPickupOrder.length === 0) return;
+    if (pendingPickupKey === serverPendingKey) return;
+    if (reorderPickups.isPending) return;
+    if (lastPersistKey.current === pendingPickupKey) return;
+    lastPersistKey.current = pendingPickupKey;
+    reorderPickups.mutate({ tripId: trip.id, orderedLegIds: pendingIdsRef.current });
+  }, [
+    driverPickupOrder.length,
+    pendingPickupKey,
+    reorderPickups,
+    reorderPickups.isPending,
+    serverPendingKey,
+    trip.id,
+  ]);
 
   const displayLegForPendingOrder = (leg: TripLeg, orderedPendingIds: string[]): TripLeg => {
     const ep = computePickupChainEndpoints(trip, legs, orderedPendingIds).get(leg.id);
     return ep ? { ...leg, ...ep } : leg;
   };
 
-  const applyPickupReorder = (nextIds: string[]) => {
-    setLocalPickupOrder(nextIds);
-    reorderPickups.mutate(
-      { tripId: trip.id, orderedLegIds: nextIds },
-      {
-        onSuccess: () => toast.success("Pickup order updated"),
-        onSettled: () => setLocalPickupOrder([]),
-      },
-    );
-  };
+  const applyPickupReorder = useCallback(
+    (nextIds: string[]) => {
+      const key = nextIds.join("|");
+      if (key === pendingPickupKey) return;
+      lastPersistKey.current = key;
+      setDriverPickupOrder(nextIds);
+      reorderPickups.mutate(
+        { tripId: trip.id, orderedLegIds: nextIds },
+        {
+          onSuccess: () => toast.success("Pickup order updated"),
+          onError: () => setDriverPickupOrder([]),
+        },
+      );
+    },
+    [pendingPickupKey, reorderPickups, trip.id],
+  );
 
   const startAddressForLeg = (leg: TripLeg) => {
     if (leg.legKind === "venue_to_venue" || (leg.legKind === "depot_to_client" && leg.toParticipantId == null && isVenueHop)) {
@@ -1721,11 +1895,36 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
   // BMS-style silent refresh:
   useRealtimeInvalidate({ table: "trip_legs", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
   useRealtimeInvalidate({ table: "transport_trips", queryKeys: [ACTIVE_TRIP_QUERY_KEY] });
+  useRealtimeInvalidate({ table: "trip_run_notices", queryKeys: [["trip-run-notices", trip.id]] });
 
   const activeRef = useRef<HTMLDivElement | null>(null);
-  useEffect(() => {
-    if (activeRef.current) activeRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
-  }, [activeLeg?.id]);
+  const closeRunRef = useRef<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (preDepartureOpen) return;
+    const reveal = () => revealInManifestScroll(activeRef.current);
+    reveal();
+    const later = window.setTimeout(reveal, 300);
+    return () => window.clearTimeout(later);
+  }, [activeLeg?.id, preDepartureOpen]);
+
+  // The reconcile card is taller than a phone once SIM, incident, and the trip
+  // header are on screen. Land with the PIN button inside the list.
+  useLayoutEffect(() => {
+    if (preDepartureOpen || !allLegsComplete) return;
+    const card = closeRunRef.current;
+    const scroller = card?.closest("[data-manifest-scroll]");
+    if (!card || !(scroller instanceof HTMLElement)) return;
+
+    const revealPin = () => {
+      const overflow =
+        card.getBoundingClientRect().bottom - scroller.getBoundingClientRect().bottom;
+      if (overflow > 1) scroller.scrollTop += overflow + 8;
+    };
+
+    revealPin();
+    const later = window.setTimeout(revealPin, 300);
+    return () => window.clearTimeout(later);
+  }, [allLegsComplete, preDepartureOpen]);
 
   const prevLegIdsRef = useRef<string[]>(legs.map((l) => l.id));
   useEffect(() => {
@@ -1759,16 +1958,34 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           legs={legs}
           startAddress={startAddressForLeg(shown)}
           onCancelPickup={canCancelPickupLeg(leg) ? () => requestCancel(leg) : undefined}
+          onChangeAddress={
+            isPassengerPickupLeg(leg) && leg.status === "pending"
+              ? () => setAddressLeg(leg)
+              : undefined
+          }
+          onWalkOn={
+            showWalkOn && leg.id === activeLeg?.id
+              ? () => setWalkOnOpen(true)
+              : undefined
+          }
           cancelDisabled={isCancelling}
           drag={drag}
           isReturnRun={isReturnRun}
           boardingRequired={
-            (isReturnRun && !boardingConfirmed) ||
+            (isReturnRun && !boardingConfirmed && returnPassengers.length > 0) ||
             (isVenueHop && !hopBoardingReady && leg.status !== "en_route" && leg.status !== "arrived")
           }
           tripId={trip.id}
           eventId={trip.eventId}
+          movementWord={movementWord}
         />
+        {trip.eventId && (
+          <WalkOnCompanionsLine
+            eventId={trip.eventId}
+            boardedLegId={leg.id}
+            hostParticipantId={shown.toParticipantId}
+          />
+        )}
       </div>
     );
   };
@@ -1783,65 +2000,83 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
       key={leg.id}
       leg={displayLeg ?? leg}
       stopNumber={stopNumber}
+      movementWord={movementWord}
       drag={drag}
       onCancelPickup={requestCancel}
       cancelDisabled={isCancelling || reorderPickups.isPending}
+      onChangeAddress={
+        isPassengerPickupLeg(leg) && leg.status === "pending"
+          ? () => setAddressLeg(leg)
+          : undefined
+      }
     />
   );
 
   return (
-    <>
-      <header className="sticky top-0 z-20 border-b border-border bg-slate-900 text-white">
+    <div className="flex min-h-0 flex-1 flex-col overflow-hidden">
+      <header className="shrink-0 border-b border-border bg-slate-900 text-white">
         <div className="flex items-center justify-between px-4 py-3">
           <div className="min-w-0 flex-1 pr-3">
             <div className="truncate text-base font-bold leading-tight">
               {eventTitle ?? "Daily Run"}
               {isVenueHop ? " · Venue hop" : ""}
             </div>
+            {continuing && (
+              <div className="truncate text-[11px] font-semibold text-emerald-300">
+                Continuing this run
+              </div>
+            )}
             <div className="truncate text-[11px] font-semibold uppercase tracking-wider text-slate-400">
-              {formatDate(trip.tripDate)} · Leg {Math.min(completedCount + 1, legs.length)} of {legs.length}
+              {formatDate(trip.tripDate)}
+              {preDepartureOpen
+                ? " · Pre-departure"
+                : ` · ${movementWord} ${Math.min(completedCount + 1, legs.length)} of ${legs.length}`}
             </div>
           </div>
           <div className="text-right">
-            <div className="text-[11px] uppercase tracking-wider text-slate-400">Logged</div>
-            <div className="font-mono text-lg font-bold tabular-nums">{totalKm.toFixed(1)} km</div>
+            <div className="text-[11px] uppercase tracking-wider text-slate-400">Start ODO</div>
+            <div className="font-mono text-lg font-bold tabular-nums">{trip.startOdometerKm}</div>
           </div>
         </div>
       </header>
 
       <ManifestOfflineBanner tripId={trip.id} className="mx-3 mt-3" />
+      <OfficeRunNoticeBanner tripId={trip.id} className="mx-3 mt-3" />
 
       <main
+        ref={bindChromeScroll}
         data-manifest-scroll
         className={cn(
-          "flex-1 overflow-y-auto px-3 pb-4 pt-3 space-y-2",
-          "overscroll-y-contain",
+          "min-h-0 flex-1 overflow-y-auto overscroll-y-none [overflow-anchor:none] px-3 pb-4 pt-3 space-y-2",
         )}
       >
-        {/* Return run: boarding roll gate before first leg departs */}
         {isReturnRun && !boardingConfirmed && returnPassengers.length > 0 && (
           <ReturnBoardingRoll
             tripId={trip.id}
             passengers={returnPassengers}
             onAllBoarded={handleAllBoarded}
+            onChangeAddress={(legId) => {
+              const leg = legs.find((l) => l.id === legId);
+              if (leg) setAddressLeg(leg);
+            }}
           />
         )}
 
-        {isVenueHop && activeLeg && activeLeg.status === "pending" && (
+        {isVenueHop && !hopBoardingReady && activeLeg?.status === "pending" && (
           <HopBoardingPanel tripId={trip.id} originLabel={activeLeg.fromLabel} />
         )}
 
-        {completedLegs.map((l) => (
-          <LegRow key={l.id} leg={l} locked />
+        {!preDepartureOpen && completedLegs.map((l) => (
+          <LegRow key={l.id} leg={l} locked movementWord={movementWord} />
         ))}
 
-        {activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
+        {!preDepartureOpen && activeLeg && !activeIsPendingPickup && renderActiveCard(activeLeg)}
 
-        {activeIsPendingPickup && pendingPickups.length > 0 && (
+        {!preDepartureOpen && activeIsPendingPickup && pendingPickups.length > 0 && (
           <>
             {pendingPickups.length >= 2 ? (
               <PointerSortableList
-                itemIds={sortablePickupIds}
+                itemIds={pendingPickupIds}
                 onReorder={applyPickupReorder}
                 disabled={reorderPickups.isPending || isCancelling}
               >
@@ -1873,13 +2108,13 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </>
         )}
 
-        {activeInProgress && !activeIsEnRoute && pendingPickups.length >= 2 && (
+        {!preDepartureOpen && activeInProgress && !activeIsEnRoute && pendingPickups.length >= 2 && (
           <div className="space-y-2">
             <div className="px-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
               Upcoming stops — drag to reorder
             </div>
             <PointerSortableList
-              itemIds={sortablePickupIds}
+              itemIds={pendingPickupIds}
               onReorder={applyPickupReorder}
               disabled={reorderPickups.isPending || isCancelling}
             >
@@ -1901,7 +2136,7 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </div>
         )}
 
-        {activeInProgress && !activeIsEnRoute && pendingPickups.length === 1 && (
+        {!preDepartureOpen && activeInProgress && !activeIsEnRoute && pendingPickups.length === 1 && (
           renderUpcomingPickupRow(
             pendingPickups[0]!,
             completedPickupCount + 2,
@@ -1912,7 +2147,9 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
 
         {legs.length === 0 && (
           <Card className="border-2 border-amber-500/50 bg-amber-500/10 p-4 text-center">
-            <div className="mt-1 text-lg font-bold">No legs on this run</div>
+            <div className="mt-1 text-lg font-bold">
+              {isVenueHop ? "No legs on this run" : "No stops on this run"}
+            </div>
             <div className="text-sm text-muted-foreground">
               {isVenueHop
                 ? "Hop leg failed to create — go back to Step 3 and tap Start Hop again (it will heal)."
@@ -1921,63 +2158,190 @@ function ActiveTripScreen({ bundle }: ActiveTripScreenProps) {
           </Card>
         )}
 
-        {allLegsComplete && (
-          <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
-            <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
-            <div className="mt-2 text-lg font-bold">All legs completed</div>
-            <div className="text-sm text-muted-foreground">Finalize the shift below.</div>
-          </Card>
+        {!preDepartureOpen && allLegsComplete && (
+          <>
+            <Card className="border-2 border-green-600 bg-green-600/10 p-4 text-center">
+              <CheckCircle2 className="mx-auto h-8 w-8 text-green-600" />
+              <div className="mt-2 text-lg font-bold">
+                {isVenueHop ? "All legs completed" : "All stops completed"}
+              </div>
+              <div className="text-sm text-muted-foreground">Finalize the shift below.</div>
+            </Card>
+            <div ref={closeRunRef}>
+              <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
+            </div>
+          </>
         )}
 
-        {!activeIsEnRoute &&
+        {!preDepartureOpen &&
+          !activeIsEnRoute &&
           upcomingStaticLegs.map((l) => (
             <LegRow
               key={l.id}
               leg={l}
+              movementWord={movementWord}
               onCancelPickup={canCancelPickupLeg(l) ? requestCancel : undefined}
+              onChangeAddress={
+                isPassengerPickupLeg(l) && l.status === "pending"
+                  ? () => setAddressLeg(l)
+                  : undefined
+              }
               cancelDisabled={isCancelling}
             />
           ))}
       </main>
 
       {pickupCancelDialog}
+      {addressLeg &&
+        ownerFromLeg({
+          participantId: addressLeg.toParticipantId,
+          staffId: addressLeg.toStaffId,
+          carerId: addressLeg.toCarerId,
+        }) && (
+          <StopAddressSheet
+            open
+            onOpenChange={(open) => {
+              if (!open) setAddressLeg(null);
+            }}
+            title={`Change ${addressLeg.toLabel}'s stop`}
+            description="This run only. The weekday plan stays as Run Planning set it."
+            owner={
+              ownerFromLeg({
+                participantId: addressLeg.toParticipantId,
+                staffId: addressLeg.toStaffId,
+                carerId: addressLeg.toCarerId,
+              })!
+            }
+            allowCustom
+            activeChoice={{ mode: "saved", addressId: "" }}
+            busy={changeAddress.isPending}
+            onChoose={(choice) => changeAddress.mutate(choice)}
+          />
+        )}
 
-      <footer className="sticky bottom-0 z-20 space-y-2 border-t border-border bg-card p-3 pb-[max(env(safe-area-inset-bottom),12px)]">
-        {allLegsComplete ? (
-          <CloseRunCard trip={trip} legs={legs} eventTitle={eventTitle} />
-        ) : activeIsEnRoute ? (
+      {trip.eventId && (
+        <WalkOnPersonModal
+          open={walkOnOpen}
+          onOpenChange={setWalkOnOpen}
+          eventId={trip.eventId}
+          source="manifest"
+          eventDaySessionId={trip.eventDaySessionId ?? null}
+          hostParticipantId={activeLeg?.toParticipantId ?? null}
+          pickupAddress={activeLeg?.targetAddress ?? null}
+          boardedLegId={activeLeg?.id ?? null}
+          busRunCode={trip.busRunCode}
+        />
+      )}
+
+      <footer
+        className={cn(
+          "z-20 shrink-0 space-y-2 overflow-hidden border-t border-border bg-card",
+          chromeHidden && !allLegsComplete
+            ? "max-h-0 border-t-0 p-0 opacity-0 pointer-events-none"
+            : "p-3 pb-[max(env(safe-area-inset-bottom),12px)] opacity-100",
+        )}
+      >
+        {preDepartureOpen ? (
           <div className="text-center text-xs text-muted-foreground">
-            Tap Arrive at Stop when you reach the destination.
+            Check everyone onto the bus, then All Aboard.
+          </div>
+        ) : allLegsComplete ? null : activeIsEnRoute ? (
+          <div className="text-center text-xs text-muted-foreground">
+            {isVenueHop
+              ? "Tap Arrive when you reach the next place."
+              : "Tap Arrive at Stop when you reach the destination."}
+          </div>
+        ) : isVenueHop ? (
+          <div className="text-center text-xs text-muted-foreground">
+            Depart when everyone who is travelling is aboard.
           </div>
         ) : (
           <div className="text-center text-xs text-muted-foreground">
-            Drag upcoming stops to reorder · tap Depart Stop when ready.
+            Drag upcoming stops to reorder · Address changes today’s stop only · Depart Stop when ready.
           </div>
         )}
-        <CancelTripButton tripId={trip.id} />
+        <div
+          className={cn(
+            "overflow-hidden",
+            chromeHidden ? "max-h-0 opacity-0 pointer-events-none" : "max-h-16 opacity-100",
+          )}
+        >
+          <CancelTripButton tripId={trip.id} />
+        </div>
       </footer>
-    </>
+    </div>
   );
+}
+
+function ChangeStopAddressButton({
+  onClick,
+  disabled,
+  tone = "light",
+}: {
+  onClick: () => void;
+  disabled?: boolean;
+  tone?: "light" | "dark";
+}) {
+  return (
+    <Button
+      type="button"
+      variant="outline"
+      size="sm"
+      className={cn(
+        "h-8 shrink-0 gap-1 px-2 text-xs font-semibold",
+        tone === "dark"
+          ? "border-blue-300/80 bg-slate-800 text-white hover:bg-slate-700 hover:text-white"
+          : "border-primary/50 text-primary hover:bg-primary/10",
+      )}
+      disabled={disabled}
+      onClick={(e) => {
+        e.stopPropagation();
+        onClick();
+      }}
+    >
+      <MapPin className="h-3.5 w-3.5" />
+      Address
+    </Button>
+  );
+}
+
+function PassengerKindBadge({ leg }: { leg: TripLeg }) {
+  const { data: staff = [] } = useStaffRegistry();
+  const row = leg.toStaffId ? staff.find((s) => s.id === leg.toStaffId) : undefined;
+  const kind = manifestPersonKind({
+    participantId: leg.toParticipantId,
+    carerId: leg.toCarerId,
+    staffId: leg.toStaffId,
+    personnelType: row?.personnelType,
+    role: row?.role,
+  });
+  if (!kind) return null;
+  return <PersonKindBadge kind={kind} className="ml-1.5 align-middle" />;
 }
 
 function LegRow({
   leg,
   onCancelPickup,
+  onChangeAddress,
   cancelDisabled,
   stopNumber,
+  movementWord,
   drag,
   locked,
 }: {
   leg: TripLeg;
   onCancelPickup?: (leg: TripLeg) => void;
+  onChangeAddress?: () => void;
   cancelDisabled?: boolean;
   stopNumber?: number;
+  /** Stop on a pickup or home run. Leg on a place-to-place hop. */
+  movementWord: "Stop" | "Leg";
   drag?: PickupDragBind;
   locked?: boolean;
 }) {
   const done = leg.status === "completed";
   const showCancel = !done && !locked && onCancelPickup && canCancelPickupLeg(leg);
-  const label = stopNumber != null ? `Stop ${stopNumber}` : `Leg ${leg.legIndex}`;
+  const label = `${movementWord} ${stopNumber ?? leg.legIndex}`;
 
   return (
     <Card
@@ -2009,9 +2373,21 @@ function LegRow({
       )}
       <div className="min-w-0 flex-1">
         <div className="text-[11px] uppercase tracking-wider text-muted-foreground">{label}</div>
-        <div className="truncate font-medium">
-          {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
-        </div>
+        {isPassengerPickupLeg(leg) && !done ? (
+          <>
+            <div className="flex min-w-0 items-center gap-1.5 font-medium">
+              <span className="truncate">{leg.toLabel}</span>
+              <PassengerKindBadge leg={leg} />
+            </div>
+            <div className="truncate text-[11px] text-muted-foreground">
+              after {leg.fromLabel}
+            </div>
+          </>
+        ) : (
+          <div className="truncate font-medium">
+            {leg.fromLabel} <span className="text-muted-foreground">→</span> {leg.toLabel}
+          </div>
+        )}
         {leg.targetAddress && (
           <div className="mt-0.5 flex items-center gap-1 truncate text-[11px] text-muted-foreground">
             <MapPin className="h-3 w-3 shrink-0" />
@@ -2025,18 +2401,26 @@ function LegRow({
         )}
       </div>
       {done ? (
-        <div className="flex shrink-0 items-center gap-1 text-xs font-semibold text-green-600">
+        <div className="flex shrink-0 items-center text-green-600">
           <CheckCircle2 className="h-4 w-4" />
-          {(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0).toFixed(1)} km
         </div>
-      ) : showCancel ? (
-        <PickupCancelButton
-          size="sm"
-          onClick={() => onCancelPickup!(leg)}
-          disabled={cancelDisabled}
-        />
       ) : (
-        <div className="shrink-0 text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
+        <div className="flex shrink-0 flex-col items-end gap-1.5">
+          {onChangeAddress && (
+            <ChangeStopAddressButton onClick={onChangeAddress} disabled={cancelDisabled} />
+          )}
+          {showCancel ? (
+            <PickupCancelButton
+              size="sm"
+              onClick={() => onCancelPickup!(leg)}
+              disabled={cancelDisabled}
+            />
+          ) : (
+            !onChangeAddress && (
+              <div className="text-xs uppercase tracking-wider text-muted-foreground">Upcoming</div>
+            )
+          )}
+        </div>
       )}
     </Card>
   );
@@ -2044,7 +2428,15 @@ function LegRow({
 
 /* -------------------- Return Boarding Roll -------------------- */
 
-interface ReturnPassenger { id: string; name: string }
+interface ReturnPassenger {
+  id: string;
+  name: string;
+  address: string | null;
+  legId: string;
+  participantId: string | null;
+  staffId: string | null;
+  carerId: string | null;
+}
 
 /**
  * Pre-departure boarding roll for return runs.
@@ -2055,11 +2447,14 @@ function ReturnBoardingRoll({
   tripId,
   passengers,
   onAllBoarded,
+  onChangeAddress,
 }: {
   tripId: string;
   passengers: ReturnPassenger[];
   onAllBoarded: () => void;
+  onChangeAddress?: (legId: string) => void;
 }) {
+  const { data: staff = [] } = useStaffRegistry();
   const boardingKey = `return_boarding_${tripId}`;
 
   const [boarded, setBoarded] = useState<Set<string>>(() => {
@@ -2093,16 +2488,17 @@ function ReturnBoardingRoll({
         action_type: "RETURN_BOARDING_CONFIRMED",
         gps_lat: null,
         gps_lng: null,
-        metadata: {
+        metadata: await withAuditActorMeta({
           trip_id: tripId,
           passenger_count: passengers.length,
           passenger_ids: passengers.map((p) => p.id),
-        },
+          passenger_names: passengers.map((p) => p.name),
+          summary: `Confirmed return boarding — ${passengers.map((p) => p.name).join(", ")} (${passengers.length} people all aboard)`,
+        }),
       });
     } catch (_) { /* best-effort */ } finally {
       setSaving(false);
     }
-    localStorage.removeItem(boardingKey);
     onAllBoarded();
   };
 
@@ -2115,52 +2511,73 @@ function ReturnBoardingRoll({
         Pre-departure — Return boarding roll
       </div>
       <p className="mt-1.5 text-sm text-slate-300">
-        Check <strong>every passenger</strong> onto the bus before departing. You are responsible for confirming head count.
+        Check <strong>every person</strong> onto the bus before departing —
+        participants, staff, volunteers and carers. You are responsible for
+        confirming head count.
       </p>
       <div className="mt-3 space-y-2">
         {passengers.map((p) => {
           const on = boarded.has(p.id);
+          const staffRow = p.staffId ? staff.find((s) => s.id === p.staffId) : undefined;
+          const kind = manifestPersonKind({
+            participantId: p.participantId,
+            staffId: p.staffId,
+            carerId: p.carerId,
+            personnelType: staffRow?.personnelType,
+            role: staffRow?.role,
+          });
           return (
-            <button
+            <div
               key={p.id}
-              type="button"
-              onClick={() => toggle(p.id)}
               className={cn(
-                "flex w-full touch-manipulation select-none items-center justify-between rounded-xl border-2 px-4 py-3 text-left transition active:scale-[0.99]",
+                "flex w-full items-center gap-2 rounded-xl border-2 px-3 py-2",
                 on
                   ? "border-green-500 bg-green-600/25 text-white"
                   : "border-slate-600 bg-slate-800/60 text-slate-200",
               )}
             >
-              <span className="text-base font-semibold">{p.name}</span>
-              <span
-                className={cn(
-                  "rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase",
-                  on ? "bg-green-600 text-white" : "bg-slate-700 text-slate-400",
-                )}
+              <button
+                type="button"
+                onClick={() => toggle(p.id)}
+                className="flex min-w-0 flex-1 touch-manipulation select-none items-center justify-between gap-2 py-1 text-left"
               >
-                {on ? "✓ On Bus" : "Not yet"}
-              </span>
-            </button>
+                <span className="min-w-0">
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <span className="truncate text-base font-semibold">{p.name}</span>
+                    {kind ? <PersonKindBadge kind={kind} /> : null}
+                  </span>
+                  {p.address && (
+                    <span className="mt-0.5 block truncate text-[11px] text-slate-300">{p.address}</span>
+                  )}
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2.5 py-0.5 text-[11px] font-bold uppercase",
+                    on ? "bg-green-600 text-white" : "bg-slate-700 text-slate-400",
+                  )}
+                >
+                  {on ? "✓ On Bus" : "Not yet"}
+                </span>
+              </button>
+              {onChangeAddress && (
+                <ChangeStopAddressButton tone="dark" onClick={() => onChangeAddress(p.legId)} />
+              )}
+            </div>
           );
         })}
       </div>
       <div className="mt-3 text-center text-sm text-slate-400">
         {boardedCount}/{passengers.length} confirmed
       </div>
-      <button
-        type="button"
+      <FieldActionButton
+        className="mt-3"
+        variant={allBoarded ? "caution" : "secondary"}
+        pulse={allBoarded && !saving}
         disabled={!allBoarded || saving}
-        onClick={confirm}
-        className={cn(
-          "mt-3 h-14 w-full rounded-xl font-bold text-white transition",
-          allBoarded
-            ? "animate-pulse bg-green-600 hover:bg-green-500 hover:animate-none"
-            : "cursor-not-allowed bg-slate-700 opacity-60",
-        )}
+        onClick={() => void confirm()}
       >
-        {saving ? "Confirming…" : allBoarded ? "✅ All Aboard — Depart" : `Waiting for ${passengers.length - boardedCount} more…`}
-      </button>
+        {saving ? "Confirming…" : allBoarded ? "All Aboard — Depart" : `Waiting for ${passengers.length - boardedCount} more…`}
+      </FieldActionButton>
     </Card>
   );
 }
@@ -2173,61 +2590,58 @@ function ActiveLegCard({
   legs,
   startAddress,
   onCancelPickup,
+  onChangeAddress,
+  onWalkOn,
   cancelDisabled,
   drag,
   isReturnRun,
   boardingRequired,
   tripId,
   eventId,
+  movementWord,
 }: {
   leg: TripLeg;
   trip: TransportTrip;
   legs: TripLeg[];
   startAddress?: string | null;
   onCancelPickup?: () => void;
+  onChangeAddress?: () => void;
+  onWalkOn?: () => void;
   cancelDisabled?: boolean;
   drag?: PickupDragBind;
   isReturnRun?: boolean;
   boardingRequired?: boolean;
   tripId: string;
   eventId?: string | null;
+  movementWord: "Stop" | "Leg";
 }) {
   const patch = usePatchTripLeg();
   const [busy, setBusy] = useState(false);
 
-  const runGps = async (mode: "start" | "end") => {
+  const markStop = async (mode: "start" | "end") => {
     setBusy(true);
     try {
-      const pos = await getCurrentPosition();
       if (mode === "start") {
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "en_route",
-            startLat: pos.lat,
-            startLng: pos.lng,
-            startAt: new Date().toISOString(),
+            startAt: operationalNowIso(),
           },
         });
       } else {
-        const km =
-          leg.startLat != null && leg.startLng != null ? haversineKm({ lat: leg.startLat, lng: leg.startLng }, pos) : 0;
         await patch.mutateAsync({
           legId: leg.id,
           tripId,
           patch: {
             status: "arrived",
-            endLat: pos.lat,
-            endLng: pos.lng,
-            endAt: new Date().toISOString(),
-            gpsDistanceKm: Number(km.toFixed(2)),
-            loggedDistanceKm: Number(km.toFixed(2)),
+            endAt: operationalNowIso(),
           },
         });
       }
     } catch (err) {
-      toast.error("GPS capture failed", {
+      toast.error("Could not update stop", {
         description: (err as Error).message,
         className: "border-red-700 bg-red-600 text-white font-medium",
       });
@@ -2262,10 +2676,20 @@ function ActiveLegCard({
         <div className="min-w-0 flex-1">
           <div className="flex items-center justify-between gap-2">
             <div className="flex min-w-0 items-center gap-2 text-[11px] font-bold uppercase tracking-wider text-blue-300">
-              <Navigation className="h-3.5 w-3.5 shrink-0" /> Active leg {leg.legIndex}
+              <Navigation className="h-3.5 w-3.5 shrink-0" /> Active {movementWord.toLowerCase()} {leg.legIndex}
             </div>
-            {onCancelPickup && leg.status !== "en_route" && (
-              <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+            {(onWalkOn || onCancelPickup || onChangeAddress) && leg.status !== "en_route" && (
+              <div className="flex shrink-0 items-center gap-1.5">
+                {onChangeAddress && leg.status === "pending" && (
+                  <ChangeStopAddressButton tone="dark" onClick={onChangeAddress} disabled={cancelDisabled} />
+                )}
+                {onWalkOn && (
+                  <WalkOnStopIconButton onClick={onWalkOn} disabled={cancelDisabled} />
+                )}
+                {onCancelPickup && (
+                  <PickupCancelButton onClick={onCancelPickup} disabled={cancelDisabled} />
+                )}
+              </div>
             )}
           </div>
 
@@ -2293,7 +2717,10 @@ function ActiveLegCard({
                   </div>
                 )}
                 <div className="text-xs text-slate-400">↓</div>
-                <div className="truncate text-lg font-bold leading-tight">{leg.toLabel}</div>
+                <div className="flex min-w-0 items-center gap-1.5 text-lg font-bold leading-tight">
+                  <span className="truncate">{leg.toLabel}</span>
+                  <PassengerKindBadge leg={leg} />
+                </div>
                 {leg.targetAddress && (
                   <div className="mt-1 flex items-start gap-1.5 text-xs text-slate-300">
                     <MapPin className="mt-0.5 h-3.5 w-3.5 shrink-0 text-blue-300" />
@@ -2304,43 +2731,44 @@ function ActiveLegCard({
             </div>
           )}
 
-          {leg.status === "en_route" && (
-            <ManifestRouteMap leg={leg} trip={trip} legs={legs} className="mt-3" />
-          )}
-
           <div className="mt-4">
             {leg.status === "en_route" ? (
-              <button
-                type="button"
+              <FieldActionButton
+                variant="caution"
+                pulse={!busy}
                 disabled={busy}
-                onClick={() => runGps("end")}
-                className="h-14 w-full rounded-xl bg-green-600 text-lg font-bold text-white transition hover:bg-green-500 disabled:opacity-60"
+                onClick={() => void markStop("end")}
               >
-                🛑 Arrive at Stop
-              </button>
+                {movementWord === "Leg" ? "Arrive" : "Arrive at Stop"}
+              </FieldActionButton>
             ) : leg.status === "arrived" ? (
               <ArrivedChecklist
                 leg={leg}
                 isReturnRun={isReturnRun}
                 isVenueHopGroup={leg.legKind === "venue_to_venue"}
+                movementWord={movementWord}
                 tripId={tripId}
                 eventId={eventId}
               />
             ) : leg.status === "completed" ? null : boardingRequired ? (
               <div className="flex h-14 w-full items-center justify-center rounded-xl bg-slate-700 text-sm font-bold text-slate-400">
-                ✋ Complete boarding roll above to depart
+                Complete boarding roll above to depart
               </div>
             ) : (
-              <button
-                type="button"
+              <FieldActionButton
+                variant="caution"
+                pulse={!busy}
                 disabled={busy}
-                onClick={() => runGps("start")}
-                className="h-14 w-full animate-pulse rounded-xl bg-yellow-500 text-lg font-bold text-black transition hover:bg-yellow-400 disabled:opacity-60"
+                onClick={() => void markStop("start")}
               >
-                🚀 Depart Stop
-              </button>
+                {movementWord === "Leg" ? "Depart" : "Depart Stop"}
+              </FieldActionButton>
             )}
           </div>
+
+          {leg.status === "en_route" && (
+            <ManifestRouteMap leg={leg} trip={trip} legs={legs} className="mt-3" />
+          )}
         </div>
       </div>
     </Card>
@@ -2355,12 +2783,14 @@ function ArrivedChecklist({
   isVenueHopGroup = false,
   tripId,
   eventId,
+  movementWord,
 }: {
   leg: TripLeg;
   isReturnRun?: boolean;
   isVenueHopGroup?: boolean;
   tripId: string;
   eventId?: string | null;
+  movementWord: "Stop" | "Leg";
 }) {
   const queryClient = useQueryClient();
   const patch = usePatchTripLeg();
@@ -2376,7 +2806,6 @@ function ArrivedChecklist({
       }
     }
     return {
-      loggedKm: String(leg.loggedDistanceKm ?? leg.gpsDistanceKm ?? 0),
       present: leg.passengerPresent ?? true,
       medStatus: leg.medicationHandoverStatus ?? (leg.medicationHandoverConfirmed ? "collected_intact" : null),
       extraMed: leg.unexpectedMedicationLogged ?? false,
@@ -2389,14 +2818,12 @@ function ArrivedChecklist({
     localStorage.setItem(storageKey, JSON.stringify(formState));
   }, [formState, storageKey]);
 
-  const { loggedKm, present, medStatus, extraMed, extraNotes, unsafeDropVerbalCleared } = formState;
+  const { present, medStatus, extraMed, extraNotes, unsafeDropVerbalCleared } = formState;
   const [noShowArmed, setNoShowArmed] = useState(() => !(formState.present ?? true));
   const [unsafeDropArmed, setUnsafeDropArmed] = useState(() => !(formState.present ?? true));
   const [showNoShow, setShowNoShow] = useState(false);
   const [showUnsafeDrop, setShowUnsafeDrop] = useState(false);
   const [verbalPending, setVerbalPending] = useState<{ description: string } | null>(null);
-  const [gpsKmWarnAck, setGpsKmWarnAck] = useState(false);
-  const legGpsWarnKm = useOdoLegGpsWarnKm();
 
   const participantId = leg.toParticipantId ?? leg.fromParticipantId;
   const participantName = leg.toParticipantId ? leg.toLabel : leg.fromLabel;
@@ -2414,26 +2841,12 @@ function ArrivedChecklist({
   /** Unsafe drop on return run requires RED verbal auth before leg can complete. */
   const unsafeDropBlocked = isReturnRun && !present && !unsafeDropVerbalCleared;
 
-  const loggedKmNum = Number(loggedKm);
-  const gpsKm =
-    leg.gpsDistanceKm != null && Number.isFinite(leg.gpsDistanceKm)
-      ? Number(leg.gpsDistanceKm)
-      : null;
-  const gpsKmMismatch =
-    gpsKm != null &&
-    Number.isFinite(loggedKmNum) &&
-    absDiffExceeds(loggedKmNum, gpsKm, legGpsWarnKm);
-
   const blocked =
-    !loggedKm ||
-    Number.isNaN(loggedKmNum) ||
     (showMedChecks && !expectedMedSatisfied) ||
     (showExtraMed && extraMed && extraNotes.trim().length < 3) ||
-    unsafeDropBlocked ||
-    (gpsKmMismatch && !gpsKmWarnAck);
+    unsafeDropBlocked;
 
   const updateField = (field: string, value: unknown) => {
-    if (field === "loggedKm") setGpsKmWarnAck(false);
     setFormState((prev: Record<string, unknown>) => ({ ...prev, [field]: value }));
   };
 
@@ -2458,7 +2871,6 @@ function ArrivedChecklist({
         tripId,
         patch: {
           status: "completed",
-          loggedDistanceKm: Number(loggedKm),
           passengerPresent: isVenueHopGroup ? true : present,
           medicationHandoverStatus: leg.medicationExpected
             ? medStatus
@@ -2468,7 +2880,7 @@ function ArrivedChecklist({
             (medStatus === "collected_intact" || medStatus === "collected_damaged"),
           unexpectedMedicationLogged: extraMed,
           unexpectedMedicationNotes: extraMed ? extraNotes.trim() : null,
-          completedAt: new Date().toISOString(),
+          completedAt: operationalNowIso(),
         },
       });
       if (
@@ -2489,7 +2901,10 @@ function ArrivedChecklist({
                 leg_id: leg.id,
                 event_id: eventId ?? null,
                 participant_id: participantId,
+                person_name: participantName,
                 handover_status: medStatus,
+                location: "trip",
+                why: medStatus.replace(/_/g, " "),
               },
             }),
           )
@@ -2512,7 +2927,7 @@ function ArrivedChecklist({
         });
       }
       localStorage.removeItem(storageKey);
-      toast.success(`Leg ${leg.legIndex} logged`, {
+      toast.success(`${movementWord} ${leg.legIndex} logged`, {
         description: `${leg.fromLabel} → ${leg.toLabel}`,
       });
     } catch {
@@ -2522,60 +2937,14 @@ function ArrivedChecklist({
 
   const confirmLabel = unsafeDropBlocked
     ? "🔴 Complete verbal consultation first"
-    : "Confirm & Log Leg Completion";
+    : `Confirm & log this ${movementWord.toLowerCase()}`;
 
   return (
     <div className="space-y-4 rounded-lg bg-slate-800/60 p-3 text-white">
-      <NumericEntryTrigger
-        id="kmlog"
-        label="Logged leg km"
-        value={loggedKm}
-        onChange={(v) => updateField("loggedKm", v)}
-        placeholder="Tap to enter leg distance"
-        title="Logged leg kilometres"
-        description="GPS estimate pre-filled — adjust in 0.5 km steps if needed."
-        step={0.5}
-        allowDecimal
-        min={0}
-        unit="km"
-        variant="dark"
-      />
-      {gpsKmMismatch && gpsKm != null && (
-        <div className={cn("space-y-3 p-3 text-sm", CAUTION_CALLOUT_CLASS)}>
-          <div className="flex items-start gap-2">
-            <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
-            <p className={CAUTION_CALLOUT_BODY_CLASS}>
-              Logged {loggedKmNum} km differs from GPS estimate {gpsKm.toFixed(1)} km by{" "}
-              {Math.abs(loggedKmNum - gpsKm).toFixed(1)} km (warn at {legGpsWarnKm} km).
-              Re-enter or accept to continue — no Hub issue.
-            </p>
-          </div>
-          <div className="grid gap-2">
-            <FieldActionButton
-              variant="primary"
-              size="sm"
-              onClick={() => {
-                updateField("loggedKm", String(Math.round(gpsKm * 2) / 2));
-                setGpsKmWarnAck(false);
-              }}
-            >
-              Use GPS ({gpsKm.toFixed(1)} km)
-            </FieldActionButton>
-            <FieldActionButton
-              variant={gpsKmWarnAck ? "success" : "caution"}
-              size="sm"
-              onClick={() => setGpsKmWarnAck(true)}
-            >
-              {gpsKmWarnAck ? "Accepted — confirm leg below" : "Accept logged distance"}
-            </FieldActionButton>
-          </div>
-        </div>
-      )}
-
       {/* ── Passenger confirmation — context-sensitive ──────────────────── */}
       {isVenueHopGroup ? (
         <p className="text-sm text-slate-300">
-          Group arrival at <strong>{leg.toLabel}</strong> — confirm distance and complete this hop.
+          Group arrival at <strong>{leg.toLabel}</strong> — complete this hop.
         </p>
       ) : isReturnRun ? (
         /* Return run: confirm safe handover at front door */
@@ -2673,7 +3042,7 @@ function ArrivedChecklist({
               }
             }}
             ledgerCategory="TRIP"
-            subjectLabel={`${participantName} · Leg ${leg.legIndex} drop-off`}
+            subjectLabel={`${participantName} · ${movementWord} ${leg.legIndex} drop-off`}
             sourceId={leg.id}
             actionType="RED_VERBAL_CONSULTATION"
             titleOverride="RED Verbal Consultation — Unsafe Drop"
@@ -2747,7 +3116,7 @@ function ArrivedChecklist({
                     patch.mutate({
                       legId: leg.id,
                       tripId,
-                      patch: { noShowTriggeredAt: new Date().toISOString() },
+                      patch: { noShowTriggeredAt: operationalNowIso() },
                     });
                   }
                 }}
@@ -2832,19 +3201,14 @@ function ArrivedChecklist({
         </div>
       )}
 
-      <button
-        type="button"
+      <FieldActionButton
+        variant={blocked || patch.isPending ? "secondary" : "caution"}
+        pulse={!blocked && !patch.isPending}
         disabled={blocked || patch.isPending}
         onClick={() => void confirm()}
-        className={cn(
-          "h-14 w-full touch-manipulation rounded-xl text-lg font-bold text-white transition active:scale-[0.98] disabled:opacity-60",
-          blocked || patch.isPending
-            ? "cursor-not-allowed bg-slate-700"
-            : "bg-green-600 hover:bg-green-700",
-        )}
       >
         {patch.isPending ? "Logging…" : confirmLabel}
-      </button>
+      </FieldActionButton>
     </div>
   );
 }

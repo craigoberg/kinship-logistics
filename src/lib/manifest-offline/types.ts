@@ -18,6 +18,11 @@ export type ManifestOutboxOp =
       kind: "mark_not_travelling";
       row: EventBusManifestRow;
       notes: string;
+    }
+  | {
+      /** Driver started a venue hop before Release. Replay reads the snapshot. */
+      kind: "force_start_hop";
+      localTripId: string;
     };
 
 export interface ManifestOutboxItem {
@@ -38,6 +43,10 @@ export interface ManifestOfflineSnapshot {
   savedAt: string;
   bundle: ActiveTripBundle;
   busManifest: EventBusManifestRow[];
+  /** Headcount is the paper sheet for this leg — no names were on the tablet. */
+  paperRoll?: boolean;
+  /** Opened from Manifest before the trip leader released the group. */
+  forcedBeforeRelease?: boolean;
 }
 
 export type ManifestOfflineListener = () => void;

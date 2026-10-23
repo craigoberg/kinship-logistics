@@ -24,6 +24,7 @@ import {
   useUpdateAttendanceSchedule,
   useRemoveAttendanceSchedule,
   useBusRunMap,
+  useTodaysRunLiveStatus,
 } from "@/hooks/use-supabase-data";
 import {
   Dialog,
@@ -35,7 +36,12 @@ import {
 } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import { formatDate } from "@/lib/utils";
-import type { AttendanceLog, AttendanceSchedule } from "@/lib/data-store";
+import {
+  NON_CHARGEABLE_STATUSES,
+  type AttendanceLog,
+  type AttendanceSchedule,
+} from "@/lib/data-store";
+import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 
 // Canonical weekday sort order for the schedules table.
 const DAY_ORDER: Record<string, number> = {
@@ -50,13 +56,23 @@ function dayRank(code: string): number {
   return DAY_ORDER[code] ?? 99;
 }
 
+function scheduleIsToday(dayOfWeek: string, todayDayCode: string): boolean {
+  if (dayOfWeek === todayDayCode) return true;
+  return (DAY_LABELS[todayDayCode] ?? "") === dayOfWeek;
+}
+
 import { AddAttendanceScheduleModal } from "./add-attendance-schedule-modal";
 import { EditAttendanceLogModal } from "./edit-attendance-log-modal";
 import { MarkAttendanceExceptionModal } from "./mark-attendance-exception-modal";
+import { OffTodayExemptionDialog } from "./off-today-exemption-dialog";
+import { RunLiveStatusBadge } from "./run-live-status-badge";
 import { LogPlannedAbsenceModal } from "./log-planned-absence-modal";
 import { AttendanceStatusBadge } from "./attendance-status-badge";
 import { NoShowCountdownModal } from "./no-show-countdown-modal";
 import { toast } from "sonner";
+import { useOperationalTodayIso } from "@/lib/operational-clock";
+import { todaysSydneyDayCode } from "@/lib/operational-time";
+import { lookupRunLiveStatus, type RunLiveStatus } from "@/lib/api/run-live-status";
 
 type ScheduleSortCol = "day" | "service" | "inbound" | "outbound" | "status";
 type SortDir = "asc" | "desc";
@@ -85,6 +101,57 @@ function TransportCodeBadge({
   return <span className="text-muted-foreground">{code || "—"}</span>;
 }
 
+function ScheduleRunTodayCell({
+  schedule,
+  participantId,
+  isToday,
+  liveStatusMap,
+  busRunMap,
+}: {
+  schedule: AttendanceSchedule;
+  participantId: string;
+  isToday: boolean;
+  liveStatusMap: Map<string, RunLiveStatus> | undefined;
+  busRunMap: Map<string, BusRunBadge>;
+}) {
+  if (!isToday || !schedule.active) {
+    return <span className="text-xs text-muted-foreground">—</span>;
+  }
+  const map = liveStatusMap ?? new Map();
+  const inbound = schedule.inboundTransport || schedule.transportRule;
+  const outbound = schedule.outboundTransport || schedule.transportRule;
+  const morning = busRunMap.has(inbound)
+    ? lookupRunLiveStatus(map, participantId, inbound, "morning")
+    : null;
+  const afternoon = busRunMap.has(outbound)
+    ? lookupRunLiveStatus(map, participantId, outbound, "afternoon")
+    : null;
+  const fallback = lookupRunLiveStatus(map, participantId, "", "morning");
+  if (!morning && !afternoon) {
+    return <RunLiveStatusBadge status={fallback} />;
+  }
+  return (
+    <div className="flex flex-col gap-1">
+      {morning && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            IN
+          </span>
+          <RunLiveStatusBadge status={morning} />
+        </div>
+      )}
+      {afternoon && (
+        <div className="flex items-center gap-1.5">
+          <span className="text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+            OUT
+          </span>
+          <RunLiveStatusBadge status={afternoon} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 interface Props {
   participantId: string;
   participantName: string;
@@ -98,6 +165,8 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const [editOpen, setEditOpen] = useState(false);
   const [exceptionSchedule, setExceptionSchedule] = useState<AttendanceSchedule | null>(null);
   const [exceptionOpen, setExceptionOpen] = useState(false);
+  const [offTodaySchedule, setOffTodaySchedule] = useState<AttendanceSchedule | null>(null);
+  const [offTodayOpen, setOffTodayOpen] = useState(false);
   const [absenceOpen, setAbsenceOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [showArchived, setShowArchived] = useState(false);
@@ -112,6 +181,18 @@ export function AttendanceTab({ participantId, participantName }: Props) {
   const restore = useUpdateAttendanceSchedule();
   const removeMut = useRemoveAttendanceSchedule();
   const busRunMap = useBusRunMap();
+  const todayIso = useOperationalTodayIso();
+  const todayDayCode = todaysSydneyDayCode();
+  const { data: liveStatusMap } = useTodaysRunLiveStatus();
+
+  useRealtimeInvalidate({
+    table: "trip_legs",
+    queryKeys: [["run-live-status"]],
+  });
+  useRealtimeInvalidate({
+    table: "attendance_roster_logs",
+    queryKeys: [["run-live-status"], ["attendance_logs", participantId]],
+  });
 
   const allSchedules = schedulesQ.data ?? [];
   const archivedCount = allSchedules.filter((s) => !s.active).length;
@@ -263,6 +344,7 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                       </th>
                     );
                   })}
+                  <th className="px-4 py-2 font-medium">Run today</th>
                   <th className="px-4 py-2 text-right font-medium">Actions</th>
                 </tr>
               </thead>
@@ -296,13 +378,45 @@ export function AttendanceTab({ participantId, participantName }: Props) {
                         {s.active ? "Active" : "Archived"}
                       </span>
                     </td>
+                    <td className="px-4 py-2">
+                      <ScheduleRunTodayCell
+                        schedule={s}
+                        participantId={participantId}
+                        isToday={scheduleIsToday(s.dayOfWeek, todayDayCode)}
+                        liveStatusMap={liveStatusMap}
+                        busRunMap={busRunMap}
+                      />
+                    </td>
                     <td className="px-4 py-2 text-right">
-                      <div className="flex items-center justify-end gap-1">
+                      <div className="flex flex-nowrap items-center justify-end gap-1 whitespace-nowrap">
+                        {s.active &&
+                          scheduleIsToday(s.dayOfWeek, todayDayCode) &&
+                          (busRunMap.has(s.inboundTransport || s.transportRule) ||
+                            busRunMap.has(s.outboundTransport || s.transportRule)) &&
+                          !logs.some(
+                            (l) =>
+                              l.rosterDate === todayIso &&
+                              NON_CHARGEABLE_STATUSES.includes(l.actualStatus),
+                          ) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="shrink-0 gap-1"
+                              onClick={() => {
+                                setOffTodaySchedule(s);
+                                setOffTodayOpen(true);
+                              }}
+                              title="Mark this person off today's run"
+                            >
+                              <CalendarOff className="h-3.5 w-3.5" />
+                              Off today
+                            </Button>
+                          )}
                         {s.active && (
                           <Button
                             size="sm"
                             variant="ghost"
-                            className="gap-1"
+                            className="shrink-0 gap-1"
                             onClick={() => {
                               setExceptionSchedule(s);
                               setExceptionOpen(true);
@@ -578,6 +692,15 @@ export function AttendanceTab({ participantId, participantName }: Props) {
           if (!o) setExceptionSchedule(null);
         }}
         schedule={exceptionSchedule}
+        participantName={participantName}
+      />
+      <OffTodayExemptionDialog
+        open={offTodayOpen}
+        onOpenChange={(o) => {
+          setOffTodayOpen(o);
+          if (!o) setOffTodaySchedule(null);
+        }}
+        schedule={offTodaySchedule}
         participantName={participantName}
       />
       <LogPlannedAbsenceModal

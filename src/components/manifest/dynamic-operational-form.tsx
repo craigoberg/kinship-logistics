@@ -579,7 +579,7 @@ function PinDeclarationModal({
           </Label>
           <PinPad
             value={pin}
-            onChange={(v) => setPin(v.replace(/\D/g, "").slice(0, 4))}
+            onChange={setPin}
             length={4}
             onComplete={(v) => void handleComplete(v)}
             disabled={submitting}

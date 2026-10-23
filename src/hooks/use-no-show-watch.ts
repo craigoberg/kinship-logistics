@@ -2,6 +2,7 @@ import { useQuery } from "@tanstack/react-query";
 import { supabase } from "@/integrations/supabase/client";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import { useAuthReady } from "@/hooks/use-auth-ready";
+import { isNetworkError } from "@/lib/manifest-offline";
 
 /**
  * Counts today's `attendance_roster_logs` rows that are still 'Pending'
@@ -29,8 +30,9 @@ export function useNoShowWatch(): { count: number; thresholdMinutes: number } {
         .eq("actual_status", "Pending")
         .lt("created_at", cutoffIso);
       if (error) {
-        // Surface zero on table-not-ready; do not crash the sidebar.
-        console.error("[useNoShowWatch] query failed", error);
+        if (!isNetworkError(error)) {
+          console.error("[useNoShowWatch] query failed", error);
+        }
         return 0;
       }
       return (data ?? []).length;

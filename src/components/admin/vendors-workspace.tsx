@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
-import { Archive, Pencil, Plus, Search } from "lucide-react";
+import { Archive, ChevronRight, Plus, Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
@@ -219,7 +221,11 @@ export function VendorsWorkspace() {
               </TableRow>
             ) : (
               visible.map((v) => (
-                <TableRow key={v.id}>
+                <TableRow
+                  key={v.id}
+                  className={cn(canEdit && officeClickRowClass)}
+                  onClick={canEdit ? () => openEdit(v) : undefined}
+                >
                   <TableCell className="font-medium">{v.name}</TableCell>
                   <TableCell>
                     {v.status === "active" ? (
@@ -232,35 +238,31 @@ export function VendorsWorkspace() {
                     <FormattedDateTime value={v.createdAt} />
                   </TableCell>
                   <TableCell>
-                    {canEdit && (
-                      <div className="flex justify-end gap-1">
-                        <IconActionButton
-                          className="h-8 w-8"
-                          onClick={() => openEdit(v)}
-                          tooltip="Edit vendor"
-                        >
-                          <Pencil className="h-4 w-4" />
-                        </IconActionButton>
-                        {v.status === "active" ? (
-                          <IconActionButton
-                            className="h-8 w-8"
-                            onClick={() => setArchiveTarget(v)}
-                            tooltip="Archive vendor"
-                          >
-                            <Archive className="h-4 w-4" />
-                          </IconActionButton>
-                        ) : (
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => restoreMut.mutate(v)}
-                          >
-                            Restore
-                          </Button>
-                        )}
-                      </div>
-                    )}
+                    <div className="flex items-center justify-end gap-1">
+                      {canEdit && (
+                        <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                          {v.status === "active" ? (
+                            <IconActionButton
+                              className="h-8 w-8"
+                              onClick={() => setArchiveTarget(v)}
+                              tooltip="Archive vendor"
+                            >
+                              <Archive className="h-4 w-4" />
+                            </IconActionButton>
+                          ) : (
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              onClick={() => restoreMut.mutate(v)}
+                            >
+                              Restore
+                            </Button>
+                          )}
+                        </div>
+                      )}
+                      {canEdit && <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                    </div>
                   </TableCell>
                 </TableRow>
               ))

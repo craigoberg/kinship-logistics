@@ -21,9 +21,14 @@ import { NotificationSimulator } from "../components/ui/NotificationSimulator";
 // (GlobalEscalationInterceptor file preserved on disk as inactive fallback.)
 import { RouteRehydrationGuardian } from "../components/dashboard/route-rehydration-guardian";
 import { GlobalIncidentIntakeDrawer } from "../components/global/global-incident-intake-drawer";
+import { GlobalRaiseTicketDrawer } from "../components/global/global-raise-ticket-drawer";
+import { TicketSurfaceProvider } from "../lib/app-tickets/ticket-surface";
 import { Toaster } from "../components/ui/sonner";
 import { TooltipProvider } from "../components/ui/tooltip";
 import { DevOperationalClockBar } from "../components/dev/dev-operational-clock-bar";
+import { bootFieldLinkWatch } from "@/integrations/supabase/client";
+import { IdleLockGate } from "../components/auth/idle-lock-gate";
+import { ChromeVisibilityProvider } from "@/hooks/chrome-visibility";
 import {
   markOperationalClockClientReady,
 } from "@/lib/operational-clock";
@@ -136,6 +141,10 @@ function RootShell({ children }: { children: ReactNode }) {
   );
 }
 
+function isPublicSitePath(pathname: string): boolean {
+  return pathname === "/public" || pathname.startsWith("/public/");
+}
+
 function AuthGate() {
   const navigate = useNavigate();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
@@ -143,6 +152,8 @@ function AuthGate() {
 
   useEffect(() => {
     if (pathname === "/auth") return;
+    // BL-110: yada.org.au public site routes — no day-login / PIN.
+    if (isPublicSitePath(pathname)) return;
     // Wait for Supabase session hydrate before deciding.
     if (!isReady) return;
     // BL-099: day session (Auth) required, then PIN profile (role).
@@ -167,6 +178,7 @@ function RoleAwareGuardians() {
     <>
       {role === "driver" && <RouteRehydrationGuardian />}
       <GlobalIncidentIntakeDrawer />
+      <GlobalRaiseTicketDrawer />
     </>
   );
 }
@@ -175,6 +187,10 @@ function RootComponent() {
   const { queryClient } = Route.useRouteContext();
   const pathname = useRouterState({ select: (s) => s.location.pathname });
   const isAuthRoute = pathname === "/auth";
+  const isPublicRoute = isPublicSitePath(pathname);
+  // Manifest uses an inner overflow pane. If SIM bar + AppShell + h-[100dvh]
+  // can also scroll the document, iOS/Chrome bounce between the two layers.
+  const lockViewport = pathname.startsWith("/manifest");
 
   // Unlock SIM TIME after paint so lazy routes (e.g. Event Deliver) finish
   // hydrating against the same "live" date the server rendered.
@@ -183,26 +199,51 @@ function RootComponent() {
     return () => window.clearTimeout(id);
   }, []);
 
+  useEffect(() => {
+    bootFieldLinkWatch();
+  }, []);
+
   return (
     <QueryClientProvider client={queryClient}>
       {/* Root provider so global overlays (Big Red Incident) work outside AppShell. */}
       <TooltipProvider delayDuration={300}>
+        <TicketSurfaceProvider>
         <AuthGate />
-        {isAuthRoute ? (
-          // Bare-shell terminal view — no AppShell chrome on the sign-in screen.
+        {isPublicRoute ? (
           <Outlet />
         ) : (
-          <>
-            <DevOperationalClockBar />
-            {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
-            <AppShell>
-              <Outlet />
-            </AppShell>
-            <NotificationSimulator />
-            <RoleAwareGuardians />
-          </>
+          <ChromeVisibilityProvider>
+            {isAuthRoute ? (
+              <>
+                <DevOperationalClockBar />
+                <Outlet />
+              </>
+            ) : (
+              <div
+                className={
+                  lockViewport
+                    ? "flex h-dvh flex-col overflow-hidden overscroll-none"
+                    : undefined
+                }
+              >
+                <DevOperationalClockBar />
+                {/* Required: nested routes render here. Removing <Outlet /> breaks all child routes. */}
+                <AppShell viewportLock={lockViewport}>
+                  <Outlet />
+                </AppShell>
+              </div>
+            )}
+            {isAuthRoute ? null : (
+              <>
+                <IdleLockGate />
+                <NotificationSimulator />
+                <RoleAwareGuardians />
+              </>
+            )}
+          </ChromeVisibilityProvider>
         )}
         <Toaster />
+        </TicketSurfaceProvider>
       </TooltipProvider>
     </QueryClientProvider>
   );

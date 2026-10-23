@@ -1,4 +1,5 @@
 import { supabase } from "@/integrations/supabase/client";
+import { operationalNowIso, operationalNowMs, operationalRowStamps } from "@/lib/operational-clock";
 import { resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import { redHasAcceptedWorkaround } from "@/lib/site-day/red-workaround";
@@ -189,6 +190,8 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     reported_by: reportedBy,
   });
   const hasWorkaround = !!(payload.workaroundPlan && payload.workaroundPlan.trim());
+  const nowIso = operationalNowIso();
+  const stamps = operationalRowStamps();
   const insertPayload: Record<string, unknown> = {
     session_id: payload.sessionId ?? null,
     reported_by: reportedBy,
@@ -198,10 +201,11 @@ export async function createIssue(payload: NewSiteIssue): Promise<SiteIssue> {
     owner: payload.owner,
     status: "open",
     update_log: "",
-    workaround_accepted_at: hasWorkaround ? new Date().toISOString() : null,
+    workaround_accepted_at: hasWorkaround ? nowIso : null,
     event_id: payload.eventId ?? null,
     event_day_session_id: payload.eventDaySessionId ?? null,
-    occurred_at: payload.occurredAt ?? new Date().toISOString(),
+    created_at: stamps.created_at,
+    occurred_at: payload.occurredAt ?? stamps.occurred_at,
   };
   if (payload.issueArea) {
     insertPayload.issue_area = payload.issueArea;
@@ -351,7 +355,7 @@ export function sortByRygeNewestFirst<T extends { severity: string; createdAt: s
 export async function markResolved(id: string): Promise<SiteIssue> {
   const { data, error } = await supabase
     .from("site_issues_register")
-    .update({ status: "resolved", resolved_at: new Date().toISOString() })
+    .update({ status: "resolved", resolved_at: operationalNowIso() })
     .eq("id", id)
     .select("*")
     .single();
@@ -389,7 +393,7 @@ export function routeToCouncilLocal(issue: {
     category === "Sev 1" ? "Sev_1" : category === "Sev 2" ? "Sev_2" : "Sev_3";
   const h = Number(hours?.[key]);
   const slaHours = Number.isFinite(h) && h > 0 ? h : 24;
-  const deadline = new Date(Date.now() + slaHours * 3600 * 1000);
+  const deadline = new Date(operationalNowMs() + slaHours * 3600 * 1000);
   return {
     category,
     hours: slaHours,
@@ -462,7 +466,7 @@ export async function dispatchCouncilEmail(
     .from("site_issues_register")
     .update({
       email_dispatched_to_council: true,
-      email_dispatched_at: new Date().toISOString(),
+      email_dispatched_at: operationalNowIso(),
       council_sla_category: args.category,
       council_sla_deadline: args.deadlineIso,
     })

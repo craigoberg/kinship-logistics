@@ -9,11 +9,16 @@ import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { listParticipants, resolveStaffIdWithFallback } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
 import {
+  formatTravelHow,
+  lookupParticipantName,
+  withAuditActorMeta,
+} from "@/lib/api/office-change-log";
+import {
   encodeLeftTripNotes,
   leftTripHubDescription,
   type LeftTripDisposition,
 } from "@/lib/trip-absent";
-import { operationalNowIso } from "@/lib/operational-clock";
+import { operationalNowIso, operationalRowStamps } from "@/lib/operational-clock";
 
 export type EventArrivalMethod = "bus" | "private" | "walk_in" | "other";
 export type EventAttendanceStatus = "expected" | "checked_in" | "checked_out" | "absent";
@@ -157,6 +162,11 @@ export async function seedEventAttendanceRoll(
 
   if (payload.length === 0) return 0;
 
+  const finishSeed = async (count: number): Promise<number> => {
+    await backfillMissingAttendanceBusRuns(eventDaySessionId, bookings);
+    return count;
+  };
+
   const isMissingOnConflictTarget = (err: {
     code?: string;
     message?: string;
@@ -199,7 +209,7 @@ export async function seedEventAttendanceRoll(
     const existing = await listEventAttendanceRoll(eventDaySessionId);
     const have = new Set(existing.map((r) => r.participantId));
     const missing = payload.filter((r) => !have.has(r.participant_id));
-    if (missing.length === 0) return 0;
+    if (missing.length === 0) return finishSeed(0);
     const { data: plain, error: plainErr } = await supabase
       .from("event_attendance_log")
       .insert(missing)
@@ -218,14 +228,49 @@ export async function seedEventAttendanceRoll(
         .insert(legacy)
         .select("id");
       if (retry.error) throw retry.error;
-      return retry.data?.length ?? 0;
+      return finishSeed(retry.data?.length ?? 0);
     }
     if (plainErr) throw plainErr;
-    return plain?.length ?? 0;
+    return finishSeed(plain?.length ?? 0);
   }
 
   if (insErr) throw insErr;
-  return inserted?.length ?? 0;
+  return finishSeed(inserted?.length ?? 0);
+}
+
+/** Fill expected/checked-in rows that were seeded before roster had a run code. */
+async function backfillMissingAttendanceBusRuns(
+  eventDaySessionId: string,
+  bookings: Array<Record<string, unknown>>,
+): Promise<void> {
+  const rosterRun = new Map<string, string>();
+  for (const b of bookings) {
+    const row = b as {
+      participant_id: string;
+      return_transport_mode?: string | null;
+      return_bus_run_code?: string | null;
+    };
+    const mode = row.return_transport_mode ?? "bus";
+    const code = (row.return_bus_run_code ?? "").trim();
+    if (mode === "bus" && code) rosterRun.set(row.participant_id, code);
+  }
+  if (rosterRun.size === 0) return;
+
+  const roll = await listEventAttendanceRoll(eventDaySessionId);
+  for (const row of roll) {
+    if (row.status === "checked_out" || row.status === "absent") continue;
+    if (row.returnBusRunCode) continue;
+    if (row.returnTransport && row.returnTransport !== "bus") continue;
+    const code = rosterRun.get(row.participantId);
+    if (!code) continue;
+    const { error } = await supabase
+      .from("event_attendance_log")
+      .update({ return_bus_run_code: code, return_transport: "bus" })
+      .eq("id", row.id);
+    if (error && !isSchemaMismatchError(error)) {
+      console.warn("[seedEventAttendanceRoll:backfillRun]", error.message);
+    }
+  }
 }
 
 /**
@@ -252,9 +297,10 @@ export async function syncEventAttendanceFromRoster(
 /** Tap toggle: expected ↔ checked_in (§4.4 fat-finger cards). */
 export async function toggleEventCheckIn(
   row: EventAttendanceRow,
+  occurredAt?: string,
 ): Promise<EventAttendanceRow> {
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = occurredAt ?? operationalNowIso();
   const isIn = row.status === "checked_in";
   if (!isIn && row.participantId) {
     const { assertNotInfectiousExcluded } = await import(
@@ -283,6 +329,12 @@ export async function toggleEventCheckIn(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(
+    isIn ? null : row.arrivalMethod,
+    isIn ? null : row.arrivalBusRunCode,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -290,13 +342,18 @@ export async function toggleEventCheckIn(
     action_type: isIn ? "EVENT_FLOOR_CHECKIN_UNDO" : "EVENT_FLOOR_CHECKIN",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
       attendance_id: row.id,
+      person_name: who,
+      location: "trip",
       arrival_method: isIn ? null : row.arrivalMethod,
       arrival_bus_run_code: isIn ? null : row.arrivalBusRunCode,
-    },
+      summary: isIn
+        ? `Undid check-in for ${who} on trip`
+        : `Checked in ${who} to trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);
@@ -316,6 +373,8 @@ export async function recordEventArrival(
     notes?: string;
     /** When true (default for expected), also stamp checked_in. */
     alsoCheckIn?: boolean;
+    /** Tap time when this was queued offline. */
+    occurredAt?: string;
   },
 ): Promise<EventAttendanceRow> {
   if (row.status === "absent") {
@@ -326,8 +385,9 @@ export async function recordEventArrival(
   }
 
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
+  const nowIso = input.occurredAt ?? operationalNowIso();
   const isSelf = input.arrival === "self";
+  const collectedPlace = input.notes?.trim().match(/^Collected at (.+)$/)?.[1] ?? null;
   const runCode = isSelf
     ? null
     : (input.busRunCode ?? "").trim() || null;
@@ -341,7 +401,7 @@ export async function recordEventArrival(
   }
 
   const patch: Record<string, unknown> = {
-    arrival_method: (isSelf ? "walk_in" : "bus") as EventArrivalMethod,
+    arrival_method: (collectedPlace ? "other" : isSelf ? "walk_in" : "bus") as EventArrivalMethod,
     arrival_bus_run_code: runCode,
   };
   if (input.notes && input.notes.trim()) {
@@ -374,6 +434,10 @@ export async function recordEventArrival(
 
   const gps = await tryGetGps();
   const checkedInNow = alsoCheckIn && row.status === "expected";
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const arrivalMethod = collectedPlace ? "other" : isSelf ? "walk_in" : "bus";
+  const how = formatTravelHow(arrivalMethod, runCode);
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -383,17 +447,60 @@ export async function recordEventArrival(
       : "EVENT_FLOOR_ARRIVAL_METHOD",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
       attendance_id: row.id,
-      arrival_method: isSelf ? "walk_in" : "bus",
+      person_name: who,
+      location: "trip",
+      arrival_method: arrivalMethod,
       arrival_bus_run_code: runCode,
       prior_arrival_method: row.arrivalMethod,
-    },
+      summary: collectedPlace
+        ? `Collected ${who} onto the trip at ${collectedPlace}`
+        : checkedInNow
+          ? `Checked in ${who} to trip ${how}`.trim()
+          : `Set arrival for ${who} on trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);
+}
+
+/** They never joined. Not a left-trip welfare issue. */
+export async function markNotCollected(
+  row: EventAttendanceRow,
+  place: string,
+): Promise<void> {
+  if (row.status === "checked_in" || row.status === "checked_out") {
+    throw new Error("They are already on the trip.");
+  }
+  const staffId = await resolveStaffIdWithFallback();
+  const where = place.trim() || "the pickup";
+  const notes = `Not collected — ${where}`;
+  const { error } = await supabase
+    .from("event_attendance_log")
+    .update({ status: "absent" as EventAttendanceStatus, notes })
+    .eq("id", row.id);
+  if (error) throw error;
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  await writeToLedger({
+    staff_id: staffId,
+    category: "CLIENT",
+    severity: "GREEN",
+    action_type: "EVENT_FLOOR_NOT_COLLECTED",
+    gps_lat: null,
+    gps_lng: null,
+    metadata: await withAuditActorMeta({
+      event_day_session_id: row.eventDaySessionId,
+      participant_id: row.participantId,
+      attendance_id: row.id,
+      person_name: who,
+      location: where,
+      summary: `${who} was not collected at ${where}`,
+    }),
+  });
 }
 
 /** Departure handover — assign return transport and check out. */
@@ -401,14 +508,17 @@ export async function checkoutEventParticipant(
   row: EventAttendanceRow,
   returnTransport: ReturnTransport,
   returnBusRunCode?: string | null,
+  occurredAt?: string,
 ): Promise<EventAttendanceRow> {
   if (row.status !== "checked_in") {
     throw new Error("Participant must be checked in before departure handover.");
   }
   const staffId = await resolveStaffIdWithFallback();
-  const nowIso = new Date().toISOString();
+  const nowIso = occurredAt ?? operationalNowIso();
   const runCode =
-    returnTransport === "bus" ? (returnBusRunCode ?? "").trim() || null : null;
+    returnTransport === "bus"
+      ? await resolveCheckoutReturnBusRun(row, returnBusRunCode)
+      : null;
 
   const patch: Record<string, unknown> = {
     status: "checked_out",
@@ -438,6 +548,12 @@ export async function checkoutEventParticipant(
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const personName = await lookupParticipantName(row.participantId);
+  const who = personName ?? "client";
+  const how = formatTravelHow(
+    returnTransport === "self" ? "self" : "bus",
+    runCode,
+  );
   await writeToLedger({
     staff_id: staffId,
     category: "CLIENT",
@@ -445,15 +561,58 @@ export async function checkoutEventParticipant(
     action_type: "EVENT_FLOOR_CHECKOUT",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: row.eventDaySessionId,
       participant_id: row.participantId,
+      person_name: who,
+      location: "trip",
       return_transport: returnTransport,
       return_bus_run_code: runCode,
-    },
+      summary: `Checked out ${who} from trip ${how}`.trim(),
+    }),
   });
 
   return toRow(data as DbRow);
+}
+
+/** Floor code, else roster return run, else sole Admin bus_runs row. */
+async function resolveCheckoutReturnBusRun(
+  row: EventAttendanceRow,
+  requested: string | null | undefined,
+): Promise<string | null> {
+  let run = (requested ?? "").trim() || null;
+  if (run) return run;
+
+  const { data: sess, error: sessErr } = await supabase
+    .from("event_day_sessions")
+    .select("event_id")
+    .eq("id", row.eventDaySessionId)
+    .maybeSingle();
+  if (sessErr) throw sessErr;
+  const eventId = (sess as { event_id?: string } | null)?.event_id;
+  if (eventId && row.participantId) {
+    const { data: booking, error: bookErr } = await supabase
+      .from("event_roster_bookings")
+      .select("return_bus_run_code")
+      .eq("event_id", eventId)
+      .eq("participant_id", row.participantId)
+      .maybeSingle();
+    if (bookErr && !isSchemaMismatchError(bookErr)) throw bookErr;
+    run =
+      ((booking as { return_bus_run_code?: string | null } | null)
+        ?.return_bus_run_code ?? "").trim() || null;
+    if (run) return run;
+  }
+
+  const { listLookupParameters, LOOKUP_CATEGORIES } = await import(
+    "@/lib/data-store"
+  );
+  const { eventBusRunOptions } = await import("@/lib/event-bus-runs");
+  const lookups = await listLookupParameters(LOOKUP_CATEGORIES.busRun);
+  const opts = eventBusRunOptions(lookups);
+  if (opts.length === 1) return opts[0].code;
+  if (opts.length === 0) return null;
+  throw new Error("Choose which bus (R1 / R2) before handing over.");
 }
 
 /**
@@ -617,6 +776,7 @@ export async function markEventAttendanceAbsent({
     owner: "internal",
     status: "open",
     update_log: "",
+    ...operationalRowStamps(),
   });
   if (issueErr) {
     console.warn("[markEventAttendanceAbsent] Hub issue creation failed (non-fatal):", issueErr.message);

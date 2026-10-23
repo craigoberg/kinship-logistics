@@ -35,12 +35,23 @@ Code: `src/lib/simulated-offline.ts` · control on `DevOperationalClockBar`.
 
 **Not a secret:** `VITE_SHOW_TEST_TOOLS` / `VITE_APP_LANE` are public Vite flags in `.env` (see `.env.example`). Until BL-099 PROD exists, published `*.lovable.app` DEV also shows these tools. Future PROD: set `VITE_IS_PRODUCTION=true`.
 
+## Force-start before Release (2026-10-16)
+
+While Manifest can reach the server it stores today’s venue hops and who is expected on each one (checked-in clients, carers with them, checked-in support).
+
+On **Not released to the bus yet**, the driver can tap **Start this leg anyway**:
+
+- Last-known names on the tablet → confirm, then mark each person on the bus or not travelling. A name that was not on the list can be added; the office confirms it from the activity log.
+- No names on the tablet → **System offline. Write who is on the bus on the paper roll for this leg and start?** That sheet is the headcount and is filed against this trip and this leg.
+
+The upload creates or matches **one** hop trip and applies the marks. A later Release joins that trip. Activity log action `EVENT_HOP_FORCE_STARTED`. Procedure for the policy pack: `docs/architecture/OFFLINE-BUS-HEADCOUNT.md`.
+
 ## Remaining field offline (backlog)
 
 | ID | Scope |
 |----|--------|
 | BL-101 | Event Deliver / Trips floor |
-| BL-102 | Manifest walkaround / Start Run |
+| BL-102 | Manifest walkaround / Day Centre Start Run still open. Unreleased **venue hop** force-start is built (above). |
 | BL-103 | Day Centre arrival / Check-In |
 
 ## Driver smoke (Alpha)

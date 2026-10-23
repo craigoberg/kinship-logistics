@@ -27,6 +27,7 @@ import {
 import { supabase } from "@/integrations/supabase/client";
 import { prettyGateLabel } from "@/lib/operational-forms";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { operationalNowIso } from "@/lib/operational-clock";
 import { submitManagerHandshake } from "@/lib/api/site-day-sessions";
 import { SITE_SESSION_QUERY_KEY } from "@/hooks/use-site-session";
 
@@ -104,7 +105,7 @@ function VehicleConsultationModal({
           status,
           resolution_notes: notes.trim(),
           resolved_by: staffId,
-          resolved_at: new Date().toISOString(),
+          resolved_at: operationalNowIso(),
         })
         .eq("id", escalation.id);
       if (error) throw error;

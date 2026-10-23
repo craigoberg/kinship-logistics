@@ -1,5 +1,10 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
 
+import {
+  PUBLIC_ANON_EXECUTE_FUNCTIONS,
+  PUBLIC_ANON_SELECT_TABLES,
+  SERVICE_ROLE_ONLY_FUNCTIONS,
+} from "@/lib/backup-restore/constants";
 import type {
   SchemaCatalog,
   SchemaColumnRow,
@@ -148,10 +153,17 @@ export async function applySchemaCatalog(
       `ALTER TABLE public.${quoteIdent(table)} ENABLE ROW LEVEL SECURITY;`,
       `rls enable ${table}`,
     );
+    const anonSelect = (PUBLIC_ANON_SELECT_TABLES as readonly string[]).includes(table);
     await run(
-      `GRANT ALL ON TABLE public.${quoteIdent(table)} TO anon, authenticated, service_role;`,
+      `GRANT ALL ON TABLE public.${quoteIdent(table)} TO authenticated, service_role;`,
       `grant ${table}`,
     );
+    if (anonSelect) {
+      await run(
+        `GRANT SELECT ON TABLE public.${quoteIdent(table)} TO anon;`,
+        `grant anon select ${table}`,
+      );
+    }
   }
 
   // ADD COLUMN IF NOT EXISTS
@@ -267,8 +279,15 @@ END $$;`,
     // Grant execute on callable RPCs (non-trigger helpers)
     if (!/RETURNS trigger/i.test(fn.definition)) {
       const args = fn.args?.trim() ?? "";
+      const fnRoles = (SERVICE_ROLE_ONLY_FUNCTIONS as readonly string[]).includes(
+        fn.function_name,
+      )
+        ? "service_role"
+        : (PUBLIC_ANON_EXECUTE_FUNCTIONS as readonly string[]).includes(fn.function_name)
+          ? "anon, authenticated, service_role"
+          : "authenticated, service_role";
       await run(
-        `GRANT EXECUTE ON FUNCTION public.${quoteIdent(fn.function_name)}(${args}) TO anon, authenticated, service_role;`,
+        `GRANT EXECUTE ON FUNCTION public.${quoteIdent(fn.function_name)}(${args}) TO ${fnRoles};`,
         `grant fn ${fn.function_name}`,
       );
     }

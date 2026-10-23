@@ -10,6 +10,7 @@ import {
   sessionRequiresEveningRoll,
 } from "@/lib/api/event-deliver-status";
 import { listEventDaySessions } from "@/lib/api/event-outing";
+import { listBusHomeHandoverGaps } from "@/lib/api/event-transport";
 import { formatDate } from "@/lib/utils";
 
 export function isDaySessionClosed(phase: string): boolean {
@@ -47,7 +48,8 @@ export async function assertPriorDayClosedBeforeOpen(opts: {
 /**
  * BL-088 §1 — day close readiness.
  * Intermediate multi-day nights: evening roll complete (clock may still be early).
- * Final / single day: departure handover (nobody still checked in).
+ * Final / single day: departure handover (nobody still checked in) plus
+ * bus people must already be on the HOME Manifest (not last drop-off).
  */
 export async function assertDaySessionCloseable(opts: {
   eventId: string;
@@ -82,11 +84,32 @@ export async function assertDaySessionCloseable(opts: {
       `Departure handover incomplete — still checked in: ${stillIn.join(", ")}. Check out each participant first.`,
     );
   }
+
+  await assertBusHomeHandoverOnManifest(opts);
+}
+
+async function assertBusHomeHandoverOnManifest(opts: {
+  eventId: string;
+  sessionId: string;
+  sessionDate: string;
+}): Promise<void> {
+  const gaps = await listBusHomeHandoverGaps(opts);
+  if (gaps.names.length === 0) return;
+  const names = gaps.names.join(", ");
+  if (!gaps.homeStarted) {
+    throw new Error(
+      `Start the return run in Manifest first — handed to the bus but not on a HOME list: ${names}.`,
+    );
+  }
+  throw new Error(
+    `Cannot close — handed to the bus but not on HOME Manifest: ${names}. The driver must have them on the return run before the venue waves goodbye.`,
+  );
 }
 
 /**
  * BL-088 §3 — final-day floor must be cleared before the whole event closes.
- * (Return bus completion stays in assessEventReturnTransport.)
+ * Bus handovers must also be on HOME Manifest (same rule as day close).
+ * (Return bus *completion* stays in assessEventReturnTransport.)
  */
 export async function assertFinalDayDepartureComplete(eventId: string): Promise<void> {
   const sessions = await listEventDaySessions(eventId);
@@ -112,4 +135,10 @@ export async function assertFinalDayDepartureComplete(eventId: string): Promise<
       `Final day still has ${stillExpected.length} expected arrival${stillExpected.length === 1 ? "" : "s"} unresolved — mark absent or check in/out before closing the event.`,
     );
   }
+
+  await assertBusHomeHandoverOnManifest({
+    eventId,
+    sessionId: final.id,
+    sessionDate: final.session_date,
+  });
 }

@@ -1,7 +1,16 @@
 import { useMemo, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { Link } from "@tanstack/react-router";
 import { ChevronRight, AlertTriangle } from "lucide-react";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
+import { loadGuestDirectoryContext, type GuestDirectoryContext } from "@/lib/api/guest-directory-context";
 import { iddsiLevel } from "@/lib/iddsi";
+import type { OperatingBoardDay } from "@/lib/api/run-planning";
 import { dayChronoIndex } from "@/lib/data-store";
 import { usePendingScheduleMap } from "@/hooks/use-pending-schedules";
 import {
@@ -18,17 +27,10 @@ interface Props {
   participants: Participant[];
   onSelect: (p: Participant) => void;
   search: string;
-  dayFilter: string;       // 'all' | 'DAY-MON'…'DAY-FRI'
+  dayFilter: string;
+  boardDays: OperatingBoardDay[];
   transportFilter: string; // 'all' | 'bus' | 'private' | 'walk_in' | run code e.g. 'R1'
 }
-
-const WEEK_DAYS: { code: string; short: string; long: string }[] = [
-  { code: "DAY-MON", short: "Mon", long: "Monday" },
-  { code: "DAY-TUE", short: "Tue", long: "Tuesday" },
-  { code: "DAY-WED", short: "Wed", long: "Wednesday" },
-  { code: "DAY-THU", short: "Thu", long: "Thursday" },
-  { code: "DAY-FRI", short: "Fri", long: "Friday" },
-];
 
 const DAY_SHORT_2: Record<string, string> = {
   "DAY-MON": "Mo",
@@ -48,13 +50,31 @@ const TRANSPORT_CLASS: Record<TransportMethod, string> = {
   other: "bg-slate-300 text-slate-700 dark:bg-slate-700 dark:text-slate-200",
 };
 
-export function ParticipantTable({ participants, onSelect, search, dayFilter, transportFilter }: Props) {
+export function ParticipantTable({
+  participants,
+  onSelect,
+  search,
+  dayFilter,
+  boardDays,
+  transportFilter,
+}: Props) {
   const [verifying, setVerifying] = useState<{
     schedule: MedicationSchedule;
     participantName: string;
   } | null>(null);
   const pending = usePendingScheduleMap();
   const { data: indicators } = useParticipantDirectoryIndicators();
+  const guestIds = useMemo(
+    () => participants.filter((p) => p.participantKind === "guest").map((p) => p.id).sort(),
+    [participants],
+  );
+  const guestKey = guestIds.join(",");
+  const { data: guestContext } = useQuery({
+    queryKey: ["guest-directory-context", guestKey],
+    queryFn: () => loadGuestDirectoryContext(guestIds),
+    enabled: guestIds.length > 0,
+    staleTime: 30_000,
+  });
 
   const filtered = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -94,12 +114,14 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
       }
 
       if (!needle) return true;
+      const guestLine = guestContext?.get(p.id)?.line.toLowerCase() ?? "";
       return (
         p.fullName.toLowerCase().includes(needle) ||
-        p.ndisNumber.toLowerCase().includes(needle)
+        p.ndisNumber.toLowerCase().includes(needle) ||
+        guestLine.includes(needle)
       );
     });
-  }, [participants, search, dayFilter, transportFilter, indicators]);
+  }, [participants, search, dayFilter, transportFilter, indicators, guestContext]);
 
   const getInd = (id: string) => indicators?.get(id) ?? EMPTY_INDICATORS;
 
@@ -111,46 +133,65 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
           const ind = getInd(p.id);
           return (
             <li key={p.id}>
-              <button onClick={() => onSelect(p)} className="w-full text-left">
-                <Card className="flex items-start justify-between gap-3 p-4 transition-colors hover:bg-accent/40">
-                  <div className="min-w-0 flex-1 space-y-2">
-                    <div className="flex items-center gap-2">
-                      <span className="truncate font-semibold">{p.fullName}</span>
-                      {pending.has(p.id) && (
-                        <PendingBadge
-                          onClick={() =>
-                            setVerifying({
-                              schedule: pending.get(p.id)!,
-                              participantName: p.fullName,
-                            })
-                          }
-                        />
-                      )}
-                    </div>
-                    <DailyTransportSummary ind={ind} />
-                    <div className="flex flex-wrap gap-1.5">
-                      <MedDayChips ind={ind} />
-                      <IddsiChips p={p} />
-                    </div>
+              <Card
+                onClick={() => onSelect(p)}
+                className={cn(
+                  officeClickRowClass,
+                  "flex w-full items-start justify-between gap-3 p-4 text-left",
+                  (p.participantKind === "guest" ? !!p.archivedAt : p.serviceStatus === "exited") && "bg-secondary/25",
+                )}
+              >
+                <div className="min-w-0 flex-1 space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="truncate font-semibold">{p.fullName}</span>
+                    {p.participantKind === "guest" && (
+                      <PersonKindBadge kind="guest" />
+                    )}
+                    <GuestContext guest={guestContext?.get(p.id) ?? null} />
+                    {p.participantKind === "guest" && p.archivedAt && (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                        Archived
+                      </Badge>
+                    )}
+                    {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                      <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                        Off-boarded
+                      </Badge>
+                    )}
+                    {pending.has(p.id) && (
+                      <PendingBadge
+                        onClick={() =>
+                          setVerifying({
+                            schedule: pending.get(p.id)!,
+                            participantName: p.fullName,
+                          })
+                        }
+                      />
+                    )}
                   </div>
-                  <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
-                </Card>
-              </button>
+                  <DailyTransportSummary ind={ind} days={boardDays.map((d) => d.code)} />
+                  <div className="flex flex-wrap gap-1.5">
+                    <MedDayChips ind={ind} />
+                    <IddsiChips p={p} />
+                  </div>
+                </div>
+                <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+              </Card>
             </li>
           );
         })}
       </ul>
 
-      {/* Desktop: Mon-Fri grid */}
+      {/* Desktop: operating-day columns */}
       <div className="hidden overflow-hidden rounded-lg border border-border md:block">
         <table className="w-full text-sm">
           <thead className="bg-muted/60 text-left text-xs uppercase tracking-wide text-muted-foreground">
             <tr>
               <th className="px-3 py-2 font-medium">Participant</th>
-              {WEEK_DAYS.map((d) => (
+              {boardDays.map((d) => (
                 <th key={d.code} className="px-2 py-2 font-medium w-[88px]">
                   <div className="flex flex-col items-center leading-tight">
-                    <span>{d.short}</span>
+                    <span>{d.label}</span>
                     <span className="mt-0.5 grid grid-cols-2 gap-1 text-[9px] font-normal normal-case text-muted-foreground/80">
                       <span>In</span>
                       <span>Out</span>
@@ -170,11 +211,29 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                 <tr
                   key={p.id}
                   onClick={() => onSelect(p)}
-                  className="cursor-pointer border-t border-border transition-colors hover:bg-accent/40"
+                  className={cn(
+                    officeClickRowClass,
+                    "border-t border-border",
+                    (p.participantKind === "guest" ? !!p.archivedAt : p.serviceStatus === "exited") && "bg-secondary/25",
+                  )}
                 >
                   <td className="px-3 py-2 font-medium">
-                    <div className="flex items-center gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
                       <span className="truncate">{p.fullName}</span>
+                      {p.participantKind === "guest" && (
+                        <PersonKindBadge kind="guest" />
+                      )}
+                      <GuestContext guest={guestContext?.get(p.id) ?? null} />
+                      {p.participantKind === "guest" && p.archivedAt && (
+                        <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                          Archived
+                        </Badge>
+                      )}
+                      {p.participantKind !== "guest" && p.serviceStatus === "exited" && (
+                        <Badge variant="secondary" className="shrink-0 text-[10px] uppercase tracking-wide">
+                          Off-boarded
+                        </Badge>
+                      )}
                       {pending.has(p.id) && (
                         <PendingBadge
                           onClick={() =>
@@ -187,7 +246,7 @@ export function ParticipantTable({ participants, onSelect, search, dayFilter, tr
                       )}
                     </div>
                   </td>
-                  {WEEK_DAYS.map((d) => (
+                  {boardDays.map((d) => (
                     <td key={d.code} className="px-2 py-2 align-middle">
                       <DayCell day={ind.schedule[d.code]} />
                     </td>
@@ -298,10 +357,17 @@ function MedDayChips({ ind }: { ind: ParticipantIndicators }) {
   );
 }
 
-function DailyTransportSummary({ ind }: { ind: ParticipantIndicators }) {
-  const codes = Object.keys(ind.schedule).sort(
-    (a, b) => dayChronoIndex(a) - dayChronoIndex(b),
-  );
+function DailyTransportSummary({
+  ind,
+  days,
+}: {
+  ind: ParticipantIndicators;
+  days: string[];
+}) {
+  const open = new Set(days);
+  const codes = Object.keys(ind.schedule)
+    .filter((c) => open.has(c))
+    .sort((a, b) => dayChronoIndex(a) - dayChronoIndex(b));
   if (!codes.length) {
     return <p className="text-xs text-muted-foreground">No recurring schedule</p>;
   }
@@ -340,6 +406,26 @@ function IddsiChips({ p, className }: { p: Participant; className?: string }) {
         </span>
       )}
     </div>
+  );
+}
+
+function GuestContext({ guest }: { guest: GuestDirectoryContext | null }) {
+  if (!guest) return null;
+  return (
+    <span className="flex basis-full flex-wrap items-center gap-2 font-normal">
+      <span className="text-xs font-normal text-muted-foreground">{guest.line}</span>
+      {guest.issueId ? (
+        <Button asChild size="sm" variant="outline" className="h-6 px-2 text-[10px]">
+          <Link
+            to="/governance"
+            search={{ tab: "issues", issue: guest.issueId }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            Hub issue
+          </Link>
+        </Button>
+      ) : null}
+    </span>
   );
 }
 

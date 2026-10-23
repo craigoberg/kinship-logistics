@@ -42,7 +42,7 @@ export const hubUpdateSlaTopic: HelpTopic = {
     },
     {
       heading: "How to stay green on urgency",
-      body: "Open Manage issue → Log Note with a real operational update (or Resolve if done). Cosmetic “bump” notes without substance waste the audit trail — write what a manager or auditor needs next week.",
+      body: "Click the card, then Log Note with a real operational update (or Resolve if done). Cosmetic “bump” notes without substance waste the audit trail — write what a manager or auditor needs next week. Resolved cards show the close time and how long the item was open, on the list as well as inside.",
     },
     {
       heading: "Thresholds are configured in Admin",

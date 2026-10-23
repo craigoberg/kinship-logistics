@@ -25,6 +25,8 @@ interface Props {
   sessionDate: string;
   open: boolean;
   onOpenChange: (open: boolean) => void;
+  /** When set (e.g. Programme activity), scopes the issue subject to that stop. */
+  activityLabel?: string | null;
 }
 
 export function EventDayVerbalAnomalyFlow({
@@ -34,6 +36,7 @@ export function EventDayVerbalAnomalyFlow({
   sessionDate,
   open,
   onOpenChange,
+  activityLabel = null,
 }: Props) {
   const qc = useQueryClient();
   const [verbalPending, setVerbalPending] = useState<{
@@ -42,7 +45,9 @@ export function EventDayVerbalAnomalyFlow({
     occurredAt: string;
   } | null>(null);
 
-  const subjectLabel = `${eventTitle} · ${formatDate(sessionDate)}`;
+  const subjectLabel = activityLabel?.trim()
+    ? `${eventTitle} · ${formatDate(sessionDate)} · ${activityLabel.trim()}`
+    : `${eventTitle} · ${formatDate(sessionDate)}`;
 
   return (
     <>

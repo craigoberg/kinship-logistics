@@ -10,6 +10,7 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { seedEventAttendanceRoll } from "@/lib/api/event-attendance";
+import { carrySupportAlreadyOnTrip } from "@/lib/api/event-support";
 import { sessionRequiresMorningRoll } from "@/lib/api/event-deliver-status";
 import { resolveOvernightWakeBase } from "@/lib/api/event-deliver-status";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
@@ -110,6 +111,11 @@ export async function applyOvernightDayStartContinuity(
     eventId: input.eventId,
     sessionDate: input.sessionDate,
   });
+  await carrySupportAlreadyOnTrip({
+    sessionId: input.sessionId,
+    eventId: input.eventId,
+    actorStaffId: input.actorStaffId,
+  });
 
   const nowIso = operationalNowIso();
   const checker = input.actorStaffId;
@@ -202,26 +208,34 @@ export async function applyOvernightDayStartContinuity(
  */
 export async function reconcileOvernightAttendanceContinuity(
   input: Omit<OvernightContinuityInput, "source">,
-): Promise<boolean> {
+): Promise<{ refresh: boolean; openMorningRoll: boolean }> {
   const required = await sessionRequiresMorningRoll(input.eventId, input.sessionDate);
-  if (!required) return false;
+  if (!required) return { refresh: false, openMorningRoll: false };
 
   const { data: rows, error } = await supabase
     .from("event_attendance_log")
     .select("status")
     .eq("event_day_session_id", input.sessionId);
   if (error) throw error;
-  if (!rows?.length) return false;
+  if (!rows?.length) return { refresh: false, openMorningRoll: false };
 
   const statuses = rows.map((r) => (r as { status: string }).status);
   const allExpected = statuses.every((s) => s === "expected");
+  const supportCarried = await carrySupportAlreadyOnTrip({
+    sessionId: input.sessionId,
+    eventId: input.eventId,
+    actorStaffId: input.actorStaffId,
+  }).catch(() => 0);
 
   if (allExpected) {
     const result = await applyOvernightDayStartContinuity({
       ...input,
       source: "reconcile",
     });
-    return result.applied || result.leftTripCarried > 0;
+    return {
+      refresh: result.applied || result.leftTripCarried > 0 || supportCarried > 0,
+      openMorningRoll: result.applied,
+    };
   }
 
   // Already opened / continuity applied — still heal Left trip carry for Day N+1.
@@ -230,7 +244,7 @@ export async function reconcileOvernightAttendanceContinuity(
     eventId: input.eventId,
     sessionDate: input.sessionDate,
   });
-  return carried > 0;
+  return { refresh: carried > 0 || supportCarried > 0, openMorningRoll: false };
 }
 
 /** Seed roster then apply overnight continuity when Day 2+. */

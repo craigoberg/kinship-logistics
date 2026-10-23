@@ -37,7 +37,7 @@ export const checkinRollEscalationsTopic: HelpTopic = {
     },
     {
       heading: "Day Centre Check-In / arrival",
-      body: "Each expected participant has an expected arrival time from their schedule. If they are still outstanding after that time, the roll and duty-of-care tiles escalate (No-Show / Missing style). Operators can defer expected arrival (single person or bulk group) when the bus is late — that pushes the clock forward. Mark Absent with a real reason when they are not coming; do not endless-defer a true absence.",
+      body: "Each expected participant has an expected arrival time from their schedule. If they are still outstanding after that time, the roll and duty-of-care tiles escalate (No-Show / Missing style). Operators can defer expected arrival (single person or bulk group) when the bus is late — that pushes the clock forward. Mark Absent with a real reason when they are not coming; do not endless-defer a true absence. Arrival overdue REDs stay in the Hub for review (Lost Soul Rule) but do not block the next Open Centre. If they later walk in, check them in — they are not lost; the RED stays open until a manager reviews it.",
     },
     {
       heading: "Event / trip Check-In (arrival)",

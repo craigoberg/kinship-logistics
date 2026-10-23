@@ -35,6 +35,8 @@ import {
   XCircle,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindText } from "@/components/people/person-kind-badge";
+import { personKindFromLabel } from "@/lib/ui/person-kind-chip";
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
@@ -195,6 +197,14 @@ export function TripReportTab({ event }: Props) {
         }}
       />
 
+      <TripReportDocument report={report} />
+    </div>
+  );
+}
+
+export function TripReportDocument({ report }: { report: TripReport }) {
+  return (
+    <div className="space-y-6">
       {/* ── Event header ── */}
       <Section icon={<FileText className="h-4 w-4" />} title="Event summary">
         <div className="grid gap-2 sm:grid-cols-2 text-sm">
@@ -258,12 +268,48 @@ export function TripReportTab({ event }: Props) {
       )}
 
       {/* ── Roster ── */}
-      <Section icon={<Users className="h-4 w-4" />} title={`Roster (${report.rosterSummary.total})`}>
+      <Section icon={<Users className="h-4 w-4" />} title={`Attendees (${report.rosterSummary.attendees})`}>
         <div className="mb-3 flex flex-wrap gap-3 text-sm">
-          <span className="font-medium">{report.rosterSummary.confirmed} confirmed</span>
+          <span className="font-medium">{report.rosterSummary.confirmed} participants</span>
+          <span className="font-medium">{report.rosterSummary.nonParticipants} non-participants</span>
           <span className="text-muted-foreground">{report.rosterSummary.cancelled} cancelled</span>
         </div>
         <RosterTable roster={report.roster} />
+        {(report.support ?? []).length > 0 && (
+          <div className="mt-4">
+            <h4 className="mb-2 text-sm font-semibold">Non-participants</h4>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead className="text-left text-xs uppercase tracking-wide text-muted-foreground">
+                  <tr className="border-b">
+                    <th className="pb-1 pr-4">Name</th>
+                    <th className="pb-1 pr-4">Role</th>
+                    <th className="pb-1 pr-4">Meeting point</th>
+                    <th className="pb-1">Home</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {report.support.map((s) => (
+                    <tr key={`${s.displayName}-${s.roleLabel}`} className="border-b last:border-0">
+                      <td className="py-1.5 pr-4 font-medium">{s.displayName}</td>
+                      <td className="py-1.5 pr-4">
+                        {personKindFromLabel(s.roleLabel) ? (
+                          <PersonKindText kind={personKindFromLabel(s.roleLabel)!} />
+                        ) : (
+                          s.roleLabel
+                        )}
+                      </td>
+                      <td className="py-1.5 pr-4">
+                        {s.outboundTransportMode === "bus" ? "Bus" : "Self"}
+                      </td>
+                      <td className="py-1.5">{s.returnTransportMode === "bus" ? "Bus" : "Self"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        )}
       </Section>
 
       {/* ── Finance ── */}
@@ -463,7 +509,7 @@ function ReportIssueRow({ issue }: { issue: TripReportIssue }) {
             <p className="mt-0.5 text-muted-foreground">Workaround: {issue.workaroundPlan}</p>
           )}
           <div className="mt-1 flex flex-wrap gap-2 text-[10px] text-muted-foreground">
-            <span>{formatDateTime(issue.createdAt)}</span>
+            <span>{formatDateTime(issue.occurredAt || issue.createdAt)}</span>
             <span className="font-semibold uppercase">{sevLabel}</span>
             {issue.isVerbalWorkaround && (
               <span className="font-semibold text-amber-700">Verbal workaround — Hub close-out by manager</span>

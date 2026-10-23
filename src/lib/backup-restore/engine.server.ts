@@ -16,11 +16,8 @@ import {
   schemaCatalogSummary,
   type SchemaCatalog,
 } from "@/lib/backup-restore/schema-catalog";
-import {
-  createPublishableServerClient,
-  createServiceServerClient,
-  getServerSupabaseUrl,
-} from "@/lib/supabase.server";
+import { assertManagerPin } from "@/lib/auth/pin-auth.server";
+import { createServiceServerClient, getServerSupabaseUrl } from "@/lib/supabase.server";
 import type { SupabaseClient } from "@supabase/supabase-js";
 
 const PAGE_SIZE = 1000;
@@ -32,7 +29,7 @@ export interface BackupSummary {
   tables: { name: string; rowCount: number }[];
 }
 
-async function listPublicTables(client = createPublishableServerClient()): Promise<string[]> {
+async function listPublicTables(client = createServiceServerClient()): Promise<string[]> {
   const { data, error } = await client.rpc("list_backup_tables");
   if (error) {
     throw new Error(
@@ -46,7 +43,7 @@ async function listPublicTables(client = createPublishableServerClient()): Promi
 
 async function orderTablesForRestore(
   tables: string[],
-  client = createPublishableServerClient(),
+  client = createServiceServerClient(),
 ): Promise<string[]> {
   const { data, error } = await client.rpc("order_tables_for_restore", {
     p_tables: tables,
@@ -56,7 +53,7 @@ async function orderTablesForRestore(
 }
 
 async function fetchSchemaCatalog(
-  client = createPublishableServerClient(),
+  client = createServiceServerClient(),
 ): Promise<SchemaCatalog> {
   const { data, error } = await client.rpc("export_backup_schema_catalog");
   if (error) {
@@ -72,7 +69,7 @@ async function fetchSchemaCatalog(
 
 async function fetchTableRows(
   tableName: string,
-  client = createPublishableServerClient(),
+  client = createServiceServerClient(),
 ): Promise<Record<string, unknown>[]> {
   const rows: Record<string, unknown>[] = [];
   let from = 0;
@@ -96,7 +93,7 @@ export async function summarizeBackupTarget(): Promise<BackupSummary> {
   const tables = await listPublicTables();
   const preview = await Promise.all(
     tables.map(async (name) => {
-      const { count, error } = await createPublishableServerClient()
+      const { count, error } = await createServiceServerClient()
         .from(name)
         .select("*", { count: "exact", head: true });
       if (error) throw new Error(`Count failed on ${name}: ${error.message}`);
@@ -113,7 +110,7 @@ export async function summarizeBackupTarget(): Promise<BackupSummary> {
 }
 
 export async function createFullBackup(): Promise<BackupManifest> {
-  const client = createPublishableServerClient();
+  const client = createServiceServerClient();
   const tableNames = await listPublicTables();
   const schema = await fetchSchemaCatalog(client);
   const tables: Record<string, BackupTableBundle> = {};
@@ -135,35 +132,6 @@ export async function createFullBackup(): Promise<BackupManifest> {
     tables,
     schema,
   };
-}
-
-export async function verifyManagerPin(staffId: string, pin: string): Promise<void> {
-  const client = createPublishableServerClient();
-  const { data, error } = await client.rpc("verify_operator_pin", {
-    entered_pin: pin,
-  });
-  if (error) throw new Error(`PIN verification failed: ${error.message}`);
-
-  const rows = (Array.isArray(data) ? data : data ? [data] : []) as Array<{
-    id: string;
-    role: string | null;
-    personnel_type?: string | null;
-  }>;
-  const row = rows.find((r) => r.id === staffId);
-  if (!row) throw new Error("Incorrect manager PIN.");
-
-  const access = (row.personnel_type ?? row.role ?? "")
-    .trim()
-    .toLowerCase()
-    .replace(/\s+/g, "_");
-  const isCoordinator =
-    access === "coordinator" ||
-    access === "manager" ||
-    access === "assistant_manager" ||
-    access.includes("manager");
-  if (!isCoordinator) {
-    throw new Error("Selected operator is not a manager.");
-  }
 }
 
 async function insertRestoreRows(
@@ -256,14 +224,13 @@ export async function restoreFullBackup(
   manifest: BackupManifest,
   options: RestoreOptions,
 ): Promise<RestoreResult> {
-  await verifyManagerPin(options.managerStaffId, options.managerPin);
+  await assertManagerPin(options.managerStaffId, options.managerPin);
 
   if (!options.applyStructure && !options.restoreData) {
     throw new Error("Select at least one of: Apply infrastructure, Restore table data.");
   }
 
   const service = createServiceServerClient();
-  const readClient = createPublishableServerClient();
   const warnings: string[] = [];
   let schemaApplied = false;
   let schemaStatements = 0;
@@ -298,7 +265,7 @@ export async function restoreFullBackup(
   }
 
   // Re-list tables after schema apply (new tables appear)
-  const currentTables = await listPublicTables(readClient);
+  const currentTables = await listPublicTables(service);
   const currentSet = new Set(currentTables);
 
   const preservedTables = options.restoreLoginDetails
@@ -332,19 +299,13 @@ export async function restoreFullBackup(
   const orderedTruncate = await orderTablesForDataRestore(
     tablesToTruncate,
     catalog,
-    readClient,
+    service,
   );
-  const { error: truncateErr } = await service.rpc("truncate_backup_tables", {
-    p_tables: orderedTruncate,
-  });
-  if (truncateErr) {
-    throw new Error(
-      `Truncate failed. Ensure SUPABASE_SERVICE_ROLE_KEY is set and docs/sql/2026-07-11_backup_restore_rpcs.sql is applied — ${truncateErr.message}`,
-    );
-  }
 
-  // Hard gate: drop ALL public FKs before inserts (one RPC). Without this, child
-  // tables fail when parents sort wrong or session rows load after attendance.
+  // Drop FKs BEFORE truncate. TRUNCATE … CASCADE follows foreign keys even when
+  // the child is on the preserve list. staff_registry.person_id → people(id)
+  // was wiping every staff row on a data-only restore, then the preserve list
+  // refused to load them back.
   const { data: droppedFkCount, error: dropFkErr } = await service.rpc(
     "backup_drop_all_public_fks",
   );
@@ -354,14 +315,23 @@ export async function restoreFullBackup(
     );
   }
   warnings.push(
-    `FK load window: dropped ${Number(droppedFkCount ?? 0)} foreign key(s) before data insert.`,
+    `FK load window: dropped ${Number(droppedFkCount ?? 0)} foreign key(s) before truncate.`,
   );
+
+  const { error: truncateErr } = await service.rpc("truncate_backup_tables", {
+    p_tables: orderedTruncate,
+  });
+  if (truncateErr) {
+    throw new Error(
+      `Truncate failed. Ensure SUPABASE_SERVICE_ROLE_KEY is set and docs/sql/2026-07-11_backup_restore_rpcs.sql is applied — ${truncateErr.message}`,
+    );
+  }
 
   const restoreTargets = tablesToRestore.filter((t) => !preservedTables.includes(t));
   const orderedRestore = await orderTablesForDataRestore(
     restoreTargets,
     catalog,
-    readClient,
+    service,
   );
 
   let rowCount = 0;

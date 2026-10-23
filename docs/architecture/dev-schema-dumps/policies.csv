@@ -1,0 +1,168 @@
+schemaname,tablename,policyname,permissive,roles,cmd,qual,with_check
+public,asset_checkpoints,Allow authenticated select checkpoints,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,asset_clearance_items,Allow all access to clearance items,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,asset_daily_clearance,asset_daily_clearance readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,asset_daily_clearance,asset_daily_clearance updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,asset_daily_clearance,asset_daily_clearance writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,asset_maintenance_logs,asset_maintenance_logs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,asset_maintenance_logs,asset_maintenance_logs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,asset_maintenance_logs,asset_maintenance_logs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,assets,assets readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,assets,assets updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,assets,assets writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,attendance_roster_logs,attendance_roster_logs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,attendance_roster_logs,attendance_roster_logs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,attendance_roster_logs,attendance_roster_logs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,carers_registry,carers_registry readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,carers_registry,carers_registry updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,carers_registry,carers_registry writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,centre_operating_hours,centre_operating_hours readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,centre_operating_hours,centre_operating_hours updatable,PERMISSIVE,{authenticated},UPDATE,true,true
+public,centre_operating_hours,centre_operating_hours writable,PERMISSIVE,{authenticated},INSERT,null,true
+public,charge_codes,charge_codes readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,charge_codes,charge_codes updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,charge_codes,charge_codes writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,checklist_items,checklist_items_read,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,checklist_responses,checklist_responses_insert,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,checklist_responses,checklist_responses_read,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,client_attendance_log,client_attendance_log readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,client_attendance_log,client_attendance_log updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,client_attendance_log,client_attendance_log writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,compliance_assets,compliance_assets readable by all,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,compliance_assets,compliance_assets writable,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,compliance_audit_logs,compliance_audit_logs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,compliance_audit_logs,compliance_audit_logs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,compliance_audit_logs,compliance_audit_logs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_activity_rolls,anon_delete_event_activity_rolls,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_activity_rolls,anon_insert_event_activity_rolls,PERMISSIVE,{anon},INSERT,null,true
+public,event_activity_rolls,anon_read_event_activity_rolls,PERMISSIVE,{anon},SELECT,true,null
+public,event_activity_rolls,anon_update_event_activity_rolls,PERMISSIVE,{anon},UPDATE,true,null
+public,event_attendance_log,event_attendance_log deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_attendance_log,event_attendance_log readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_attendance_log,event_attendance_log updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_attendance_log,event_attendance_log writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_bus_manifest,event_bus_manifest deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_bus_manifest,event_bus_manifest readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_bus_manifest,event_bus_manifest updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_bus_manifest,event_bus_manifest writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_curfew_log,event_curfew_log deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_curfew_log,event_curfew_log readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_curfew_log,event_curfew_log updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_curfew_log,event_curfew_log writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_day_med_alternate_plans,anon_all_event_day_med_alternate_plans,PERMISSIVE,{anon},ALL,true,true
+public,event_day_sessions,anon_update_event_day_sessions,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_day_sessions,event_day_sessions deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_day_sessions,event_day_sessions readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_day_sessions,event_day_sessions updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_day_sessions,event_day_sessions writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_financial_ledger,event_financial_ledger readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_financial_ledger,event_financial_ledger updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_financial_ledger,event_financial_ledger writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_manifest,event_manifest readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_manifest,event_manifest updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_manifest,event_manifest writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_meal_service_rolls,anon_all_event_meal_service_rolls,PERMISSIVE,{anon},ALL,true,true
+public,event_morning_log,event_morning_log deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_morning_log,event_morning_log readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_morning_log,event_morning_log updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_morning_log,event_morning_log writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_roster_bookings,event_roster_bookings readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_roster_bookings,event_roster_bookings updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_roster_bookings,event_roster_bookings writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_venue_reconfirmations,event_venue_reconfirmations deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_venue_reconfirmations,event_venue_reconfirmations readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_venue_reconfirmations,event_venue_reconfirmations updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_venue_reconfirmations,event_venue_reconfirmations writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,event_venue_stops,event_venue_stops deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,event_venue_stops,event_venue_stops readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,event_venue_stops,event_venue_stops updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,event_venue_stops,event_venue_stops writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,hub_issue_notes,hub_issue_notes_insert,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,hub_issue_notes,hub_issue_notes_select,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,maintenance_items,anon_maintenance_items_all,PERMISSIVE,{anon},ALL,true,true
+public,maintenance_items,authenticated_maintenance_items_all,PERMISSIVE,{authenticated},ALL,true,true
+public,maintenance_notes,anon_maintenance_notes_all,PERMISSIVE,{anon},ALL,true,true
+public,maintenance_notes,authenticated_maintenance_notes_all,PERMISSIVE,{authenticated},ALL,true,true
+public,medication_administration_log,medication_administration_log readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,medication_administration_log,medication_administration_log updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,medication_administration_log,medication_administration_log writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,offline_sync_logs,offline_sync_logs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,offline_sync_logs,offline_sync_logs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,offline_sync_logs,offline_sync_logs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,operational_emergencies,op_emergencies_anon_all,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,operational_emergency_muster,op_emergency_muster_anon_all,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,operational_escalations,global_public_policy,PERMISSIVE,{public},ALL,true,true
+public,operational_incidents,incidents_insert_all,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,operational_incidents,incidents_read_all,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,operational_incidents,incidents_update_all,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,operational_ledger,ledger_insert_all,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,operational_ledger,ledger_read_all,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participant_attendance_schedules,participant_attendance_schedules readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participant_attendance_schedules,participant_attendance_schedules updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,participant_attendance_schedules,participant_attendance_schedules writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,participant_compliance_and_alerts,participant_compliance_and_alerts readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participant_compliance_and_alerts,participant_compliance_and_alerts updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,participant_compliance_and_alerts,participant_compliance_and_alerts writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,participant_financial_ledger,participant_financial_ledger readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participant_financial_ledger,participant_financial_ledger updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,participant_financial_ledger,participant_financial_ledger writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,participant_infectious_exclusions,infectious_exclusions_anon_all,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,participant_medication_schedules,participant_medication_schedules readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participant_medication_schedules,participant_medication_schedules updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,participant_medication_schedules,participant_medication_schedules writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,participants,participants readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,participants,participants updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,participants,participants writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,site_day_activities,kinship_anon_all_site_day_activities,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,site_day_meal_service_rolls,kinship_anon_all_site_day_meal_service_rolls,PERMISSIVE,"{anon,authenticated}",ALL,true,true
+public,site_day_sessions,Allow authenticated changes,PERMISSIVE,{authenticated},ALL,true,null
+public,site_day_sessions,Allow authenticated read access,PERMISSIVE,{authenticated},SELECT,true,null
+public,site_day_sessions,Universal access policy,PERMISSIVE,{public},ALL,true,true
+public,site_day_visitors,site_day_visitors deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,site_day_visitors,site_day_visitors readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,site_day_visitors,site_day_visitors updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,site_day_visitors,site_day_visitors writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,site_issues_register,sir_delete_all,PERMISSIVE,"{anon,authenticated,service_role}",DELETE,true,null
+public,site_issues_register,sir_insert_all,PERMISSIVE,"{anon,authenticated,service_role}",INSERT,null,true
+public,site_issues_register,sir_select_all,PERMISSIVE,"{anon,authenticated,service_role}",SELECT,true,null
+public,site_issues_register,sir_update_all,PERMISSIVE,"{anon,authenticated,service_role}",UPDATE,true,true
+public,staff_compliance_and_certs,staff_compliance_and_certs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,staff_compliance_and_certs,staff_compliance_and_certs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,staff_compliance_and_certs,staff_compliance_and_certs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,staff_registry,Universal access policy,PERMISSIVE,{public},ALL,true,true
+public,system_lookup_parameters,system_lookup_parameters readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,system_lookup_parameters,system_lookup_parameters updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,system_lookup_parameters,system_lookup_parameters writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,system_operational_settings,Enable all operations for settings,PERMISSIVE,{authenticated},ALL,true,true
+public,system_parameters,system_parameters readable by all,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,system_parameters,system_parameters updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,transport_assets,transport_assets readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,transport_assets,transport_assets updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,transport_assets,transport_assets writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,transport_requests,transport_requests authenticated all,PERMISSIVE,{authenticated},ALL,true,true
+public,transport_trips,transport_trips deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,transport_trips,transport_trips readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,transport_trips,transport_trips updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,transport_trips,transport_trips writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,trip_legs,trip_legs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,trip_legs,trip_legs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,trip_legs,trip_legs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,vendors,vendors readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,vendors,vendors updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,vendors,vendors writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,venue_safety_answers,venue_safety_answers deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,venue_safety_answers,venue_safety_answers readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,venue_safety_answers,venue_safety_answers updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,venue_safety_answers,venue_safety_answers writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,venue_safety_baseline_signoffs,venue_safety_baseline_signoffs deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,venue_safety_baseline_signoffs,venue_safety_baseline_signoffs readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,venue_safety_baseline_signoffs,venue_safety_baseline_signoffs updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,venue_safety_baseline_signoffs,venue_safety_baseline_signoffs writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,venue_template_fields,venue_template_fields deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,venue_template_fields,venue_template_fields readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,venue_template_fields,venue_template_fields updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,venue_template_fields,venue_template_fields writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true
+public,venues,venues deletable,PERMISSIVE,"{anon,authenticated}",DELETE,true,null
+public,venues,venues readable,PERMISSIVE,"{anon,authenticated}",SELECT,true,null
+public,venues,venues updatable,PERMISSIVE,"{anon,authenticated}",UPDATE,true,true
+public,venues,venues writable,PERMISSIVE,"{anon,authenticated}",INSERT,null,true

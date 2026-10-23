@@ -26,6 +26,7 @@ import { listParticipants } from "@/lib/data-store";
 import { eventDeliverStatusKey } from "@/lib/api/event-deliver-status";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
 import { RollCallDeferDialog } from "@/components/events/roll-call-defer-dialog";
+import { isNetworkError } from "@/lib/manifest-offline";
 
 interface Props {
   eventId: string;
@@ -145,7 +146,9 @@ export function EventDeliverRollAlertBanner({
             queryKey: ["event-accountability-roll"],
           });
         })
-        .catch((e) => console.error("[roll-alert] sweep failed", e));
+        .catch((e) => {
+          if (!isNetworkError(e)) console.error("[roll-alert] sweep failed", e);
+        });
     };
     run();
     const id = window.setInterval(run, 60_000);

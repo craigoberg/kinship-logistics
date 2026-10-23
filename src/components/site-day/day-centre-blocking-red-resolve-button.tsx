@@ -13,6 +13,8 @@ export type DayCentreManageableIssue = {
   issue_description?: string | null;
   createdAt?: string;
   created_at?: string;
+  occurredAt?: string | null;
+  occurred_at?: string | null;
   eventId?: string | null;
   event_id?: string | null;
 };
@@ -25,6 +27,8 @@ function toUnifiedIssue(row: DayCentreManageableIssue): UnifiedIssue {
   ).trim();
   const createdAt =
     row.createdAt ?? row.created_at ?? new Date().toISOString();
+  const occurredAt =
+    row.occurredAt ?? row.occurred_at ?? createdAt;
   const eventId = row.eventId ?? row.event_id ?? null;
   const sev = (row.severity ?? "").toLowerCase();
   const severity =
@@ -40,7 +44,7 @@ function toUnifiedIssue(row: DayCentreManageableIssue): UnifiedIssue {
     description: desc,
     status: row.status ?? "open",
     createdAt,
-    occurredAt: createdAt,
+    occurredAt,
     sourceRowId: row.id,
     eventId,
     raw: row,

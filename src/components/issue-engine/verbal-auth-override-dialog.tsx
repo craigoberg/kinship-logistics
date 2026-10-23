@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
 import { PinPad } from "@/components/auth/pin-pad";
 import { verifyManagerPin, resolveOperatorStaffIdFromPin } from "@/components/auth/pin-verify";
+import { isManagerOrAssistantAccess } from "@/lib/access-roles";
 import {
   Select,
   SelectContent,
@@ -90,13 +91,7 @@ export function VerbalAuthOverrideDialog({
     queryKey: ["staff-registry", "coordinators"],
     queryFn: async () => {
       const all = await listStaffRegistry();
-      return all.filter(
-        (s) =>
-          s.active &&
-          (s.role === "coordinator" ||
-            s.role?.toLowerCase().includes("manager") ||
-            s.role?.toLowerCase().includes("coordinator")),
-      );
+      return all.filter((s) => s.active && isManagerOrAssistantAccess(s.personnelType));
     },
     staleTime: 120_000,
     enabled: open,
@@ -120,7 +115,6 @@ export function VerbalAuthOverrideDialog({
       setManagerPinVerified(true);
       setPinDraft("");
       setActivePinStep(null);
-      toast.success("Manager PIN verified");
     } catch (e) {
       setPinError(e instanceof Error ? e.message : "Incorrect manager PIN.");
       setPinDraft("");
@@ -137,7 +131,6 @@ export function VerbalAuthOverrideDialog({
       setOperatorPinVerified(true);
       setPinDraft("");
       setActivePinStep(null);
-      toast.success("Operator PIN verified");
     } catch (e) {
       setPinError(e instanceof Error ? e.message : "Incorrect operator PIN.");
       setPinDraft("");
@@ -297,7 +290,7 @@ export function VerbalAuthOverrideDialog({
               ) : (
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
                   <p className="mb-2 text-xs text-muted-foreground">
-                    Manager PIN — 4 digits
+                    Manager sign-in PIN (4 digits, or all 6)
                   </p>
                   <PinPad
                     value={pinDraft}
@@ -358,7 +351,7 @@ export function VerbalAuthOverrideDialog({
                 </Button>
               ) : (
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <p className="mb-2 text-xs text-muted-foreground">Your 4-digit operator PIN</p>
+                  <p className="mb-2 text-xs text-muted-foreground">Your sign-in PIN (4 digits, or all 6)</p>
                   <PinPad
                     value={pinDraft}
                     onChange={setPinDraft}

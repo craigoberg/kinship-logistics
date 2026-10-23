@@ -2,10 +2,10 @@
  * Venues Management workspace — GUARDRAILS §12.2
  *
  * Tabs:
- *   Registry  — list all venues; create / edit / archive / clone
- *   [selected venue] — template fields + baseline sign-off history
+ *   Venues — list; expand a row for template, baseline, and compliance
+ *   Venue types — names offered on the venue form
  */
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { toast } from "sonner";
 import {
@@ -13,7 +13,8 @@ import {
   CheckCircle2,
   ClipboardCheck,
   Copy,
-  FolderOpen,
+  ChevronDown,
+  ChevronRight,
   Loader2,
   Pencil,
   Plus,
@@ -24,6 +25,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { IconActionButton } from "@/components/ui/icon-action-button";
+import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -49,6 +52,7 @@ import {
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   Table,
   TableBody,
@@ -70,7 +74,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { CharacterCountedInput } from "@/components/ui/character-counted-input";
 import { MobileOptionButton } from "@/components/manifest/mobile-field-button";
-import { PinEntryTrigger } from "@/components/auth/pin-entry-dialog";
+import { PinEntryDialog } from "@/components/auth/pin-entry-dialog";
 import { verifyManagerPin } from "@/components/auth/pin-verify";
 import { getActiveUserProfile } from "@/lib/data-store";
 import { FormattedDateTime } from "@/components/ui/formatted-time";
@@ -80,16 +84,20 @@ import { useStaffRegistry } from "@/hooks/use-supabase-data";
 import {
   addVenueTemplateField,
   archiveVenue,
+  restoreVenue,
   batchLatestBaselineSignoffs,
   cloneVenue,
   deleteVenueTemplateField,
   getLatestBaselineSignoff,
+  getVenue,
   listBaselineSignoffs,
   listVenueTemplateFields,
   listVenues,
   submitBaselineSignoff,
   updateVenueTemplateField,
+  saveVenueFieldAssessment,
   upsertVenue,
+  venueAssessmentResult,
   type AnswerType,
   type BaselineSignoffAnswer,
   type RiskTier,
@@ -99,18 +107,9 @@ import {
   type VenueUseReason,
 } from "@/lib/api/venues";
 import { MIN_EVIDENCE } from "@/lib/governance/constants";
-
-const VENUE_TYPE_LABELS: Record<string, string> = {
-  general: "General",
-  park: "Park / outdoor",
-  hotel: "Hotel / accommodation",
-  cinema: "Cinema / theatre",
-  museum: "Museum / gallery",
-  sports: "Sports / recreation",
-  restaurant: "Restaurant / café",
-  shopping: "Shopping centre",
-  club: "Club / social venue",
-};
+import { BUILTIN_VENUE_TYPES, venueTypeLabel } from "@/lib/api/venue-types";
+import { ensureDueVenueBaselineIssues, syncVenueTypeRequirements } from "@/lib/api/venue-requirements";
+import { useVenueTypes, VenueTypesPanel } from "@/components/admin/venue-types-panel";
 
 // ─── Query keys ────────────────────────────────────────────────────────────
 
@@ -182,7 +181,7 @@ export function VenuesWorkspace() {
   const qc = useQueryClient();
   const [statusFilter, setStatusFilter] = useState<"active" | "all">("active");
   const [search, setSearch] = useState("");
-  const [selected, setSelected] = useState<Venue | null>(null);
+  const [expandedId, setExpandedId] = useState<string | null>(null);
 
   // Create / edit
   const [editing, setEditing] = useState<Venue | "new" | null>(null);
@@ -196,6 +195,13 @@ export function VenuesWorkspace() {
     queryFn: () => listVenues(),
     staleTime: 60_000,
   });
+  const typesQ = useVenueTypes();
+  const typeName = (code: string) => venueTypeLabel(typesQ.data?.types, code);
+
+  useEffect(() => {
+    if (venues.length === 0) return;
+    void ensureDueVenueBaselineIssues(venues);
+  }, [venues]);
 
   const activeVenueIds = useMemo(
     () => venues.filter((v) => v.status === "active").map((v) => v.id),
@@ -217,10 +223,11 @@ export function VenuesWorkspace() {
     return rows.filter(
       (v) =>
         v.name.toLowerCase().includes(q) ||
+        typeName(v.venue_type).toLowerCase().includes(q) ||
         (v.venue_type ?? "").toLowerCase().includes(q) ||
         (v.street_address ?? "").toLowerCase().includes(q),
     );
-  }, [venues, statusFilter, search]);
+  }, [venues, statusFilter, search, typesQ.data?.types]);
 
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: VENUES_KEY });
@@ -233,21 +240,34 @@ export function VenuesWorkspace() {
       toast.success("Venue archived.");
       invalidate();
       setArchiveTarget(null);
-      if (selected?.id === archiveTarget?.id) setSelected(null);
+      if (expandedId === archiveTarget?.id) setExpandedId(null);
+    },
+    onError: (e: Error) => toast.error(e.message),
+  });
+
+  const restoreMut = useMutation({
+    mutationFn: (id: string) => restoreVenue(id),
+    onSuccess: () => {
+      toast.success("Venue restored. If the review date has passed, sign a new baseline.");
+      invalidate();
     },
     onError: (e: Error) => toast.error(e.message),
   });
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div>
-        <p className="text-sm text-muted-foreground">
-          Managed destination registry for out-of-centre outings (§12.2). Venue safety
-          templates and baseline sign-offs are stored here — not per-event.
-        </p>
-      </div>
+      <p className="text-sm text-muted-foreground">
+        Managed destination registry for out-of-centre outings (§12.2). Venue safety
+        templates and baseline sign-offs are stored here — not per-event.
+      </p>
 
+      <Tabs defaultValue="venues" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="venues">Venues</TabsTrigger>
+          <TabsTrigger value="types">Venue types</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="venues" className="space-y-4">
       {/* Toolbar — match Vendors */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative min-w-[200px] flex-1">
@@ -304,9 +324,10 @@ export function VenuesWorkspace() {
               </TableRow>
             ) : (
               visible.map((v) => (
+                <Fragment key={v.id}>
                 <TableRow
-                  key={v.id}
-                  className={selected?.id === v.id ? "bg-muted/50" : undefined}
+                  className={cn(officeClickRowClass, expandedId === v.id && "bg-muted/50")}
+                  onClick={() => setEditing(v)}
                 >
                   <TableCell>
                     <div className="font-medium">{v.name}</div>
@@ -317,7 +338,7 @@ export function VenuesWorkspace() {
                     ) : null}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">
-                    {VENUE_TYPE_LABELS[v.venue_type] ?? v.venue_type}
+                    {typeName(v.venue_type)}
                   </TableCell>
                   <TableCell>{riskBadge(v.risk_tier)}</TableCell>
                   <TableCell>
@@ -331,69 +352,68 @@ export function VenuesWorkspace() {
                   </TableCell>
                   <TableCell>{statusBadge(v.status)}</TableCell>
                   <TableCell>
-                    <div className="flex justify-end gap-1">
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setSelected(v)}
-                        tooltip="Open template & baseline"
-                      >
-                        <FolderOpen className="h-4 w-4" />
-                      </IconActionButton>
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setEditing(v)}
-                        tooltip="Edit venue"
-                      >
-                        <Pencil className="h-4 w-4" />
-                      </IconActionButton>
-                      <IconActionButton
-                        className="h-8 w-8"
-                        onClick={() => setCloneSource(v)}
-                        tooltip="Clone venue"
-                      >
-                        <Copy className="h-4 w-4" />
-                      </IconActionButton>
-                      {v.status === "active" && (
+                    <div className="flex items-center justify-end gap-1">
+                      <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
                         <IconActionButton
                           className="h-8 w-8"
-                          onClick={() => setArchiveTarget(v)}
-                          tooltip="Archive venue"
+                          onClick={() => setExpandedId((id) => (id === v.id ? null : v.id))}
+                          tooltip={expandedId === v.id ? "Hide baseline" : "Show baseline"}
                         >
-                          <Archive className="h-4 w-4" />
+                          {expandedId === v.id ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
                         </IconActionButton>
-                      )}
+                        <IconActionButton
+                          className="h-8 w-8"
+                          onClick={() => setCloneSource(v)}
+                          tooltip="Clone venue"
+                        >
+                          <Copy className="h-4 w-4" />
+                        </IconActionButton>
+                        {v.status === "active" ? (
+                          <IconActionButton
+                            className="h-8 w-8"
+                            onClick={() => setArchiveTarget(v)}
+                            tooltip="Archive venue"
+                          >
+                            <Archive className="h-4 w-4" />
+                          </IconActionButton>
+                        ) : (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="outline"
+                            disabled={restoreMut.isPending}
+                            onClick={() => restoreMut.mutate(v.id)}
+                          >
+                            Restore
+                          </Button>
+                        )}
+                      </div>
                     </div>
                   </TableCell>
                 </TableRow>
+                {expandedId === v.id && (
+                  <TableRow>
+                    <TableCell colSpan={6} className="bg-card p-0">
+                      <VenueDetailPanel
+                        venue={v}
+                        embedded
+                        onClose={() => setExpandedId(null)}
+                        onEdit={() => setEditing(v)}
+                        onInvalidate={invalidate}
+                      />
+                    </TableCell>
+                  </TableRow>
+                )}
+                </Fragment>
               ))
             )}
           </TableBody>
         </Table>
       </div>
-
-      {/* Venue detail side-panel */}
-      {selected && (
-        <VenueDetailPanel
-          venue={selected}
-          onClose={() => setSelected(null)}
-          onEdit={() => setEditing(selected)}
-          onInvalidate={invalidate}
-        />
-      )}
-
-      {/* Create / Edit sheet */}
-      {editing !== null && (
-        <VenueFormSheet
-          open
-          venue={editing === "new" ? null : editing}
-          onOpenChange={(open) => !open && setEditing(null)}
-          onSaved={(v) => {
-            invalidate();
-            setEditing(null);
-            setSelected(v);
-          }}
-        />
-      )}
 
       {/* Clone dialog */}
       {cloneSource && (
@@ -404,7 +424,7 @@ export function VenuesWorkspace() {
           onCloned={(v) => {
             invalidate();
             setCloneSource(null);
-            setSelected(v);
+            setExpandedId(v.id);
           }}
         />
       )}
@@ -438,6 +458,30 @@ export function VenuesWorkspace() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+        </TabsContent>
+
+        <TabsContent value="types">
+          <VenueTypesPanel
+            venues={venues}
+            catalog={typesQ.data}
+            loading={typesQ.isLoading}
+            onEditVenue={(v) => setEditing(v)}
+          />
+        </TabsContent>
+      </Tabs>
+
+      {editing !== null && (
+        <VenueFormSheet
+          open
+          venue={editing === "new" ? null : editing}
+          onOpenChange={(open) => !open && setEditing(null)}
+          onSaved={(v) => {
+            invalidate();
+            setEditing(null);
+            setExpandedId(v.id);
+          }}
+        />
+      )}
     </div>
   );
 }
@@ -446,13 +490,16 @@ export function VenuesWorkspace() {
 
 interface DetailProps {
   venue: Venue;
+  /** Inside the venue row. The row already shows the name. */
+  embedded?: boolean;
   onClose: () => void;
   onEdit: () => void;
   onInvalidate: () => void;
 }
 
-function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps) {
+function VenueDetailPanel({ venue, embedded = false, onClose, onEdit, onInvalidate }: DetailProps) {
   const qc = useQueryClient();
+  const typesQ = useVenueTypes();
   const [panelTab, setPanelTab] = useState<"template" | "signoffs" | "compliance">("template");
   const [signoffOpen, setSignoffOpen] = useState(false);
 
@@ -469,17 +516,28 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
   });
 
   const latestSignoff = signoffs[0] ?? null;
+  const currentFields = currentTemplateFields(fields);
+
+  useEffect(() => {
+    let cancel = false;
+    void syncVenueTypeRequirements(venue.id, venue.venue_type).then((ok) => {
+      if (!cancel && ok) void qc.invalidateQueries({ queryKey: venueFieldsKey(venue.id) });
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [venue.id, venue.venue_type, qc]);
 
   return (
-    <div className="mt-2 rounded-lg border bg-card">
-      {/* Panel header */}
+    <div className={embedded ? "border-t bg-card" : "mt-2 rounded-lg border bg-card"}>
+      {!embedded && (
       <div className="flex items-start justify-between gap-3 border-b px-4 py-3">
         <div className="space-y-0.5">
           <h3 className="font-semibold text-sm">{venue.name}</h3>
           <div className="flex flex-wrap items-center gap-1.5">
             {statusBadge(venue.status)}
             {riskBadge(venue.risk_tier)}
-            <span className="text-xs text-muted-foreground capitalize">{venue.venue_type}</span>
+            <span className="text-xs text-muted-foreground">{venueTypeLabel(typesQ.data?.types, venue.venue_type)}</span>
             {venue.max_safe_group_size && (
               <span className="text-xs text-muted-foreground">
                 Max group: {venue.max_safe_group_size}
@@ -500,6 +558,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
           </Button>
         </div>
       </div>
+      )}
 
       {/* Baseline status */}
       <div className="flex items-center justify-between gap-3 border-b px-4 py-2.5 bg-muted/30">
@@ -548,7 +607,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
       {panelTab === "template" && (
         <TemplateFieldsEditor
           venue={venue}
-          fields={fields}
+          fields={currentFields}
           isLoading={fieldsLoading}
           onInvalidate={onInvalidate}
         />
@@ -571,7 +630,7 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
         <BaselineSignoffDialog
           open
           venue={venue}
-          fields={fields}
+          fields={currentFields}
           onOpenChange={(open) => !open && setSignoffOpen(false)}
           onSigned={() => {
             void qc.invalidateQueries({ queryKey: venueSignoffsKey(venue.id) });
@@ -581,6 +640,45 @@ function VenueDetailPanel({ venue, onClose, onEdit, onInvalidate }: DetailProps)
           }}
         />
       )}
+    </div>
+  );
+}
+
+function VenueAssessmentNote({
+  field,
+  onSaved,
+}: {
+  field: VenueTemplateField;
+  onSaved: () => void;
+}) {
+  const result = venueAssessmentResult(field);
+  const [text, setText] = useState(field.assessment_reason ?? "");
+  useEffect(() => {
+    setText(field.assessment_reason ?? "");
+  }, [field.id, field.assessment_reason]);
+  if (result !== "no" && result !== "partial") return null;
+
+  return (
+    <div className="mt-2 max-w-md">
+      <CharacterCountedInput
+        label={field.is_mandatory ? "Why this is still OK" : "Note (optional)"}
+        value={text}
+        onValueChange={setText}
+        onBlur={() => {
+          if (text.trim() === (field.assessment_reason ?? "").trim()) return;
+          void saveVenueFieldAssessment(field.id, result, text)
+            .then(onSaved)
+            .catch((err: Error) => toast.error(err.message));
+        }}
+        minChars={field.is_mandatory ? 8 : 0}
+        maxChars={200}
+        required={!!field.is_mandatory}
+        placeholder={
+          result === "partial"
+            ? "What complies, and the workaround in place"
+            : "Why the visit can still go ahead"
+        }
+      />
     </div>
   );
 }
@@ -651,8 +749,9 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
     <div className="space-y-3 p-4">
       <div className="flex items-center justify-between">
         <p className="text-xs text-muted-foreground">
-          These fields appear in every baseline sign-off and per-event reconfirmation for this
-          venue. System core fields (§12.2.2) cannot be removed.
+          Yes means the venue has this and it meets the requirement. Partial means some of it
+          complies, with the workaround in the note. No means it does not have this, and the same
+          note says why the visit is still OK. Then sign the baseline.
         </p>
         <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
           <Plus className="mr-1 h-3.5 w-3.5" />
@@ -665,22 +764,51 @@ function TemplateFieldsEditor({ venue, fields, isLoading, onInvalidate }: Templa
       ) : (
         <div className="divide-y rounded-lg border text-sm">
           {fields.map((f) => (
-            <div key={f.id} className="flex items-start gap-3 px-3 py-2.5">
-              <div className="flex-1 min-w-0">
+            <div key={f.id} className="flex flex-wrap items-start gap-3 px-3 py-2.5">
+              <div className="min-w-0 flex-1">
                 <span className="font-medium">{f.prompt}</span>
                 <div className="mt-0.5 flex flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="text-[10px] capitalize">
-                    {f.answer_type.replace("_", " ")}
-                  </Badge>
                   {f.is_mandatory && (
                     <Badge variant="outline" className="text-[10px]">Required</Badge>
                   )}
-                  {f.is_system_core && (
-                    <Badge variant="secondary" className="text-[10px]">Core</Badge>
+                  {f.requirement_code && (
+                    <Badge variant="secondary" className="text-[10px]">From type</Badge>
                   )}
                 </div>
+                {(f.requirement_code || f.answer_type === "yes_no") && (
+                  <VenueAssessmentNote field={f} onSaved={invalidate} />
+                )}
               </div>
-              {!f.is_system_core && (
+              {(f.requirement_code || f.answer_type === "yes_no") && (
+              <div className="flex items-center gap-1">
+                {(
+                  [
+                    ["yes", "Yes"],
+                    ["partial", "Partial"],
+                    ["no", "No"],
+                  ] as const
+                ).map(([value, label]) => (
+                  <Button
+                    key={value}
+                    type="button"
+                    size="sm"
+                    variant={venueAssessmentResult(f) === value ? "default" : "outline"}
+                    onClick={() => {
+                      void saveVenueFieldAssessment(
+                        f.id,
+                        value,
+                        value === "yes" ? null : f.assessment_reason ?? "",
+                      )
+                        .then(() => invalidate())
+                        .catch((err: Error) => toast.error(err.message));
+                    }}
+                  >
+                    {label}
+                  </Button>
+                ))}
+              </div>
+              )}
+              {!f.is_system_core && !f.requirement_code && (
                 <IconActionButton
                   className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive"
                   tooltip="Remove template field"
@@ -826,6 +954,7 @@ interface VenueFormSheetProps {
 
 function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetProps) {
   const isEdit = !!venue;
+  const typesQ = useVenueTypes();
 
   const [name, setName] = useState("");
   const [venueType, setVenueType] = useState("general");
@@ -858,6 +987,18 @@ function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetPr
       setRiskTier("medium");
     }
   }, [open, venue]);
+
+  const catalogTypes = typesQ.data?.types ?? BUILTIN_VENUE_TYPES;
+  const typeOptions = catalogTypes.filter(
+    (t) => t.status === "active" || t.code === venueType,
+  );
+
+  useEffect(() => {
+    if (!open || isEdit) return;
+    const active = catalogTypes.filter((t) => t.status === "active");
+    if (active.some((t) => t.code === venueType)) return;
+    if (active[0]) setVenueType(active[0].code);
+  }, [open, isEdit, catalogTypes, venueType]);
 
   const mut = useMutation({
     mutationFn: () =>
@@ -916,19 +1057,9 @@ function VenueFormSheet({ open, venue, onOpenChange, onSaved }: VenueFormSheetPr
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {[
-                  ["general", "General"],
-                  ["park", "Park / outdoor"],
-                  ["hotel", "Hotel / accommodation"],
-                  ["cinema", "Cinema / theatre"],
-                  ["museum", "Museum / gallery"],
-                  ["sports", "Sports / recreation"],
-                  ["restaurant", "Restaurant / café"],
-                  ["shopping", "Shopping centre"],
-                  ["club", "Club / social venue"],
-                ].map(([v, l]) => (
-                  <SelectItem key={v} value={v}>{l}</SelectItem>
-                ))}
+                {typeOptions.map((t) => (
+                    <SelectItem key={t.code} value={t.code}>{t.label}</SelectItem>
+                  ))}
               </SelectContent>
             </Select>
           </div>
@@ -1114,6 +1245,61 @@ function CloneVenueDialog({ open, source, onOpenChange, onCloned }: CloneDialogP
   );
 }
 
+function currentTemplateFields(fields: VenueTemplateField[]): VenueTemplateField[] {
+  return fields.filter((f) => f.is_current !== false).filter((f, i, all) => {
+    if (!f.requirement_code) return true;
+    return all.findIndex((other) => other.requirement_code === f.requirement_code) === i;
+  });
+}
+
+/** Opens the baseline sign-off on top of whatever screen called it. Close returns there. */
+export function VenueBaselineSignoffHost({
+  venueId,
+  open,
+  onOpenChange,
+  onSigned,
+}: {
+  venueId: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSigned: () => void;
+}) {
+  const qc = useQueryClient();
+  const venueQ = useQuery({
+    queryKey: ["venue", venueId],
+    queryFn: () => getVenue(venueId!),
+    enabled: open && !!venueId,
+  });
+  const fieldsQ = useQuery({
+    queryKey: venueFieldsKey(venueId ?? ""),
+    queryFn: () => listVenueTemplateFields(venueId!),
+    enabled: open && !!venueId,
+  });
+
+  useEffect(() => {
+    const venue = venueQ.data;
+    if (!open || !venue) return;
+    let cancel = false;
+    void syncVenueTypeRequirements(venue.id, venue.venue_type).then((changed) => {
+      if (!cancel && changed) void qc.invalidateQueries({ queryKey: venueFieldsKey(venue.id) });
+    });
+    return () => {
+      cancel = true;
+    };
+  }, [open, venueQ.data, qc]);
+
+  if (!open || !venueId || !venueQ.data || fieldsQ.isLoading) return null;
+  return (
+    <BaselineSignoffDialog
+      open
+      venue={venueQ.data}
+      fields={currentTemplateFields(fieldsQ.data ?? [])}
+      onOpenChange={onOpenChange}
+      onSigned={onSigned}
+    />
+  );
+}
+
 // ─── Baseline sign-off dialog ────────────────────────────────────────────────
 
 interface BaselineSignoffDialogProps {
@@ -1134,9 +1320,7 @@ function BaselineSignoffDialog({
   const [answers, setAnswers] = useState<Record<string, string>>({});
   const [evidence, setEvidence] = useState("");
   const [notes, setNotes] = useState("");
-  const [managerPinVerified, setManagerPinVerified] = useState(false);
-  const verifiedManagerPinRef = useRef("");
-  const [pinError, setPinError] = useState<string | null>(null);
+  const [pinOpen, setPinOpen] = useState(false);
   const [busy, setBusy] = useState(false);
 
   const managerStaffId = getActiveUserProfile()?.staffId ?? "";
@@ -1146,62 +1330,44 @@ function BaselineSignoffDialog({
       setAnswers({});
       setEvidence("");
       setNotes("");
-      setManagerPinVerified(false);
-      verifiedManagerPinRef.current = "";
-      setPinError(null);
+      setPinOpen(false);
+      setBusy(false);
     }
   }, [open]);
 
   const mandatoryFields = fields.filter((f) => f.is_mandatory);
-  const allMandatoryAnswered = mandatoryFields.every((f) => {
-    const a = answers[f.id] ?? "";
-    return a.trim().length > 0;
-  });
+  const allMandatoryAnswered = mandatoryFields.every((f) =>
+    requirementAnswerOk(f, rowAnswer(f, answers[f.id] ?? "")),
+  );
+  const missingOnTemplate = fields.filter(
+    (f) => f.is_mandatory && usesRowAnswer(f) && !requirementAnswerOk(f, rowAnswer(f, "")),
+  );
   const evidenceOk = evidence.trim().length >= MIN_EVIDENCE;
-  const pinOk = managerPinVerified;
-  const canSubmit = allMandatoryAnswered && evidenceOk && pinOk && !busy;
+  const canSubmit = fields.length > 0 && allMandatoryAnswered && evidenceOk && !!managerStaffId && !busy;
 
-  const handleSubmit = async () => {
-    if (!canSubmit) return;
-    setBusy(true);
-    setPinError(null);
-    try {
-      const answerRows: BaselineSignoffAnswer[] = fields
-        .filter((f) => answers[f.id])
-        .map((f) => ({ field_id: f.id, answer_text: answers[f.id] }));
-
-      await submitBaselineSignoff({
-        venue_id: venue.id,
-        managerPin: verifiedManagerPinRef.current,
-        evidence_ref: evidence.trim(),
-        notes: notes.trim() || null,
-        answers: answerRows,
-      });
-
-      toast.success("Baseline sign-off recorded.");
-      onSigned();
-    } catch (e) {
-      const msg = (e as Error).message;
-      if (msg.toLowerCase().includes("pin") || msg.toLowerCase().includes("manager")) {
-        setPinError(msg);
-        setManagerPinVerified(false);
-        verifiedManagerPinRef.current = "";
-      } else {
-        toast.error(msg);
-      }
-    } finally {
-      setBusy(false);
-    }
+  const saveWithPin = async (pin: string) => {
+    const answerRows: BaselineSignoffAnswer[] = fields
+      .map((f) => ({ field_id: f.id, answer_text: rowAnswer(f, answers[f.id] ?? "") }))
+      .filter((row) => row.answer_text.trim().length > 0);
+    await submitBaselineSignoff({
+      venue_id: venue.id,
+      managerStaffId,
+      managerPin: pin,
+      evidence_ref: evidence.trim(),
+      notes: notes.trim() || null,
+      answers: answerRows,
+    });
   };
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Venue safety baseline sign-off</DialogTitle>
           <DialogDescription>
-            Complete all mandatory checklist fields, then sign with your Manager PIN. This
-            record is immutable once saved.
+            Finish the answers and the evidence, then sign off. Your manager PIN confirms the save.
+            This record is immutable once saved.
           </DialogDescription>
         </DialogHeader>
 
@@ -1212,7 +1378,27 @@ function BaselineSignoffDialog({
             </p>
           ) : (
             <>
-              {fields.map((f) => (
+              {missingOnTemplate.length > 0 && (
+                <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
+                  Still to answer on the template: {missingOnTemplate.map((f) => f.prompt).join(", ")}
+                </div>
+              )}
+              <ul className="space-y-1 text-sm">
+                {fields.filter(usesRowAnswer).map((f) => (
+                  <li key={f.id}>
+                    <span className="font-medium">{f.prompt}</span>
+                    {" — "}
+                    {venueAssessmentResult(f) === "yes"
+                      ? "Yes"
+                      : venueAssessmentResult(f) === "partial"
+                        ? `Partial. ${f.assessment_reason ?? ""}`
+                        : venueAssessmentResult(f) === "no"
+                          ? `No. ${f.assessment_reason ?? ""}`
+                          : "Not answered"}
+                  </li>
+                ))}
+              </ul>
+              {fields.filter((f) => !usesRowAnswer(f)).map((f) => (
                 <AnswerField
                   key={f.id}
                   field={f}
@@ -1240,34 +1426,6 @@ function BaselineSignoffDialog({
                     className="text-sm"
                   />
                 </div>
-
-                {/* Manager PIN */}
-                <div className="space-y-1.5">
-                  <Label className="text-sm font-semibold">
-                    Manager PIN <span className="text-destructive">*</span>
-                  </Label>
-                  <PinEntryTrigger
-                    label="Tap to enter manager PIN"
-                    verified={managerPinVerified}
-                    verifiedLabel="Manager PIN verified"
-                    length={4}
-                    title="Venue safety baseline sign-off"
-                    description="Immutable record — manager PIN required."
-                    disabled={!managerStaffId}
-                    required
-                    onVerify={async (p) => {
-                      await verifyManagerPin(managerStaffId, p);
-                    }}
-                    onSuccess={(p) => {
-                      verifiedManagerPinRef.current = p;
-                      setManagerPinVerified(true);
-                      setPinError(null);
-                    }}
-                  />
-                  {pinError && (
-                    <p className="text-sm text-destructive font-medium">{pinError}</p>
-                  )}
-                </div>
               </div>
             </>
           )}
@@ -1277,7 +1435,7 @@ function BaselineSignoffDialog({
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
             Close
           </Button>
-          <Button onClick={handleSubmit} disabled={!canSubmit}>
+          <Button type="button" onClick={() => canSubmit && setPinOpen(true)} disabled={!canSubmit}>
             {busy ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" />Saving…</>
             ) : (
@@ -1287,10 +1445,96 @@ function BaselineSignoffDialog({
         </DialogFooter>
       </DialogContent>
     </Dialog>
+    <PinEntryDialog
+      open={pinOpen}
+      onOpenChange={setPinOpen}
+      title="Venue safety baseline sign-off"
+      description="Manager PIN confirms this sign-off. It is saved only after the PIN is accepted."
+      length={6}
+      busy={busy}
+      onVerify={async (pin) => {
+        setBusy(true);
+        try {
+          await verifyManagerPin(managerStaffId, pin);
+          await saveWithPin(pin);
+        } finally {
+          setBusy(false);
+        }
+      }}
+      onSuccess={() => {
+        toast.success("Baseline sign-off recorded.");
+        onSigned();
+      }}
+    />
+    </>
   );
 }
 
 // ─── Answer field renderer ───────────────────────────────────────────────────
+
+function usesRowAnswer(field: VenueTemplateField): boolean {
+  return !!field.requirement_code || field.answer_type === "yes_no";
+}
+
+function rowAnswer(field: VenueTemplateField, typed: string): string {
+  if (!usesRowAnswer(field)) return typed;
+  const result = venueAssessmentResult(field);
+  if (result === "yes") return "Yes";
+  if (result === "partial") return `Partial: ${field.assessment_reason ?? ""}`;
+  if (result === "no") return `No: ${field.assessment_reason ?? ""}`;
+  return "";
+}
+
+function requirementAnswerOk(field: VenueTemplateField, value: string): boolean {
+  if (usesRowAnswer(field)) {
+    const result = venueAssessmentResult(field);
+    if (result === "yes") return true;
+    if (result === "no" || result === "partial") {
+      if (!field.is_mandatory) return true;
+      return (field.assessment_reason ?? "").trim().length >= 8;
+    }
+    return !field.is_mandatory;
+  }
+  return value.trim().length > 0;
+}
+
+function RequirementAnswer({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const notHere = value.startsWith("Not present:");
+  const reason = notHere ? value.slice("Not present:".length).trimStart() : "";
+  return (
+    <div className="space-y-2">
+      <div className="grid grid-cols-2 gap-2">
+        <MobileOptionButton
+          label="Present"
+          selected={value === "Present"}
+          onClick={() => onChange("Present")}
+        />
+        <MobileOptionButton
+          label="Not here"
+          selected={notHere}
+          onClick={() => onChange(reason ? `Not present: ${reason}` : "Not present: ")}
+        />
+      </div>
+      {notHere && (
+        <CharacterCountedInput
+          label="Why it is not here"
+          value={reason}
+          onValueChange={(next) => onChange(`Not present: ${next}`)}
+          minChars={8}
+          maxChars={200}
+          required
+          placeholder="Who this affects, and why the visit can still go ahead"
+        />
+      )}
+    </div>
+  );
+}
 
 function AnswerField({
   field,
@@ -1310,7 +1554,9 @@ function AnswerField({
         {field.is_mandatory && <span className="ml-1 text-destructive">*</span>}
       </Label>
 
-      {field.answer_type === "yes_no" ? (
+      {field.requirement_code ? (
+        <RequirementAnswer value={value} onChange={onChange} />
+      ) : field.answer_type === "yes_no" ? (
         <div className="grid grid-cols-2 gap-2">
           {(["Yes", "No"] as const).map((opt) => (
             <MobileOptionButton

@@ -32,7 +32,7 @@ export const medicationRoundsTopic: HelpTopic = {
     },
     {
       heading: "Sign-off mode",
-      body: "Choose Dual staff PIN (administering + witness — never a client as witness) or Sole carer PIN with justification ≥10 when only one authorised carer is available.",
+      body: "Choose Dual staff PIN (administering + witness — never a client as witness) or Sole carer PIN with justification ≥10 when only one authorised carer is available. If Admin bound Medical admin / Medication witness Duty roles, missing tickets need a Manager justify + PIN before the staff PINs.",
     },
     {
       heading: "Complete the round",

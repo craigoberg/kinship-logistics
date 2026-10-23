@@ -28,8 +28,8 @@ export interface DatePickerProps {
   /** Optional date format string (date-fns). Defaults to "PPP". */
   dateFormat?: string;
   /**
-   * Caption navigation. Default `label` (‹ › months only).
-   * Use `dropdown` for DOB / far-history dates so year and month jump without 70× clicks.
+   * Caption navigation. Default `dropdown`: month and year lists, each with ‹ ›.
+   * `label` is the old month-name plus month-only chevrons.
    */
   captionLayout?: DatePickerCaptionLayout;
   /** Earliest navigable month (pairs with `captionLayout="dropdown"`). */
@@ -45,8 +45,9 @@ export interface DatePickerProps {
 const DOB_YEAR_SPAN = 120;
 
 /**
- * Canonical props for date-of-birth fields: month + year dropdowns,
- * newest years first, last 120 years through today (no future DOBs).
+ * Canonical props for date-of-birth fields: newest years first, last 120 years
+ * through today (no future DOBs). Month and year dropdowns plus ‹ › steppers
+ * come from the shared calendar caption.
  */
 export function getDobDatePickerProps(now = new Date()): Pick<
   DatePickerProps,
@@ -84,7 +85,7 @@ export function DatePicker({
   className,
   disabledDates,
   dateFormat = REGIONAL_DATE_FORMAT,
-  captionLayout = "label",
+  captionLayout = "dropdown",
   startMonth,
   endMonth,
   reverseYears,

@@ -1,0 +1,45 @@
+---
+description: Human-driven office/record saves must write a row to the Activity log (operational_ledger). Keep floor YELLOW/RED logging as-is.
+alwaysApply: true
+---
+
+# Human-driven Activity log
+
+Office/operator **saves** (who clicked what, when) go to `operational_ledger` via `recordOfficeChangeBestEffort` in `src/lib/api/office-change-log.ts`. Admin **Activity log** reads that ledger (plus meal-serve and medication-dose overlays). Do **not** add a second changelog table.
+
+## Always log (INFO, `OFFICE_RECORD_CHANGED`)
+
+Create/update/archive of: clients, staff, carers, addresses, med schedules, lookups, vendors, fleet records, duty-role catalogue/assignment, CMS, menu access, onboarding save/confirm, events/bookings, transport requests, day-login password **fact** (never the secret).
+
+```ts
+void recordOfficeChangeBestEffort({
+  action: "updated",
+  entity: "client",
+  recordId: id,
+  recordName: fullName,
+  before,
+  after, // omit pin/password/hash values
+});
+```
+
+Call **after** the DB write succeeds. Actor = PIN profile then day-login staff — never `resolveStaffIdWithFallback()` first-staff. Stamp with `operationalNowIso()` via `writeToLedger`.
+
+## Floor receipts must be auditor-grade
+
+Do **not** replace existing check-in / meal / medication / YELLOW/RED `writeToLedger` calls with `OFFICE_RECORD_CHANGED`. **Do** stamp those receipts with `withAuditActorMeta` so the Activity log can name:
+
+- **Who acted** (`actor_name`)
+- **Who was affected** (`person_name`)
+- **Where** (`location`: Day Centre / trip / venue)
+- **What** (meal title + status, medication + dose, arrival/departure how, asset name)
+
+An auditor row must read like “Buffy checked in Jane Smith to Day Centre via Bus (R1)”, not “Check-in”.
+
+Unattended system writes (compliance-asset trigger with no signed-in staff) use actor **System**, never “Unknown operator”.
+
+## Do not
+
+- Replace YELLOW/RED / emergency / check-in write paths
+- Log PIN, password, or hash **values** (say “PIN changed”)
+- Double-log a mutation that already writes a human `metadata.summary` (Run Planning, venues, system parameters)
+- Log public-site anon submits here (Hub tickets already cover those)

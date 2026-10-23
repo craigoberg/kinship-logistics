@@ -3,22 +3,42 @@
  */
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback, verifyStaffPin } from "@/lib/data-store";
-import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import { isDuplicateKeyError, isSchemaMismatchError } from "@/lib/api/supabase-errors";
 import { writeToLedger } from "@/lib/api/ledger";
 import { operationalNowIso } from "@/lib/operational-clock";
 import {
   isMedicationStop,
   listEventVenueStops,
-  upsertEventVenueStop,
   type EventVenueStop,
 } from "@/lib/api/event-outing";
+
+const medEnsureInflight = new Map<string, Promise<EventVenueStop | null>>();
 
 /** Ensure one Medication round stop exists for the trip day (Day Centre parity). */
 export async function ensureEventDayMedicationRound(
   eventId: string,
   sessionDate: string,
 ): Promise<EventVenueStop | null> {
-  const stops = await listEventVenueStops(eventId);
+  const key = `${eventId}:${sessionDate.slice(0, 10)}`;
+  const inflight = medEnsureInflight.get(key);
+  if (inflight) return inflight;
+  const run = ensureEventDayMedicationRoundOnce(eventId, sessionDate).finally(() => {
+    medEnsureInflight.delete(key);
+  });
+  medEnsureInflight.set(key, run);
+  return run;
+}
+
+async function ensureEventDayMedicationRoundOnce(
+  eventId: string,
+  sessionDate: string,
+): Promise<EventVenueStop | null> {
+  let stops: EventVenueStop[];
+  try {
+    stops = await listEventVenueStops(eventId);
+  } catch {
+    return null;
+  }
   const existing = stops.find(
     (s) => s.session_date === sessionDate && isMedicationStop(s),
   );
@@ -28,11 +48,9 @@ export async function ensureEventDayMedicationRound(
   const maxOrder = dayStops.reduce((m, s) => Math.max(m, s.stop_order), 0);
 
   try {
-    // Seed uses manager path via upsert — field open may lack manager rights.
-    // Fall back to direct insert for PIN terminals (anon RLS).
-    const { data, error } = await supabase
-      .from("event_venue_stops")
-      .insert({
+    // Ignore a duplicate stop_order. A second mount must not 409, then 409 again on a fallback insert.
+    const { error } = await supabase.from("event_venue_stops").upsert(
+      {
         event_id: eventId,
         session_date: sessionDate,
         venue_id: null,
@@ -41,26 +59,18 @@ export async function ensureEventDayMedicationRound(
         activity_kind: "medication_round",
         movement_method: "on_site",
         phase: "pending",
-      })
-      .select("*")
-      .single();
-    if (error) {
-      // Manager path as fallback when insert blocked.
+      },
+      { onConflict: "event_id,session_date,stop_order", ignoreDuplicates: true },
+    );
+    if (error && !isDuplicateKeyError(error)) {
       if (isSchemaMismatchError(error)) return null;
-      try {
-        return await upsertEventVenueStop({
-          event_id: eventId,
-          session_date: sessionDate,
-          stop_order: maxOrder + 1,
-          activity_kind: "medication_round",
-          label_override: "Medication round",
-        });
-      } catch {
-        console.warn("[ensureEventDayMedicationRound]", error.message);
-        return null;
-      }
+      console.warn("[ensureEventDayMedicationRound]", error.message);
+      return null;
     }
-    return data as EventVenueStop;
+    const again = await listEventVenueStops(eventId);
+    return (
+      again.find((s) => s.session_date === sessionDate && isMedicationStop(s)) ?? null
+    );
   } catch (e) {
     console.warn("[ensureEventDayMedicationRound]", e);
     return null;

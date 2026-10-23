@@ -1,11 +1,10 @@
 import { useMemo } from "react";
-import { AlertTriangle, Loader2, ShieldAlert, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Loader2, ShieldCheck } from "lucide-react";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ClientTime } from "@/components/ui/client-time";
-import { cn } from "@/lib/utils";
 import { useUnifiedIssues } from "@/hooks/use-unified-issues";
 import type { UnifiedIssue } from "@/lib/api/unified-issues";
+import { IssueRegisterCard, type IssueRegisterCardModel } from "./issue-register-card";
 
 /**
  * Section 9 — Unified Active Issues Register.
@@ -56,11 +55,28 @@ export function ActiveIssuesRegister({
     });
   }, [q.data, vehicleInfo]);
 
-  const hasWorkaround = (i: UnifiedIssue): boolean => {
-    const raw = i.raw as Record<string, unknown> | null;
-    const wp = (raw?.workaround_plan as string | null) ?? null;
-    const wa = (raw?.workaround_accepted_at as string | null) ?? null;
-    return Boolean((wp && wp.trim().length > 0) || wa);
+  const toCard = (i: UnifiedIssue): IssueRegisterCardModel => {
+    const raw = (i.raw ?? null) as Record<string, unknown> | null;
+    const plan = typeof raw?.workaround_plan === "string" ? raw.workaround_plan.trim() : "";
+    const acceptedAt =
+      typeof raw?.workaround_accepted_at === "string" ? raw.workaround_accepted_at : null;
+    const resolvedAt = typeof raw?.resolved_at === "string" ? raw.resolved_at : null;
+    const description =
+      i.description && i.description !== i.title ? i.description : i.title || i.description;
+    return {
+      severity: i.severity,
+      occurredAt: i.occurredAt,
+      loggedAt: i.createdAt,
+      description,
+      sourceLabel: i.sourceLabel,
+      workaroundPlan: plan || null,
+      councilOwned: raw?.owner === "council",
+      councilNotified: raw?.email_dispatched_to_council === true,
+      resolved: i.status === "resolved",
+      workaroundAccepted: i.status === "workaround_accepted" || !!acceptedAt,
+      workaroundAcceptedAt: acceptedAt,
+      resolvedAt,
+    };
   };
 
   if (q.isLoading) {
@@ -100,50 +116,11 @@ export function ActiveIssuesRegister({
       </div>
 
       <ul className="mt-2 space-y-2">
-        {filtered.map((i) => {
-          const workaround = hasWorkaround(i);
-          return (
-            <li
-              key={i.key}
-              className={cn(
-                "rounded-md border p-2 text-xs",
-                i.severity === "red"
-                  ? "border-red-600/50 bg-red-600/5"
-                  : i.severity === "yellow"
-                    ? "border-yellow-500/50 bg-yellow-500/10"
-                    : "border-border bg-background",
-              )}
-            >
-              <div className="flex items-start gap-2">
-                {i.severity === "red" ? (
-                  <ShieldAlert className="mt-0.5 h-3.5 w-3.5 shrink-0 text-red-600" />
-                ) : (
-                  <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0 text-amber-600" />
-                )}
-                <div className="min-w-0 flex-1">
-                  <div className="font-semibold leading-snug">{i.title}</div>
-                  {i.description && i.description !== i.title && (
-                    <div className="mt-0.5 text-[11px] text-muted-foreground line-clamp-2">
-                      {i.description}
-                    </div>
-                  )}
-                  <div className="mt-1 flex flex-wrap items-center gap-1.5 text-[10px] text-muted-foreground">
-                    <Badge variant="outline" className="font-mono">
-                      {i.sourceLabel}
-                    </Badge>
-                    <span>·</span>
-                    <ClientTime iso={i.occurredAt} />
-                    {workaround && (
-                      <Badge className="bg-amber-500 text-black">
-                        Workaround in force
-                      </Badge>
-                    )}
-                  </div>
-                </div>
-              </div>
-            </li>
-          );
-        })}
+        {filtered.map((i) => (
+          <li key={i.key}>
+            <IssueRegisterCard issue={toCard(i)} />
+          </li>
+        ))}
       </ul>
     </Card>
   );

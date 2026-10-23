@@ -6,20 +6,28 @@
  * Transport IN (outbound) still uses the parent's StartPointPicker via children.
  * BL-069: multiple Transport IN / HOME cards when roster uses R1/R2/….
  */
-import { useEffect, useMemo } from "react";
-import { CheckCircle2, Circle, Loader2, MapPin } from "lucide-react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { AlertTriangle, CheckCircle2, Circle, Loader2, MapPin } from "lucide-react";
 import { toast } from "sonner";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import {
   useEventTransportRuns,
-  usePrepareEventHop,
   useStartEventVenueHop,
   useStartTrip,
 } from "@/hooks/use-supabase-data";
 import { useSystemParameter } from "@/hooks/use-system-parameters";
 import type { EventTransportRunCard } from "@/lib/api/event-hop-transport";
 import { useRealtimeInvalidate } from "@/hooks/use-realtime-invalidate";
+import {
+  CAUTION_CALLOUT_BODY_CLASS,
+  CAUTION_CALLOUT_CLASS,
+  CAUTION_CALLOUT_ICON_CLASS,
+} from "@/lib/ui/caution-callout";
+import { revealInManifestScroll } from "@/lib/ui/manifest-scroll";
+import { ForceUnreleasedHop } from "@/components/manifest/force-unreleased-hop";
+import { loadExpectedHops, rememberExpectedHops } from "@/lib/manifest-offline";
+import { isAppOnline } from "@/lib/simulated-offline";
 
 export type SelectedTransportRun =
   | { kind: "outbound"; busRunCode: string | null; card: EventTransportRunCard }
@@ -38,6 +46,12 @@ interface Props {
   onHopStarted: () => void;
   /** Outbound (Transport IN) only — Depot/Day Centre start picker + submit */
   children?: React.ReactNode;
+  /** BL-126 — same Manager approval as parent Start Run. */
+  dutyGate?: {
+    needsGap: boolean;
+    approved: boolean;
+    ensureApproved: () => Promise<boolean>;
+  };
 }
 
 function statusIcon(status: EventTransportRunCard["status"]) {
@@ -50,6 +64,52 @@ function statusIcon(status: EventTransportRunCard["status"]) {
 
 function canStartRun(status: EventTransportRunCard["status"]): boolean {
   return status === "ready" || status === "released" || status === "active";
+}
+
+/** Venue hops require trip-leader Release first — never auto-prepare from Manifest. */
+function canStartHop(status: EventTransportRunCard["status"]): boolean {
+  return status === "released" || status === "active";
+}
+
+/** Why Start is absent. Shown on the Manifest, not left as a blank gap. */
+function hopHoldMessage(card: EventTransportRunCard): { title: string; body: string } {
+  const leg = card.label;
+  const detail = card.detail ?? "";
+  if (detail.includes("previous hop")) {
+    return {
+      title: "Current activity is still open",
+      body: `Close it on Event Deliver before the bus can take ${leg}.`,
+    };
+  }
+  if (detail.includes("Check-In") || detail.includes("Transport IN")) {
+    const reason = detail.replace(/^Waiting — /, "");
+    return {
+      title: "Check-in is not finished",
+      body: `${reason}. ${leg} can start after that.`,
+    };
+  }
+  if (detail.includes("Open location")) {
+    return {
+      title: "Location is not open",
+      body: `Open the location on Event Deliver before ${leg} can start.`,
+    };
+  }
+  if (detail.includes("not a driver run") || detail.includes("Leader marks")) {
+    return {
+      title: "The trip leader has this hop",
+      body: `${leg} is marked on Event Deliver. This Manifest is the run to the meeting point, or the run home.`,
+    };
+  }
+  if (card.status === "ready" || detail.includes("Release") || detail.includes("By Bus")) {
+    return {
+      title: "Not released to the bus yet",
+      body: `${leg}. The trip leader releases the group on Event Deliver. Start hop manifest appears here after that.`,
+    };
+  }
+  return {
+    title: "This manifest cannot start yet",
+    body: detail || `${leg} is not ready.`,
+  };
 }
 
 function sameBusRun(
@@ -69,11 +129,38 @@ export function EventTransportRunsStep3({
   onSelect,
   onHopStarted,
   children,
+  dutyGate,
 }: Props) {
-  const { data: runs = [], isLoading } = useEventTransportRuns(eventId, sessionId, sessionDate);
-  const prepareHop = usePrepareEventHop();
+  const runsQuery = useEventTransportRuns(eventId, sessionId, sessionDate);
+  const { isLoading } = runsQuery;
+  const [savedHops, setSavedHops] = useState<EventTransportRunCard[]>([]);
+
+  useEffect(() => {
+    if (!eventId || !sessionId || !sessionDate) return;
+    void loadExpectedHops({ eventId, sessionId, sessionDate }).then((hops) => {
+      setSavedHops(
+        hops.map((hop) => ({
+          key: `hop-${hop.hopIndex}`,
+          kind: "venue_hop" as const,
+          hopIndex: hop.hopIndex,
+          label: hop.label,
+          detail: "Saved on this tablet",
+          status: "ready" as const,
+          tripId: null,
+          fromStopId: hop.fromStopId,
+          toStopId: hop.toStopId,
+          originLabel: hop.originLabel,
+          originAddress: hop.originAddress,
+        })),
+      );
+    });
+  }, [eventId, sessionId, sessionDate]);
+
+  const usingSavedList = runsQuery.data == null && !isLoading && savedHops.length > 0;
+  const runs = runsQuery.data ?? (usingSavedList ? savedHops : []);
   const startHop = useStartEventVenueHop();
   const startTrip = useStartTrip();
+  const focusRef = useRef<HTMLDivElement | null>(null);
   const defaultDepotAddress = useSystemParameter<string>("depot_address", "");
   const defaultCentreAddress = useSystemParameter<string>("day_centre_address", "");
 
@@ -97,7 +184,7 @@ export function EventTransportRunsStep3({
 
   useEffect(() => {
     if (!runs.length) return;
-    const readyHop = hopRuns.find((r) => canStartRun(r.status));
+    const readyHop = hopRuns.find((r) => canStartHop(r.status));
     if (readyHop) {
       const sameHop =
         selected?.kind === "venue_hop" && selected.hopIndex === readyHop.hopIndex;
@@ -128,38 +215,89 @@ export function EventTransportRunsStep3({
       }
       return;
     }
-    if (!selected) {
-      const readyOutbound = outboundCards.find(
-        (r) => r.status === "ready" || r.status === "released",
-      );
-      if (readyOutbound) {
+    const readyOutbound = outboundCards.find(
+      (r) => r.status === "ready" || r.status === "released",
+    );
+    if (readyOutbound && !selected) {
+      onSelect({
+        kind: "outbound",
+        busRunCode: readyOutbound.busRunCode ?? null,
+        card: readyOutbound,
+      });
+      return;
+    }
+    if (selected?.kind === "outbound" || selected?.kind === "return") return;
+    const heldHop = hopRuns.find(
+      (r) =>
+        r.status !== "completed" &&
+        r.hopIndex != null &&
+        (!!r.tripId || r.status === "ready"),
+    );
+    if (heldHop) {
+      const sameHop =
+        selected?.kind === "venue_hop" && selected.hopIndex === heldHop.hopIndex;
+      const staleCard =
+        sameHop &&
+        (selected.card.tripId !== heldHop.tripId ||
+          selected.card.status !== heldHop.status ||
+          selected.card.detail !== heldHop.detail);
+      if (!sameHop || staleCard) {
         onSelect({
-          kind: "outbound",
-          busRunCode: readyOutbound.busRunCode ?? null,
-          card: readyOutbound,
+          kind: "venue_hop",
+          hopIndex: heldHop.hopIndex!,
+          card: heldHop,
         });
       }
     }
   }, [runs, hopRuns, returnCards, outboundCards, selected, onSelect]);
 
+  const hopHold =
+    selected?.kind === "venue_hop" && !canStartHop(selected.card.status)
+      ? hopHoldMessage(selected.card)
+      : null;
+  const focusKey = selected
+    ? selected.kind === "venue_hop"
+      ? `hop:${selected.hopIndex}:${selected.card.status}:${hopHold?.title ?? ""}`
+      : `${selected.kind}:${selected.busRunCode ?? ""}:${selected.card.status}`
+    : "";
+
+  useEffect(() => {
+    if (!isAppOnline() || !eventId || !sessionId || !sessionDate) return;
+    const hops = hopRuns.filter((hop) => hop.status !== "completed");
+    if (!hops.length) return;
+    void rememberExpectedHops({ eventId, sessionId, sessionDate, hops }).catch(() => {
+      /* keep the last downloaded list */
+    });
+  }, [eventId, sessionId, sessionDate, hopRuns]);
+
+  useLayoutEffect(() => {
+    if (!focusKey || isLoading) return;
+    const reveal = () => revealInManifestScroll(focusRef.current);
+    reveal();
+    const later = window.setTimeout(reveal, 300);
+    return () => window.clearTimeout(later);
+  }, [focusKey, isLoading]);
+
   const submitHop = async () => {
     if (!selected || selected.kind !== "venue_hop") return;
     const card = selected.card;
-    if (!canStartRun(card.status)) {
-      toast.error("This hop is not ready yet.");
+    if (!canStartHop(card.status)) {
+      toast.error(
+        card.status === "ready"
+          ? "Waiting for trip leader to Release group to bus on Event Deliver."
+          : "This hop is not ready yet.",
+      );
       return;
     }
 
-    let tripId = card.tripId;
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
+
+    const tripId = card.tripId;
     if (!tripId) {
-      tripId = await prepareHop.mutateAsync({
-        eventId,
-        eventDaySessionId: sessionId,
-        sessionDate,
-        hopIndex: card.hopIndex!,
-        fromStopId: card.fromStopId!,
-        toStopId: card.toStopId!,
-      });
+      toast.error(
+        "Waiting for trip leader to Release group to bus on Event Deliver.",
+      );
+      return;
     }
 
     startHop.mutate(
@@ -180,8 +318,9 @@ export function EventTransportRunsStep3({
     );
   };
 
-  const submitReturn = () => {
+  const submitReturn = async () => {
     if (!selected || selected.kind !== "return") return;
+    if (dutyGate && !(await dutyGate.ensureApproved())) return;
     const returnCard = selected.card;
     if (!canStartRun(returnCard.status)) {
       toast.error("Return home is not ready yet — finish Check-Out first.");
@@ -229,13 +368,16 @@ export function EventTransportRunsStep3({
   }
 
   const showOutboundStart = selected?.kind === "outbound";
-  const showHopStart = selected?.kind === "venue_hop";
-  const showReturnStart = selected?.kind === "return";
 
   return (
     <div className="space-y-4">
       <div className="grid gap-2">
-        <Label>Today&apos;s transport</Label>
+        <Label>Today&apos;s Transport Legs</Label>
+        {usingSavedList && (
+          <p className="text-xs text-amber-800 dark:text-amber-200">
+            Showing the last list saved on this tablet.
+          </p>
+        )}
         <div className="space-y-2">
           {runs.map((run) => {
             const isHop = run.kind === "venue_hop";
@@ -254,129 +396,175 @@ export function EventTransportRunsStep3({
               run.status === "blocked" ||
               run.status === "completed";
 
+            const hopReady =
+              isSelected && isHop && selected?.kind === "venue_hop" && canStartHop(run.status);
+            const hopHeld = isSelected && isHop && selected?.kind === "venue_hop" && !hopReady;
+
             return (
-              <button
+              <div
                 key={run.key}
-                type="button"
-                disabled={disabled && !isSelected}
-                onClick={() => {
-                  if (run.kind === "outbound") {
-                    onSelect({
-                      kind: "outbound",
-                      busRunCode: run.busRunCode ?? null,
-                      card: run,
-                    });
-                  } else if (run.kind === "return") {
-                    onSelect({
-                      kind: "return",
-                      busRunCode: run.busRunCode ?? null,
-                      card: run,
-                    });
-                  } else if (run.kind === "venue_hop" && run.hopIndex != null) {
-                    onSelect({ kind: "venue_hop", hopIndex: run.hopIndex, card: run });
-                  }
-                }}
-                className={cn(
-                  "flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition",
-                  isSelected
-                    ? "border-blue-500 bg-blue-500/10"
-                    : disabled
-                      ? "border-border bg-muted/20"
-                      : "border-border hover:border-blue-400",
-                )}
+                ref={isSelected ? focusRef : undefined}
+                className="space-y-2"
               >
-                <div className="mt-0.5">{statusIcon(run.status)}</div>
-                <div className="min-w-0 flex-1">
-                  <div
-                    className={cn(
-                      "text-sm font-semibold",
-                      disabled && !isSelected && "text-foreground/80",
-                    )}
-                  >
-                    {run.label}
-                  </div>
-                  {run.detail && (
-                    <div className="text-xs text-muted-foreground">{run.detail}</div>
+                <button
+                  type="button"
+                  disabled={disabled && !isSelected}
+                  onClick={() => {
+                    if (run.kind === "outbound") {
+                      onSelect({
+                        kind: "outbound",
+                        busRunCode: run.busRunCode ?? null,
+                        card: run,
+                      });
+                    } else if (run.kind === "return") {
+                      onSelect({
+                        kind: "return",
+                        busRunCode: run.busRunCode ?? null,
+                        card: run,
+                      });
+                    } else if (run.kind === "venue_hop" && run.hopIndex != null) {
+                      onSelect({ kind: "venue_hop", hopIndex: run.hopIndex, card: run });
+                    }
+                  }}
+                  className={cn(
+                    "flex w-full items-start gap-3 rounded-lg border px-3 py-3 text-left transition",
+                    isSelected
+                      ? "border-blue-500 bg-blue-500/10"
+                      : disabled
+                        ? "border-border bg-muted/20"
+                        : "border-border hover:border-blue-400",
                   )}
-                </div>
-              </button>
+                >
+                  <div className="mt-0.5">{statusIcon(run.status)}</div>
+                  <div className="min-w-0 flex-1">
+                    <div
+                      className={cn(
+                        "text-sm font-semibold",
+                        disabled && !isSelected && "text-foreground/80",
+                      )}
+                    >
+                      {run.label}
+                    </div>
+                    {run.via && (
+                      <div className="text-xs font-medium text-foreground/90">{run.via}</div>
+                    )}
+                    {run.detail && (
+                      <div className="text-xs text-muted-foreground">{run.detail}</div>
+                    )}
+                  </div>
+                </button>
+
+                {hopHeld && hopHold && (
+                  <div className={cn("flex items-start gap-2 px-4 py-3", CAUTION_CALLOUT_CLASS)}>
+                    <AlertTriangle className={cn("mt-0.5 h-4 w-4", CAUTION_CALLOUT_ICON_CLASS)} />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-semibold">{hopHold.title}</p>
+                      <p className={cn("mt-0.5 text-xs leading-relaxed", CAUTION_CALLOUT_BODY_CLASS)}>
+                        {hopHold.body}
+                      </p>
+                      {hopHold.title === "Not released to the bus yet" &&
+                        selected?.kind === "venue_hop" &&
+                        selected.card.status === "ready" && (
+                        <ForceUnreleasedHop
+                          eventId={eventId}
+                          sessionId={sessionId}
+                          sessionDate={sessionDate}
+                          card={selected.card}
+                          startOdometerKm={startOdometer}
+                          assetId={assetId}
+                          dutyGate={dutyGate}
+                          onStarted={onHopStarted}
+                        />
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {hopReady && selected?.kind === "venue_hop" && (
+                  <div className="space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
+                    <div className="flex items-start gap-2 text-sm">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+                      <div>
+                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                          Starting from: {selected.card.originLabel ?? "Where the group is"}
+                        </p>
+                        <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
+                          Bus is assumed at this pickup — board here and go. How it got here does not matter.
+                        </p>
+                        {selected.card.originAddress && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {selected.card.originAddress}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        startHop.isPending ||
+                        !selected.card.tripId ||
+                        !!(dutyGate?.needsGap && !dutyGate.approved)
+                      }
+                      onClick={() => void submitHop()}
+                      className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
+                    >
+                      {startHop.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : (
+                        "Start hop manifest"
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {isSelected && run.kind === "return" && selected?.kind === "return" && (
+                  <div className="space-y-3 rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3">
+                    <div className="flex items-start gap-2 text-sm">
+                      <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
+                      <div>
+                        <p className="font-semibold text-emerald-900 dark:text-emerald-100">
+                          Starting from: {selected.card.originLabel ?? "Last stop"}
+                          {selected.card.busRunShortLabel
+                            ? ` · ${selected.card.busRunShortLabel}`
+                            : ""}
+                        </p>
+                        <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
+                          Bus is assumed at this pickup — board return passengers and go home.
+                        </p>
+                        {selected.card.originAddress && (
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {selected.card.originAddress}
+                          </p>
+                        )}
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      disabled={
+                        startTrip.isPending ||
+                        !canStartRun(selected.card.status) ||
+                        !!(dutyGate?.needsGap && !dutyGate.approved)
+                      }
+                      onClick={submitReturn}
+                      className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
+                    >
+                      {startTrip.isPending ? (
+                        <Loader2 className="h-4 w-4 animate-spin" />
+                      ) : selected.card.busRunShortLabel ? (
+                        `Start ${selected.card.busRunShortLabel} HOME`
+                      ) : (
+                        "Start return home"
+                      )}
+                    </button>
+                  </div>
+                )}
+
+                {isSelected && run.kind === "outbound" && showOutboundStart && children}
+              </div>
             );
           })}
         </div>
       </div>
-
-      {showHopStart && selected.kind === "venue_hop" && (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 space-y-3">
-          <div className="flex items-start gap-2 text-sm">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
-            <div>
-              <p className="font-semibold text-emerald-900 dark:text-emerald-100">
-                Starting from: {selected.card.originLabel ?? "Where the group is"}
-              </p>
-              <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
-                Bus is assumed at this pickup — board here and go. How it got here does not matter.
-              </p>
-              {selected.card.originAddress && (
-                <p className="mt-1 text-xs text-muted-foreground">{selected.card.originAddress}</p>
-              )}
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={
-              prepareHop.isPending ||
-              startHop.isPending ||
-              !canStartRun(selected.card.status)
-            }
-            onClick={() => void submitHop()}
-            className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
-          >
-            {prepareHop.isPending || startHop.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              "Start hop manifest"
-            )}
-          </button>
-        </div>
-      )}
-
-      {showReturnStart && selected.kind === "return" && (
-        <div className="rounded-lg border border-emerald-500/40 bg-emerald-500/10 px-4 py-3 space-y-3">
-          <div className="flex items-start gap-2 text-sm">
-            <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-emerald-700 dark:text-emerald-300" />
-            <div>
-              <p className="font-semibold text-emerald-900 dark:text-emerald-100">
-                Starting from: {selected.card.originLabel ?? "Last stop"}
-                {selected.card.busRunShortLabel
-                  ? ` · ${selected.card.busRunShortLabel}`
-                  : ""}
-              </p>
-              <p className="text-xs text-emerald-800/80 dark:text-emerald-200/80">
-                Bus is assumed at this pickup — board return passengers and go home.
-              </p>
-              {selected.card.originAddress && (
-                <p className="mt-1 text-xs text-muted-foreground">{selected.card.originAddress}</p>
-              )}
-            </div>
-          </div>
-          <button
-            type="button"
-            disabled={startTrip.isPending || !canStartRun(selected.card.status)}
-            onClick={submitReturn}
-            className="flex h-12 w-full items-center justify-center rounded-lg bg-emerald-600 text-sm font-bold text-white disabled:opacity-50"
-          >
-            {startTrip.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : selected.card.busRunShortLabel ? (
-              `Start ${selected.card.busRunShortLabel} HOME`
-            ) : (
-              "Start return home"
-            )}
-          </button>
-        </div>
-      )}
-
-      {showOutboundStart && children}
     </div>
   );
 }

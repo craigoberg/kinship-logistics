@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { useMutation } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import { toast } from "sonner";
 import { Loader2 } from "lucide-react";
 import {
@@ -24,6 +24,10 @@ import {
   type ArrivalMethod,
   type ClientAttendanceRow,
 } from "@/lib/api/client-attendance";
+import {
+  listSupportAttendanceRoll,
+  SUPPORT_ROLL_KEY,
+} from "@/lib/api/support-attendance";
 
 interface Props {
   open: boolean;
@@ -54,6 +58,11 @@ export function BulkDeferGroupModal({
   const [method, setMethod] = useState<ArrivalMethod>("bus");
   const [minutes, setMinutes] = useState<number>(30);
 
+  const supportQ = useQuery({
+    queryKey: SUPPORT_ROLL_KEY(sessionId),
+    queryFn: () => listSupportAttendanceRoll(sessionId),
+    enabled: open && !!sessionId,
+  });
   const affected = useMemo(
     () =>
       rows.filter(
@@ -65,6 +74,18 @@ export function BulkDeferGroupModal({
       ),
     [rows, method],
   );
+  const supportAffected = useMemo(
+    () =>
+      (supportQ.data ?? []).filter(
+        (r) =>
+          r.arrivalMethod === method &&
+          r.status !== "checked_in" &&
+          r.status !== "checked_out" &&
+          r.status !== "absent",
+      ),
+    [supportQ.data, method],
+  );
+  const deferCount = affected.length + supportAffected.length;
 
   const mut = useMutation({
     mutationFn: () =>
@@ -92,10 +113,10 @@ export function BulkDeferGroupModal({
         <DialogHeader>
           <DialogTitle>Bulk Defer Group</DialogTitle>
           <DialogDescription>
-            Push the expected arrival forward for every un-arrived client in
-            a transport group (e.g. the entire bus when it's delayed). YELLOW
-            warnings that clear the overdue window are auto-resolved. RED
-            escalations stay open for manager review.
+            Push the expected arrival forward for every un-arrived person on
+            this transport — clients and support (staff, volunteers, carers).
+            YELLOW warnings that clear the overdue window are auto-resolved.
+            RED escalations stay open for manager review.
           </DialogDescription>
         </DialogHeader>
 
@@ -139,19 +160,22 @@ export function BulkDeferGroupModal({
 
           <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
             <div className="font-medium text-slate-900">
-              {affected.length} client(s) will be deferred
+              {deferCount} {deferCount === 1 ? "person" : "people"} will be deferred
             </div>
-            {affected.length > 0 ? (
+            {deferCount > 0 ? (
               <ul className="mt-1 max-h-32 overflow-auto text-xs text-muted-foreground">
                 {affected.map((r) => (
                   <li key={r.id}>
                     • {nameMap[r.participantId] ?? "Client"}
                   </li>
                 ))}
+                {supportAffected.map((r) => (
+                  <li key={r.id}>• {r.displayName}</li>
+                ))}
               </ul>
             ) : (
               <div className="mt-1 text-xs text-muted-foreground">
-                No un-arrived clients match this method.
+                No un-arrived people match this method.
               </div>
             )}
           </div>
@@ -167,10 +191,10 @@ export function BulkDeferGroupModal({
           </Button>
           <Button
             onClick={() => mut.mutate()}
-            disabled={mut.isPending || affected.length === 0}
+            disabled={mut.isPending || deferCount === 0}
           >
             {mut.isPending && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Defer {affected.length} by +{minutes} min
+            Defer {deferCount} by +{minutes} min
           </Button>
         </DialogFooter>
       </DialogContent>

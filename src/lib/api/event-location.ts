@@ -7,6 +7,7 @@
 import { supabase } from "@/integrations/supabase/client";
 import { resolveStaffIdWithFallback, verifyCoordinatorPin } from "@/lib/data-store";
 import { writeToLedger, tryGetGps } from "@/lib/api/ledger";
+import { withAuditActorMeta } from "@/lib/api/office-change-log";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import { seedAttendanceWithOvernightContinuity } from "@/lib/api/event-day-continuity";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/lib/api/event-lifecycle-gates";
 import {
   assertOvernightDaysEndAtHotel,
+  assertItineraryDayAnchors,
   type EventDaySession,
 } from "@/lib/api/event-outing";
 import { operationalNowIso } from "@/lib/operational-clock";
@@ -39,6 +41,15 @@ async function getSession(sessionId: string): Promise<EventDaySession & { event_
     .single();
   if (error) throw new Error(`Trip day not found: ${error.message}`);
   return data as EventDaySession & { event_id: string };
+}
+
+async function eventTitle(eventId: string): Promise<string> {
+  const { data } = await supabase
+    .from("event_manifest")
+    .select("title")
+    .eq("id", eventId)
+    .maybeSingle();
+  return ((data as { title?: string } | null)?.title ?? "").trim() || "trip";
 }
 
 async function assertTripLeaderPin(tripLeaderStaffId: string, pin: string): Promise<void> {
@@ -78,6 +89,7 @@ export async function openEventLocation(input: {
 
   // BL-T3 / BL-072 — overnight itinerary must end at hotel (final day exempt).
   await assertOvernightDaysEndAtHotel(session.event_id);
+  await assertItineraryDayAnchors(session.event_id);
 
   // BL-098 — guest bookings must be complete before floor open.
   const { listIncompleteGuestBookings, formatGuestIncompleteMessage } =
@@ -111,6 +123,7 @@ export async function openEventLocation(input: {
   });
 
   const gps = await tryGetGps();
+  const title = await eventTitle(session.event_id);
   await writeToLedger({
     staff_id: actorStaffId,
     category: "CENTRE",
@@ -118,13 +131,15 @@ export async function openEventLocation(input: {
     action_type: "EVENT_LOCATION_OPENED",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: input.sessionId,
       event_id: session.event_id,
       session_date: session.session_date,
       notes: input.notes ?? null,
       venue_open_checks: input.venueOpenChecksCompleted ?? [],
-    },
+      location: title,
+      summary: `Opened trip location for ${title} on ${session.session_date}`,
+    }),
   });
 
   return data as EventDaySession;
@@ -159,13 +174,42 @@ export async function closeEventLocation(input: {
 
   await assertTripLeaderPin(tripLeaderId, input.managerPin);
 
+  return applyEventLocationClose({
+    sessionId: input.sessionId,
+    eventId: session.event_id,
+    outcome: input.outcome,
+    notes: input.notes,
+    tripLeaderId,
+  });
+}
+
+/** Write the close. The trip leader PIN was already accepted. */
+export async function applyEventLocationClose(input: {
+  sessionId: string;
+  eventId: string;
+  outcome: "closed_orderly" | "closed_incident";
+  notes?: string;
+  tripLeaderId: string;
+  occurredAt?: string;
+}): Promise<EventDaySession> {
+  const nowIso = input.occurredAt ?? operationalNowIso();
+  const { data: existing, error: readErr } = await supabase
+    .from("event_day_sessions")
+    .select("phase")
+    .eq("id", input.sessionId)
+    .maybeSingle();
+  if (readErr) throw new Error(readErr.message);
+  if (isEventLocationClosed((existing as { phase?: string } | null)?.phase ?? "")) {
+    const session = await getSession(input.sessionId);
+    return session;
+  }
+
   const actorStaffId = await resolveStaffIdWithFallback();
-  const nowIso = operationalNowIso();
   const { data, error } = await supabase
     .from("event_day_sessions")
     .update({
       phase: input.outcome,
-      closed_by_id: tripLeaderId,
+      closed_by_id: input.tripLeaderId,
       close_declared_at: nowIso,
       close_leader_notes: input.notes?.trim() || null,
     })
@@ -175,6 +219,11 @@ export async function closeEventLocation(input: {
   if (error) throw error;
 
   const gps = await tryGetGps();
+  const title = await eventTitle(input.eventId);
+  const closedHow =
+    input.outcome === "closed_incident"
+      ? "Closed trip location after incident"
+      : "Closed trip location";
   await writeToLedger({
     staff_id: actorStaffId,
     category: "CENTRE",
@@ -185,11 +234,13 @@ export async function closeEventLocation(input: {
         : "EVENT_LOCATION_CLOSED_ORDERLY",
     gps_lat: gps?.lat ?? null,
     gps_lng: gps?.lng ?? null,
-    metadata: {
+    metadata: await withAuditActorMeta({
       event_day_session_id: input.sessionId,
-      event_id: session.event_id,
+      event_id: input.eventId,
       notes: input.notes ?? null,
-    },
+      location: title,
+      summary: `${closedHow} for ${title}`,
+    }),
   });
 
   return data as EventDaySession;

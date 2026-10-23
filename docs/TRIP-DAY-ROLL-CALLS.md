@@ -10,7 +10,7 @@
 
 | Surface | Role |
 |---------|------|
-| **Event Manage** (`/events`) | Office: Roster, Itinerary, Trip Days (leader + evening/morning clocks), Trip Report, Finance. **No** floor rolls. |
+| **Event Manage** (`/events`) | Office: Details, Itinerary (leader + clocks, then places), Roster, Live watch, Finance, Trip Report. **No** floor rolls. |
 | **Event Deliver** (`/event-deliver`) | Field: Open location, Check-In, Programme, Morning/Evening rolls, Check-Out, Close day / Close trip. |
 | **Manifest** (`/manifest`) | Bus hops: boarding on `event_bus_manifest` via hop boarding panel — **not** a substitute for venue Check-In. |
 
@@ -18,7 +18,7 @@
 
 ## Single-day outing
 
-1. Event Manage → Trip Days: set **trip leader** (and any day config).
+1. Event Manage → Itinerary: set **trip leader** on the date (and any day config), then the stops.
 2. **Run this event** → Event Deliver → **Open location** (Manager PIN / venue gates as configured).
 3. **Check-In** — event-floor arrival (`event_attendance_log`): expected → checked in / absent / later checked out.
 4. **Programme** (if itinerary stops) + **Manifest** hops for bus moves — board passengers on the bus manifest.
@@ -30,7 +30,7 @@
 
 ## Multi-day tour
 
-### Config (Event Manage → Trip Days)
+### Config (Event Manage → Itinerary)
 
 - Per day: trip leader, **Evening roll call** time, **Morning roll call** time (`HalfHourTimeField`, 24h).
 - Admin defaults: `default_evening_roll_call_time`, `default_morning_roll_call_time` (System Parameters). New days seed from defaults; unset days can inherit on save.

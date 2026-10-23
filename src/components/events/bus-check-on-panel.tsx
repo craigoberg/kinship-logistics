@@ -22,6 +22,9 @@ import {
   UserX,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import { useStaffRegistry } from "@/hooks/use-supabase-data";
+import { manifestPersonKind } from "@/lib/ui/person-kind-chip";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import {
@@ -29,9 +32,9 @@ import {
   listBusManifest,
   markNotTravelling,
   markOnBus,
-  seedBusManifest,
   type EventBusManifestRow,
 } from "@/lib/api/event-day-ops";
+import { seedBusManifestForHop } from "@/lib/api/event-hop-transport";
 import { hasOpenRedIssueForSession } from "@/lib/api/site-issues";
 import type { EventVenueStop } from "@/lib/api/event-outing";
 import type { EventManifest } from "@/lib/data-store";
@@ -72,8 +75,9 @@ export function BusCheckOnPanel({ event, sessionId, sessionDate, stops }: Props)
   return (
     <div className="space-y-3">
       <p className="text-sm text-muted-foreground">
-        Mark each passenger on-board before the bus departs each hop.
-        Missing passengers must be recorded as "Not travelling".
+        Mark each person on-board before the bus departs each hop
+        (participants, staff, volunteers and carers). Stay-behind must be
+        recorded as &quot;Not travelling&quot;.
       </p>
       {sorted.slice(0, -1).map((fromStop, idx) => {
         const toStop = sorted[idx + 1];
@@ -160,12 +164,10 @@ function HopRoll({ event, sessionId, sessionDate, fromStop, toStop, hopIndex }: 
     if (!tripId) return;
     setSeeding(true);
     try {
-      const n = await seedBusManifest({
+      const n = await seedBusManifestForHop({
         eventId: event.id,
         eventDaySessionId: sessionId,
         tripId,
-        // Venue hops — passengers rostered for bus on this outing day.
-        direction: "outbound",
       });
       if (n === 0) {
         toast.message(
@@ -337,7 +339,18 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
     onError: (e: Error) => toast.error(e.message),
   });
 
-  const name = row.participant_name ?? (row.carer_id ? "Carer" : "Unknown");
+  const { data: staff = [] } = useStaffRegistry();
+  const staffRow = row.staff_id ? staff.find((s) => s.id === row.staff_id) : undefined;
+  const name =
+    row.participant_name ??
+    (row.staff_id ? "Staff" : row.carer_id ? "Carer" : "Unknown");
+  const kind = manifestPersonKind({
+    participantId: row.participant_id,
+    carerId: row.carer_id,
+    staffId: row.staff_id,
+    personnelType: staffRow?.personnelType,
+    role: staffRow?.role,
+  });
   const isOnBus = row.status === "on_bus";
   const isNt = row.status === "not_travelling";
 
@@ -347,11 +360,7 @@ function ManifestRow({ row, onChanged }: ManifestRowProps) {
         <div className="flex flex-wrap items-center gap-2">
           <div className="min-w-0 flex-1">
             <span className="text-base font-semibold">{name}</span>
-            {row.carer_id && !row.participant_id && (
-              <span className="ml-2 text-[10px] uppercase tracking-wide text-muted-foreground">
-                Carer
-              </span>
-            )}
+            {kind ? <PersonKindBadge kind={kind} /> : null}
             {row.notes && (
               <p className="text-xs italic text-muted-foreground truncate">{row.notes}</p>
             )}

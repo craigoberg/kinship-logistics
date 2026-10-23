@@ -90,6 +90,57 @@ export function isDayCentreScopedIssue(issue: {
   return eventId == null && eventDaySessionId == null;
 }
 
+/**
+ * Lost Soul Rule — person late / missing / not-yet-arrived (client or support).
+ * These REDs stay open in the Hub for review; they must not hold Open Centre.
+ * Checkout / unexpected-med REDs are not lost souls.
+ */
+export function isLostSoulAttendanceIssue(
+  description: string | null | undefined,
+): boolean {
+  const d = (description ?? "").trim();
+  if (!d) return false;
+  if (d.includes("[DEPARTURE]")) return false;
+  if (/overdue checkout/i.test(d)) return false;
+  if (/unexpected medication/i.test(d)) return false;
+  if (d.includes("[ATTENDANCE]")) return true;
+  if (d.includes("[AUTOMATED_RED]") && /overdue by \d+\s*min/i.test(d)) {
+    return true;
+  }
+  return false;
+}
+
+function issueDescriptionOf(issue: {
+  issue_description?: string | null;
+  issueDescription?: string | null;
+}): string {
+  return issue.issue_description ?? issue.issueDescription ?? "";
+}
+
+/** True when this Day Centre issue must hold Open Centre. */
+export function doesIssueBlockDayCentreOpen(
+  issue: {
+    severity: string;
+    status: string | null;
+    issue_description?: string | null;
+    issueDescription?: string | null;
+    workaround_plan?: string | null;
+    workaroundPlan?: string | null;
+    workaround_accepted_at?: string | null;
+    workaroundAcceptedAt?: string | null;
+  },
+  escMap?: EscalationWorkaroundMap | null,
+): boolean {
+  if (issue.status === "resolved" || issue.status === "deferred") return false;
+  if (isLostSoulAttendanceIssue(issueDescriptionOf(issue))) return false;
+  if (issue.severity === "red") return !redHasAcceptedWorkaround(issue, escMap);
+  if (issue.severity === "yellow") {
+    const plan = issue.workaround_plan ?? issue.workaroundPlan ?? "";
+    return !plan.trim();
+  }
+  return false;
+}
+
 export type DayCentreRedIssueRow = {
   id: string;
   session_id: string | null;
@@ -99,6 +150,7 @@ export type DayCentreRedIssueRow = {
   workaround_plan: string | null;
   workaround_accepted_at: string | null;
   created_at: string;
+  occurred_at: string | null;
   event_id: string | null;
   event_day_session_id: string | null;
 };
@@ -112,7 +164,8 @@ export const DAY_CENTRE_BLOCKING_REDS_QUERY_KEY = [
  * RED issues that can block Day Centre Open Centre.
  * Scoped to Day Centre only: `event_id` and `event_day_session_id` both null.
  * Trip morning/evening / event-floor REDs are excluded.
- * Non-blocking: `resolved`, Hub `deferred`, or accepted workaround.
+ * Non-blocking: `resolved`, Hub `deferred`, accepted workaround, or Lost Soul
+ * attendance overdue (person late/missing — Hub still shows the open RED).
  */
 export async function fetchDayCentreBlockingReds(): Promise<{
   /** Day-scoped RED rows (any status except we still return resolved for diagnostics). */
@@ -124,7 +177,7 @@ export async function fetchDayCentreBlockingReds(): Promise<{
   const { data, error } = await supabase
     .from("site_issues_register")
     .select(
-      "id, session_id, severity, status, issue_description, workaround_plan, workaround_accepted_at, created_at, event_id, event_day_session_id",
+      "id, session_id, severity, status, issue_description, workaround_plan, workaround_accepted_at, created_at, occurred_at, event_id, event_day_session_id",
     )
     .eq("severity", "red")
     .is("event_id", null)
@@ -133,14 +186,10 @@ export async function fetchDayCentreBlockingReds(): Promise<{
   if (error) throw error;
 
   const rows = (data ?? []) as DayCentreRedIssueRow[];
-  // Resolved and Hub-deferred REDs do not block Open Centre. Defer parks the
-  // issue for later Hub follow-up without holding the morning open gate.
   const unresolved = rows.filter(
     (r) => r.status !== "resolved" && r.status !== "deferred",
   );
   const escMap = await fetchApprovedRedWorkarounds(unresolved.map((r) => r.id));
-  const blocking = unresolved.filter(
-    (r) => !redHasAcceptedWorkaround(r, escMap),
-  );
+  const blocking = unresolved.filter((r) => doesIssueBlockDayCentreOpen(r, escMap));
   return { rows, blocking, escMap };
 }

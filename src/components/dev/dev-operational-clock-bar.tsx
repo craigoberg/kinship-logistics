@@ -1,23 +1,29 @@
 /**
  * DEV/TEST tools bar — fake Sydney date/time + Simulate offline (BL-082).
- * Single amber row. Gated by IS_TEST_BUILD. Never mounts in production builds.
+ * Single amber row. SIM Time: anyone on your PC, Craig only on the office site.
+ * Simulate offline stays on the row only when Craig is signed in.
  */
-import { useSyncExternalStore, useState, useMemo } from "react";
+import { useSyncExternalStore, useState, useMemo, useEffect, useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Clock, CloudOff, X } from "lucide-react";
 import { toast } from "sonner";
+import { useCanUseDevTools, useCanUseSimTime } from "@/lib/dev-tools-access";
 import { getAppLaneBadge, IS_TEST_BUILD } from "@/lib/test-mode";
 import {
+  applyOperationalClock,
   clearOperationalClockOverride,
   formatOperationalClockLabel,
   freezeOperationalClockToLive,
   getOperationalClockOverride,
   getOperationalClockSnapshot,
-  setOperationalClockOverride,
   shiftOperationalClockDays,
   shiftOperationalClockMinutes,
   subscribeOperationalClock,
 } from "@/lib/operational-clock";
+import {
+  isSharedOperationalClockOn,
+  publishSharedOperationalClock,
+} from "@/lib/shared-operational-clock";
 import {
   isSimulatedOffline,
   setSimulatedOffline,
@@ -31,6 +37,7 @@ import { Input } from "@/components/ui/input";
 import { Switch } from "@/components/ui/switch";
 import { cn, parseIsoDateLocal, toIsoDateString } from "@/lib/utils";
 import { getSydneyIsoDate } from "@/lib/operational-time";
+import { useChromeVisibility } from "@/hooks/chrome-visibility";
 
 function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
   void qc.invalidateQueries();
@@ -38,10 +45,82 @@ function invalidateOperationalQueries(qc: ReturnType<typeof useQueryClient>) {
 
 export function DevOperationalClockBar() {
   if (!IS_TEST_BUILD) return null;
-  return <DevOperationalClockBarInner />;
+  return <DevOperationalClockShell />;
 }
 
-function DevOperationalClockBarInner() {
+function DevOperationalClockShell() {
+  const qc = useQueryClient();
+  const sim = useCanUseSimTime();
+  const devTools = useCanUseDevTools();
+  const snapshot = useSyncExternalStore(
+    subscribeOperationalClock,
+    getOperationalClockSnapshot,
+    () => "ssr:live",
+  );
+  const override = useMemo(() => getOperationalClockOverride(), [snapshot]);
+  const sharedOn = isSharedOperationalClockOn();
+  const clockKey = override ? `${override.date}T${override.time}` : "live";
+  const seen = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (seen.current === null) {
+      seen.current = clockKey;
+      if (clockKey !== "live") invalidateOperationalQueries(qc);
+      return;
+    }
+    if (seen.current === clockKey) return;
+    seen.current = clockKey;
+    invalidateOperationalQueries(qc);
+  }, [clockKey, qc]);
+
+  if (sharedOn && override && !devTools) {
+    return <FollowerClockBar override={override} />;
+  }
+  if (!sim) return null;
+  return <DevOperationalClockBarInner showOffline={devTools} sharedOn={sharedOn} />;
+}
+
+function FollowerClockBar({ override }: { override: { date: string; time: string } }) {
+  const { chromeHidden } = useChromeVisibility();
+  const laneBadge = getAppLaneBadge();
+  return (
+    <div
+      className={cn(
+        "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b border-amber-600/60 bg-amber-500 px-3 text-amber-950",
+        chromeHidden ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none" : "py-1.5 opacity-100",
+      )}
+      aria-hidden={chromeHidden}
+    >
+      <button
+        type="button"
+        className="flex min-w-0 items-center gap-1.5 text-left text-[11px] font-bold uppercase tracking-wider"
+        onClick={() =>
+          toast.message("Exercise clock", {
+            description: "This time is set for everyone. Ask Craig to change it.",
+          })
+        }
+      >
+        <Clock className="h-3.5 w-3.5 shrink-0" />
+        <span className="truncate">SIM TIME · {formatOperationalClockLabel(override)} · ALL</span>
+      </button>
+      <span
+        className="pointer-events-none select-none rounded bg-amber-950/25 px-2 py-0.5 text-center text-[12px] font-black tracking-[0.18em]"
+        aria-label={`App lane ${laneBadge}`}
+      >
+        {laneBadge}
+      </span>
+      <span />
+    </div>
+  );
+}
+
+function DevOperationalClockBarInner({
+  showOffline,
+  sharedOn,
+}: {
+  showOffline: boolean;
+  sharedOn: boolean;
+}) {
   const qc = useQueryClient();
   // Override is null until markOperationalClockClientReady() (root) — matches SSR.
   const snapshot = useSyncExternalStore(
@@ -51,6 +130,7 @@ function DevOperationalClockBarInner() {
   );
   const override = useMemo(() => getOperationalClockOverride(), [snapshot]);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [broadcasting, setBroadcasting] = useState(false);
 
   const liveParts = useMemo(() => {
     const now = new Date();
@@ -76,17 +156,54 @@ function DevOperationalClockBarInner() {
     setSheetOpen(true);
   };
 
-  const apply = (next: { date: string; time: string }, label: string) => {
-    setOperationalClockOverride(next);
-    invalidateOperationalQueries(qc);
-    toast.message("Operational clock set", { description: label });
+  const apply = async (next: { date: string; time: string }, label: string): Promise<boolean> => {
+    try {
+      if (sharedOn) await publishSharedOperationalClock(next);
+      else await applyOperationalClock(next);
+      invalidateOperationalQueries(qc);
+      toast.message(sharedOn ? "Everyone is on this time" : "Operational clock set", {
+        description: label,
+      });
+      return true;
+    } catch (err) {
+      toast.error("Clock did not update", { description: (err as Error).message });
+      return false;
+    }
   };
 
-  const clear = () => {
-    clearOperationalClockOverride();
-    invalidateOperationalQueries(qc);
-    toast.message("Operational clock cleared", { description: "Back to live wall clock." });
-    setSheetOpen(false);
+  const clear = async () => {
+    try {
+      if (sharedOn) await publishSharedOperationalClock(null);
+      clearOperationalClockOverride();
+      invalidateOperationalQueries(qc);
+      toast.message(sharedOn ? "Exercise clock off" : "Operational clock cleared", {
+        description: sharedOn ? "Everyone is on the live clock." : "Back to live wall clock.",
+      });
+      setSheetOpen(false);
+    } catch (err) {
+      toast.error("Clock did not turn off", { description: (err as Error).message });
+    }
+  };
+
+  const setEveryone = async (on: boolean) => {
+    setBroadcasting(true);
+    try {
+      if (on) {
+        await publishSharedOperationalClock({ date: draftDate, time: draftTime });
+        toast.message("Everyone is on this time", {
+          description: formatOperationalClockLabel({ date: draftDate, time: draftTime }),
+        });
+      } else {
+        await publishSharedOperationalClock(null);
+        clearOperationalClockOverride();
+        toast.message("Exercise clock off", { description: "Everyone is on the live clock." });
+      }
+      invalidateOperationalQueries(qc);
+    } catch (err) {
+      toast.error("Exercise clock did not change", { description: (err as Error).message });
+    } finally {
+      setBroadcasting(false);
+    }
   };
 
   const simOffline = useSyncExternalStore(
@@ -107,16 +224,21 @@ function DevOperationalClockBarInner() {
   };
 
   const laneBadge = getAppLaneBadge();
+  const { chromeHidden } = useChromeVisibility();
 
   return (
     <>
       <div
         className={cn(
-          "sticky top-0 z-[60] grid grid-cols-[1fr_auto_1fr] items-center gap-2 border-b px-3 py-1.5",
+          "sticky top-0 z-[60] grid shrink-0 grid-cols-[1fr_auto_1fr] items-center gap-2 overflow-hidden border-b px-3",
+          chromeHidden
+            ? "max-h-0 border-b-0 py-0 opacity-0 pointer-events-none"
+            : "py-1.5 opacity-100",
           override || simOffline
             ? "border-amber-600/60 bg-amber-500 text-amber-950"
             : "border-dashed border-amber-500/40 bg-amber-500/15 text-amber-800 dark:text-amber-200",
         )}
+        aria-hidden={chromeHidden}
       >
         <button
           type="button"
@@ -126,7 +248,7 @@ function DevOperationalClockBarInner() {
           <Clock className="h-3.5 w-3.5 shrink-0" />
           <span className="truncate">
             {override
-              ? `SIM TIME · ${formatOperationalClockLabel(override)}`
+              ? `SIM TIME · ${formatOperationalClockLabel(override)}${sharedOn ? " · ALL" : ""}`
               : "SIM · live (tap for date/time)"}
             {simOffline ? " · OFFLINE" : ""}
           </span>
@@ -145,12 +267,13 @@ function DevOperationalClockBarInner() {
             <button
               type="button"
               className="shrink-0 rounded bg-amber-950/20 px-2 py-0.5 text-[10px] font-bold uppercase"
-              onClick={clear}
+              onClick={() => void clear()}
             >
-              Clear
+              {sharedOn ? "Clear all" : "Clear"}
             </button>
           ) : null}
 
+          {showOffline ? (
           <label
             className="flex shrink-0 items-center gap-1.5 text-[10px] font-bold uppercase tracking-wider"
             onClick={(e) => e.stopPropagation()}
@@ -163,16 +286,28 @@ function DevOperationalClockBarInner() {
               aria-label="Simulate network offline for field testing"
             />
           </label>
+          ) : null}
         </div>
       </div>
 
       <BottomSheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
-        title="DEV operational clock"
-        description="Sydney date + time for multi-day and YELLOW/RED testing. Ledger timestamps stay real."
+        title="SIM time"
+        description="Sydney date and time. All operators sends this time to every signed-in person. Turn it off and everyone returns to the live clock. The exercise clock expires at Sydney midnight."
       >
         <div className="space-y-4 pb-4">
+          {showOffline ? (
+            <label className="flex items-center justify-between gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3">
+              <span className="text-sm font-medium">All operators follow this clock</span>
+              <Switch
+                checked={sharedOn}
+                disabled={broadcasting}
+                onCheckedChange={(on) => void setEveryone(on)}
+                aria-label="All operators follow this clock"
+              />
+            </label>
+          ) : null}
           <div className="grid gap-2">
             <Label>Date (Sydney)</Label>
             <DatePicker
@@ -201,8 +336,12 @@ function DevOperationalClockBarInner() {
             type="button"
             className="h-12 w-full"
             onClick={() => {
-              apply({ date: draftDate, time: draftTime }, formatOperationalClockLabel({ date: draftDate, time: draftTime }));
-              setSheetOpen(false);
+              void apply(
+                { date: draftDate, time: draftTime },
+                formatOperationalClockLabel({ date: draftDate, time: draftTime }),
+              ).then((ok) => {
+                if (ok) setSheetOpen(false);
+              });
             }}
           >
             Apply simulated clock
@@ -304,7 +443,7 @@ function DevOperationalClockBarInner() {
             Freeze at live now
           </Button>
 
-          <Button type="button" variant="ghost" className="w-full gap-1 text-destructive" onClick={clear}>
+          <Button type="button" variant="ghost" className="w-full gap-1 text-destructive" onClick={() => void clear()}>
             <X className="h-4 w-4" />
             Clear — use live wall clock
           </Button>

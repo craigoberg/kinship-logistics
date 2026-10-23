@@ -17,17 +17,30 @@ import {
   Users,
   UserX,
 } from "lucide-react";
+import {
+  WalkOnBadge,
+  WalkOnFloorButton,
+  WalkOnPersonModal,
+} from "@/components/events/walk-on-person-modal";
+import { EventSupportRoll } from "@/components/events/event-support-roll";
+import {
+  listWalkOnBookings,
+  walkOnParticipantIds,
+} from "@/lib/api/event-walk-on";
+import { PersonKindBadge } from "@/components/people/person-kind-badge";
+import type { PersonKindChip } from "@/lib/ui/person-kind-chip";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ClientTime } from "@/components/ui/client-time";
 import { EmbeddedMethodButton } from "@/components/ui/embedded-method-button";
+import { FloorRollUndoButton } from "@/components/site-day/floor-roll-undo-button";
 import { TransportMethodPickerSheet } from "@/components/ui/transport-method-picker-sheet";
 import { cn } from "@/lib/utils";
 import { BottomSheet } from "@/components/ui/bottom-sheet";
 import { MobileFieldButton } from "@/components/manifest/mobile-field-button";
 import {
-  buildBusSelfPickerOptions,
   selectionFromEventMode,
+  type FloorMethodPickerOption,
   type FloorTransportSelection,
 } from "@/lib/ui/floor-transport-method";
 import {
@@ -36,18 +49,22 @@ import {
   type TripAbsentDispositionResult,
 } from "@/components/events/trip-absent-disposition-dialog";
 import {
-  checkoutEventParticipant,
   listEventAttendanceRoll,
   listPriorAbsences,
   markEventAttendanceAbsent,
-  recordEventArrival,
   reinstateFromAbsent,
   seedEventAttendanceRoll,
-  toggleEventCheckIn,
   type EventArrivalChoice,
   type EventAttendanceRow,
   type ReturnTransport,
 } from "@/lib/api/event-attendance";
+import { laterPickupIds, listPassengerAssignments } from "@/lib/api/passenger-stops";
+import {
+  checkoutEventParticipantOfflineAware,
+  recordEventArrivalOfflineAware,
+  resolveEventAttendanceRoll,
+  toggleEventCheckInOfflineAware,
+} from "@/lib/deliver-offline/outbox";
 import { ClinicalFlagChips } from "@/components/ui/clinical-flag-chips";
 import { clinicalFlagsFromParticipant } from "@/lib/clinical-flags";
 import { getExpectedArrivalBy } from "@/lib/api/event-activity-roll";
@@ -55,9 +72,13 @@ import { EventTransportBadge } from "@/components/events/event-transport-badge";
 import { listParticipants, LOOKUP_CATEGORIES } from "@/lib/data-store";
 import { formatLeftTripDisplay } from "@/lib/trip-absent";
 import { useLookupParameters } from "@/hooks/use-supabase-data";
-import { eventBusRunOptions, eventBusRunShortLabel } from "@/lib/event-bus-runs";
+import { eventBusRunOptions } from "@/lib/event-bus-runs";
 import { supabase } from "@/integrations/supabase/client";
 import { isSchemaMismatchError } from "@/lib/api/supabase-errors";
+import {
+  sortByParticipantSurname,
+  surnameMapFromParticipants,
+} from "@/lib/ui/sort-participants";
 
 const rollKey = (sessionId: string) => ["event-attendance-log", sessionId] as const;
 
@@ -128,9 +149,11 @@ export function EventArrivalRollPanel({
 
   const { data: rows = [], isLoading, isFetching } = useQuery({
     queryKey: rollKey(sessionId),
-    queryFn: () => listEventAttendanceRoll(sessionId),
+    queryFn: () =>
+      resolveEventAttendanceRoll(sessionId, () => listEventAttendanceRoll(sessionId)),
     staleTime: 20_000,
     refetchInterval: 30_000,
+    networkMode: "offlineFirst",
   });
 
   const { data: participants = [] } = useQuery({
@@ -138,6 +161,17 @@ export function EventArrivalRollPanel({
     queryFn: listParticipants,
     staleTime: 60_000,
   });
+
+  const { data: walkOnFlags = [] } = useQuery({
+    queryKey: ["event-walk-ons", eventId],
+    queryFn: () => listWalkOnBookings(eventId),
+    staleTime: 15_000,
+  });
+  const walkOnIds = useMemo(
+    () => walkOnParticipantIds(walkOnFlags),
+    [walkOnFlags],
+  );
+  const [walkOnOpen, setWalkOnOpen] = useState(false);
 
   const priorSessionIds = priorSessions.map((s) => s.id);
   const { data: priorAbsenceMap = {} } = useQuery({
@@ -185,6 +219,29 @@ export function EventArrivalRollPanel({
     );
   }, [participants]);
 
+  const surnameById = useMemo(
+    () => surnameMapFromParticipants(participants),
+    [participants],
+  );
+  const sortedRows = useMemo(
+    () =>
+      sortByParticipantSurname(rows, (r) => r.participantId, surnameById),
+    [rows, surnameById],
+  );
+  const { data: pickupAssignments = [] } = useQuery({
+    queryKey: ["passenger-assignments", eventId],
+    queryFn: () => listPassengerAssignments(eventId),
+    staleTime: 60_000,
+  });
+  const laterParticipantIds = useMemo(
+    () => laterPickupIds(pickupAssignments).participantIds,
+    [pickupAssignments],
+  );
+  const meetingRows = useMemo(
+    () => sortedRows.filter((row) => !laterParticipantIds.has(row.participantId)),
+    [sortedRows, laterParticipantIds],
+  );
+
   const invalidate = () => {
     qc.invalidateQueries({ queryKey: rollKey(sessionId) });
     qc.invalidateQueries({ predicate: (q) => q.queryKey?.[0] === "event-actual-transport" });
@@ -197,7 +254,7 @@ export function EventArrivalRollPanel({
   };
 
   const toggleMut = useMutation({
-    mutationFn: (row: EventAttendanceRow) => toggleEventCheckIn(row),
+    mutationFn: (row: EventAttendanceRow) => toggleEventCheckInOfflineAware(row),
     onSuccess: () => invalidate(),
     onError: (e: Error) => toast.error(e.message),
   });
@@ -211,7 +268,7 @@ export function EventArrivalRollPanel({
       row: EventAttendanceRow;
       transport: ReturnTransport;
       busRunCode?: string | null;
-    }) => checkoutEventParticipant(row, transport, busRunCode),
+    }) => checkoutEventParticipantOfflineAware(row, transport, busRunCode),
     onSuccess: () => {
       toast.success("Departure handover recorded.");
       invalidate();
@@ -236,7 +293,7 @@ export function EventArrivalRollPanel({
       notes?: string;
       alsoCheckIn?: boolean;
     }) =>
-      recordEventArrival(row, {
+      recordEventArrivalOfflineAware(row, {
         arrival,
         busRunCode,
         notes,
@@ -342,12 +399,12 @@ export function EventArrivalRollPanel({
     onError: (e: Error) => toast.error("Could not reinstate.", { description: e.message }),
   });
 
-  // Progress counter: "absent" rows are resolved — they do not count as pending check-ins
-  const checkedIn = rows.filter((r) => r.status === "checked_in").length;
-  const checkedOut = rows.filter((r) => r.status === "checked_out").length;
-  const absent = rows.filter((r) => r.status === "absent").length;
-  const pending = rows.filter((r) => r.status === "expected").length;
-  const total = rows.length;
+  // Meeting-point roll only. Later pickups are collected on Programme.
+  const checkedIn = meetingRows.filter((r) => r.status === "checked_in").length;
+  const checkedOut = meetingRows.filter((r) => r.status === "checked_out").length;
+  const absent = meetingRows.filter((r) => r.status === "absent").length;
+  const pending = meetingRows.filter((r) => r.status === "expected").length;
+  const total = meetingRows.length;
 
   if (isLoading) {
     return (
@@ -370,19 +427,25 @@ export function EventArrivalRollPanel({
         {isFetching && <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />}
       </div>
 
-      <div className="flex flex-wrap gap-3 text-xs font-medium">
-        <span>
-          {checkedIn}/{total} checked in
-        </span>
-        {pending > 0 && (
-          <span className="text-amber-600">{pending} still expected</span>
-        )}
-        {absent > 0 && (
-          <span className="text-destructive">{absent} absent</span>
-        )}
-        {checkedOut > 0 && (
-          <span className="text-muted-foreground">{checkedOut} handed to transport</span>
-        )}
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-3 text-xs font-medium">
+          <span>
+            {checkedIn}/{total} checked in
+          </span>
+          {pending > 0 && (
+            <span className="text-amber-600">{pending} still expected</span>
+          )}
+          {absent > 0 && (
+            <span className="text-destructive">{absent} absent</span>
+          )}
+          {checkedOut > 0 && (
+            <span className="text-muted-foreground">{checkedOut} handed to transport</span>
+          )}
+        </div>
+        <WalkOnFloorButton
+          label="Someone extra arrived"
+          onClick={() => setWalkOnOpen(true)}
+        />
       </div>
 
       {/* ── Arrival gate banner ── */}
@@ -405,14 +468,14 @@ export function EventArrivalRollPanel({
         return null;
       })()}
 
-      {rows.length === 0 ? (
+      {meetingRows.length === 0 ? (
         <div className="rounded-lg border border-dashed py-6 text-center text-sm text-muted-foreground">
           <Users className="mx-auto mb-2 h-5 w-5" />
           No roster entries — open the location to seed the arrival roll.
         </div>
       ) : (
         <ul className="space-y-1.5">
-          {rows.map((row) => {
+          {meetingRows.map((row) => {
             const absentPriorSessionId = priorAbsenceMap[row.participantId];
             const absentDayLabel = absentPriorSessionId
               ? priorSessionLabel[absentPriorSessionId]
@@ -437,6 +500,12 @@ export function EventArrivalRollPanel({
                 busRunOpts={busRunOpts}
                 plannedOutbound={
                   plannedOutboundByParticipant.get(row.participantId) ?? null
+                }
+                isWalkOn={walkOnIds.has(row.participantId)}
+                personKind={
+                  participants.find((p) => p.id === row.participantId)?.participantKind === "guest"
+                    ? "guest"
+                    : "participant"
                 }
                 clinicalChips={clinicalFlagsFromParticipant(
                   participants.find((p) => p.id === row.participantId) ?? {},
@@ -479,6 +548,18 @@ export function EventArrivalRollPanel({
           })}
         </ul>
       )}
+
+      {priorSessions.length === 0 && (
+        <EventSupportRoll sessionId={sessionId} eventId={eventId} mode="check_in" />
+      )}
+
+      <WalkOnPersonModal
+        open={walkOnOpen}
+        onOpenChange={setWalkOnOpen}
+        eventId={eventId}
+        source="venue"
+        eventDaySessionId={sessionId}
+      />
     </div>
   );
 }
@@ -498,6 +579,8 @@ function RollCard({
   arrivalUrgency = null,
   busRunOpts,
   plannedOutbound,
+  isWalkOn = false,
+  personKind = "participant",
   clinicalChips = [],
   onUndoCheckIn,
   onCheckout,
@@ -517,6 +600,8 @@ function RollCard({
   arrivalUrgency?: ArrivalUrgency;
   busRunOpts: ReturnType<typeof eventBusRunOptions>;
   plannedOutbound: { mode: "bus" | "self"; busRunCode: string | null } | null;
+  isWalkOn?: boolean;
+  personKind?: PersonKindChip;
   clinicalChips?: import("@/lib/clinical-flags").ClinicalFlagChip[];
   onUndoCheckIn: () => void;
   onCheckout: (t: ReturnTransport, busRunCode?: string | null) => void;
@@ -563,16 +648,33 @@ function RollCard({
   const [arrivalOverride, setArrivalOverride] =
     useState<FloorTransportSelection | null>(null);
   const arrivalSel = arrivalOverride ?? plannedSelection;
-  const arrivalPickerOptions = useMemo(
-    () =>
-      buildBusSelfPickerOptions(busRunOpts, "event", {
-        busTitlePrefix: "Arrived on",
-        selfTitle: "Self / Meeting at venue",
-        selfSubtitle: "Family or independent — not on the bus",
-      }),
-    [busRunOpts],
+  const pickerBusCode =
+    (isIn && actualIsBus ? row.arrivalBusRunCode : null) ??
+    (arrivalSel.kind === "bus" ? arrivalSel.busRunCode : null) ??
+    plannedOutbound?.busRunCode ??
+    null;
+  const arrivalPickerOptions = useMemo<FloorMethodPickerOption[]>(
+    () => [
+      {
+        id: "bus",
+        kind: "bus",
+        busRunCode: pickerBusCode,
+        title: "Arrived on Bus",
+        subtitle: "On the trip bus",
+        label: "Bus",
+      },
+      {
+        id: "self",
+        kind: "self",
+        busRunCode: null,
+        title: "Self / Meeting at venue",
+        subtitle: "Family or independent — not on the bus",
+        label: "Self",
+      },
+    ],
+    [pickerBusCode],
   );
-
+  const arrivalLabel = arrivalSel.kind === "self" ? "Self" : "Bus";
   // Walk-in state
   const [walkInNote, setWalkInNote] = useState("");
 
@@ -614,11 +716,15 @@ function RollCard({
     );
   }
 
+  const kindSurface = isIn || arrivalUrgency === "warning" ? "light" : "theme";
+
   return (
     <li
       className={cn(
         "rounded-lg border px-3 py-2",
-        isIn && "border-emerald-500/40 bg-emerald-500/5",
+        // Hi-vis checked-in — solid success fill (§4.5 / UI-STYLE-GUIDE)
+        isIn &&
+          "border-2 border-success bg-success text-success-foreground shadow-md ring-2 ring-success/40",
         isOut && "border-muted bg-muted/20 opacity-80",
         isAbsent && "border-destructive/60 bg-destructive/5",
         !isIn && !isOut && !isAbsent && arrivalUrgency === "warning" && "border-amber-400 bg-amber-50",
@@ -637,34 +743,31 @@ function RollCard({
               "min-h-11 touch-manipulation active:scale-[0.99]",
               "hover:bg-black/5 disabled:opacity-60",
             )}
-            aria-label={`Check in ${name} via ${arrivalSel.label}`}
+            aria-label={`Check in ${name} via ${arrivalLabel}`}
           >
             <div className="flex flex-wrap items-center gap-1">
               <span className="font-medium text-sm leading-tight">{name}</span>
-              <Badge variant="outline" className="text-[10px] text-muted-foreground">
-                Planned{" "}
-                {plannedIsBus
-                  ? eventBusRunShortLabel(
-                      plannedOutbound?.busRunCode ?? null,
-                      busRunOpts,
-                    ) || "Bus"
-                  : "Self"}
-              </Badge>
+              <PersonKindBadge kind={personKind} surface={kindSurface} />
+              {isWalkOn && <WalkOnBadge />}
               {absentDayLabel && (
                 <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
                   Absent {absentDayLabel}
                 </Badge>
               )}
-              {clinicalChips.length > 0 && (
-                <ClinicalFlagChips chips={clinicalChips} personName={name} />
-              )}
             </div>
             <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
-              Tap to check in via {arrivalSel.label}
+              Tap to check in via {arrivalLabel}
             </p>
           </button>
+          {clinicalChips.length > 0 && (
+            <ClinicalFlagChips
+              chips={clinicalChips}
+              personName={name}
+              surface={arrivalUrgency === "warning" ? "light" : "theme"}
+            />
+          )}
           <EmbeddedMethodButton
-            label={arrivalSel.label}
+            label={arrivalLabel}
             disabled={busy}
             onClick={() => setMethodPickerOpen(true)}
           />
@@ -688,6 +791,8 @@ function RollCard({
             <div className="min-w-0 flex-1">
               <div className="flex flex-wrap items-center gap-1">
                 <span className="font-medium text-sm leading-tight">{name}</span>
+                <PersonKindBadge kind={personKind} surface={kindSurface} />
+                {isWalkOn && <WalkOnBadge />}
                 {absentDayLabel && (
                   <Badge className="text-[10px] border-amber-500/50 bg-amber-500/10 text-amber-700 font-medium">
                     Absent {absentDayLabel}
@@ -708,7 +813,14 @@ function RollCard({
                 )}
               </div>
               {row.checkedInAt && (
-                <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+                <p
+                  className={cn(
+                    "mt-0.5 text-[11px] leading-snug",
+                    isIn
+                      ? "text-success-foreground/90"
+                      : "text-muted-foreground",
+                  )}
+                >
                   In <ClientTime iso={row.checkedInAt} />
                   {row.checkedOutAt && (
                     <>
@@ -733,24 +845,12 @@ function RollCard({
             <div className="flex shrink-0 items-center gap-1">
               {/* Read-only method badge when chip is not shown (avoids R1 chip + R1 badge double) */}
               {!isAbsent && (isIn || isOut) && !(editable && isIn && !isOut) && (
-                <MethodBadge
-                  method={row.arrivalMethod}
-                  busShortLabel={
-                    row.arrivalMethod === "bus"
-                      ? eventBusRunShortLabel(row.arrivalBusRunCode, busRunOpts)
-                      : null
-                  }
-                />
+                <MethodBadge method={row.arrivalMethod} />
               )}
 
               {editable && isIn && !isOut && (
                 <EmbeddedMethodButton
-                  label={
-                    actualIsBus
-                      ? eventBusRunShortLabel(row.arrivalBusRunCode, busRunOpts) ||
-                        "Bus"
-                      : "Self"
-                  }
+                  label={actualIsBus ? "Bus" : "Self"}
                   disabled={busy}
                   onClick={() => setMethodPickerOpen(true)}
                   aria-label="Change arrival method"
@@ -758,24 +858,12 @@ function RollCard({
               )}
 
               {editable && isIn && !isOut && (
-                <button
-                  type="button"
+                <FloorRollUndoButton
+                  kind="check_in"
+                  personName={name}
                   disabled={busy}
                   onClick={() => onUndoCheckIn()}
-                  className={cn(
-                    "inline-flex min-h-11 min-w-11 flex-col items-center justify-center gap-0.5 rounded-md px-2",
-                    "border border-slate-300 bg-white text-slate-900 shadow-sm",
-                    "hover:bg-slate-100 active:scale-[0.98] touch-manipulation",
-                    "disabled:opacity-50 disabled:pointer-events-none",
-                  )}
-                  title="Undo check-in"
-                  aria-label={`Undo check-in for ${name}`}
-                >
-                  <RotateCcw className="h-3.5 w-3.5" />
-                  <span className="text-[9px] font-medium uppercase leading-none text-slate-500">
-                    Undo
-                  </span>
-                </button>
+                />
               )}
 
               {editable && isAbsent && (
@@ -916,13 +1004,9 @@ function RollCard({
         }
         options={arrivalPickerOptions}
         selected={
-          isIn
-            ? selectionFromEventMode(
-                actualIsSelf ? "self" : "bus",
-                row.arrivalBusRunCode,
-                busRunOpts,
-              )
-            : arrivalSel
+          (isIn ? actualIsSelf : arrivalSel.kind === "self")
+            ? { kind: "self", busRunCode: null, label: "Self" }
+            : { kind: "bus", busRunCode: pickerBusCode, label: "Bus" }
         }
         pending={busy}
         onSelect={applyArrivalSelection}

@@ -5,7 +5,9 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
+import { officeClickRowClass } from "@/lib/ui/office-click-row";
 import { getActiveUserProfile } from "@/lib/data-store";
+import { useMenuAccess } from "@/hooks/use-menu-access";
 import {
   HELP_TOPICS,
   buildHelpAreaChips,
@@ -21,6 +23,7 @@ export function HelpPage() {
   const [query, setQuery] = useState("");
   const [menuFilter, setMenuFilter] = useState<string | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const { canOpen } = useMenuAccess();
   const [profile, setProfile] = useState(() => getActiveUserProfile());
 
   useEffect(() => {
@@ -59,6 +62,7 @@ export function HelpPage() {
       <HelpArticle
         topic={selected}
         allVisible={visibleTopics}
+        canOpen={canOpen}
         onBack={() => setSelectedId(null)}
         onOpenRelated={(id) => setSelectedId(id)}
       />
@@ -136,7 +140,10 @@ export function HelpPage() {
               key={topic.id}
               type="button"
               onClick={() => setSelectedId(topic.id)}
-              className="flex w-full items-start gap-3 rounded-lg border bg-card p-3 text-left transition-colors hover:bg-muted/40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              className={cn(
+                officeClickRowClass,
+                "flex w-full items-start gap-3 rounded-lg border p-3 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+              )}
             >
               <div className="min-w-0 flex-1 space-y-1">
                 <div className="flex flex-wrap items-center gap-2">
@@ -188,16 +195,18 @@ function FilterChip({
 function HelpArticle({
   topic,
   allVisible,
+  canOpen,
   onBack,
   onOpenRelated,
 }: {
   topic: HelpTopic;
   allVisible: HelpTopic[];
+  canOpen: (menuKey: string) => boolean;
   onBack: () => void;
   onOpenRelated: (id: string) => void;
 }) {
   const navigate = useNavigate();
-  const deepLink = resolveHelpDeepLink(topic.menus);
+  const deepLink = resolveHelpDeepLink(topic.menus, canOpen);
   const related = (topic.relatedIds ?? [])
     .map((id) => getHelpTopicById(allVisible, id))
     .filter((t): t is HelpTopic => !!t);
@@ -267,7 +276,10 @@ function HelpArticle({
                 key={item.id}
                 type="button"
                 onClick={() => onOpenRelated(item.id)}
-                className="flex w-full items-center justify-between gap-3 rounded-lg border bg-card px-3 py-3 text-left text-sm font-medium hover:bg-muted/40"
+                className={cn(
+                  officeClickRowClass,
+                  "flex w-full items-center justify-between gap-3 rounded-lg border px-3 py-3 text-left text-sm font-medium",
+                )}
               >
                 {item.title}
                 <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
