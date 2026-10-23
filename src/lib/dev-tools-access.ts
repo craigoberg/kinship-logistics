@@ -5,6 +5,8 @@
  * signed-in driver sees it, on your PC and on the office site.
  *
  * SIM Time is separate: anyone on your PC (DEV), Craig only on the office site.
+ * The exercise clock (All operators) is Craig-only everywhere. When it is on,
+ * every signed-in person follows that time.
  */
 import { useEffect, useState } from "react";
 import { ACTIVE_PROFILE_EVENT } from "@/lib/active-profile-event";

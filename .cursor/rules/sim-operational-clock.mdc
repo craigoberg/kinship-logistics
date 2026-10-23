@@ -26,4 +26,4 @@ Any work that uses a **date, time, “today”, duration, overdue check, or oper
 
 Operator-visible log stamps (`operational_ledger.created_at`, issue `created_at` / `occurred_at`, Hub `stamped_at`) use `operationalNowIso()`.
 
-Production builds use the same helpers (live clock). Never special-case TEST with a second clock.
+`VITE_IS_PRODUCTION=true` uses the same helpers on the live clock. The office site can follow one shared exercise clock when Craig has turned **All operators** on. Never add a second clock beside these helpers.

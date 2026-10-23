@@ -160,6 +160,8 @@ const ACTION_LABELS: Record<string, string> = {
   EVENT_LOCATION_CLOSED_ORDERLY: "Trip location closed",
   EVENT_LOCATION_CLOSED_INCIDENT: "Trip location closed (incident)",
   EVENT_RESET_START_OF_DAY: "Trip day reset",
+  EVENT_DELIVER_UNWOUND: "Event Deliver unwound",
+  SHARED_OPERATIONAL_CLOCK: "Exercise clock",
   SYSTEM_PARAMETER_UPDATED: "System parameter updated",
   AUDIT_PACK_EXPORTED: "NDIS Audit Pack exported",
   EVENT_FLOOR_CHECKIN: "Trip check-in",

@@ -4,7 +4,9 @@
  * Lets QA fake Sydney date + time so multi-day trips and YELLOW→RED sweeps
  * can be tested without waiting for the wall clock.
  *
- * Gated by IS_TEST_BUILD. Production builds always use the live clock.
+ * Gated by IS_TEST_BUILD. A true production build (`VITE_IS_PRODUCTION`) always
+ * uses the live clock. On the office site, Craig can publish one exercise
+ * clock that every signed-in person follows (`shared-operational-clock.ts`).
  * GUARDRAILS §5.3: any date/time work must honour this clock. Floor stamps
  * operators see (depart/arrive/board, check-in, open/close, Off today) use
  * `operationalNowIso()`. Ledger `created_at` is SIM so Logs/Hub match the
@@ -14,7 +16,14 @@
 import { useSyncExternalStore } from "react";
 import { toast } from "sonner";
 import { ACTIVE_PROFILE_EVENT } from "@/lib/active-profile-event";
-import { canUseSimTime } from "@/lib/dev-tools-access";
+import { canUseDevTools, canUseSimTime } from "@/lib/dev-tools-access";
+import {
+  getSharedOperationalOverride,
+  isSharedOperationalClockOn,
+  publishSharedOperationalClock,
+  startSharedOperationalClockSync,
+  subscribeSharedClock,
+} from "@/lib/shared-operational-clock";
 import { IS_TEST_BUILD } from "@/lib/test-mode";
 import {
   getSydneyIsoDate,
@@ -61,6 +70,7 @@ export function markOperationalClockClientReady(): void {
   clientReady = true;
   expireStaleOperationalClockOverride("midnight");
   memoryCache = undefined; // re-read localStorage on next access
+  startSharedOperationalClockSync();
   notify();
   startWallDateWatcher();
 }
@@ -144,7 +154,10 @@ function readOverride(): OperationalClockOverride | null {
   if (!canOverride()) return null;
   // Hydration: match SSR (no localStorage) until root marks client ready.
   if (!clientReady) return null;
-  // DEV: any operator. TEST: stored SIM applies only while Craig is signed in.
+  // Exercise clock wins for every signed-in person while Craig has it on.
+  const shared = getSharedOperationalOverride();
+  if (shared) return shared;
+  // DEV: any operator. Office site: stored private SIM applies only for Craig.
   if (!canUseSimTime()) return null;
   if (memoryCache !== undefined) return memoryCache;
   try {
@@ -206,12 +219,14 @@ export function isOperationalClockOverridden(): boolean {
   return readOverride() != null;
 }
 
-export function setOperationalClockOverride(next: OperationalClockOverride): void {
-  if (!canOverride() || !canUseSimTime()) return;
-  clientReady = true;
+function normalizeClock(next: OperationalClockOverride): OperationalClockOverride {
   const [hh, mm] = next.time.trim().split(":").map(Number);
   const time = `${String(Math.min(23, Math.max(0, hh ?? 0))).padStart(2, "0")}:${String(Math.min(59, Math.max(0, mm ?? 0))).padStart(2, "0")}`;
-  const value: OperationalClockOverride = { date: next.date, time };
+  return { date: next.date, time };
+}
+
+function writeLocalOverride(value: OperationalClockOverride): void {
+  clientReady = true;
   const stored: StoredOperationalClockOverride = {
     ...value,
     setOnWallDate: wallSydneyDateIso(),
@@ -223,6 +238,30 @@ export function setOperationalClockOverride(next: OperationalClockOverride): voi
     /* ignore */
   }
   notify();
+}
+
+/**
+ * Save a Sydney date and time. While the exercise clock is on, Craig's save
+ * moves every signed-in person. Otherwise it stays on this browser.
+ */
+export async function applyOperationalClock(next: OperationalClockOverride): Promise<void> {
+  if (!canOverride()) return;
+  const value = normalizeClock(next);
+  if (isSharedOperationalClockOn()) {
+    if (!canUseDevTools()) return;
+    await publishSharedOperationalClock(value);
+    return;
+  }
+  if (!canUseSimTime()) return;
+  writeLocalOverride(value);
+}
+
+export function setOperationalClockOverride(next: OperationalClockOverride): void {
+  void applyOperationalClock(next).catch((err: Error) => {
+    toast.error("Exercise clock did not update for everyone", {
+      description: err.message,
+    });
+  });
 }
 
 export function clearOperationalClockOverride(): void {
@@ -248,6 +287,12 @@ export function clearOperationalClockOnOperatorLogin(): void {
       !!localStorage.getItem(OPERATIONAL_CLOCK_STORAGE_KEY));
   if (!hadOverride) return;
   clearOperationalClockOverride();
+  if (isSharedOperationalClockOn()) {
+    toast.message("Private SIM cleared on sign-in", {
+      description: "The exercise clock is still on for everyone.",
+    });
+    return;
+  }
   toast.message("SIM TIME cleared on sign-in", {
     description: "Back to live wall clock. Set SIM again only for this sitting.",
   });
@@ -324,3 +369,8 @@ export function useOperationalTodayIso(): string {
   );
   return getOperationalTodayIso();
 }
+
+subscribeSharedClock(() => {
+  memoryCache = undefined;
+  notify();
+});

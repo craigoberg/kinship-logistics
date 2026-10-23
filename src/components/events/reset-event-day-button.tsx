@@ -1,6 +1,6 @@
 /**
- * Test-only — rewind this Event Deliver trip day to Start of Day.
- * Full ops wipe + DEV clock → session date @ 07:00.
+ * Craig only — unwind Event Deliver for this day, or the whole trip.
+ * Roster and itinerary stay. Floor progress is removed.
  */
 import { useState } from "react";
 import { useMutation, useQueryClient } from "@tanstack/react-query";
@@ -17,7 +17,10 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog";
-import { resetEventDayToStartOfDay } from "@/lib/api/event-day-reset";
+import {
+  resetEventDayToStartOfDay,
+  unwindEventDeliver,
+} from "@/lib/api/event-day-reset";
 import {
   invalidateEventDayCaches,
   invalidateTransportCaches,
@@ -31,6 +34,8 @@ interface Props {
   onReset?: () => void;
 }
 
+type Scope = "day" | "trip";
+
 export function ResetEventDayButton({
   sessionId,
   eventId,
@@ -42,8 +47,15 @@ export function ResetEventDayButton({
   const [error, setError] = useState<string | null>(null);
 
   const mut = useMutation({
-    mutationFn: () => resetEventDayToStartOfDay(sessionId),
-    onSuccess: (next) => {
+    mutationFn: async (scope: Scope) => {
+      if (scope === "trip") {
+        const result = await unwindEventDeliver(eventId);
+        return { scope, result } as const;
+      }
+      const session = await resetEventDayToStartOfDay(sessionId);
+      return { scope, session } as const;
+    },
+    onSuccess: (payload) => {
       invalidateEventDayCaches(qc, {
         eventId,
         sessionDate,
@@ -55,16 +67,25 @@ export function ResetEventDayButton({
       void qc.invalidateQueries({ queryKey: ["event-attendance-log", sessionId] });
       void qc.invalidateQueries({ queryKey: ["event-support-attendance", sessionId] });
       void qc.invalidateQueries({ queryKey: ["event-accountability-roll"] });
-      const notes = next.open_leader_notes ?? "";
-      const overnight = notes.includes("overnight start of day");
-      const noRoster = notes.includes("no confirmed roster");
-      toast.success("Trip day reset to Start of Day", {
-        description: noRoster
-          ? `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Nobody is confirmed on the roster, so this day was left unopened.`
-          : overnight
-            ? `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Overnight base open — Morning Roll ready.`
-            : `Test clock ${formatDate(sessionDate)} · 07:00 Syd. Open Location to begin (Day 1).`,
-      });
+      void qc.invalidateQueries({ queryKey: ["compliance_audit_logs"] });
+      void qc.invalidateQueries({ queryKey: ["event-manifest"] });
+      if (payload.scope === "trip") {
+        const { days, firstDate, reopened } = payload.result;
+        toast.success("Event Deliver unwound", {
+          description: `${days} day${days === 1 ? "" : "s"} cleared from ${formatDate(firstDate)} · 07:00 Syd. Roster and itinerary kept.${reopened ? " Event is Open again." : ""}`,
+        });
+      } else {
+        const notes = payload.session.open_leader_notes ?? "";
+        const overnight = notes.includes("overnight start of day");
+        const noRoster = notes.includes("no confirmed roster");
+        toast.success("This day is back to the start", {
+          description: noRoster
+            ? `${formatDate(sessionDate)} · 07:00 Syd. Nobody is confirmed on the roster, so this day was left unopened.`
+            : overnight
+              ? `${formatDate(sessionDate)} · 07:00 Syd. Overnight base open — Morning Roll ready.`
+              : `${formatDate(sessionDate)} · 07:00 Syd. Open Location to begin.`,
+        });
+      }
       setError(null);
       setOpen(false);
       onReset?.();
@@ -79,7 +100,6 @@ export function ResetEventDayButton({
       <AlertDialog
         open={open}
         onOpenChange={(next) => {
-          if (mut.isPending) return;
           setOpen(next);
           if (!next) setError(null);
         }}
@@ -91,14 +111,14 @@ export function ResetEventDayButton({
             variant="outline"
             className="h-11 w-full gap-1.5 border-dashed border-amber-500/60 text-amber-700 hover:bg-amber-500/10"
             disabled={mut.isPending}
-            title="TEST ONLY — wipe this day's floor ops and set test clock to 07:00"
+            title="Clear Event Deliver for this day or the whole trip. Roster and itinerary stay."
           >
             {mut.isPending ? (
               <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
               <RotateCcw className="h-4 w-4" />
             )}
-            Reset Start of Day
+            Unwind Deliver
             <span className="ml-1 rounded bg-amber-500/15 px-1 py-0.5 text-[9px] font-bold uppercase tracking-wider">
               Test
             </span>
@@ -106,32 +126,33 @@ export function ResetEventDayButton({
         </AlertDialogTrigger>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reset this trip day to Start of Day?</AlertDialogTitle>
+            <AlertDialogTitle>Unwind Event Deliver?</AlertDialogTitle>
             <AlertDialogDescription asChild>
               <div className="space-y-2 text-sm text-muted-foreground">
                 <p>
-                  Stays on <strong>{formatDate(sessionDate)}</strong> — same leader, roll times, and
-                  itinerary.
-                </p>
-                <p>Discarded for this day only:</p>
-                <ul className="list-disc space-y-0.5 pl-5">
-                  <li>Check-in for participants and support (staff, volunteers, carers)</li>
-                  <li>Morning &amp; evening roll rows (including Yellow/Red + Hub issues)</li>
-                  <li>Activity rolls, bus hops, outbound/return trips</li>
-                  <li>Later venue-stop runtime (itinerary kept)</li>
-                </ul>
-                <p>
-                  <strong>Day 2+:</strong> overnight base stays open — confirmed roster checked in so
-                  Morning Roll is available (no re-arrival Check-In). If nobody is confirmed, the
-                  day is left unopened.{" "}
-                  <strong>Day 1:</strong> location closes; Open Location + Check-In as usual.
+                  Field progress is removed so this trip can be run again. Roster, itinerary,
+                  leaders, and roll times stay in Event Manage. People added on the day stay on
+                  the roster. The Activity log of the field run stays.
                 </p>
                 <p>
-                  Test clock will be set to <strong>{formatDate(sessionDate)} · 07:00 Syd</strong>.
+                  <strong>This day</strong> ({formatDate(sessionDate)}) clears check-in, rolls,
+                  programme, bus hops, meals, medication doses, and Hub issues. Day 1 is ready
+                  to Open location. A later day wakes at the overnight base with Morning Roll
+                  ready.
                 </p>
-                {error && (
-                  <p className="font-medium text-destructive">{error}</p>
-                )}
+                <p>
+                  <strong>Whole trip</strong> puts every day back to before Open location. The
+                  clock moves to day 1 at 07:00 Syd so you can SIM that morning and work through.
+                </p>
+                <p>
+                  Vehicle walkaround records for those calendar dates are cleared so the bus
+                  check can be done again. If the event was Closed, it returns to Open.
+                </p>
+                <p>
+                  Turn on <strong>All operators</strong> on the SIM bar first if everyone should
+                  jump to 07:00 with you.
+                </p>
+                {error && <p className="font-medium text-destructive">{error}</p>}
               </div>
             </AlertDialogDescription>
           </AlertDialogHeader>
@@ -148,14 +169,26 @@ export function ResetEventDayButton({
             </Button>
             <Button
               type="button"
+              variant="outline"
+              className="border-amber-600 text-amber-800 hover:bg-amber-500/10"
+              disabled={mut.isPending}
+              onClick={() => {
+                setError(null);
+                mut.mutate("day");
+              }}
+            >
+              {mut.isPending ? "Clearing…" : "This day"}
+            </Button>
+            <Button
+              type="button"
               className="bg-amber-600 text-white hover:bg-amber-700"
               disabled={mut.isPending}
               onClick={() => {
                 setError(null);
-                mut.mutate();
+                mut.mutate("trip");
               }}
             >
-              {mut.isPending ? "Resetting…" : "Reset Start of Day"}
+              {mut.isPending ? "Clearing…" : "Whole trip"}
             </Button>
           </AlertDialogFooter>
         </AlertDialogContent>

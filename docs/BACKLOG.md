@@ -235,6 +235,7 @@ Frontend must match **live Supabase** before drift remediation (see `.cursor/rul
 
 | Date | Change |
 |------|--------|
+| 2026-10-23 | Exercise clock: Craig can turn SIM time on for every signed-in person, move it, and turn it off. Expires at Sydney midnight. SQL `docs/sql/2026-10-23_shared_operational_clock.sql`. Unwind Deliver clears one trip day or the whole trip. Roster and itinerary stay. |
 | 2026-10-17 | Trip Deliver check-in, check-out, venue open/close, and activity check-in save on the tablet and upload in order. Practice note `docs/architecture/OFFLINE-TRIP-DELIVER.md` for BL-092. Meals, meds, rolls, and Close day stay online. |
 | 2026-10-16 | Venue hop can start before Release from the last known expected list, or a paper roll when that list is not on the tablet. One trip on upload. Practice note `docs/architecture/OFFLINE-BUS-HEADCOUNT.md` for BL-092. |
 | 2026-10-12 | Manifest odometer is the dash reading at the start of the trip and again at Close Run. Stops no longer ask for kilometres. Travelled km = end − start. |

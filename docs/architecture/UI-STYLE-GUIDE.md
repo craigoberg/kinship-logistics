@@ -199,7 +199,7 @@ Silent “button disabled, no red outlines” is a **ship blocker**.
 | **Departure vector / quick inline choice** | Defined | `BottomSheet` + `MobileFieldButton` rows | Check-out departure method, 2–4 quick options | Slide-up sheet, `tone="neutral"`, immediate action on tap — no persistent selected state needed. |
 | **Dialog dismiss during save** | Defined | Always allow Close — no `isPending` guard | All modals | Remove `if (isPending) return` from `onOpenChange`; do not `disabled={busy}` the Close button. |
 | **Loading states** | Partial | `Loader2` inline, `Skeleton` | Fetches | Prefer inline spinner on buttons; skeleton for tables TBD |
-| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` | QA only (`IS_TEST_BUILD`) | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). SIM lasts this sitting: same calendar day + refresh; **expires at Sydney midnight** and on **day login / `/auth` PIN** (not idle unlock). Not for production operator forms. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
+| **DEV operational clock** | Defined | `DevOperationalClockBar` + `operational-clock.ts` + `shared-operational-clock.ts` | Test builds, including the office site | Sticky amber bar; sheet with `DatePicker` + exact `HH:mm` (native time input allowed **DEV-only** for minute-precise YELLOW/RED tests). **All operators** (Craig only) publishes one Sydney time; every signed-in person shows a read-only `SIM TIME · … · ALL` bar. Turn the switch off and everyone is on the live clock. Exercise clock expires at Sydney midnight. Private SIM still clears on day login / `/auth` PIN. **All date/time code must honour this clock** (GUARDRAILS §5.3). |
 
 ---
 
@@ -589,6 +589,8 @@ When a pattern is global (new primitive), mirror a one-line entry into GUARDRAIL
 
 | Date | Pattern | Decision |
 |------|---------|----------|
+| 2026-10-23 | Exercise clock | Amber SIM bar. Craig’s sheet has **All operators follow this clock**. On: every signed-in person shows a read-only `SIM TIME · … · ALL` bar. Off: everyone on the live clock. Expires at Sydney midnight. Private SIM on the office site stays Craig-only. |
+| 2026-10-23 | Unwind Deliver | Event Deliver, Craig only. **This day** or **Whole trip**. Roster and itinerary stay. Same amber dashed button as Reset Start of Day. |
 | 2026-10-19 | Event Manage on a small screen | The list stacks on a phone. Opening an event fills the screen below 1280px. The wide office dialog stays centred on a full window. Roster money sits under the name until then. |
 | 2026-10-17 | Trip Deliver offline banner | Same amber / blue card as Manifest. Copy names check-in, check-out, venue open, and activity check-in. Close day stays online. |
 | 2026-10-16 | Manifest hop not released | **Start this leg anyway** under the caution callout, then confirm the last-known list or the paper-roll prompt |

@@ -3,7 +3,7 @@
  * Later bus legs the same day only confirm. A new day asks again.
  */
 import { operationalNowIso } from "@/lib/operational-clock";
-import { idbGet, idbPut, STORE_CACHE } from "./idb";
+import { idbDelete, idbGet, idbPut, STORE_CACHE } from "./idb";
 
 type BusDayBase = {
   key: string;
@@ -36,6 +36,11 @@ export type BusDayDraft =
 
 export function busDayClearanceKey(eventId: string, sessionDate: string): string {
   return `bus-day:${eventId}:${sessionDate.slice(0, 10)}`;
+}
+
+/** Drop this tablet's "bus already checked" memory so the day can be run again. */
+export async function clearBusDayClearance(eventId: string, sessionDate: string): Promise<void> {
+  await idbDelete(STORE_CACHE, busDayClearanceKey(eventId, sessionDate));
 }
 
 export async function loadBusDayClearance(

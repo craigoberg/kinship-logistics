@@ -78,7 +78,8 @@ import {
   setOperationalClockOverride,
   useOperationalTodayIso,
 } from "@/lib/operational-clock";
-import { IS_TEST_BUILD } from "@/lib/test-mode";
+import { canUseDevTools, canUseSimTime } from "@/lib/dev-tools-access";
+import { isSharedOperationalClockOn } from "@/lib/shared-operational-clock";
 import { cn, formatDateWithWeekday, todayLocalIso } from "@/lib/utils";
 import { getEventDayPhaseDisplay } from "@/lib/event-day-phase-display";
 
@@ -621,9 +622,10 @@ function TripDayView({
   const goToAdjacentDay = (delta: -1 | 1) => {
     const next = sortedSessions[dayIndex + delta];
     if (!next) return;
-    // Test builds: keep SIM clock time, move calendar to the selected trip day
-    // so Open location / rolls match the day on screen.
-    if (IS_TEST_BUILD) {
+    // Keep SIM time, move the calendar to the selected trip day so Open
+    // location and rolls match the day on screen. Craig's move updates
+    // everyone while the exercise clock is on.
+    if (canUseDevTools() || (canUseSimTime() && !isSharedOperationalClockOn())) {
       const existing = getOperationalClockOverride();
       let time = existing?.time;
       if (!time) {
@@ -640,10 +642,15 @@ function TripDayView({
       setOperationalClockOverride({ date: next.session_date, time });
     }
     onSessionChange(next);
+    const clockNote = isSharedOperationalClockOn()
+      ? canUseDevTools()
+        ? "Everyone is now on this trip day."
+        : "Showing this trip day."
+      : canUseSimTime()
+        ? "SIM date on this browser is now this trip day."
+        : "Showing this trip day.";
     toast.message(`${formatDateWithWeekday(next.session_date)} · Day ${dayIndex + delta + 1} of ${sortedSessions.length}`, {
-      description: IS_TEST_BUILD
-        ? "SIM clock date updated to this trip day."
-        : "Switched trip day — close prior days before opening a later one.",
+      description: clockNote,
     });
   };
 
